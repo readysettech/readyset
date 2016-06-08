@@ -1,0 +1,8 @@
+[package]
+name = "distributary"
+version = "0.1.0"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+
+[dependencies]
+petgraph = "0.2"
+bus = "1.0.0"
