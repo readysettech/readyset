@@ -17,7 +17,7 @@ pub trait View<Q: Send> {
     /// `Sender` channel.
     fn query(&self,
              &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>],
-             &Q,
+             Option<&Q>,
              mpsc::Sender<Self::U>)
              -> mpsc::Sender<Self::P>;
 
@@ -29,7 +29,7 @@ pub trait View<Q: Send> {
                -> Option<Self::U>;
 }
 
-struct FlowGraph<Q: Send + Sync, V: Send + Sync + View<Q>> {
+pub struct FlowGraph<Q: Send + Sync, V: Send + Sync + View<Q>> {
     graph: petgraph::Graph<Option<sync::Arc<V>>, Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
     wait: Vec<thread::JoinHandle<()>>,
@@ -48,7 +48,9 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
 
     pub fn run(&mut self,
                buf: usize)
-               -> HashMap<petgraph::graph::NodeIndex, mpsc::SyncSender<V::U>> {
+               -> (HashMap<petgraph::graph::NodeIndex, mpsc::SyncSender<V::U>>,
+                   HashMap<petgraph::graph::NodeIndex,
+                           Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // set up in-channels for each base record node
@@ -136,7 +138,7 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
                     Box::new(move |tx: mpsc::Sender<V::U>| -> mpsc::Sender<V::P> {
-                        a.query(&aqf[..], &*q, tx)
+                        a.query(&aqf[..], Some(&*q), tx)
                     }) as Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>
                 })
                 .collect();
@@ -144,7 +146,17 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
             aqfs.insert(node, sync::Arc::new(aqf));
         }
 
-        // TODO: expose .query in a friendly format to outsiders
+        // expose .query in a friendly format to outsiders
+        let mut qs = HashMap::with_capacity(aqfs.len());
+        for (ni, aqf) in aqfs.iter() {
+            let aqf = aqf.clone();
+            let n = self.graph[*ni].as_ref().unwrap().clone();
+            let func = Box::new(move |tx: mpsc::Sender<V::U>| -> mpsc::Sender<V::P> {
+                n.query(&aqf[..], None, tx)
+            }) as Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>;
+
+            qs.insert(*ni, func);
+        }
 
         // spin up all the worker threads
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
@@ -170,7 +182,7 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
             // TODO: how do we get an &mut bus later for adding recipients?
         }
 
-        incoming
+        (incoming, qs)
     }
 
     pub fn incorporate(&mut self,
@@ -202,15 +214,70 @@ impl<Q: Send + Sync, V: Send + Sync + View<Q>> Drop for FlowGraph<Q, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time;
+    use std::sync;
+    use std::thread;
+    use std::sync::mpsc;
+    struct Counter(sync::Arc<sync::Mutex<u32>>);
+
+    impl View<()> for Counter {
+        type U = u32;
+        type P = ();
+
+        fn query(&self,
+                 aqs: &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>],
+                 q: Option<&()>,
+                 tx: mpsc::Sender<Self::U>)
+                 -> mpsc::Sender<Self::P> {
+            let (ptx, prx) = mpsc::channel();
+            let x = self.0.clone();
+            thread::spawn(move || {
+                for p in prx.into_iter() {
+                    tx.send(*x.lock().unwrap()).unwrap();
+                }
+            });
+            ptx
+        }
+
+        fn process(&self,
+                   u: Self::U,
+                   aqs: &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>])
+                   -> Option<Self::U> {
+            use std::ops::AddAssign;
+            self.0.lock().unwrap().add_assign(u);
+            None
+        }
+    }
+
+    #[test]
     fn it_works() {
+        // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(ops::Atom::new(&["id", "title"]), &[]);
-        let v = g.incorporate(ops::Atom::new(&["id", "user"]), &[]);
-        let vc = g.incorporate(ops::Aggregate::new("user", &["id"], ops::Aggregate::COUNT),
-                               &[Query::new(&[Some("id"), Some("user")], vec![]).over(v)]);
-        let awv = g.incorporate(ops::Join::new(&["id"]),
-                                &[Query::new(&[Some("id"), Some("title")], vec![]).over(a),
-                                  Query::new(&[Some("id"), Some("count")], vec![]).over(vc)]);
-        let (insert, augment) = g.run();
+        let a = g.incorporate(Counter(Default::default()), vec![]);
+        let (put, get) = g.run(10);
+
+        // send a value
+        put[&a].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 100));
+
+        // prepare to query
+        let (rtx, rrx) = mpsc::channel();
+        let args = get[&a](rtx);
+
+        // send a query
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(1));
+
+        // update value again
+        put[&a].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 100));
+
+        // check that value was updated again
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(2));
     }
 }
