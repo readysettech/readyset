@@ -6,3 +6,4 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 [dependencies]
 petgraph = "0.2"
 bus = "1.0.0"
+shortcut = "2.0.0"

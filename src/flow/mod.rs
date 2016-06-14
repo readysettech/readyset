@@ -6,36 +6,35 @@ use std::sync::mpsc;
 use std::sync;
 use std::thread;
 
-pub trait View<Q: Send> {
-    type U: Clone + Send;
-    type P: Send;
-
-    // TODO: how can query/process query an ancestor?
+pub trait View<Q: Clone + Send> {
+    type Update: Clone + Send;
+    type Data: Clone + Send;
+    type Params: Send;
 
     /// Process a stream of query parameters, producing all matching records. All matching records
     /// will be sent on the passed `Sender` channel. Parameters should be sent on the returned
     /// `Sender` channel.
     fn query(&self,
-             &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>],
+             sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
              Option<&Q>,
-             mpsc::Sender<Self::U>)
-             -> mpsc::Sender<Self::P>;
+             mpsc::Sender<Self::Data>)
+             -> mpsc::Sender<Self::Params>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
     fn process(&self,
-               Self::U,
-               &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>])
-               -> Option<Self::U>;
+               Self::Update,
+               sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+               -> Option<Self::Update>;
 }
 
-pub struct FlowGraph<Q: Send + Sync, V: Send + Sync + View<Q>> {
+pub struct FlowGraph<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> {
     graph: petgraph::Graph<Option<sync::Arc<V>>, Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
     wait: Vec<thread::JoinHandle<()>>,
 }
 
-impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, V> {
+impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, V> {
     pub fn new() -> FlowGraph<Q, V> {
         let mut graph = petgraph::Graph::new();
         let source = graph.add_node(None);
@@ -48,9 +47,9 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
 
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<petgraph::graph::NodeIndex, mpsc::SyncSender<V::U>>,
+               -> (HashMap<petgraph::graph::NodeIndex, mpsc::SyncSender<V::Update>>,
                    HashMap<petgraph::graph::NodeIndex,
-                           Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>>) {
+                           Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // set up in-channels for each base record node
@@ -125,10 +124,9 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
 
             // since we're doing a bfs, the ancestor queries for all our ancestors are already in
             // aqfs. the arguments we need are the queries stored in edges to us executed using the
-            // .query for each corresponding ancestor. note that the ::Outgoing below means all
-            // edges whose Outgoing *end* is node. it will thus return all edges that go *to* node.
+            // .query for each corresponding ancestor.
             let aqf = self.graph
-                .edges_directed(node, petgraph::EdgeDirection::Outgoing)
+                .edges_directed(node, petgraph::EdgeDirection::Incoming)
                 .map(|(ni, e)| {
                     // get the query for this ancestor
                     let q = e.as_ref().unwrap().clone();
@@ -137,9 +135,9 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    Box::new(move |tx: mpsc::Sender<V::U>| -> mpsc::Sender<V::P> {
-                        a.query(&aqf[..], Some(&*q), tx)
-                    }) as Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>
+                    Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
+                        a.query(aqf.clone(), Some(&q), tx)
+                    }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>
                 })
                 .collect();
 
@@ -151,9 +149,9 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |tx: mpsc::Sender<V::U>| -> mpsc::Sender<V::P> {
-                n.query(&aqf[..], None, tx)
-            }) as Box<Fn(mpsc::Sender<V::U>) -> mpsc::Sender<V::P> + Send + Sync>;
+            let func = Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
+                n.query(aqf.clone(), None, tx)
+            }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -173,7 +171,7 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
             // basically just a rx->process->tx loop.
             self.wait.push(thread::spawn(move || {
                 for u in rx.into_iter() {
-                    if let Some(u) = node.process(u, &aqf[..]) {
+                    if let Some(u) = node.process(u, aqf.clone()) {
                         tx.broadcast(u);
                     }
                 }
@@ -203,7 +201,7 @@ impl<Q: 'static + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, 
     }
 }
 
-impl<Q: Send + Sync, V: Send + Sync + View<Q>> Drop for FlowGraph<Q, V> {
+impl<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> Drop for FlowGraph<Q, V> {
     fn drop(&mut self) {
         for w in self.wait.drain(..) {
             w.join().unwrap();
@@ -218,21 +216,22 @@ mod tests {
     use std::sync;
     use std::thread;
     use std::sync::mpsc;
-    struct Counter(sync::Arc<sync::Mutex<u32>>);
+    struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
     impl View<()> for Counter {
-        type U = u32;
-        type P = ();
+        type Update = u32;
+        type Data = u32;
+        type Params = ();
 
         fn query(&self,
-                 aqs: &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>],
-                 q: Option<&()>,
-                 tx: mpsc::Sender<Self::U>)
-                 -> mpsc::Sender<Self::P> {
+                 _: sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
+                 _: Option<&()>,
+                 tx: mpsc::Sender<Self::Data>)
+                 -> mpsc::Sender<Self::Params> {
             let (ptx, prx) = mpsc::channel();
-            let x = self.0.clone();
+            let x = self.1.clone();
             thread::spawn(move || {
-                for p in prx.into_iter() {
+                for _ in prx.into_iter() {
                     tx.send(*x.lock().unwrap()).unwrap();
                 }
             });
@@ -240,27 +239,28 @@ mod tests {
         }
 
         fn process(&self,
-                   u: Self::U,
-                   aqs: &[Box<Fn(mpsc::Sender<Self::U>) -> mpsc::Sender<Self::P> + Send + Sync>])
-                   -> Option<Self::U> {
+                   u: Self::Update,
+                   _: sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+                   -> Option<Self::Update> {
             use std::ops::AddAssign;
-            self.0.lock().unwrap().add_assign(u);
-            None
+            let mut x = self.1.lock().unwrap();
+            x.add_assign(u);
+            Some(u)
         }
     }
 
     #[test]
-    fn it_works() {
+    fn simple_graph() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter(Default::default()), vec![]);
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
         let (put, get) = g.run(10);
 
         // send a value
         put[&a].send(1).unwrap();
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 100));
+        thread::sleep(time::Duration::new(0, 1_000_000));
 
         // prepare to query
         let (rtx, rrx) = mpsc::channel();
@@ -274,7 +274,78 @@ mod tests {
         put[&a].send(1).unwrap();
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 100));
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // check that value was updated again
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(2));
+    }
+
+    #[test]
+    fn join_graph() {
+        // set up graph
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
+        let c = g.incorporate(Counter("c".into(), Default::default()),
+                              vec![((), a), ((), b)]);
+        let (put, get) = g.run(10);
+
+        // send a value on a
+        put[&a].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // prepare to query
+        let (rtx, rrx) = mpsc::channel();
+        let args = get[&c](rtx);
+
+        // send a query to c
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(1));
+
+        // update value again
+        put[&b].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // check that value was updated again
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(2));
+    }
+
+    #[test]
+    fn join_and_forward() {
+        // set up graph
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
+        let c = g.incorporate(Counter("c".into(), Default::default()),
+                              vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let (put, get) = g.run(10);
+
+        // send a value on a
+        put[&a].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // prepare to query
+        let (rtx, rrx) = mpsc::channel();
+        let args = get[&d](rtx);
+
+        // send a query to d
+        args.send(()).unwrap();
+        assert_eq!(rrx.recv(), Ok(1));
+
+        // update value again
+        put[&b].send(1).unwrap();
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
         args.send(()).unwrap();
