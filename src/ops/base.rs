@@ -152,7 +152,7 @@ mod tests {
     use std::thread;
     use std::sync::mpsc;
 
-    struct Tester(usize);
+    struct Tester(i64);
 
     impl NodeOp for Tester {
         fn forward(&self, u: ops::Update, _: &AQ) -> Option<ops::Update> {
@@ -160,7 +160,7 @@ mod tests {
             match u {
                 ops::Update::Records(mut rs) => {
                     if let Some(ops::Record::Positive(r)) = rs.pop() {
-                        if let query::DataType::Usize(r) = r[0] {
+                        if let query::DataType::Number(r) = r[0] {
                             Some(
                                 ops::Update::Records(
                                     vec![ops::Record::Positive(vec![(r + self.0).into()])]
@@ -187,7 +187,7 @@ mod tests {
             let c = self.0;
             thread::spawn(move || {
                 for r in rx {
-                    if let query::DataType::Usize(r) = r[0] {
+                    if let query::DataType::Number(r) = r[0] {
                         ptx.send(vec![(r + c).into()]).unwrap();
                     } else {
                         unreachable!();
@@ -253,23 +253,23 @@ mod tests {
         // a
         aargs.send(vec![]).unwrap();
         drop(aargs);
-        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
         bargs.send(vec![]).unwrap();
         drop(bargs);
-        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
         cargs.send(vec![]).unwrap();
         drop(cargs);
-        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
         dargs.send(vec![]).unwrap();
         drop(dargs);
-        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }
@@ -329,23 +329,23 @@ mod tests {
         // a
         aargs.send(vec![]).unwrap();
         drop(aargs);
-        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
         bargs.send(vec![]).unwrap();
         drop(bargs);
-        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
         cargs.send(vec![]).unwrap();
         drop(cargs);
-        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
         dargs.send(vec![]).unwrap();
         drop(dargs);
-        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }

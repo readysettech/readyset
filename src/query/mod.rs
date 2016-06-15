@@ -4,18 +4,24 @@ use shortcut;
 pub enum DataType {
     None,
     Text(String),
-    Usize(usize),
+    Number(i64),
 }
 
-impl From<usize> for DataType {
-    fn from(s: usize) -> Self {
-        DataType::Usize(s)
+impl From<i64> for DataType {
+    fn from(s: i64) -> Self {
+        DataType::Number(s)
     }
 }
 
-impl Into<usize> for DataType {
-    fn into(self) -> usize {
-        if let DataType::Usize(s) = self {
+impl From<i32> for DataType {
+    fn from(s: i32) -> Self {
+        DataType::Number(s as i64)
+    }
+}
+
+impl Into<i64> for DataType {
+    fn into(self) -> i64 {
+        if let DataType::Number(s) = self {
             s
         } else {
             unreachable!();
