@@ -1,6 +1,6 @@
 use shortcut;
 
-#[derive(PartialEq, PartialOrd, Debug, Clone)]
+#[derive(Eq, PartialEq, PartialOrd, Hash, Debug, Clone)]
 pub enum DataType {
     None,
     Text(String),
