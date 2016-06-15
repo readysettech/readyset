@@ -27,7 +27,11 @@ pub trait NodeOp {
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
     /// appropriately.
-    fn forward(&self, ops::Update, &AQ) -> Option<ops::Update>;
+    fn forward(&self,
+               ops::Update,
+               Option<&shortcut::Store<query::DataType>>,
+               &AQ)
+               -> Option<ops::Update>;
 
     /// Called whenever this node is being queried for records, and it is not materialized. The
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
@@ -104,15 +108,17 @@ impl<O> flow::View<query::Query> for Node<O>
     }
 
     fn process(&self, u: Self::Update, aqs: sync::Arc<AQ>) -> Option<Self::Update> {
-        let new_u = self.inner.forward(u, &*aqs);
+        use std::ops::Deref;
+        let data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
+
+        let new_u = self.inner.forward(u, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
             match *new_u {
                 ops::Update::Records(ref rs) => {
-                    if let Some(ref data) = *self.data {
-                        let mut w = data.write().unwrap();
+                    if let Some(mut data) = data {
                         for r in rs.iter() {
                             if let ops::Record::Positive(ref d) = *r {
-                                w.insert(d.clone());
+                                data.insert(d.clone());
                             } else {
                                 unimplemented!();
                             }
@@ -147,6 +153,7 @@ mod tests {
     use flow;
     use ops;
     use query;
+    use shortcut;
 
     use std::time;
     use std::thread;
@@ -155,7 +162,11 @@ mod tests {
     struct Tester(i64);
 
     impl NodeOp for Tester {
-        fn forward(&self, u: ops::Update, _: &AQ) -> Option<ops::Update> {
+        fn forward(&self,
+                   u: ops::Update,
+                   _: Option<&shortcut::Store<query::DataType>>,
+                   _: &AQ)
+                   -> Option<ops::Update> {
             // forward
             match u {
                 ops::Update::Records(mut rs) => {
