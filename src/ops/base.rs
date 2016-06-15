@@ -187,9 +187,8 @@ mod tests {
         Box::new(prx.into_iter())
     }
 
-
     #[test]
-    fn it_works() {
+    fn materialized() {
         use std::collections::HashSet;
 
         // set up graph
@@ -203,6 +202,83 @@ mod tests {
         let c = g.incorporate(new(&["x"], true, 4 as usize, fw, q),
                               vec![(all.clone(), a), (all.clone(), b)]);
         let d = g.incorporate(new(&["x"], true, 8 as usize, fw, q), vec![(all.clone(), c)]);
+        let (put, get) = g.run(10);
+
+        // send a value
+        put[&a].send(ops::Update::Records(vec![ops::Record::Positive(vec![1.into()])])).unwrap();
+
+        // state should now be:
+        // a = [2]
+        // b = []
+        // c = [6]
+        // d = [14]
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // send another in
+        put[&b].send(ops::Update::Records(vec![ops::Record::Positive(vec![16.into()])])).unwrap();
+
+        // state should now be:
+        // a = [2]
+        // b = [18]
+        // c = [6, 22]
+        // d = [14, 30]
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 1_000_000));
+
+        // prepare to query
+        let (atx, arx) = mpsc::channel();
+        let aargs = get[&a](atx);
+        let (btx, brx) = mpsc::channel();
+        let bargs = get[&b](btx);
+        let (ctx, crx) = mpsc::channel();
+        let cargs = get[&c](ctx);
+        let (dtx, drx) = mpsc::channel();
+        let dargs = get[&d](dtx);
+
+        // check state
+        // a
+        aargs.send(vec![]).unwrap();
+        drop(aargs);
+        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        assert!(set.contains(&2));
+        // b
+        bargs.send(vec![]).unwrap();
+        drop(bargs);
+        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        assert!(set.contains(&18), format!("18 not in {:?}", set));
+        // c
+        cargs.send(vec![]).unwrap();
+        drop(cargs);
+        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        assert!(set.contains(&6), format!("6 not in {:?}", set));
+        assert!(set.contains(&22), format!("22 not in {:?}", set));
+        // d
+        dargs.send(vec![]).unwrap();
+        drop(dargs);
+        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<usize>>();
+        assert!(set.contains(&14), format!("14 not in {:?}", set));
+        assert!(set.contains(&30), format!("30 not in {:?}", set));
+    }
+
+    #[test]
+    fn not_materialized() {
+        use std::collections::HashSet;
+
+        // set up graph
+        let mut g = flow::FlowGraph::new();
+        let all = query::Query {
+            select: vec![true],
+            having: vec![],
+        };
+        let a = g.incorporate(new(&["x"], true, 1 as usize, fw, q), vec![]);
+        let b = g.incorporate(new(&["x"], true, 2 as usize, fw, q), vec![]);
+        let c = g.incorporate(new(&["x"], false, 4 as usize, fw, q),
+                              vec![(all.clone(), a), (all.clone(), b)]);
+        let d = g.incorporate(new(&["x"], false, 8 as usize, fw, q),
+                              vec![(all.clone(), c)]);
         let (put, get) = g.run(10);
 
         // send a value
