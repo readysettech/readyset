@@ -6,6 +6,8 @@ use std::sync::mpsc;
 use std::sync;
 use std::thread;
 
+pub use petgraph::graph::NodeIndex;
+
 pub trait View<Q: Clone + Send> {
     type Update: Clone + Send;
     type Data: Clone + Send;
@@ -15,7 +17,7 @@ pub trait View<Q: Clone + Send> {
     /// will be sent on the passed `Sender` channel. Parameters should be sent on the returned
     /// `Sender` channel.
     fn query(&self,
-             sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
+             sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
              Option<&Q>,
              mpsc::Sender<Self::Data>)
              -> mpsc::Sender<Self::Params>;
@@ -24,7 +26,8 @@ pub trait View<Q: Clone + Send> {
     /// in the data flow graph.
     fn process(&self,
                Self::Update,
-               sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+               NodeIndex,
+               sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
                -> Option<Self::Update>;
 }
 
@@ -47,8 +50,8 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
 
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<petgraph::graph::NodeIndex, mpsc::SyncSender<V::Update>>,
-                   HashMap<petgraph::graph::NodeIndex,
+               -> (HashMap<NodeIndex, mpsc::SyncSender<V::Update>>,
+                   HashMap<NodeIndex,
                            Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
@@ -57,8 +60,18 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
         let mut start = HashMap::new();
         for base in self.graph.neighbors(self.source) {
             let (tx, rx) = mpsc::sync_channel(buf);
+
+            // automatically add source node to all incoming facts so users don't have to add this
+            // themselves.
+            let (px_tx, px_rx) = mpsc::sync_channel(buf);
+            let root = self.source;
+            thread::spawn(move || {
+                for u in rx.into_iter() {
+                    px_tx.send((root, u)).unwrap();
+                }
+            });
             incoming.insert(base, tx);
-            start.insert(base, rx);
+            start.insert(base, px_rx);
         }
 
         // set up the internal data-flow graph channels
@@ -88,7 +101,7 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     // question.
                     thread::spawn(move || {
                         for u in rx.into_iter() {
-                            if let Err(..) = tx.send(u) {
+                            if let Err(..) = tx.send((ancestor, u)) {
                                 break;
                             }
                         }
@@ -118,7 +131,7 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
             if self.graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming).next() ==
                Some(self.source) {
                 // we're a base node, so we can be queried without any ancestor query functions
-                aqfs.insert(node, sync::Arc::new(Vec::new()));
+                aqfs.insert(node, sync::Arc::new(HashMap::new()));
                 continue;
             }
 
@@ -135,9 +148,10 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
+                    let f = Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
                         a.query(aqf.clone(), Some(&q), tx)
-                    }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>
+                    }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>;
+                    (ni, f)
                 })
                 .collect();
 
@@ -170,8 +184,8 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
             // start a thread for managing this node.
             // basically just a rx->process->tx loop.
             self.wait.push(thread::spawn(move || {
-                for u in rx.into_iter() {
-                    if let Some(u) = node.process(u, aqf.clone()) {
+                for (src, u) in rx.into_iter() {
+                    if let Some(u) = node.process(u, src, aqf.clone()) {
                         tx.broadcast(u);
                     }
                 }
@@ -216,6 +230,7 @@ mod tests {
     use std::sync;
     use std::thread;
     use std::sync::mpsc;
+    use std::collections::HashMap;
     struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
     impl View<()> for Counter {
@@ -224,7 +239,7 @@ mod tests {
         type Params = ();
 
         fn query(&self,
-                 _: sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
+                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
                  _: Option<&()>,
                  tx: mpsc::Sender<Self::Data>)
                  -> mpsc::Sender<Self::Params> {
@@ -240,7 +255,8 @@ mod tests {
 
         fn process(&self,
                    u: Self::Update,
-                   _: sync::Arc<Vec<Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+                   _: NodeIndex,
+                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
             let mut x = self.1.lock().unwrap();

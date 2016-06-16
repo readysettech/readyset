@@ -1,4 +1,5 @@
 use ops;
+use flow;
 use query;
 use ops::base::NodeOp;
 
@@ -38,6 +39,7 @@ pub struct Aggregator {
 impl NodeOp for Aggregator {
     fn forward(&self,
                u: ops::Update,
+               _: flow::NodeIndex,
                db: Option<&shortcut::Store<query::DataType>>,
                _: &ops::base::AQ)
                -> Option<ops::Update> {
@@ -176,7 +178,7 @@ impl NodeOp for Aggregator {
 
         // now, query our ancestor, and aggregate into groups.
         let (tx, rx) = mpsc::channel();
-        let ptx = (*aqfs[0])(tx);
+        let ptx = (*aqfs.iter().next().unwrap().1)(tx);
         ptx.send(params).unwrap();
         drop(ptx);
 
@@ -207,11 +209,13 @@ mod tests {
     use super::*;
 
     use ops;
+    use flow;
     use query;
     use shortcut;
 
     use ops::base::NodeOp;
     use std::sync::mpsc;
+    use std::collections::HashMap;
 
     #[test]
     fn it_forwards() {
@@ -222,11 +226,12 @@ mod tests {
         };
 
         let mut s = shortcut::Store::new(2);
+        let src = flow::NodeIndex::new(0);
 
         let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
 
         // first row for a group should emit -0 and +1 for that group
-        let out = c.forward(u, Some(&s), &vec![]);
+        let out = c.forward(u, src, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -253,7 +258,7 @@ mod tests {
         let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
 
         // first row for a second group should emit -0 and +1 for that new group
-        let out = c.forward(u, Some(&s), &vec![]);
+        let out = c.forward(u, src, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -280,7 +285,7 @@ mod tests {
         let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
 
         // second row for a group should emit -1 and +2
-        let out = c.forward(u, Some(&s), &vec![]);
+        let out = c.forward(u, src, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -306,7 +311,7 @@ mod tests {
         let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])]);
 
         // negative row for a group should emit -1 and +0
-        let out = c.forward(u, Some(&s), &vec![]);
+        let out = c.forward(u, src, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -341,7 +346,7 @@ mod tests {
         ]);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
-        let out = c.forward(u, Some(&s), &vec![]);
+        let out = c.forward(u, src, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
@@ -437,9 +442,10 @@ mod tests {
             op: Aggregation::COUNT,
         };
 
-        let source = vec![Box::new(source) as Box<_>];
+        let mut aqfs = HashMap::new();
+        aqfs.insert(0.into(), Box::new(source) as Box<_>);
 
-        let hits = c.query(None, &source).collect::<Vec<_>>();
+        let hits = c.query(None, &aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
@@ -452,7 +458,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(q), &source).collect::<Vec<_>>();
+        let hits = c.query(Some(q), &aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }

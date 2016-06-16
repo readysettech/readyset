@@ -7,10 +7,12 @@ use shortcut;
 use std::sync;
 use std::thread;
 use std::sync::mpsc;
+use std::collections::HashMap;
 
 pub type Params = Vec<shortcut::Value<query::DataType>>;
 pub type AQ =
-    Vec<Box<Fn(mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<Params> + Send + Sync>>;
+    HashMap<flow::NodeIndex,
+            Box<Fn(mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<Params> + Send + Sync>>;
 pub type Datas = Box<Iterator<Item = Vec<query::DataType>>>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
@@ -29,6 +31,7 @@ pub trait NodeOp {
     /// appropriately.
     fn forward(&self,
                ops::Update,
+               flow::NodeIndex,
                Option<&shortcut::Store<query::DataType>>,
                &AQ)
                -> Option<ops::Update>;
@@ -107,11 +110,15 @@ impl<O> flow::View<query::Query> for Node<O>
         ptx
     }
 
-    fn process(&self, u: Self::Update, aqs: sync::Arc<AQ>) -> Option<Self::Update> {
+    fn process(&self,
+               u: Self::Update,
+               src: flow::NodeIndex,
+               aqs: sync::Arc<AQ>)
+               -> Option<Self::Update> {
         use std::ops::Deref;
         let data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
 
-        let new_u = self.inner.forward(u, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
+        let new_u = self.inner.forward(u, src, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
             match *new_u {
                 ops::Update::Records(ref rs) => {
@@ -164,6 +171,7 @@ mod tests {
     impl NodeOp for Tester {
         fn forward(&self,
                    u: ops::Update,
+                   _: flow::NodeIndex,
                    _: Option<&shortcut::Store<query::DataType>>,
                    _: &AQ)
                    -> Option<ops::Update> {
@@ -190,7 +198,7 @@ mod tests {
         fn query(&self, _: Option<query::Query>, aqs: &AQ) -> Datas {
             // query all ancestors, emit r + c for each
             let (tx, rx) = mpsc::channel();
-            for aq in aqs.iter() {
+            for (_, aq) in aqs.iter() {
                 aq(tx.clone()).send(vec![]).unwrap();
             }
 
