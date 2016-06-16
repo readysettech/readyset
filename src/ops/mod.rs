@@ -5,7 +5,7 @@ pub mod aggregate;
 pub mod join;
 pub mod union;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Record {
     Positive(Vec<query::DataType>),
     Negative(Vec<query::DataType>),
