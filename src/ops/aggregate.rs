@@ -2,7 +2,6 @@ use ops;
 use query;
 use ops::base::NodeOp;
 
-use std::collections::HashSet;
 use std::collections::HashMap;
 
 use shortcut;
@@ -31,11 +30,10 @@ impl Aggregation {
 }
 
 pub struct Aggregator {
-    group: HashSet<usize>,
     op: Aggregation,
     over: usize,
+    cols: usize,
 }
-
 
 impl NodeOp for Aggregator {
     fn forward(&self,
@@ -45,11 +43,11 @@ impl NodeOp for Aggregator {
                -> Option<ops::Update> {
 
         // Construct the query we'll need
-        let mut q = self.group
-            .iter()
+        let mut q = (0..self.cols)
+            .filter(|&i| i != self.over)
             .map(|col| {
                 shortcut::Condition {
-                    column: *col,
+                    column: col,
                     cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
                 }
             })
@@ -57,7 +55,8 @@ impl NodeOp for Aggregator {
 
         match u {
             ops::Update::Records(rs) => {
-                let cols = rs.get(0).and_then(|c| Some(c.rec().len())).unwrap_or(0);
+                assert_eq!(rs.get(0).and_then(|c| Some(c.rec().len())).unwrap_or(0),
+                           self.cols);
 
                 // First, we want to be smart about multiple added/removed rows with same group.
                 // For example, if we get a -, then a +, for the same group, we don't want to
@@ -68,7 +67,7 @@ impl NodeOp for Aggregator {
                     let val = r[self.over].clone().into();
                     let group = r.into_iter()
                         .enumerate()
-                        .filter(|&(i, _)| self.group.contains(&i))
+                        .filter(|&(i, _)| i != self.over)
                         .collect::<Vec<_>>();
 
                     consolidate.entry(group).or_insert_with(Vec::new).push((val, pos));
@@ -122,7 +121,7 @@ impl NodeOp for Aggregator {
 
                     // construct prefix of output record
                     let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend((0..cols).into_iter().filter_map(|i| group.remove(&i)));
+                    rec.extend((0..self.cols).into_iter().filter_map(|i| group.remove(&i)));
 
                     // revoke old value
                     rec.push(current.into());
@@ -144,10 +143,317 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, _: Option<query::Query>, _: &ops::base::AQ) -> ops::base::Datas {
-        // TODO
-        // we have to implement this in order to support the addition of later, materialized
-        // aggregations, as well as to support non-materialized aggregations. For now though:
-        unimplemented!();
+    fn query(&self, q: Option<query::Query>, aqfs: &ops::base::AQ) -> ops::base::Datas {
+        use std::sync::mpsc;
+        use std::iter;
+
+        assert_eq!(aqfs.len(), 1);
+
+        // we need to figure out what parameters to pass to our source to get only the rows
+        // relevant to our query.
+        let mut params: Vec<shortcut::Value<query::DataType>> =
+            iter::repeat(shortcut::Value::Const(query::DataType::None)).take(self.cols).collect();
+
+        // we find all conditions that filter over a field present in the input (so everything
+        // except conditions on self.over), and use those as parameters.
+        if let Some(q) = q {
+            for c in q.having.into_iter() {
+                // FIXME: we could technically support querying over the output of the aggregation,
+                // but a) it would be inefficient, and b) we'd have to restructure this function a
+                // fair bit so that we keep that part of the query around for after we've got the
+                // results back. We'd then need to do another filtering pass over the results of
+                // query.
+                let col = c.column;
+                assert!(col != self.over);
+                match c.cmp {
+                    shortcut::Comparison::Equal(v) => {
+                        *params.get_mut(c.column).unwrap() = v;
+                    }
+                }
+            }
+        }
+        params.remove(self.over);
+
+        // now, query our ancestor, and aggregate into groups.
+        let (tx, rx) = mpsc::channel();
+        let ptx = (*aqfs[0])(tx);
+        ptx.send(params).unwrap();
+        drop(ptx);
+
+        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
+        // aggregated state in memory until we've seen all rows.
+        let mut consolidate = HashMap::new();
+        for rec in rx.into_iter() {
+            let (group, mut over): (_, Vec<_>) =
+                rec.into_iter().enumerate().partition(|&(fi, _)| fi != self.over);
+            assert_eq!(over.len(), 1);
+            let group = group.into_iter().map(|(_, v)| v).collect();
+            let over = over.pop().unwrap().1.into();
+
+            let cur = consolidate.entry(group).or_insert(self.op.zero());
+            *cur = self.op.update(*cur, over, true);
+        }
+
+        Box::new(consolidate.into_iter().map(|(mut group, over): (Vec<query::DataType>, i64)| {
+            group.push(over.into());
+            // TODO: respect q.select
+            group
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ops;
+    use query;
+    use shortcut;
+
+    use ops::base::NodeOp;
+    use std::sync::mpsc;
+
+    #[test]
+    fn it_forwards() {
+        let c = Aggregator {
+            cols: 2,
+            over: 1,
+            op: Aggregation::COUNT,
+        };
+
+        let mut s = shortcut::Store::new(2);
+
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
+
+        // first row for a group should emit -0 and +1 for that group
+        let out = c.forward(u, Some(&s), &vec![]);
+        if let Some(ops::Update::Records(rs)) = out {
+            assert_eq!(rs.len(), 2);
+            let mut rs = rs.into_iter();
+
+            match rs.next().unwrap() {
+                ops::Record::Negative(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 0.into());
+                }
+                _ => unreachable!(),
+            }
+            match rs.next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 1.into());
+                    s.insert(r);
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!();
+        }
+
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
+
+        // first row for a second group should emit -0 and +1 for that new group
+        let out = c.forward(u, Some(&s), &vec![]);
+        if let Some(ops::Update::Records(rs)) = out {
+            assert_eq!(rs.len(), 2);
+            let mut rs = rs.into_iter();
+
+            match rs.next().unwrap() {
+                ops::Record::Negative(r) => {
+                    assert_eq!(r[0], 2.into());
+                    assert_eq!(r[1], 0.into());
+                }
+                _ => unreachable!(),
+            }
+            match rs.next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], 2.into());
+                    assert_eq!(r[1], 1.into());
+                    s.insert(r);
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!();
+        }
+
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
+
+        // second row for a group should emit -1 and +2
+        let out = c.forward(u, Some(&s), &vec![]);
+        if let Some(ops::Update::Records(rs)) = out {
+            assert_eq!(rs.len(), 2);
+            let mut rs = rs.into_iter();
+
+            match rs.next().unwrap() {
+                ops::Record::Negative(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 1.into());
+                }
+                _ => unreachable!(),
+            }
+            match rs.next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 2.into());
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!();
+        }
+
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])]);
+
+        // negative row for a group should emit -1 and +0
+        let out = c.forward(u, Some(&s), &vec![]);
+        if let Some(ops::Update::Records(rs)) = out {
+            assert_eq!(rs.len(), 2);
+            let mut rs = rs.into_iter();
+
+            match rs.next().unwrap() {
+                ops::Record::Negative(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 1.into());
+                }
+                _ => unreachable!(),
+            }
+            match rs.next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], 1.into());
+                    assert_eq!(r[1], 0.into());
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!();
+        }
+
+        let u = ops::Update::Records(vec![
+             ops::Record::Negative(vec![1.into(), 1.into()]),
+             ops::Record::Positive(vec![1.into(), 1.into()]),
+             ops::Record::Positive(vec![1.into(), 2.into()]),
+             ops::Record::Negative(vec![2.into(), 2.into()]),
+             ops::Record::Positive(vec![2.into(), 2.into()]),
+             ops::Record::Positive(vec![2.into(), 3.into()]),
+             ops::Record::Positive(vec![2.into(), 1.into()]),
+             ops::Record::Positive(vec![3.into(), 3.into()]),
+        ]);
+
+        // multiple positives and negatives should update aggregation value by appropriate amount
+        let out = c.forward(u, Some(&s), &vec![]);
+        if let Some(ops::Update::Records(rs)) = out {
+            assert_eq!(rs.len(), 6); // one - and one + for each group
+            // group 1 lost 1 and gained 2
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Negative(ref r) = *r {
+                    r[0] == 1.into() && r[1] == 1.into()
+                } else {
+                    false
+                }
+            }));
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Positive(ref r) = *r {
+                    r[0] == 1.into() && r[1] == 2.into()
+                } else {
+                    false
+                }
+            }));
+            // group 2 lost 1 and gained 3
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Negative(ref r) = *r {
+                    r[0] == 2.into() && r[1] == 1.into()
+                } else {
+                    false
+                }
+            }));
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Positive(ref r) = *r {
+                    r[0] == 2.into() && r[1] == 3.into()
+                } else {
+                    false
+                }
+            }));
+            // group 3 lost 1 (well, 0) and gained 1
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Negative(ref r) = *r {
+                    r[0] == 3.into() && r[1] == 0.into()
+                } else {
+                    false
+                }
+            }));
+            assert!(rs.iter().any(|r| {
+                if let ops::Record::Positive(ref r) = *r {
+                    r[0] == 3.into() && r[1] == 1.into()
+                } else {
+                    false
+                }
+            }));
+        } else {
+            unreachable!();
+        }
+    }
+
+    // TODO: also test SUM
+
+    fn source(tx: mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<ops::base::Params> {
+        use std::thread;
+
+        let (ptx, prx): (_, mpsc::Receiver<Vec<_>>) = mpsc::channel();
+        let data = vec![
+                vec![1.into(), 1.into()],
+                vec![2.into(), 1.into()],
+                vec![2.into(), 2.into()],
+            ];
+        let mut q = query::Query {
+            select: vec![true, true],
+            having: vec![shortcut::Condition{
+                    column: 0,
+                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None))
+                }],
+        };
+
+        thread::spawn(move || {
+            for p in prx {
+                assert_eq!(p.len(), 1);
+                let p = p.into_iter().last().unwrap();
+                q.having.get_mut(0).unwrap().cmp = shortcut::Comparison::Equal(p);
+
+                for r in data.iter() {
+                    if let Some(r) = q.feed(r) {
+                        tx.send(r).unwrap();
+                    }
+                }
+            }
+        });
+        ptx
+    }
+
+    #[test]
+    fn it_queries() {
+        let c = Aggregator {
+            cols: 2,
+            over: 1,
+            op: Aggregation::COUNT,
+        };
+
+        let source = vec![Box::new(source) as Box<_>];
+
+        let hits = c.query(None, &source).collect::<Vec<_>>();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
+
+        let q = query::Query {
+            select: vec![true, true],
+            having: vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
+                         }],
+        };
+
+        let hits = c.query(Some(q), &source).collect::<Vec<_>>();
+        assert_eq!(hits.len(), 1);
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }
 }

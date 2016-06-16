@@ -1,10 +1,27 @@
 use shortcut;
 
-#[derive(Eq, PartialEq, PartialOrd, Hash, Debug, Clone)]
+#[derive(Eq, PartialOrd, Hash, Debug, Clone)]
 pub enum DataType {
     None,
     Text(String),
     Number(i64),
+}
+
+impl PartialEq for DataType {
+    fn eq(&self, other: &DataType) -> bool {
+        if let DataType::None = *self {
+            return true;
+        }
+        if let DataType::None = *other {
+            return true;
+        }
+
+        match (self, other) {
+            (&DataType::Text(ref a), &DataType::Text(ref b)) => a == b,
+            (&DataType::Number(ref a), &DataType::Number(ref b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl From<i64> for DataType {
