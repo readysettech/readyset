@@ -8,26 +8,25 @@ use std::thread;
 
 pub use petgraph::graph::NodeIndex;
 
+// TODO: add an "uninstantiated query" type
+
 pub trait View<Q: Clone + Send> {
     type Update: Clone + Send;
     type Data: Clone + Send;
     type Params: Send;
 
-    /// Process a stream of query parameters, producing all matching records. All matching records
-    /// will be sent on the passed `Sender` channel. Parameters should be sent on the returned
-    /// `Sender` channel.
-    fn query(&self,
-             sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
+    /// Execute a single concrete query, producing an iterator over all matching records.
+    fn find(&self,
+             sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
              Option<&Q>,
-             mpsc::Sender<Self::Data>)
-             -> mpsc::Sender<Self::Params>;
+             Self::Params) -> Box<Iterator<Item = Self::Data>>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
     fn process(&self,
                Self::Update,
                NodeIndex,
-               sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+               sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                -> Option<Self::Update>;
 }
 
@@ -52,7 +51,7 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                buf: usize)
                -> (HashMap<NodeIndex, mpsc::SyncSender<V::Update>>,
                    HashMap<NodeIndex,
-                           Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>>) {
+                           Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // set up in-channels for each base record node
@@ -148,9 +147,9 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
-                        a.query(aqf.clone(), Some(&q), tx)
-                    }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>;
+                    let f = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
+                        a.find(aqf.clone(), Some(&q), p)
+                    }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
                     (ni, f)
                 })
                 .collect();
@@ -163,9 +162,9 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |tx: mpsc::Sender<V::Data>| -> mpsc::Sender<V::Params> {
-                n.query(aqf.clone(), None, tx)
-            }) as Box<Fn(mpsc::Sender<V::Data>) -> mpsc::Sender<V::Params> + Send + Sync>;
+            let func = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
+                n.find(aqf.clone(), None, p)
+            }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -229,7 +228,6 @@ mod tests {
     use std::time;
     use std::sync;
     use std::thread;
-    use std::sync::mpsc;
     use std::collections::HashMap;
     struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
@@ -238,25 +236,17 @@ mod tests {
         type Data = u32;
         type Params = ();
 
-        fn query(&self,
-                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>,
+        fn find(&self,
+                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
                  _: Option<&()>,
-                 tx: mpsc::Sender<Self::Data>)
-                 -> mpsc::Sender<Self::Params> {
-            let (ptx, prx) = mpsc::channel();
-            let x = self.1.clone();
-            thread::spawn(move || {
-                for _ in prx.into_iter() {
-                    tx.send(*x.lock().unwrap()).unwrap();
-                }
-            });
-            ptx
+                 _: ()) -> Box<Iterator<Item = Self::Data>> {
+            Box::new(Some(*self.1.lock().unwrap()).into_iter())
         }
 
         fn process(&self,
                    u: Self::Update,
                    _: NodeIndex,
-                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(mpsc::Sender<Self::Data>) -> mpsc::Sender<Self::Params> + Send + Sync>>>)
+                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
             let mut x = self.1.lock().unwrap();
@@ -278,13 +268,8 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
 
-        // prepare to query
-        let (rtx, rrx) = mpsc::channel();
-        let args = get[&a](rtx);
-
         // send a query
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(1));
+        assert_eq!(get[&a](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&a].send(1).unwrap();
@@ -293,8 +278,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(2));
+        assert_eq!(get[&a](()).collect::<Vec<_>>(), vec![2]);
     }
 
     #[test]
@@ -313,13 +297,8 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
 
-        // prepare to query
-        let (rtx, rrx) = mpsc::channel();
-        let args = get[&c](rtx);
-
         // send a query to c
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(1));
+        assert_eq!(get[&c](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&b].send(1).unwrap();
@@ -328,8 +307,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(2));
+        assert_eq!(get[&c](()).collect::<Vec<_>>(), vec![2]);
     }
 
     #[test]
@@ -349,13 +327,8 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
 
-        // prepare to query
-        let (rtx, rrx) = mpsc::channel();
-        let args = get[&d](rtx);
-
         // send a query to d
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(1));
+        assert_eq!(get[&d](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&b].send(1).unwrap();
@@ -364,7 +337,6 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        args.send(()).unwrap();
-        assert_eq!(rrx.recv(), Ok(2));
+        assert_eq!(get[&d](()).collect::<Vec<_>>(), vec![2]);
     }
 }

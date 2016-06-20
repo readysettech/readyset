@@ -5,14 +5,11 @@ use ops;
 use shortcut;
 
 use std::sync;
-use std::thread;
-use std::sync::mpsc;
 use std::collections::HashMap;
 
 pub type Params = Vec<shortcut::Value<query::DataType>>;
-pub type AQ =
-    HashMap<flow::NodeIndex,
-            Box<Fn(mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<Params> + Send + Sync>>;
+pub type AQ = HashMap<flow::NodeIndex,
+                      Box<Fn(Params) -> Box<Iterator<Item = Vec<query::DataType>>> + Send + Sync>>;
 pub type Datas = Box<Iterator<Item = Vec<query::DataType>>>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
@@ -40,13 +37,76 @@ pub trait NodeOp {
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
     /// and emit resulting records as they come in. Note that there may be no query, in which case
     /// all records should be returned.
-    fn query(&self, Option<query::Query>, &AQ) -> Datas;
+    fn query(&self, Option<&query::Query>, &AQ) -> Datas;
 }
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     fields: Vec<String>,
     data: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
     inner: sync::Arc<O>,
+}
+
+struct ArcStoreRef {
+    _keep: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
+    _lock: sync::RwLockReadGuard<'static, shortcut::Store<query::DataType>>,
+    iter: Box<Iterator<Item = &'static [query::DataType]>>,
+}
+
+impl !Send for ArcStoreRef {}
+
+impl ArcStoreRef {
+    pub fn new(src: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
+               conds: &[shortcut::Condition<query::DataType>])
+               -> Option<ArcStoreRef> {
+        use std::mem;
+        use std::ops::Deref;
+
+        if src.is_none() {
+            return None;
+        }
+
+        let rlock: sync::RwLockReadGuard<'static, shortcut::Store<query::DataType>> = {
+            let rlock = src.deref().as_ref().unwrap().read().unwrap();
+            // safe to make 'static because we keep the Arc around
+            // it's really 'as-long-as-this-struct-is-around
+            unsafe { mem::transmute(rlock) }
+        };
+
+        let iter = {
+            let iter = rlock.find(conds);
+            // safe to make 'static because we keep the rlock around, and never expose refs to things
+            // yielded by the iter; they are always made owned before returning them (and thus before
+            // self can be dropped). as above, it is really 'as-long-as-this-struct-is-around.
+            unsafe { mem::transmute(iter) }
+        };
+
+        Some(ArcStoreRef {
+            _keep: src,
+            _lock: rlock,
+            iter: iter,
+        })
+    }
+
+    pub fn start<F: Fn(&[query::DataType]) -> Vec<query::DataType>>(self,
+                                                                    to_owned: F)
+                                                                    -> ArcStoreIterator<F> {
+        ArcStoreIterator {
+            store: self,
+            to_owned: to_owned,
+        }
+    }
+}
+
+struct ArcStoreIterator<F: Fn(&[query::DataType]) -> Vec<query::DataType>> {
+    store: ArcStoreRef,
+    to_owned: F,
+}
+
+impl<F: Fn(&[query::DataType]) -> Vec<query::DataType>> Iterator for ArcStoreIterator<F> {
+    type Item = Vec<query::DataType>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.store.iter.next().and_then(|v| Some((self.to_owned)(v)))
+    }
 }
 
 impl<O> flow::View<query::Query> for Node<O>
@@ -56,58 +116,47 @@ impl<O> flow::View<query::Query> for Node<O>
     type Data = Vec<query::DataType>;
     type Params = Params;
 
-    fn query(&self,
-             aqs: sync::Arc<AQ>,
-             q: Option<&query::Query>,
-             tx: mpsc::Sender<Self::Data>)
-             -> mpsc::Sender<Self::Params> {
-        // we need a parameter channel
-        let (ptx, prx) = mpsc::channel::<Self::Params>();
+    fn find(&self,
+            aqs: sync::Arc<AQ>,
+            q: Option<&query::Query>,
+            mut p: Params)
+            -> Box<Iterator<Item = Self::Data>> {
 
-        // and the thread is going to need to access a bunch of state
-        let q = q.and_then(|q| Some(q.clone()));
-        let inner = self.inner.clone();
-        let data = self.data.clone();
-
-        // TODO: this should be a thread pool
-        thread::spawn(move || {
-            for mut p in prx.into_iter() {
-                // insert all the query arguments
-                p.reverse(); // so we can pop below
-                let mut q_cur = q.clone();
-                if let Some(ref mut q_cur) = q_cur {
-                    for c in q_cur.having.iter_mut() {
-                        match c.cmp {
-                            shortcut::Comparison::Equal(ref mut v @ shortcut::Value::Const(query::DataType::None)) => {
-                                *v = p.pop().expect("not enough query parameters were given");
-                            }
-                            _ => (),
-                        }
+        // insert all the query arguments
+        p.reverse(); // so we can pop below
+        let mut q_cur = q.and_then(|q| Some(q.clone()));
+        if let Some(ref mut q_cur) = q_cur {
+            for c in q_cur.having.iter_mut() {
+                match c.cmp {
+                    shortcut::Comparison::Equal(
+                        ref mut v @ shortcut::Value::Const(
+                            query::DataType::None
+                        )
+                    ) => {
+                        *v = p.pop().expect("not enough query parameters were given");
                     }
-                }
-
-                // find and return matching rows
-                if let Some(ref data) = *data {
-                    // we are materialized --- give the results
-                    let read = data.read().unwrap();
-                    if let Some(q_cur) = q_cur {
-                        for r in read.find(&q_cur.having[..]) {
-                            tx.send(q_cur.project(r)).unwrap();
-                        }
-                    } else {
-                        for r in read.find(&[]) {
-                            tx.send(r.iter().cloned().collect()).unwrap();
-                        }
-                    }
-                } else {
-                    // we are not materialized --- query
-                    for r in inner.query(q_cur, &*aqs) {
-                        tx.send(r).unwrap()
-                    }
+                    _ => (),
                 }
             }
-        });
-        ptx
+        }
+
+        // find and return matching rows
+        if self.data.is_some() {
+            let data = self.data.clone();
+            if let Some(q) = q {
+                let q = q.clone();
+                Box::new(ArcStoreRef::new(data, &q.having[..])
+                    .unwrap()
+                    .start(move |r| q.project(r)))
+            } else {
+                Box::new(ArcStoreRef::new(data, &[])
+                    .unwrap()
+                    .start(|r| r.iter().cloned().collect()))
+            }
+        } else {
+            // we are not materialized --- query
+            Box::new(self.inner.query(q, &*aqs))
+        }
     }
 
     fn process(&self,
@@ -164,7 +213,6 @@ mod tests {
 
     use std::time;
     use std::thread;
-    use std::sync::mpsc;
 
     struct Tester(i64);
 
@@ -195,25 +243,21 @@ mod tests {
             }
         }
 
-        fn query(&self, _: Option<query::Query>, aqs: &AQ) -> Datas {
+        fn query(&self, _: Option<&query::Query>, aqs: &AQ) -> Datas {
             // query all ancestors, emit r + c for each
-            let (tx, rx) = mpsc::channel();
+            let mut iter = Box::new(None.into_iter()) as Datas;
             for (_, aq) in aqs.iter() {
-                aq(tx.clone()).send(vec![]).unwrap();
+                iter = Box::new(iter.chain(aq(vec![])));
             }
 
-            let (ptx, prx) = mpsc::channel();
             let c = self.0;
-            thread::spawn(move || {
-                for r in rx {
-                    if let query::DataType::Number(r) = r[0] {
-                        ptx.send(vec![(r + c).into()]).unwrap();
-                    } else {
-                        unreachable!();
-                    }
+            Box::new(iter.map(move |r| {
+                if let query::DataType::Number(r) = r[0] {
+                    vec![(r + c).into()]
+                } else {
+                    unreachable!();
                 }
-            });
-            Box::new(prx.into_iter())
+            }))
         }
     }
 
@@ -258,37 +302,19 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
 
-        // prepare to query
-        let (atx, arx) = mpsc::channel();
-        let aargs = get[&a](atx);
-        let (btx, brx) = mpsc::channel();
-        let bargs = get[&b](btx);
-        let (ctx, crx) = mpsc::channel();
-        let cargs = get[&c](ctx);
-        let (dtx, drx) = mpsc::channel();
-        let dargs = get[&d](dtx);
-
         // check state
         // a
-        aargs.send(vec![]).unwrap();
-        drop(aargs);
-        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&a](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        bargs.send(vec![]).unwrap();
-        drop(bargs);
-        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&b](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        cargs.send(vec![]).unwrap();
-        drop(cargs);
-        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&c](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        dargs.send(vec![]).unwrap();
-        drop(dargs);
-        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&d](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }
@@ -334,37 +360,19 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
 
-        // prepare to query
-        let (atx, arx) = mpsc::channel();
-        let aargs = get[&a](atx);
-        let (btx, brx) = mpsc::channel();
-        let bargs = get[&b](btx);
-        let (ctx, crx) = mpsc::channel();
-        let cargs = get[&c](ctx);
-        let (dtx, drx) = mpsc::channel();
-        let dargs = get[&d](dtx);
-
         // check state
         // a
-        aargs.send(vec![]).unwrap();
-        drop(aargs);
-        let set = arx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&a](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        bargs.send(vec![]).unwrap();
-        drop(bargs);
-        let set = brx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&b](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        cargs.send(vec![]).unwrap();
-        drop(cargs);
-        let set = crx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&c](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        dargs.send(vec![]).unwrap();
-        drop(dargs);
-        let set = drx.iter().map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&d](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }

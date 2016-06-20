@@ -145,8 +145,7 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, q: Option<query::Query>, aqfs: &ops::base::AQ) -> ops::base::Datas {
-        use std::sync::mpsc;
+    fn query(&self, q: Option<&query::Query>, aqfs: &ops::base::AQ) -> ops::base::Datas {
         use std::iter;
 
         assert_eq!(aqfs.len(), 1);
@@ -159,7 +158,7 @@ impl NodeOp for Aggregator {
         // we find all conditions that filter over a field present in the input (so everything
         // except conditions on self.over), and use those as parameters.
         if let Some(q) = q {
-            for c in q.having.into_iter() {
+            for c in q.having.iter() {
                 // FIXME: we could technically support querying over the output of the aggregation,
                 // but a) it would be inefficient, and b) we'd have to restructure this function a
                 // fair bit so that we keep that part of the query around for after we've got the
@@ -168,8 +167,8 @@ impl NodeOp for Aggregator {
                 let col = c.column;
                 assert!(col != self.over);
                 match c.cmp {
-                    shortcut::Comparison::Equal(v) => {
-                        *params.get_mut(c.column).unwrap() = v;
+                    shortcut::Comparison::Equal(ref v) => {
+                        *params.get_mut(c.column).unwrap() = v.clone();
                     }
                 }
             }
@@ -177,10 +176,7 @@ impl NodeOp for Aggregator {
         params.remove(self.over);
 
         // now, query our ancestor, and aggregate into groups.
-        let (tx, rx) = mpsc::channel();
-        let ptx = (*aqfs.iter().next().unwrap().1)(tx);
-        ptx.send(params).unwrap();
-        drop(ptx);
+        let rx = (*aqfs.iter().next().unwrap().1)(params);
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
@@ -214,7 +210,6 @@ mod tests {
     use shortcut;
 
     use ops::base::NodeOp;
-    use std::sync::mpsc;
     use std::collections::HashMap;
 
     #[test]
@@ -401,37 +396,24 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(tx: mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<ops::base::Params> {
-        use std::thread;
-
-        let (ptx, prx): (_, mpsc::Receiver<Vec<_>>) = mpsc::channel();
+    fn source(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), 1.into()],
                 vec![2.into(), 1.into()],
                 vec![2.into(), 2.into()],
             ];
-        let mut q = query::Query {
+
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
+        let q = query::Query {
             select: vec![true, true],
-            having: vec![shortcut::Condition{
-                    column: 0,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None))
-                }],
+            having: vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(p),
+                         }],
         };
 
-        thread::spawn(move || {
-            for p in prx {
-                assert_eq!(p.len(), 1);
-                let p = p.into_iter().last().unwrap();
-                q.having.get_mut(0).unwrap().cmp = shortcut::Comparison::Equal(p);
-
-                for r in data.iter() {
-                    if let Some(r) = q.feed(r) {
-                        tx.send(r).unwrap();
-                    }
-                }
-            }
-        });
-        ptx
+        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
     #[test]
@@ -458,7 +440,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(q), &aqfs).collect::<Vec<_>>();
+        let hits = c.query(Some(&q), &aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }

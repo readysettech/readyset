@@ -1,3 +1,5 @@
+#![feature(optin_builtin_traits)]
+
 extern crate petgraph;
 extern crate shortcut;
 extern crate bus;

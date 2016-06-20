@@ -19,8 +19,6 @@ impl NodeOp for Joiner {
                _: Option<&shortcut::Store<query::DataType>>,
                aqfs: &ops::base::AQ)
                -> Option<ops::Update> {
-        use std::sync::mpsc;
-
         if aqfs.len() != 2 {
             unimplemented!(); // only two-way joins are supported at the moment
         }
@@ -45,9 +43,6 @@ impl NodeOp for Joiner {
                     .flat_map(|rec| {
                         let (r, pos) = rec.extract();
 
-                        // prepare to receive results
-                        let (tx, rx) = mpsc::channel();
-
                         // figure out the join values for this record
                         let params = join.1
                             .iter()
@@ -55,9 +50,7 @@ impl NodeOp for Joiner {
                             .collect();
 
                         // send the parameters to start the query.
-                        let ptx = (*aqfs[&join.0])(tx);
-                        ptx.send(params).unwrap();
-                        drop(ptx);
+                        let rx = (*aqfs[&join.0])(params);
 
                         rx.into_iter().map(move |j| {
                             // weave together r and j according to join rules
@@ -91,7 +84,7 @@ impl NodeOp for Joiner {
         }
     }
 
-    fn query(&self, _: Option<query::Query>, _: &ops::base::AQ) -> ops::base::Datas {
+    fn query(&self, _: Option<&query::Query>, _: &ops::base::AQ) -> ops::base::Datas {
         unimplemented!();
     }
 }
@@ -105,7 +98,6 @@ mod tests {
     use shortcut;
 
     use ops::base::NodeOp;
-    use std::sync::mpsc;
     use std::collections::HashMap;
 
     #[test]
@@ -176,69 +168,43 @@ mod tests {
         }
     }
 
-    fn left(tx: mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<ops::base::Params> {
-        use std::thread;
-
-        let (ptx, prx): (_, mpsc::Receiver<Vec<_>>) = mpsc::channel();
+    fn left(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
-                vec![3.into(), "c".into()],
+                vec![2.into(), "c".into()],
             ];
-        let mut q = query::Query {
+
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
+        let q = query::Query {
             select: vec![true, true],
-            having: vec![shortcut::Condition{
-                    column: 0,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None))
-                }],
+            having: vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(p),
+                         }],
         };
 
-        thread::spawn(move || {
-            for p in prx {
-                assert_eq!(p.len(), 1);
-                let p = p.into_iter().last().unwrap();
-                q.having.get_mut(0).unwrap().cmp = shortcut::Comparison::Equal(p);
-
-                for r in data.iter() {
-                    if let Some(r) = q.feed(r) {
-                        tx.send(r).unwrap();
-                    }
-                }
-            }
-        });
-        ptx
+        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
-    fn right(tx: mpsc::Sender<Vec<query::DataType>>) -> mpsc::Sender<ops::base::Params> {
-        use std::thread;
-
-        let (ptx, prx): (_, mpsc::Receiver<Vec<_>>) = mpsc::channel();
+    fn right(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "x".into()],
                 vec![1.into(), "y".into()],
                 vec![2.into(), "z".into()],
             ];
-        let mut q = query::Query {
+
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
+        let q = query::Query {
             select: vec![true, true],
-            having: vec![shortcut::Condition{
-                    column: 0,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None))
-                }],
+            having: vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(p),
+                         }],
         };
 
-        thread::spawn(move || {
-            for p in prx {
-                assert_eq!(p.len(), 1);
-                let p = p.into_iter().last().unwrap();
-                q.having.get_mut(0).unwrap().cmp = shortcut::Comparison::Equal(p);
-
-                for r in data.iter() {
-                    if let Some(r) = q.feed(r) {
-                        tx.send(r).unwrap();
-                    }
-                }
-            }
-        });
-        ptx
+        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 }
