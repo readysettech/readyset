@@ -84,7 +84,10 @@ impl NodeOp for Joiner {
         }
     }
 
-    fn query(&self, _: Option<&query::Query>, _: &ops::base::AQ) -> ops::base::Datas {
+    fn query<'a>(&'a self,
+                 _: Option<&query::Query>,
+                 _: sync::Arc<ops::base::AQ>)
+                 -> ops::base::Datas<'a> {
         unimplemented!();
     }
 }

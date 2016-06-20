@@ -3,6 +3,7 @@ use flow;
 use query;
 use ops::base::NodeOp;
 
+use std::sync;
 use std::collections::HashMap;
 
 use shortcut;
@@ -145,7 +146,7 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, aqfs: &ops::base::AQ) -> ops::base::Datas {
+    fn query(&self, q: Option<&query::Query>, aqfs: sync::Arc<ops::base::AQ>) -> ops::base::Datas {
         use std::iter;
 
         assert_eq!(aqfs.len(), 1);
@@ -418,6 +419,8 @@ mod tests {
 
     #[test]
     fn it_queries() {
+        use std::sync;
+
         let c = Aggregator {
             cols: 2,
             over: 1,
@@ -426,8 +429,9 @@ mod tests {
 
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
+        let aqfs = sync::Arc::new(aqfs);
 
-        let hits = c.query(None, &aqfs).collect::<Vec<_>>();
+        let hits = c.query(None, aqfs.clone()).collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
@@ -440,7 +444,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(&q), &aqfs).collect::<Vec<_>>();
+        let hits = c.query(Some(&q), aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }

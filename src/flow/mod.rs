@@ -1,6 +1,7 @@
 use petgraph;
 use bus::Bus;
 
+use std;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync;
@@ -16,10 +17,10 @@ pub trait View<Q: Clone + Send> {
     type Params: Send;
 
     /// Execute a single concrete query, producing an iterator over all matching records.
-    fn find(&self,
+    fn find<'a>(&'a self,
              sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
              Option<&Q>,
-             Self::Params) -> Box<Iterator<Item = Self::Data>>;
+             Self::Params) -> Box<Iterator<Item = Self::Data> + 'a>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -28,6 +29,49 @@ pub trait View<Q: Clone + Send> {
                NodeIndex,
                sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                -> Option<Self::Update>;
+}
+
+/// This is nasty little hack to allow View::find() to return an iterator bound to the lifetime of
+/// &self. This makes it find more pleasant to implement, but forces us to do some additional work
+/// on the caller side to ensure that the ref stays around for long enough. Basically, we make sure
+/// to keep around a sync::Arc to the vertex in question, which allows us to transmute the iterator
+/// to 'static (since we know the lifetime bound always holds).
+struct NodeFind<D, P, Q, V>
+    where D: Clone + Send,
+          P: Send,
+          Q: Clone + Send + Sync,
+          V: Send + Sync + View<Q, Data = D, Params = P>
+{
+    _keep: sync::Arc<V>,
+    _x: std::marker::PhantomData<P>,
+    _y: std::marker::PhantomData<Q>,
+    it: Box<Iterator<Item = D>>,
+}
+
+impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: Send + Sync + View<Q, Data = D, Params = P>> NodeFind<D, P, Q, V> {
+    pub fn new(this: sync::Arc<V>,
+               aqfs: sync::Arc<HashMap<NodeIndex,
+                                       Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>>>,
+               q: Option<&Q>,
+               p: P)
+               -> NodeFind<D, P, Q, V> {
+        use std::mem;
+// ok to make 'static as we hold on to the Arc for at least as long as the iterator lives
+        let it = unsafe { mem::transmute(this.find(aqfs, q, p)) };
+        NodeFind {
+            _keep: this,
+            _x: std::marker::PhantomData,
+            _y: std::marker::PhantomData,
+            it: it,
+        }
+    }
+}
+
+impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: Send + Sync + View<Q, Data = D, Params = P>> Iterator for NodeFind<D, P, Q, V> {
+    type Item = D;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.it.next()
+    }
 }
 
 pub struct FlowGraph<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> {
@@ -148,7 +192,7 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
                     let f = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
-                        a.find(aqf.clone(), Some(&q), p)
+                        Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(&q), p))
                     }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
                     (ni, f)
                 })
@@ -163,7 +207,7 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
             let func = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
-                n.find(aqf.clone(), None, p)
+                Box::new(NodeFind::new(n.clone(), aqf.clone(), None, p))
             }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
 
             qs.insert(*ni, func);

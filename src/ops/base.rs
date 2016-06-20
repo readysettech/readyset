@@ -10,7 +10,7 @@ use std::collections::HashMap;
 pub type Params = Vec<shortcut::Value<query::DataType>>;
 pub type AQ = HashMap<flow::NodeIndex,
                       Box<Fn(Params) -> Box<Iterator<Item = Vec<query::DataType>>> + Send + Sync>>;
-pub type Datas = Box<Iterator<Item = Vec<query::DataType>>>;
+pub type Datas<'a> = Box<Iterator<Item = Vec<query::DataType>> + 'a>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
 /// `flow::View`, and for good reason. This is effectively the behavior of a node when there is no
@@ -37,7 +37,7 @@ pub trait NodeOp {
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
     /// and emit resulting records as they come in. Note that there may be no query, in which case
     /// all records should be returned.
-    fn query(&self, Option<&query::Query>, &AQ) -> Datas;
+    fn query<'a>(&'a self, Option<&query::Query>, sync::Arc<AQ>) -> Datas<'a>;
 }
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
@@ -46,6 +46,13 @@ pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     inner: sync::Arc<O>,
 }
 
+/// This is a somewhat nasty trick to allow an iterator to hold a read lock.
+/// Basically, since the lock is in an Arc, we know that the lock will never be dropped.
+/// We can thus just take a read lock, and keep it around (transmuting it to 'static) until the
+/// iterator has completed. We *aren't* allowed to return a reference from the iterator though,
+/// since the value might already be gone by the time the consumer of the iterator tries to read
+/// the reference. In particular, the read lock guard might have dropped, causing a data race, or
+/// the Arc itself might have been dropped, which might case a use-after-free.
 struct ArcStoreRef {
     _keep: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
     _lock: sync::RwLockReadGuard<'static, shortcut::Store<query::DataType>>,
@@ -116,11 +123,11 @@ impl<O> flow::View<query::Query> for Node<O>
     type Data = Vec<query::DataType>;
     type Params = Params;
 
-    fn find(&self,
-            aqs: sync::Arc<AQ>,
-            q: Option<&query::Query>,
-            mut p: Params)
-            -> Box<Iterator<Item = Self::Data>> {
+    fn find<'a>(&'a self,
+                aqs: sync::Arc<AQ>,
+                q: Option<&query::Query>,
+                mut p: Params)
+                -> Box<Iterator<Item = Self::Data> + 'a> {
 
         // insert all the query arguments
         p.reverse(); // so we can pop below
@@ -155,7 +162,7 @@ impl<O> flow::View<query::Query> for Node<O>
             }
         } else {
             // we are not materialized --- query
-            Box::new(self.inner.query(q, &*aqs))
+            Box::new(self.inner.query(q, aqs))
         }
     }
 
@@ -212,6 +219,7 @@ mod tests {
     use shortcut;
 
     use std::time;
+    use std::sync;
     use std::thread;
 
     struct Tester(i64);
@@ -243,7 +251,7 @@ mod tests {
             }
         }
 
-        fn query(&self, _: Option<&query::Query>, aqs: &AQ) -> Datas {
+        fn query<'a>(&'a self, _: Option<&query::Query>, aqs: sync::Arc<AQ>) -> Datas<'a> {
             // query all ancestors, emit r + c for each
             let mut iter = Box::new(None.into_iter()) as Datas;
             for (_, aq) in aqs.iter() {
