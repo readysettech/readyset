@@ -86,6 +86,7 @@ impl Query {
     }
 
     pub fn project(&self, r: &[DataType]) -> Vec<DataType> {
+        assert_eq!(r.len(), self.select.len());
         r.iter()
             .enumerate()
             .filter_map(|(i, f)| {
