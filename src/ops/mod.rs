@@ -37,5 +37,5 @@ impl Record {
 
 #[derive(Clone)]
 pub enum Update {
-    Records(Vec<Record>),
+    Records(Vec<Record>, i64),
 }

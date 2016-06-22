@@ -30,6 +30,7 @@ impl Joiner {
     fn join<'a>(&'a self,
                 left: Vec<query::DataType>,
                 on: &'a (flow::NodeIndex, Vec<usize>),
+                ts: i64,
                 aqfs: &ops::base::AQ)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
         // figure out the join values for this record
@@ -39,7 +40,7 @@ impl Joiner {
             .collect();
 
         // send the parameters to start the query.
-        let rx = (*aqfs[&on.0])(params);
+        let rx = (*aqfs[&on.0])((params, ts));
 
         Box::new(rx.into_iter().map(move |right| {
             // weave together r and j according to join rules
@@ -75,7 +76,7 @@ impl NodeOp for Joiner {
         }
 
         match u {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(rs, ts) => {
                 // okay, so here's what's going on:
                 // the record(s) we receive are all from one side of the join. we need to query the
                 // other side(s) for records matching the incoming records on that side's join
@@ -87,10 +88,10 @@ impl NodeOp for Joiner {
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
                 Some(ops::Update::Records(rs.into_iter()
-                    .flat_map(|rec| {
+                                              .flat_map(|rec| {
                         let (r, pos) = rec.extract();
 
-                        self.join(r, join, aqfs).map(move |res| {
+                        self.join(r, join, ts - 1, aqfs).map(move |res| {
                             // return new row with appropriate sign
                             if pos {
                                 ops::Record::Positive(res)
@@ -99,13 +100,15 @@ impl NodeOp for Joiner {
                             }
                         })
                     })
-                    .collect()))
+                                              .collect(),
+                                          ts))
             }
         }
     }
 
     fn query<'a>(&'a self,
                  q: Option<&query::Query>,
+                 ts: i64,
                  aqfs: sync::Arc<ops::base::AQ>)
                  -> ops::base::Datas<'a> {
         use std::iter;
@@ -163,11 +166,11 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         let aqfs2 = aqfs.clone(); // XXX: figure out why this is needed?
-        Box::new((aqfs[&left.0])(lparams)
+        Box::new((aqfs[&left.0])((lparams, ts))
             .flat_map(move |left| {
                 // TODO: also add constants from q to filter used to select from right
                 // TODO: respect q.select
-                self.join(left, on, &*aqfs2)
+                self.join(left, on, ts, &*aqfs2)
             })
             .filter_map(move |r| {
                 if let Some(ref q) = q {
@@ -229,28 +232,30 @@ mod tests {
         // let r_z2 = vec![2.into(), "z".into()];
 
         // to shorten stuff a little:
-        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)]);
+        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)], 0);
 
         // forward c3 from left; should produce [] since no records in right are 3
         match j.forward(t(l_c3.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(rs, ts) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
+                assert_eq!(ts, 0);
             }
         }
 
         // forward b2 from left; should produce [b2*z2]
         match j.forward(t(l_b2.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(rs, ts) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
+                assert_eq!(ts, 0);
             }
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
         match j.forward(t(l_a1.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(rs, ts) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
                 // they should all be positive since input was positive
@@ -260,6 +265,7 @@ mod tests {
                 // and both join results should be present
                 assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
                 assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
+                assert_eq!(ts, 0);
             }
         }
 
@@ -275,7 +281,7 @@ mod tests {
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz]
-        let hits = j.query(None, aqfs.clone()).collect::<Vec<_>>();
+        let hits = j.query(None, 0, aqfs.clone()).collect::<Vec<_>>();
         assert_eq!(hits.len(), 3);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
@@ -290,7 +296,7 @@ mod tests {
                          }],
         };
 
-        let hits = j.query(Some(&q), aqfs.clone()).collect::<Vec<_>>();
+        let hits = j.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
@@ -303,7 +309,7 @@ mod tests {
                          }],
         };
 
-        let hits = j.query(Some(&q), aqfs.clone()).collect::<Vec<_>>();
+        let hits = j.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
@@ -317,7 +323,7 @@ mod tests {
                          }],
         };
 
-        let hits = j.query(Some(&q), aqfs).collect::<Vec<_>>();
+        let hits = j.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
     }
@@ -329,8 +335,8 @@ mod tests {
                 vec![3.into(), "c".into()],
             ];
 
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
+        assert_eq!(p.0.len(), 1);
+        let p = p.0.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {
@@ -349,8 +355,8 @@ mod tests {
                 vec![2.into(), "z".into()],
             ];
 
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
+        assert_eq!(p.0.len(), 1);
+        let p = p.0.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {

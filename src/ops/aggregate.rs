@@ -58,7 +58,7 @@ impl NodeOp for Aggregator {
             .collect::<Vec<_>>();
 
         match u {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(rs, ts) => {
                 assert_eq!(rs.get(0).and_then(|c| Some(c.rec().len())).unwrap_or(0),
                            self.cols);
 
@@ -143,12 +143,16 @@ impl NodeOp for Aggregator {
                     out.push(ops::Record::Positive(rec));
                 }
 
-                Some(ops::Update::Records(out))
+                Some(ops::Update::Records(out, ts))
             }
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, aqfs: sync::Arc<ops::base::AQ>) -> ops::base::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             ts: i64,
+             aqfs: sync::Arc<ops::base::AQ>)
+             -> ops::base::Datas {
         use std::iter;
 
         assert_eq!(aqfs.len(), 1);
@@ -179,7 +183,7 @@ impl NodeOp for Aggregator {
         params.remove(self.over);
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = (*aqfs.iter().next().unwrap().1)(params);
+        let rx = (*aqfs.iter().next().unwrap().1)((params, ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
@@ -227,12 +231,13 @@ mod tests {
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])], 0);
 
         // first row for a group should emit -0 and +1 for that group
         let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs)) = out {
+        if let Some(ops::Update::Records(rs, ts)) = out {
             assert_eq!(rs.len(), 2);
+            assert_eq!(ts, 0);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -255,12 +260,13 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])], 1);
 
         // first row for a second group should emit -0 and +1 for that new group
         let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs)) = out {
+        if let Some(ops::Update::Records(rs, ts)) = out {
             assert_eq!(rs.len(), 2);
+            assert_eq!(ts, 1);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -283,12 +289,13 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])], 2);
 
         // second row for a group should emit -1 and +2
         let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs)) = out {
+        if let Some(ops::Update::Records(rs, ts)) = out {
             assert_eq!(rs.len(), 2);
+            assert_eq!(ts, 2);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -309,12 +316,13 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])]);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])], 3);
 
         // negative row for a group should emit -1 and +0
         let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs)) = out {
+        if let Some(ops::Update::Records(rs, ts)) = out {
             assert_eq!(rs.len(), 2);
+            assert_eq!(ts, 3);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -344,12 +352,14 @@ mod tests {
              ops::Record::Positive(vec![2.into(), 3.into()]),
              ops::Record::Positive(vec![2.into(), 1.into()]),
              ops::Record::Positive(vec![3.into(), 3.into()]),
-        ]);
+        ],
+                                     4);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs)) = out {
+        if let Some(ops::Update::Records(rs, ts)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
+            assert_eq!(ts, 4);
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {
                 if let ops::Record::Negative(ref r) = *r {
@@ -409,8 +419,8 @@ mod tests {
                 vec![2.into(), 2.into()],
             ];
 
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
+        assert_eq!(p.0.len(), 1);
+        let p = p.0.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {
@@ -436,7 +446,7 @@ mod tests {
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
         let aqfs = sync::Arc::new(aqfs);
 
-        let hits = c.query(None, aqfs.clone()).collect::<Vec<_>>();
+        let hits = c.query(None, 0, aqfs.clone()).collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
@@ -449,7 +459,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(&q), aqfs).collect::<Vec<_>>();
+        let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }

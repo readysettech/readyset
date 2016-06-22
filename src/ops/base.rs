@@ -8,7 +8,7 @@ use shortcut;
 use std::sync;
 use std::collections::HashMap;
 
-pub type Params = Vec<shortcut::Value<query::DataType>>;
+pub type Params = (Vec<shortcut::Value<query::DataType>>, i64);
 pub type AQ = HashMap<flow::NodeIndex,
                       Box<Fn(Params) -> Box<Iterator<Item = Vec<query::DataType>>> + Send + Sync>>;
 pub type Datas<'a> = Box<Iterator<Item = Vec<query::DataType>> + 'a>;
@@ -38,14 +38,13 @@ pub trait NodeOp {
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
     /// and emit resulting records as they come in. Note that there may be no query, in which case
     /// all records should be returned.
-    fn query<'a>(&'a self, Option<&query::Query>, sync::Arc<AQ>) -> Datas<'a>;
+    fn query<'a>(&'a self, Option<&query::Query>, i64, sync::Arc<AQ>) -> Datas<'a>;
 }
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     fields: Vec<String>,
     data: sync::Arc<Option<sync::RwLock<backlog::BufferedStore>>>,
     inner: sync::Arc<O>,
-    local_ts: sync::atomic::AtomicIsize,
 }
 
 /// This is a somewhat nasty trick to allow an iterator to hold a read lock.
@@ -129,8 +128,11 @@ impl<O> flow::View<query::Query> for Node<O>
     fn find<'a>(&'a self,
                 aqs: sync::Arc<AQ>,
                 q: Option<&query::Query>,
-                mut p: Params)
+                p: Self::Params)
                 -> Box<Iterator<Item = Self::Data> + 'a> {
+
+        let ts = p.1;
+        let mut p = p.0;
 
         // insert all the query arguments
         p.reverse(); // so we can pop below
@@ -152,9 +154,6 @@ impl<O> flow::View<query::Query> for Node<O>
 
         // find and return matching rows
         if self.data.is_some() {
-            // TODO: not local time
-            let ts = self.local_ts.load(sync::atomic::Ordering::SeqCst) as i64;
-
             let data = self.data.clone();
             if let Some(q) = q {
                 let q = q.clone();
@@ -168,7 +167,7 @@ impl<O> flow::View<query::Query> for Node<O>
             }
         } else {
             // we are not materialized --- query
-            Box::new(self.inner.query(q, aqs))
+            Box::new(self.inner.query(q, ts, aqs))
         }
     }
 
@@ -182,19 +181,14 @@ impl<O> flow::View<query::Query> for Node<O>
 
         let new_u = self.inner.forward(u, src, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
-            // TODO: we should obviously not be using a local ts here, because then specifying the
-            // ts argument for find() given an update from another Node won't make any sense.
-            let ts = self.local_ts.fetch_add(1, sync::atomic::Ordering::SeqCst) as i64;
             match *new_u {
-                ops::Update::Records(ref rs) => {
+                ops::Update::Records(ref rs, ts) => {
                     if let Some(ref mut data) = data {
                         data.add(rs.clone(), ts);
+                        // TODO: we should obviously not really absorb straight away
+                        data.absorb(ts);
                     }
                 }
-            }
-
-            if let Some(ref mut data) = data {
-                data.absorb(ts);
             }
         }
         new_u
@@ -211,7 +205,6 @@ pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> 
     }
 
     Node {
-        local_ts: sync::atomic::AtomicIsize::new(0),
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(inner),
@@ -241,12 +234,13 @@ mod tests {
                    -> Option<ops::Update> {
             // forward
             match u {
-                ops::Update::Records(mut rs) => {
+                ops::Update::Records(mut rs, ts) => {
                     if let Some(ops::Record::Positive(r)) = rs.pop() {
                         if let query::DataType::Number(r) = r[0] {
                             Some(
                                 ops::Update::Records(
-                                    vec![ops::Record::Positive(vec![(r + self.0).into()])]
+                                    vec![ops::Record::Positive(vec![(r + self.0).into()])],
+                                    ts
                                 )
                             )
                         } else {
@@ -259,11 +253,11 @@ mod tests {
             }
         }
 
-        fn query<'a>(&'a self, _: Option<&query::Query>, aqs: sync::Arc<AQ>) -> Datas<'a> {
+        fn query<'a>(&'a self, _: Option<&query::Query>, ts: i64, aqs: sync::Arc<AQ>) -> Datas<'a> {
             // query all ancestors, emit r + c for each
             let mut iter = Box::new(None.into_iter()) as Datas;
             for (_, aq) in aqs.iter() {
-                iter = Box::new(iter.chain(aq(vec![])));
+                iter = Box::new(iter.chain(aq((vec![], ts))));
             }
 
             let c = self.0;
@@ -295,7 +289,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(ops::Update::Records(vec![ops::Record::Positive(vec![1.into()])])).unwrap();
+        put[&a].send(ops::Update::Records(vec![ops::Record::Positive(vec![1.into()])], 0)).unwrap();
 
         // state should now be:
         // a = [2]
@@ -307,7 +301,9 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send another in
-        put[&b].send(ops::Update::Records(vec![ops::Record::Positive(vec![16.into()])])).unwrap();
+        put[&b]
+            .send(ops::Update::Records(vec![ops::Record::Positive(vec![16.into()])], 1))
+            .unwrap();
 
         // state should now be:
         // a = [2]
@@ -320,17 +316,21 @@ mod tests {
 
         // check state
         // a
-        let set = get[&a](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&a]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set = get[&b](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&b]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set = get[&c](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&c]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set = get[&d](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&d]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }
@@ -353,7 +353,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(ops::Update::Records(vec![ops::Record::Positive(vec![1.into()])])).unwrap();
+        put[&a].send(ops::Update::Records(vec![ops::Record::Positive(vec![1.into()])], 0)).unwrap();
 
         // state should now be:
         // a = [2]
@@ -365,7 +365,9 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send another in
-        put[&b].send(ops::Update::Records(vec![ops::Record::Positive(vec![16.into()])])).unwrap();
+        put[&b]
+            .send(ops::Update::Records(vec![ops::Record::Positive(vec![16.into()])], 1))
+            .unwrap();
 
         // state should now be:
         // a = [2]
@@ -378,17 +380,21 @@ mod tests {
 
         // check state
         // a
-        let set = get[&a](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&a]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set = get[&b](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&b]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set = get[&c](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&c]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set = get[&d](vec![]).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set =
+            get[&d]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }
