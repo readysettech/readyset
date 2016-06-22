@@ -1,6 +1,7 @@
 use ops;
 use flow;
 use query;
+use backlog;
 use ops::base::NodeOp;
 
 use std::sync;
@@ -41,7 +42,7 @@ impl NodeOp for Aggregator {
     fn forward(&self,
                u: ops::Update,
                _: flow::NodeIndex,
-               db: Option<&shortcut::Store<query::DataType>>,
+               db: Option<&backlog::BufferedStore>,
                _: &ops::base::AQ)
                -> Option<ops::Update> {
 
@@ -95,7 +96,8 @@ impl NodeOp for Aggregator {
                     // find the current value for this group
                     let current = match db {
                         Some(db) => {
-                            let mut matches = db.find(&q[..]);
+                            // TODO: figure out what timestamp to use
+                            let mut matches = db.find(&q[..], i64::max_value());
                             let current = matches.next();
                             assert!(current.is_none() || matches.count() == 0,
                                     "aggregation had more than 1 result");
@@ -208,6 +210,7 @@ mod tests {
     use ops;
     use flow;
     use query;
+    use backlog;
     use shortcut;
 
     use ops::base::NodeOp;
@@ -221,7 +224,7 @@ mod tests {
             op: Aggregation::COUNT,
         };
 
-        let mut s = shortcut::Store::new(2);
+        let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
 
         let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
@@ -243,7 +246,8 @@ mod tests {
                 ops::Record::Positive(r) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
-                    s.insert(r);
+                    s.add(vec![ops::Record::Positive(r)], 0);
+                    s.absorb(0);
                 }
                 _ => unreachable!(),
             }
@@ -270,7 +274,8 @@ mod tests {
                 ops::Record::Positive(r) => {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
-                    s.insert(r);
+                    s.add(vec![ops::Record::Positive(r)], 1);
+                    s.absorb(1);
                 }
                 _ => unreachable!(),
             }

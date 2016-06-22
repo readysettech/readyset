@@ -1,6 +1,7 @@
 use flow;
 use query;
 use ops;
+use backlog;
 
 use shortcut;
 
@@ -29,7 +30,7 @@ pub trait NodeOp {
     fn forward(&self,
                ops::Update,
                flow::NodeIndex,
-               Option<&shortcut::Store<query::DataType>>,
+               Option<&backlog::BufferedStore>,
                &AQ)
                -> Option<ops::Update>;
 
@@ -42,8 +43,9 @@ pub trait NodeOp {
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     fields: Vec<String>,
-    data: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
+    data: sync::Arc<Option<sync::RwLock<backlog::BufferedStore>>>,
     inner: sync::Arc<O>,
+    local_ts: sync::atomic::AtomicIsize,
 }
 
 /// This is a somewhat nasty trick to allow an iterator to hold a read lock.
@@ -54,16 +56,17 @@ pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
 /// the reference. In particular, the read lock guard might have dropped, causing a data race, or
 /// the Arc itself might have been dropped, which might case a use-after-free.
 struct ArcStoreRef {
-    _keep: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
-    _lock: sync::RwLockReadGuard<'static, shortcut::Store<query::DataType>>,
+    _keep: sync::Arc<Option<sync::RwLock<backlog::BufferedStore>>>,
+    _lock: sync::RwLockReadGuard<'static, backlog::BufferedStore>,
     iter: Box<Iterator<Item = &'static [query::DataType]>>,
 }
 
 impl !Send for ArcStoreRef {}
 
 impl ArcStoreRef {
-    pub fn new(src: sync::Arc<Option<sync::RwLock<shortcut::Store<query::DataType>>>>,
-               conds: &[shortcut::Condition<query::DataType>])
+    pub fn new(src: sync::Arc<Option<sync::RwLock<backlog::BufferedStore>>>,
+               conds: &[shortcut::Condition<query::DataType>],
+               ts: i64)
                -> Option<ArcStoreRef> {
         use std::mem;
         use std::ops::Deref;
@@ -72,7 +75,7 @@ impl ArcStoreRef {
             return None;
         }
 
-        let rlock: sync::RwLockReadGuard<'static, shortcut::Store<query::DataType>> = {
+        let rlock: sync::RwLockReadGuard<'static, backlog::BufferedStore> = {
             let rlock = src.deref().as_ref().unwrap().read().unwrap();
             // safe to make 'static because we keep the Arc around
             // it's really 'as-long-as-this-struct-is-around
@@ -80,7 +83,7 @@ impl ArcStoreRef {
         };
 
         let iter = {
-            let iter = rlock.find(conds);
+            let iter = rlock.find(conds, ts);
             // safe to make 'static because we keep the rlock around, and never expose refs to things
             // yielded by the iter; they are always made owned before returning them (and thus before
             // self can be dropped). as above, it is really 'as-long-as-this-struct-is-around.
@@ -149,14 +152,17 @@ impl<O> flow::View<query::Query> for Node<O>
 
         // find and return matching rows
         if self.data.is_some() {
+            // TODO: not local time
+            let ts = self.local_ts.load(sync::atomic::Ordering::SeqCst) as i64;
+
             let data = self.data.clone();
             if let Some(q) = q {
                 let q = q.clone();
-                Box::new(ArcStoreRef::new(data, &q.having[..])
+                Box::new(ArcStoreRef::new(data, &q.having[..], ts)
                     .unwrap()
                     .start(move |r| q.project(r)))
             } else {
-                Box::new(ArcStoreRef::new(data, &[])
+                Box::new(ArcStoreRef::new(data, &[], ts)
                     .unwrap()
                     .start(|r| r.iter().cloned().collect()))
             }
@@ -172,22 +178,23 @@ impl<O> flow::View<query::Query> for Node<O>
                aqs: sync::Arc<AQ>)
                -> Option<Self::Update> {
         use std::ops::Deref;
-        let data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
+        let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
 
         let new_u = self.inner.forward(u, src, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
+            // TODO: we should obviously not be using a local ts here, because then specifying the
+            // ts argument for find() given an update from another Node won't make any sense.
+            let ts = self.local_ts.fetch_add(1, sync::atomic::Ordering::SeqCst) as i64;
             match *new_u {
                 ops::Update::Records(ref rs) => {
-                    if let Some(mut data) = data {
-                        for r in rs.iter() {
-                            if let ops::Record::Positive(ref d) = *r {
-                                data.insert(d.clone());
-                            } else {
-                                unimplemented!();
-                            }
-                        }
+                    if let Some(ref mut data) = data {
+                        data.add(rs.clone(), ts);
                     }
                 }
+            }
+
+            if let Some(ref mut data) = data {
+                data.absorb(ts);
             }
         }
         new_u
@@ -200,10 +207,11 @@ pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> 
 {
     let mut data = None;
     if materialized {
-        data = Some(sync::RwLock::new(shortcut::Store::new(fields.len())));
+        data = Some(sync::RwLock::new(backlog::BufferedStore::new(fields.len())));
     }
 
     Node {
+        local_ts: sync::atomic::AtomicIsize::new(0),
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(inner),
@@ -216,7 +224,7 @@ mod tests {
     use flow;
     use ops;
     use query;
-    use shortcut;
+    use backlog;
 
     use std::time;
     use std::sync;
@@ -228,7 +236,7 @@ mod tests {
         fn forward(&self,
                    u: ops::Update,
                    _: flow::NodeIndex,
-                   _: Option<&shortcut::Store<query::DataType>>,
+                   _: Option<&backlog::BufferedStore>,
                    _: &AQ)
                    -> Option<ops::Update> {
             // forward

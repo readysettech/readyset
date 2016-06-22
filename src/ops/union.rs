@@ -1,6 +1,7 @@
 use ops;
 use flow;
 use query;
+use backlog;
 use ops::base::NodeOp;
 
 use std::sync;
@@ -17,7 +18,7 @@ impl NodeOp for Union {
     fn forward(&self,
                u: ops::Update,
                from: flow::NodeIndex,
-               _: Option<&shortcut::Store<query::DataType>>,
+               _: Option<&backlog::BufferedStore>,
                _: &ops::base::AQ)
                -> Option<ops::Update> {
         match u {
