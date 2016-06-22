@@ -51,13 +51,31 @@ impl BufferedStore {
                     ops::Record::Positive(r) => {
                         self.store.insert(r);
                     }
-                    ops::Record::Negative(_) => {
-                        // TODO
-                        // delete the corresponding row.
-                        // we can use data.delete(), but need to come up with a condition
-                        // that will match *only* that one row (not, for example, other
-                        // rows with all the same values). do we need uniquifiers again?
-                        unimplemented!();
+                    ops::Record::Negative(r) => {
+                        // we need a cond that will match this row.
+                        let conds = r.into_iter()
+                            .enumerate()
+                            .map(|(coli, v)| {
+                                shortcut::Condition {
+                                    column: coli,
+                                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(v)),
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        // however, multiple rows may have the same values as this row for every
+                        // column. afaict, it is safe to delete any one of these rows. we do this
+                        // by returning true for the first invocation of the filter function, and
+                        // false for all subsequent invocations.
+                        let mut first = true;
+                        self.store.delete_filter(&conds[..], |_| {
+                            if first {
+                                first = false;
+                                true
+                            } else {
+                                false
+                            }
+                        });
                     }
                 }
             }
