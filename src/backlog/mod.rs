@@ -106,7 +106,44 @@ impl BufferedStore {
                     including: i64)
                     -> Box<Iterator<Item = &'a [query::DataType]> + 'a> {
         assert!(including >= self.absorbed);
-        self.store.find(conds)
+
+        // okay, so we want to:
+        //
+        //  a) get the base results
+        //  b) add any backlogged positives
+        //  c) remove any backlogged negatives
+        //
+        // (a) is trivial (self.store.find)
+        // we'll do (b) and (c) in two steps:
+        //
+        //  1) chain in all the positives in the backlog onto the base result iterator
+        //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
+        //     the backlogged entry if there's a match.
+
+        let (positives, mut negatives): (_, Vec<_>) = self.backlog
+            .iter()
+            .take_while(|&&(ts, _)| ts <= including)
+            .flat_map(|&(_, ref group)| group.iter())
+            .filter(|r| conds.iter().all(|c| c.matches(&r.rec()[..])))
+            .partition(|r| r.is_positive());
+
+        let positives = positives.into_iter().map(|r| r.rec().clone());
+        let results = self.store.find(conds).chain(positives);
+
+        let strip_negatives = move |r: &'a [query::DataType]| -> Option<&'a [query::DataType]> {
+            let revocation = negatives.iter()
+                .position(|neg| neg.rec().iter().enumerate().all(|(i, v)| &r[i] == v));
+
+            if let Some(revocation) = revocation {
+                // order of negatives doesn't matter, so O(1) swap_remove is fine
+                negatives.swap_remove(revocation);
+                None
+            } else {
+                Some(r)
+            }
+        };
+
+        Box::new(results.filter_map(strip_negatives))
     }
 }
 
