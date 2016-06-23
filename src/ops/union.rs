@@ -2,7 +2,7 @@ use ops;
 use flow;
 use query;
 use backlog;
-use ops::base::NodeOp;
+use ops::NodeOp;
 
 use std::sync;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ impl NodeOp for Union {
                u: ops::Update,
                from: flow::NodeIndex,
                _: Option<&backlog::BufferedStore>,
-               _: &ops::base::AQ)
+               _: &ops::AQ)
                -> Option<ops::Update> {
         match u {
             ops::Update::Records(rs, ts) => {
@@ -46,8 +46,8 @@ impl NodeOp for Union {
     fn query<'a>(&'a self,
                  q: Option<&query::Query>,
                  ts: i64,
-                 aqfs: sync::Arc<ops::base::AQ>)
-                 -> ops::base::Datas<'a> {
+                 aqfs: sync::Arc<ops::AQ>)
+                 -> ops::Datas<'a> {
         use std::iter;
 
         let mut params = HashMap::new();
@@ -108,10 +108,10 @@ mod tests {
     use query;
     use shortcut;
 
-    use ops::base::NodeOp;
+    use ops::NodeOp;
     use std::collections::HashMap;
 
-    fn setup() -> (ops::base::AQ, Union) {
+    fn setup() -> (ops::AQ, Union) {
         // 0 = left, 1 = right
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(left) as Box<_>);
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(hits.len(), 0);
     }
 
-    fn left(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn left(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
@@ -251,7 +251,7 @@ mod tests {
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
-    fn right(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn right(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "skipped".into(), "x".into()],
             ];

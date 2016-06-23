@@ -2,7 +2,7 @@ use ops;
 use flow;
 use query;
 use backlog;
-use ops::base::NodeOp;
+use ops::NodeOp;
 
 use std::sync;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ impl Joiner {
                 left: Vec<query::DataType>,
                 on: &'a (flow::NodeIndex, Vec<usize>),
                 ts: i64,
-                aqfs: &ops::base::AQ)
+                aqfs: &ops::AQ)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
         // figure out the join values for this record
         let params = on.1
@@ -69,7 +69,7 @@ impl NodeOp for Joiner {
                u: ops::Update,
                from: flow::NodeIndex,
                _: Option<&backlog::BufferedStore>,
-               aqfs: &ops::base::AQ)
+               aqfs: &ops::AQ)
                -> Option<ops::Update> {
         if aqfs.len() != 2 {
             unimplemented!(); // only two-way joins are supported at the moment
@@ -109,8 +109,8 @@ impl NodeOp for Joiner {
     fn query<'a>(&'a self,
                  q: Option<&query::Query>,
                  ts: i64,
-                 aqfs: sync::Arc<ops::base::AQ>)
-                 -> ops::base::Datas<'a> {
+                 aqfs: sync::Arc<ops::AQ>)
+                 -> ops::Datas<'a> {
         use std::iter;
 
         if aqfs.len() != 2 {
@@ -190,10 +190,10 @@ mod tests {
     use query;
     use shortcut;
 
-    use ops::base::NodeOp;
+    use ops::NodeOp;
     use std::collections::HashMap;
 
-    fn setup() -> (ops::base::AQ, Joiner) {
+    fn setup() -> (ops::AQ, Joiner) {
         // 0 = left, 1 = right
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(left) as Box<_>);
@@ -328,7 +328,7 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
     }
 
-    fn left(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn left(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
@@ -348,7 +348,7 @@ mod tests {
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
-    fn right(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn right(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "x".into()],
                 vec![1.into(), "y".into()],

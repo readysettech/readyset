@@ -2,7 +2,7 @@ use ops;
 use flow;
 use query;
 use backlog;
-use ops::base::NodeOp;
+use ops::NodeOp;
 
 use std::sync;
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ impl NodeOp for Aggregator {
                u: ops::Update,
                _: flow::NodeIndex,
                db: Option<&backlog::BufferedStore>,
-               _: &ops::base::AQ)
+               _: &ops::AQ)
                -> Option<ops::Update> {
 
         // Construct the query we'll need
@@ -148,11 +148,7 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             ts: i64,
-             aqfs: sync::Arc<ops::base::AQ>)
-             -> ops::base::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: sync::Arc<ops::AQ>) -> ops::Datas {
         use std::iter;
 
         assert_eq!(aqfs.len(), 1);
@@ -217,7 +213,7 @@ mod tests {
     use backlog;
     use shortcut;
 
-    use ops::base::NodeOp;
+    use ops::NodeOp;
     use std::collections::HashMap;
 
     #[test]
@@ -412,7 +408,7 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::base::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn source(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), 1.into()],
                 vec![2.into(), 1.into()],
