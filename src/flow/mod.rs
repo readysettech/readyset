@@ -1,5 +1,6 @@
 use petgraph;
 use bus::Bus;
+use clocked_dispatch;
 
 use std;
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ pub trait View<Q: Clone + Send> {
     fn process(&self,
                Self::Update,
                NodeIndex,
+               i64,
                sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                -> Option<Self::Update>;
 }
@@ -78,6 +80,7 @@ pub struct FlowGraph<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> {
     graph: petgraph::Graph<Option<sync::Arc<V>>, Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
     wait: Vec<thread::JoinHandle<()>>,
+    dispatch: clocked_dispatch::Dispatcher<V::Update>,
 }
 
 impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, V> {
@@ -88,12 +91,13 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
             graph: graph,
             source: source,
             wait: Vec::default(),
+            dispatch: clocked_dispatch::new(20),
         }
     }
 
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<NodeIndex, mpsc::SyncSender<V::Update>>,
+               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<V::Update>>,
                    HashMap<NodeIndex,
                            Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
@@ -102,15 +106,19 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
         let mut incoming = HashMap::new();
         let mut start = HashMap::new();
         for base in self.graph.neighbors(self.source) {
-            let (tx, rx) = mpsc::sync_channel(buf);
+            let (tx, rx) = self.dispatch.new(format!("{}-in", base.index()),
+                                             format!("{}-out", base.index()));
 
-            // automatically add source node to all incoming facts so users don't have to add this
-            // themselves.
+            // automatically add source node and timestamp to all incoming facts so users don't
+            // have to add this themselves.
             let (px_tx, px_rx) = mpsc::sync_channel(buf);
             let root = self.source;
             thread::spawn(move || {
-                for u in rx.into_iter() {
-                    px_tx.send((root, u)).unwrap();
+                for (u, ts) in rx.into_iter() {
+                    match u {
+                        Some(u) => px_tx.send((root, u, ts as i64)).unwrap(),
+                        None => (), // TODO
+                    }
                 }
             });
             incoming.insert(base, tx);
@@ -143,8 +151,8 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     // per incoming edge, all sharing a single mpsc channel into the node in
                     // question.
                     thread::spawn(move || {
-                        for u in rx.into_iter() {
-                            if let Err(..) = tx.send((ancestor, u)) {
+                        for (u, ts) in rx.into_iter() {
+                            if let Err(..) = tx.send((ancestor, u, ts)) {
                                 break;
                             }
                         }
@@ -227,9 +235,9 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
             // start a thread for managing this node.
             // basically just a rx->process->tx loop.
             self.wait.push(thread::spawn(move || {
-                for (src, u) in rx.into_iter() {
-                    if let Some(u) = node.process(u, src, aqf.clone()) {
-                        tx.broadcast(u);
+                for (src, u, ts) in rx.into_iter() {
+                    if let Some(u) = node.process(u, src, ts, aqf.clone()) {
+                        tx.broadcast((u, ts));
                     }
                 }
             }));
@@ -290,6 +298,7 @@ mod tests {
         fn process(&self,
                    u: Self::Update,
                    _: NodeIndex,
+                   _: i64,
                    _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
@@ -307,7 +316,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(1).unwrap();
+        put[&a].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
@@ -316,7 +325,7 @@ mod tests {
         assert_eq!(get[&a](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
-        put[&a].send(1).unwrap();
+        put[&a].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
@@ -336,7 +345,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put[&a].send(1).unwrap();
+        put[&a].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
@@ -345,7 +354,7 @@ mod tests {
         assert_eq!(get[&c](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
-        put[&b].send(1).unwrap();
+        put[&b].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
@@ -366,7 +375,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put[&a].send(1).unwrap();
+        put[&a].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));
@@ -375,7 +384,7 @@ mod tests {
         assert_eq!(get[&d](()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
-        put[&b].send(1).unwrap();
+        put[&b].send(1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 1_000_000));

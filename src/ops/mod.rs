@@ -43,7 +43,7 @@ impl Record {
 
 #[derive(Clone)]
 pub enum Update {
-    Records(Vec<Record>, i64),
+    Records(Vec<Record>),
 }
 
 pub type Params = (Vec<shortcut::Value<query::DataType>>, i64);
@@ -68,6 +68,7 @@ pub trait NodeOp {
     fn forward(&self,
                Update,
                flow::NodeIndex,
+               i64,
                Option<&backlog::BufferedStore>,
                &AQ)
                -> Option<Update>;
@@ -212,15 +213,16 @@ impl<O> flow::View<query::Query> for Node<O>
     fn process(&self,
                u: Self::Update,
                src: flow::NodeIndex,
+               ts: i64,
                aqs: sync::Arc<AQ>)
                -> Option<Self::Update> {
         use std::ops::Deref;
         let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
 
-        let new_u = self.inner.forward(u, src, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
+        let new_u = self.inner.forward(u, src, ts, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
             match *new_u {
-                Update::Records(ref rs, ts) => {
+                Update::Records(ref rs) => {
                     if let Some(ref mut data) = data {
                         data.add(rs.clone(), ts);
                         // TODO: we should obviously not really absorb straight away
@@ -266,16 +268,16 @@ mod tests {
         fn forward(&self,
                    u: Update,
                    _: flow::NodeIndex,
+                   _: i64,
                    _: Option<&backlog::BufferedStore>,
                    _: &AQ)
                    -> Option<Update> {
             // forward
             match u {
-                Update::Records(mut rs, ts) => {
+                Update::Records(mut rs) => {
                     if let Some(Record::Positive(r)) = rs.pop() {
                         if let query::DataType::Number(r) = r[0] {
-                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()])],
-                                                 ts))
+                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()])]))
                         } else {
                             unreachable!();
                         }
@@ -322,7 +324,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])], 0)).unwrap();
+        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])]));
 
         // state should now be:
         // a = [2]
@@ -334,9 +336,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send another in
-        put[&b]
-            .send(Update::Records(vec![Record::Positive(vec![16.into()])], 1))
-            .unwrap();
+        put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
 
         // state should now be:
         // a = [2]
@@ -349,21 +349,25 @@ mod tests {
 
         // check state
         // a
-        let set =
-            get[&a]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&a]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set =
-            get[&b]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&b]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set =
-            get[&c]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&c]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set =
-            get[&d]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&d]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }
@@ -386,7 +390,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])], 0)).unwrap();
+        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])]));
 
         // state should now be:
         // a = [2]
@@ -398,9 +402,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send another in
-        put[&b]
-            .send(Update::Records(vec![Record::Positive(vec![16.into()])], 1))
-            .unwrap();
+        put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
 
         // state should now be:
         // a = [2]
@@ -413,21 +415,25 @@ mod tests {
 
         // check state
         // a
-        let set =
-            get[&a]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&a]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set =
-            get[&b]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&b]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set =
-            get[&c]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&c]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set =
-            get[&d]((vec![], 1)).map(|mut v| v.pop().unwrap().into()).collect::<HashSet<i64>>();
+        let set = get[&d]((vec![], i64::max_value()))
+            .map(|mut v| v.pop().unwrap().into())
+            .collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         assert!(set.contains(&30), format!("30 not in {:?}", set));
     }

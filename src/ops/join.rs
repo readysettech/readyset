@@ -68,6 +68,7 @@ impl NodeOp for Joiner {
     fn forward(&self,
                u: ops::Update,
                from: flow::NodeIndex,
+               ts: i64,
                _: Option<&backlog::BufferedStore>,
                aqfs: &ops::AQ)
                -> Option<ops::Update> {
@@ -76,7 +77,7 @@ impl NodeOp for Joiner {
         }
 
         match u {
-            ops::Update::Records(rs, ts) => {
+            ops::Update::Records(rs) => {
                 // okay, so here's what's going on:
                 // the record(s) we receive are all from one side of the join. we need to query the
                 // other side(s) for records matching the incoming records on that side's join
@@ -88,7 +89,7 @@ impl NodeOp for Joiner {
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
                 Some(ops::Update::Records(rs.into_iter()
-                                              .flat_map(|rec| {
+                    .flat_map(|rec| {
                         let (r, pos) = rec.extract();
 
                         self.join(r, join, ts - 1, aqfs).map(move |res| {
@@ -100,8 +101,7 @@ impl NodeOp for Joiner {
                             }
                         })
                     })
-                                              .collect(),
-                                          ts))
+                    .collect()))
             }
         }
     }
@@ -232,30 +232,28 @@ mod tests {
         // let r_z2 = vec![2.into(), "z".into()];
 
         // to shorten stuff a little:
-        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)], 0);
+        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)]);
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.forward(t(l_c3.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs, ts) => {
+        match j.forward(t(l_c3.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
-                assert_eq!(ts, 0);
             }
         }
 
         // forward b2 from left; should produce [b2*z2]
-        match j.forward(t(l_b2.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs, ts) => {
+        match j.forward(t(l_b2.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
-                assert_eq!(ts, 0);
             }
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.forward(t(l_a1.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs, ts) => {
+        match j.forward(t(l_a1.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
                 // they should all be positive since input was positive
@@ -265,7 +263,6 @@ mod tests {
                 // and both join results should be present
                 assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
                 assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
-                assert_eq!(ts, 0);
             }
         }
 

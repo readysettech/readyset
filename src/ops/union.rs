@@ -18,13 +18,14 @@ impl NodeOp for Union {
     fn forward(&self,
                u: ops::Update,
                from: flow::NodeIndex,
+               _: i64,
                _: Option<&backlog::BufferedStore>,
                _: &ops::AQ)
                -> Option<ops::Update> {
         match u {
-            ops::Update::Records(rs, ts) => {
+            ops::Update::Records(rs) => {
                 Some(ops::Update::Records(rs.into_iter()
-                                              .map(|rec| {
+                    .map(|rec| {
                         let (r, pos) = rec.extract();
 
                         // yield selected columns for this source
@@ -37,8 +38,7 @@ impl NodeOp for Union {
                             ops::Record::Negative(res)
                         }
                     })
-                                              .collect(),
-                                          ts))
+                    .collect()))
             }
         }
     }
@@ -137,23 +137,21 @@ mod tests {
         let (aqfs, u) = setup();
 
         // to shorten stuff a little:
-        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)], 0);
+        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)]);
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.forward(t(left.clone()), 0.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs, ts) => {
+        match u.forward(t(left.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left)]);
-                assert_eq!(ts, 0);
             }
         }
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.forward(t(right.clone()), 1.into(), None, &aqfs).unwrap() {
-            ops::Update::Records(rs, ts) => {
+        match u.forward(t(right.clone()), 1.into(), 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()])]);
-                assert_eq!(ts, 0);
             }
         }
     }

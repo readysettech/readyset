@@ -7,3 +7,4 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 petgraph = "0.2"
 bus = "1.0.0"
 shortcut = "3.2.0"
+clocked-dispatch = "2.1"

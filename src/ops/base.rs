@@ -12,6 +12,7 @@ impl NodeOp for Base {
     fn forward(&self,
                u: ops::Update,
                _: flow::NodeIndex,
+               _: i64,
                _: Option<&backlog::BufferedStore>,
                _: &ops::AQ)
                -> Option<ops::Update> {

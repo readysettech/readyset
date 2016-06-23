@@ -42,6 +42,7 @@ impl NodeOp for Aggregator {
     fn forward(&self,
                u: ops::Update,
                _: flow::NodeIndex,
+               _: i64,
                db: Option<&backlog::BufferedStore>,
                _: &ops::AQ)
                -> Option<ops::Update> {
@@ -58,7 +59,7 @@ impl NodeOp for Aggregator {
             .collect::<Vec<_>>();
 
         match u {
-            ops::Update::Records(rs, ts) => {
+            ops::Update::Records(rs) => {
                 assert_eq!(rs.get(0).and_then(|c| Some(c.rec().len())).unwrap_or(0),
                            self.cols);
 
@@ -143,7 +144,7 @@ impl NodeOp for Aggregator {
                     out.push(ops::Record::Positive(rec));
                 }
 
-                Some(ops::Update::Records(out, ts))
+                Some(ops::Update::Records(out))
             }
         }
     }
@@ -227,13 +228,12 @@ mod tests {
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])], 0);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
 
         // first row for a group should emit -0 and +1 for that group
-        let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs, ts)) = out {
+        let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
-            assert_eq!(ts, 0);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -256,13 +256,12 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])], 1);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
 
         // first row for a second group should emit -0 and +1 for that new group
-        let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs, ts)) = out {
+        let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
-            assert_eq!(ts, 1);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -285,13 +284,12 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])], 2);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
 
         // second row for a group should emit -1 and +2
-        let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs, ts)) = out {
+        let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
-            assert_eq!(ts, 2);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -312,13 +310,12 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])], 3);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])]);
 
         // negative row for a group should emit -1 and +0
-        let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs, ts)) = out {
+        let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
-            assert_eq!(ts, 3);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
@@ -348,14 +345,12 @@ mod tests {
              ops::Record::Positive(vec![2.into(), 3.into()]),
              ops::Record::Positive(vec![2.into(), 1.into()]),
              ops::Record::Positive(vec![3.into(), 3.into()]),
-        ],
-                                     4);
+        ]);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
-        let out = c.forward(u, src, Some(&s), &HashMap::new());
-        if let Some(ops::Update::Records(rs, ts)) = out {
+        let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
-            assert_eq!(ts, 4);
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {
                 if let ops::Record::Negative(ref r) = *r {
