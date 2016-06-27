@@ -98,12 +98,12 @@ impl Query {
             })
             .collect()
     }
-}
 
-pub fn new(s: &[bool], h: Vec<shortcut::Condition<DataType>>) -> Query {
-    Query {
-        select: s.iter().cloned().collect(),
-        having: h,
+    pub fn new(s: &[bool], h: Vec<shortcut::Condition<DataType>>) -> Query {
+        Query {
+            select: s.iter().cloned().collect(),
+            having: h,
+        }
     }
 }
 
