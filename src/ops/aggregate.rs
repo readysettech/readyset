@@ -176,11 +176,21 @@ impl NodeOp for Aggregator {
                 // fair bit so that we keep that part of the query around for after we've got the
                 // results back. We'd then need to do another filtering pass over the results of
                 // query.
-                let col = c.column;
-                assert!(col != self.over);
+                let mut col = c.column;
+                assert!(col != self.cols - 1,
+                        "filtering on aggregation output is not supported");
+
+                // the order of output columns is the same as the order of the input columns
+                // *except* that self.over is removed, and the aggregation result is placed last.
+                // so, to figure out which column this is filtering on in our ancestor, we have to
+                // do a little bit of math.
+                if col >= self.over {
+                    col += 1;
+                }
+
                 match c.cmp {
                     shortcut::Comparison::Equal(ref v) => {
-                        *params.get_mut(c.column).unwrap() = v.clone();
+                        *params.get_mut(col).unwrap() = v.clone();
                     }
                 }
             }
