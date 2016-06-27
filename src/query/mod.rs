@@ -8,6 +8,16 @@ pub enum DataType {
     Number(i64),
 }
 
+impl DataType {
+    pub fn is_none(&self) -> bool {
+        return if let DataType::None = *self {
+            true
+        } else {
+            false
+        };
+    }
+}
+
 impl PartialEq for DataType {
     fn eq(&self, other: &DataType) -> bool {
         if let DataType::None = *self {

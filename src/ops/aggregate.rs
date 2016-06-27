@@ -214,6 +214,32 @@ impl NodeOp for Aggregator {
             *cur = self.op.update(*cur, over, true);
         }
 
+        if consolidate.is_empty() {
+            if let Some(q) = q {
+                let mut group: Vec<_> = iter::repeat(query::DataType::None)
+                    .take(self.cols - 1)
+                    .collect();
+
+                for c in q.having.iter() {
+                    if c.column == self.cols - 1 {
+                        continue;
+                    }
+
+                    if let shortcut::Comparison::Equal(shortcut::Value::Const(ref v)) = c.cmp {
+                        *group.get_mut(c.column).unwrap() = v.clone();
+                    } else {
+                        continue;
+                    }
+                }
+
+                if group.iter().all(|g| !g.is_none()) {
+                    // we didn't match any groups, but all the group-by parameters are given.
+                    // we can add a zero row!
+                    consolidate.insert(group, self.op.zero());
+                }
+            }
+        }
+
         Box::new(consolidate.into_iter().map(|(mut group, over): (Vec<query::DataType>, i64)| {
             group.push(over.into());
             // TODO: respect q.select
@@ -463,5 +489,28 @@ mod tests {
         let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
+    }
+
+    #[test]
+    fn it_queries_zeros() {
+        use std::sync;
+
+        let c = Aggregation::COUNT.new(1, 2);
+
+        let mut aqfs = HashMap::new();
+        aqfs.insert(0.into(), Box::new(source) as Box<_>);
+        let aqfs = sync::Arc::new(aqfs);
+
+        let q = query::Query {
+            select: vec![true, true],
+            having: vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
+                         }],
+        };
+
+        let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
+        assert_eq!(hits.len(), 1);
+        assert!(hits.iter().any(|r| r[0] == 100.into() && r[1] == 0.into()));
     }
 }
