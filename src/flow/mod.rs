@@ -38,7 +38,7 @@ pub trait View<Q: Clone + Send> {
 /// on the caller side to ensure that the ref stays around for long enough. Basically, we make sure
 /// to keep around a sync::Arc to the vertex in question, which allows us to transmute the iterator
 /// to 'static (since we know the lifetime bound always holds).
-struct NodeFind<D, P, Q, V>
+struct NodeFind<D, P, Q, V: ?Sized>
     where D: Clone + Send,
           P: Send,
           Q: Clone + Send + Sync,
@@ -50,7 +50,7 @@ struct NodeFind<D, P, Q, V>
     it: Box<Iterator<Item = D>>,
 }
 
-impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: Send + Sync + View<Q, Data = D, Params = P>> NodeFind<D, P, Q, V> {
+impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync + View<Q, Data = D, Params = P>> NodeFind<D, P, Q, V> {
     pub fn new(this: sync::Arc<V>,
                aqfs: sync::Arc<HashMap<NodeIndex,
                                        Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>>>,
@@ -69,22 +69,28 @@ impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: Send + Sync + View<Q, 
     }
 }
 
-impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: Send + Sync + View<Q, Data = D, Params = P>> Iterator for NodeFind<D, P, Q, V> {
+impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync + View<Q, Data = D, Params = P>> Iterator for NodeFind<D, P, Q, V> {
     type Item = D;
     fn next(&mut self) -> Option<Self::Item> {
         self.it.next()
     }
 }
 
-pub struct FlowGraph<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> {
-    graph: petgraph::Graph<Option<sync::Arc<V>>, Option<sync::Arc<Q>>>,
+pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Send> {
+    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
+                           Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
     wait: Vec<thread::JoinHandle<()>>,
-    dispatch: clocked_dispatch::Dispatcher<V::Update>,
+    dispatch: clocked_dispatch::Dispatcher<U>,
 }
 
-impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowGraph<Q, V> {
-    pub fn new() -> FlowGraph<Q, V> {
+impl<Q, U, D, P> FlowGraph<Q, U, D, P>
+    where Q: 'static + Clone + Send + Sync,
+          U: 'static + Clone + Send,
+          D: 'static + Clone + Send,
+          P: 'static + Send
+{
+    pub fn new() -> FlowGraph<Q, U, D, P> {
         let mut graph = petgraph::Graph::new();
         let source = graph.add_node(None);
         FlowGraph {
@@ -97,9 +103,8 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
 
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<V::Update>>,
-                   HashMap<NodeIndex,
-                           Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>>) {
+               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
+                   HashMap<NodeIndex, Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // set up in-channels for each base record node
@@ -199,9 +204,9 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
+                    let f = Box::new(move |p: P| -> Box<Iterator<Item = D>> {
                         Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(&q), p))
-                    }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
+                    }) as Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>;
                     (ni, f)
                 })
                 .collect();
@@ -214,9 +219,9 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |p: V::Params| -> Box<Iterator<Item = V::Data>> {
+            let func = Box::new(move |p: P| -> Box<Iterator<Item = D>> {
                 Box::new(NodeFind::new(n.clone(), aqf.clone(), None, p))
-            }) as Box<Fn(V::Params) -> Box<Iterator<Item = V::Data>> + Send + Sync>;
+            }) as Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -248,10 +253,11 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
         (incoming, qs)
     }
 
-    pub fn incorporate(&mut self,
-                       node: V,
-                       ancestors: Vec<(Q, petgraph::graph::NodeIndex)>)
-                       -> petgraph::graph::NodeIndex {
+    pub fn incorporate<V: 'static + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
+        (&mut self,
+         node: V,
+         ancestors: Vec<(Q, petgraph::graph::NodeIndex)>)
+         -> petgraph::graph::NodeIndex {
         let idx = self.graph.add_node(Some(sync::Arc::new(node)));
         if ancestors.is_empty() {
             // base record node
@@ -266,7 +272,12 @@ impl<Q: 'static + Clone + Send + Sync, V: 'static + Send + Sync + View<Q>> FlowG
     }
 }
 
-impl<Q: Clone + Send + Sync, V: Send + Sync + View<Q>> Drop for FlowGraph<Q, V> {
+impl<Q, U, D, P> Drop for FlowGraph<Q, U, D, P>
+    where Q: Clone + Send + Sync,
+          U: Clone + Send,
+          D: Clone + Send,
+          P: Send
+{
     fn drop(&mut self) {
         for w in self.wait.drain(..) {
             w.join().unwrap();
