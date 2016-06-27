@@ -8,3 +8,16 @@ petgraph = "0.2"
 bus = "1.0.0"
 shortcut = "3.2.0"
 clocked-dispatch = "2.1"
+
+criterion = { git = "https://github.com/japaric/criterion.rs.git" }
+docopt = "0.6"
+rand = "0.3"
+randomkit = "0.1.0"
+
+[lib]
+name = "distributary"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bench_votes"
+path = "benchmarks/votes.rs"
