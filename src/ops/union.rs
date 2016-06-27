@@ -14,6 +14,17 @@ pub struct Union {
     cols: HashMap<flow::NodeIndex, usize>,
 }
 
+impl Union {
+    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>,
+               cols: HashMap<flow::NodeIndex, usize>)
+               -> Union {
+        Union {
+            emit: emit,
+            cols: cols,
+        }
+    }
+}
+
 impl NodeOp for Union {
     fn forward(&self,
                u: ops::Update,
@@ -124,11 +135,7 @@ mod tests {
         cols.insert(0.into(), 2);
         cols.insert(1.into(), 3);
 
-        let u = Union {
-            emit: emits,
-            cols: cols,
-        };
-
+        let u = Union::new(emits, cols);
         (aqfs, u)
     }
 

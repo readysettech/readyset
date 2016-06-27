@@ -19,6 +19,15 @@ pub struct Joiner {
 }
 
 impl Joiner {
+    pub fn new(emit: Vec<(flow::NodeIndex, usize)>,
+               join: HashMap<flow::NodeIndex, Vec<(flow::NodeIndex, Vec<usize>)>>)
+               -> Joiner {
+        Joiner {
+            emit: emit,
+            join: join,
+        }
+    }
+
     fn other<'a>(&'a self, this: &flow::NodeIndex) -> &'a (flow::NodeIndex, Vec<usize>) {
         self.join[this].iter().find(|&&(ref other, _)| other != this).unwrap()
     }
@@ -209,11 +218,7 @@ mod tests {
         // third field from right
         let emit = vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)];
 
-        let j = Joiner {
-            emit: emit,
-            join: join,
-        };
-
+        let j = Joiner::new(emit, join);
         (aqfs, j)
     }
 
