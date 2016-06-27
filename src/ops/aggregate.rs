@@ -30,6 +30,14 @@ impl Aggregation {
             Aggregation::SUM => old - delta,
         }
     }
+
+    pub fn new(self, over: usize, cols: usize) -> Aggregator {
+        Aggregator {
+            op: self,
+            over: over,
+            cols: cols,
+        }
+    }
 }
 
 pub struct Aggregator {
@@ -219,11 +227,7 @@ mod tests {
 
     #[test]
     fn it_forwards() {
-        let c = Aggregator {
-            cols: 2,
-            over: 1,
-            op: Aggregation::COUNT,
-        };
+        let c = Aggregation::COUNT.new(1, 2);
 
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
@@ -427,11 +431,7 @@ mod tests {
     fn it_queries() {
         use std::sync;
 
-        let c = Aggregator {
-            cols: 2,
-            over: 1,
-            op: Aggregation::COUNT,
-        };
+        let c = Aggregation::COUNT.new(1, 2);
 
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
