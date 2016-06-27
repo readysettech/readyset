@@ -19,9 +19,9 @@ pub trait View<Q: Clone + Send> {
 
     /// Execute a single concrete query, producing an iterator over all matching records.
     fn find<'a>(&'a self,
-             sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
-             Option<&Q>,
-             Self::Params) -> Box<Iterator<Item = Self::Data> + 'a>;
+             sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
+             Option<Q>,
+             i64) -> Box<Iterator<Item = Self::Data> + 'a>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -29,8 +29,13 @@ pub trait View<Q: Clone + Send> {
                Self::Update,
                NodeIndex,
                i64,
-               sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
+               sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                -> Option<Self::Update>;
+}
+
+pub trait FillableQuery {
+    type Params;
+    fn fill(&mut self, Self::Params);
 }
 
 /// This is nasty little hack to allow View::find() to return an iterator bound to the lifetime of
@@ -53,13 +58,13 @@ struct NodeFind<D, P, Q, V: ?Sized>
 impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync + View<Q, Data = D, Params = P>> NodeFind<D, P, Q, V> {
     pub fn new(this: sync::Arc<V>,
                aqfs: sync::Arc<HashMap<NodeIndex,
-                                       Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>>>,
-               q: Option<&Q>,
-               p: P)
+                                       Box<Fn(P, i64) -> Box<Iterator<Item = D>> + Send + Sync>>>,
+               q: Option<Q>,
+               ts: i64)
                -> NodeFind<D, P, Q, V> {
         use std::mem;
 // ok to make 'static as we hold on to the Arc for at least as long as the iterator lives
-        let it = unsafe { mem::transmute(this.find(aqfs, q, p)) };
+        let it = unsafe { mem::transmute(this.find(aqfs, q, ts)) };
         NodeFind {
             _keep: this,
             _x: std::marker::PhantomData,
@@ -85,7 +90,7 @@ pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P
 }
 
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
-    where Q: 'static + Clone + Send + Sync,
+    where Q: 'static + FillableQuery<Params = P> + Clone + Send + Sync,
           U: 'static + Clone + Send,
           D: 'static + Clone + Send,
           P: 'static + Send
@@ -104,7 +109,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     pub fn run(&mut self,
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
-                   HashMap<NodeIndex, Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>>) {
+                   HashMap<NodeIndex,
+                           Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // set up in-channels for each base record node
@@ -204,9 +210,11 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |p: P| -> Box<Iterator<Item = D>> {
-                        Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(&q), p))
-                    }) as Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>;
+                    let f = Box::new(move |p: P, ts: i64| -> Box<Iterator<Item = D>> {
+                        let mut q_cur = (*q).clone();
+                        q_cur.fill(p);
+                        Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(q_cur), ts))
+                    }) as Box<Fn(P, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
                     (ni, f)
                 })
                 .collect();
@@ -219,9 +227,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |p: P| -> Box<Iterator<Item = D>> {
-                Box::new(NodeFind::new(n.clone(), aqf.clone(), None, p))
-            }) as Box<Fn(P) -> Box<Iterator<Item = D>> + Send + Sync>;
+            let func = Box::new(move |q: Option<Q>, ts: i64| -> Box<Iterator<Item = D>> {
+                Box::new(NodeFind::new(n.clone(), aqf.clone(), q, ts))
+            }) as Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -300,9 +308,9 @@ mod tests {
         type Params = ();
 
         fn find(&self,
-                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
-                 _: Option<&()>,
-                 _: ()) -> Box<Iterator<Item = Self::Data>> {
+                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
+                 _: Option<()>,
+                 _: i64) -> Box<Iterator<Item = Self::Data>> {
             Box::new(Some(*self.1.lock().unwrap()).into_iter())
         }
 
@@ -310,13 +318,18 @@ mod tests {
                    u: Self::Update,
                    _: NodeIndex,
                    _: i64,
-                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
+                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
             let mut x = self.1.lock().unwrap();
             x.add_assign(u);
             Some(u)
         }
+    }
+
+    impl FillableQuery for () {
+        type Params = ();
+        fn fill(&mut self, _: Self::Params) {}
     }
 
     #[test]
@@ -333,7 +346,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send a query
-        assert_eq!(get[&a](()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&a].send(1);
@@ -342,7 +355,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&a](()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
     }
 
     #[test]
@@ -362,7 +375,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send a query to c
-        assert_eq!(get[&c](()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -371,7 +384,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&c](()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
     }
 
     #[test]
@@ -392,7 +405,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // send a query to d
-        assert_eq!(get[&d](()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -401,6 +414,6 @@ mod tests {
         thread::sleep(time::Duration::new(0, 1_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&d](()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
     }
 }

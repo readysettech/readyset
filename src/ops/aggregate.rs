@@ -180,7 +180,7 @@ impl NodeOp for Aggregator {
         params.remove(self.over);
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = (*aqfs.iter().next().unwrap().1)((params, ts));
+        let rx = (*aqfs.iter().next().unwrap().1)(params, ts);
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
@@ -403,15 +403,15 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn source(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), 1.into()],
                 vec![2.into(), 1.into()],
                 vec![2.into(), 2.into()],
             ];
 
-        assert_eq!(p.0.len(), 1);
-        let p = p.0.into_iter().last().unwrap();
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {

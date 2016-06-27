@@ -46,9 +46,10 @@ pub enum Update {
     Records(Vec<Record>),
 }
 
-pub type Params = (Vec<shortcut::Value<query::DataType>>, i64);
-pub type AQ = HashMap<flow::NodeIndex,
-                      Box<Fn(Params) -> Box<Iterator<Item = Vec<query::DataType>>> + Send + Sync>>;
+pub type Params = Vec<shortcut::Value<query::DataType>>;
+pub type AQ =
+    HashMap<flow::NodeIndex,
+            Box<Fn(Params, i64) -> Box<Iterator<Item = Vec<query::DataType>>> + Send + Sync>>;
 pub type Datas<'a> = Box<Iterator<Item = Vec<query::DataType>> + 'a>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
@@ -166,31 +167,9 @@ impl<O> flow::View<query::Query> for Node<O>
 
     fn find<'a>(&'a self,
                 aqs: sync::Arc<AQ>,
-                q: Option<&query::Query>,
-                p: Self::Params)
+                q: Option<query::Query>,
+                ts: i64)
                 -> Box<Iterator<Item = Self::Data> + 'a> {
-
-        let ts = p.1;
-        let mut p = p.0;
-
-        // insert all the query arguments
-        p.reverse(); // so we can pop below
-        let mut q_cur = q.and_then(|q| Some(q.clone()));
-        if let Some(ref mut q_cur) = q_cur {
-            for c in q_cur.having.iter_mut() {
-                match c.cmp {
-                    shortcut::Comparison::Equal(
-                        ref mut v @ shortcut::Value::Const(
-                            query::DataType::None
-                        )
-                    ) => {
-                        *v = p.pop().expect("not enough query parameters were given");
-                    }
-                    _ => (),
-                }
-            }
-        }
-
         // find and return matching rows
         if self.data.is_some() {
             let data = self.data.clone();
@@ -206,7 +185,7 @@ impl<O> flow::View<query::Query> for Node<O>
             }
         } else {
             // we are not materialized --- query
-            Box::new(self.inner.query(q, ts, aqs))
+            Box::new(self.inner.query(q.as_ref(), ts, aqs))
         }
     }
 
@@ -292,7 +271,7 @@ mod tests {
             // query all ancestors, emit r + c for each
             let mut iter = Box::new(None.into_iter()) as Datas;
             for (_, aq) in aqs.iter() {
-                iter = Box::new(iter.chain(aq((vec![], ts))));
+                iter = Box::new(iter.chain(aq(vec![], ts)));
             }
 
             let c = self.0;
@@ -349,23 +328,23 @@ mod tests {
 
         // check state
         // a
-        let set = get[&a]((vec![], i64::max_value()))
+        let set = get[&a](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set = get[&b]((vec![], i64::max_value()))
+        let set = get[&b](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set = get[&c]((vec![], i64::max_value()))
+        let set = get[&c](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set = get[&d]((vec![], i64::max_value()))
+        let set = get[&d](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));
@@ -415,23 +394,23 @@ mod tests {
 
         // check state
         // a
-        let set = get[&a]((vec![], i64::max_value()))
+        let set = get[&a](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&2));
         // b
-        let set = get[&b]((vec![], i64::max_value()))
+        let set = get[&b](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set = get[&c]((vec![], i64::max_value()))
+        let set = get[&c](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set = get[&d]((vec![], i64::max_value()))
+        let set = get[&d](None, i64::max_value())
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&14), format!("14 not in {:?}", set));

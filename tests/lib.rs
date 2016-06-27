@@ -33,7 +33,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // send a query to c
-    assert_eq!(get[&c]((vec![], i64::max_value())).collect::<Vec<_>>(),
+    assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(),
                vec![vec![1.into(), 2.into()]]);
 
     // update value again
@@ -43,7 +43,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // check that value was updated again
-    let res = get[&c]((vec![], i64::max_value())).collect::<Vec<_>>();
+    let res = get[&c](None, i64::max_value()).collect::<Vec<_>>();
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
 }

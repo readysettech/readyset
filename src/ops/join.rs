@@ -49,7 +49,7 @@ impl Joiner {
             .collect();
 
         // send the parameters to start the query.
-        let rx = (*aqfs[&on.0])((params, ts));
+        let rx = (*aqfs[&on.0])(params, ts);
 
         Box::new(rx.into_iter().map(move |right| {
             // weave together r and j according to join rules
@@ -175,7 +175,7 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         let aqfs2 = aqfs.clone(); // XXX: figure out why this is needed?
-        Box::new((aqfs[&left.0])((lparams, ts))
+        Box::new((aqfs[&left.0])(lparams, ts)
             .flat_map(move |left| {
                 // TODO: also add constants from q to filter used to select from right
                 // TODO: respect q.select
@@ -330,15 +330,15 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
     }
 
-    fn left(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn left(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
                 vec![3.into(), "c".into()],
             ];
 
-        assert_eq!(p.0.len(), 1);
-        let p = p.0.into_iter().last().unwrap();
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {
@@ -350,15 +350,15 @@ mod tests {
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
-    fn right(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn right(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "x".into()],
                 vec![1.into(), "y".into()],
                 vec![2.into(), "z".into()],
             ];
 
-        assert_eq!(p.0.len(), 1);
-        let p = p.0.into_iter().last().unwrap();
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
         let q = query::Query {
             select: vec![true, true],
             having: vec![shortcut::Condition {

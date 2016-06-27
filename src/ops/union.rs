@@ -99,7 +99,7 @@ impl NodeOp for Union {
         Box::new(params.into_iter()
             .flat_map(move |(src, params)| {
                 let emit = &self.emit[&src];
-                (aqfs[&src])((params, ts))
+                (aqfs[&src])(params, ts)
                 // XXX: the clone here is really sad
                 .map(move |r| emit.iter().map(|ci| r[*ci].clone()).collect::<Vec<_>>())
             })
@@ -231,14 +231,14 @@ mod tests {
         assert_eq!(hits.len(), 0);
     }
 
-    fn left(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn left(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
             ];
 
-        assert_eq!(p.0.len(), 2);
-        let mut p = p.0.into_iter();
+        assert_eq!(p.len(), 2);
+        let mut p = p.into_iter();
         let q = query::Query {
             select: vec![true, true],
             having: vec![
@@ -256,13 +256,13 @@ mod tests {
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
     }
 
-    fn right(p: ops::Params) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn right(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
         let data = vec![
                 vec![1.into(), "skipped".into(), "x".into()],
             ];
 
-        assert_eq!(p.0.len(), 3);
-        let mut p = p.0.into_iter();
+        assert_eq!(p.len(), 3);
+        let mut p = p.into_iter();
         let q = query::Query {
             select: vec![true, true, true],
             having: vec![shortcut::Condition {
