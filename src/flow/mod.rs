@@ -3,10 +3,13 @@ use bus::Bus;
 use clocked_dispatch;
 
 use std;
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync;
 use std::thread;
+use std::cmp::Ordering;
+
+use std::collections::HashMap;
+use std::collections::BinaryHeap;
 
 pub use petgraph::graph::NodeIndex;
 
@@ -81,10 +84,41 @@ impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync +
     }
 }
 
+/// `Delayed` is used to keep track of messages that cannot yet be safely delivered because it
+/// would violate the in-order guarantees.
+///
+/// `Delayed` structs are ordered by their timestamp such that the *lowest* is the "highest". This
+/// is so that `Delayed` can easily be used in a `BinaryHeap`.
+struct Delayed<T> {
+    ts: i64,
+    data: T,
+}
+
+impl<T> PartialEq for Delayed<T> {
+    fn eq(&self, other: &Delayed<T>) -> bool {
+        other.ts == self.ts
+    }
+}
+
+impl<T> PartialOrd for Delayed<T> {
+    fn partial_cmp(&self, other: &Delayed<T>) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Eq for Delayed<T> {}
+
+impl<T> Ord for Delayed<T> {
+    fn cmp(&self, other: &Delayed<T>) -> Ordering {
+        other.ts.cmp(&self.ts)
+    }
+}
+
 pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Send> {
     graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
                            Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
+    mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
     dispatch: clocked_dispatch::Dispatcher<U>,
 }
@@ -101,6 +135,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         FlowGraph {
             graph: graph,
             source: source,
+            mins: HashMap::default(),
             wait: Vec::default(),
             dispatch: clocked_dispatch::new(20),
         }
@@ -112,6 +147,16 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                    HashMap<NodeIndex,
                            Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
+
+        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+            if node == self.source {
+                continue;
+            }
+
+            // create an entry in the min map for this node to track how up-to-date it is
+            // TODO: this probably shouldn't be 0 if we're doing a migration
+            self.mins.insert(node, sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
+        }
 
         // set up in-channels for each base record node
         let mut incoming = HashMap::new();
@@ -126,10 +171,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let root = self.source;
             thread::spawn(move || {
                 for (u, ts) in rx.into_iter() {
-                    match u {
-                        Some(u) => px_tx.send((root, u, ts as i64)).unwrap(),
-                        None => (), // TODO
-                    }
+                    px_tx.send((root, u, ts as i64)).unwrap();
                 }
             });
             incoming.insert(base, tx);
@@ -207,12 +249,28 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     let q = e.as_ref().unwrap().clone();
                     // find the ancestor's node
                     let a = self.graph[ni].as_ref().unwrap().clone();
+                    // and its min value
+                    let m = self.mins[&ni].clone();
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
                     let f = Box::new(move |p: P, ts: i64| -> Box<Iterator<Item = D>> {
                         let mut q_cur = (*q).clone();
                         q_cur.fill(p);
+                        if ts != i64::max_value() {
+                            while ts > m.load(sync::atomic::Ordering::Acquire) as i64 {
+                                use std::time;
+                                // TODO: be smarter
+                                println!("{:?} is waiting for {:?} to reach {} (currently {})", node, ni, ts, m.load(sync::atomic::Ordering::Acquire));
+                                thread::sleep(time::Duration::from_secs(1));
+                                // TODO
+                                // obviously don't break here
+                                // we currently break because timestamps aren't propagated unless
+                                // records are, and so other nodes are likely to never know that they
+                                // are really sufficiently up-to-date
+                                //break
+                            }
+                        }
                         Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(q_cur), ts))
                     }) as Box<Fn(P, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
                     (ni, f)
@@ -240,17 +298,99 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 continue;
             }
 
+            let srcs = self.graph
+                .edges_directed(node, petgraph::EdgeDirection::Incoming)
+                .map(|(ni, _)| ni)
+                .collect::<Vec<_>>();
+
             let aqf = aqfs.remove(&node).unwrap();
             let mut tx = busses.remove(&node).unwrap();
             let rx = start.remove(&node).unwrap();
+            let m = self.mins[&node].clone();
             let node = self.graph[node].as_ref().unwrap().clone();
 
             // start a thread for managing this node.
             // basically just a rx->process->tx loop.
             self.wait.push(thread::spawn(move || {
+                let mut delayed = BinaryHeap::new();
+                let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
+                let mut min = 0i64;
+
                 for (src, u, ts) in rx.into_iter() {
-                    if let Some(u) = node.process(u, src, ts, aqf.clone()) {
+                    assert!(ts >= min);
+                    if ts == min {
+                        let u = u.and_then(|u| node.process(u, src, ts, aqf.clone()));
+                        // TODO: notify nodes if global minimum has changed!
+                        m.store(ts as isize, sync::atomic::Ordering::Release);
                         tx.broadcast((u, ts));
+                        continue;
+                    }
+
+                    if let Some(u) = u {
+                        // this *may* be taken out again immediately if the min is raised to the given
+                        // ts, but meh, we accept that overhead for the simplicity of the code.
+                        delayed.push(Delayed {
+                            data: (src, u),
+                            ts: ts,
+                        });
+                    }
+
+                    let old_ts = freshness[&src];
+                    *freshness.get_mut(&src).unwrap() = ts;
+
+                    if old_ts != min {
+                        // min can't have changed, so there's nothing to process yet
+                        continue;
+                    }
+
+                    let new_min = freshness
+                        .values()
+                        .min()
+                        .and_then(|m| Some(*m))
+                        .unwrap_or(i64::max_value() - 1);
+
+                    if new_min == min {
+                        // min didn't change, so no updates have been released
+                    }
+
+                    // the min has changed!
+                    min = new_min;
+                    // process any delayed updates *in order*
+
+                    // keep track of the largest timestamp we've processed a message with.
+                    // this is so that, if there was no data for the current ts, we'll still
+                    // remember to forward a None for the latest time.
+                    let mut forwarded = 0;
+
+                    // keep looking for a candidate to send
+                    loop {
+                        // find the smallest in `delay`
+                        let next = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
+                        //  process it if it is early enough
+                        if next <= min {
+                            let d = delayed.pop().unwrap();
+                            let ts = d.ts;
+                            let (src, u) = d.data;
+
+                            let u = node.process(u, src, ts, aqf.clone());
+                            m.store(ts as isize, sync::atomic::Ordering::Release);
+
+                            if u.is_some() {
+                                forwarded = ts;
+                                tx.broadcast((u, ts));
+                            }
+                            continue;
+                        }
+
+                        // no delayed message has a timestamp <= min
+                        break;
+                    }
+
+                    // make sure all dependents know how up-to-date we are
+                    // even if we didn't send a delayed message for the min
+                    if forwarded < min && min != i64::max_value() - 1 {
+                        m.store(min as isize, sync::atomic::Ordering::Release);
+                        tx.broadcast((None, min));
                     }
                 }
             }));
