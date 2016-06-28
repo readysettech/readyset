@@ -205,7 +205,7 @@ impl<O> flow::View<query::Query> for Node<O>
                     if let Some(ref mut data) = data {
                         data.add(rs.clone(), ts);
                         // TODO: we should obviously not really absorb straight away
-                        data.absorb(ts);
+                        // data.absorb(ts);
                     }
                 }
             }
