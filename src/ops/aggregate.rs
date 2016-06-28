@@ -55,9 +55,9 @@ impl NodeOp for Aggregator {
                _: &ops::AQ)
                -> Option<ops::Update> {
 
-        // Construct the query we'll need
+        // Construct the query we'll need to query into ourselves
         let mut q = (0..self.cols)
-            .filter(|&i| i != self.over)
+            .filter(|&i| i != self.cols - 1)
             .map(|col| {
                 shortcut::Condition {
                     column: col,
@@ -92,14 +92,15 @@ impl NodeOp for Aggregator {
 
                     // build a query for this group
                     for s in q.iter_mut() {
+                        // s.column is the *output* column
+                        // the *input* column must be computed
+                        let mut col = s.column;
+                        if col >= self.over {
+                            col += 1;
+                        }
                         s.cmp =
-                          shortcut::Comparison::Equal(
-                            shortcut::Value::Const(
-                              group
-                                .remove(&s.column)
-                                .expect("group by column is beyond number of columns in record")
-                            )
-                          );
+                            shortcut::Comparison::Equal(shortcut::Value::Const(group.remove(&col)
+                                .expect("group by column is beyond number of columns in record")));
                     }
 
                     // find the current value for this group
@@ -110,7 +111,7 @@ impl NodeOp for Aggregator {
                             let current = matches.next();
                             assert!(current.is_none() || matches.count() == 0,
                                     "aggregation had more than 1 result");
-                            current.and_then(|r| Some(r[self.over].clone().into()))
+                            current.and_then(|r| Some(r[r.len() - 1].clone().into()))
                                 .unwrap_or(self.op.zero())
                         }
                         None => {
