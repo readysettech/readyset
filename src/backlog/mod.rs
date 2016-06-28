@@ -304,4 +304,19 @@ mod tests {
         assert_eq!(b.find(&[], 1).count(), 1);
         assert!(b.find(&[], 1).any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
+
+    #[test]
+    fn query_complex() {
+        let a1 = vec![1.into(), "a".into()];
+        let b2 = vec![2.into(), "b".into()];
+        let c3 = vec![3.into(), "c".into()];
+
+        let mut b = BufferedStore::new(2);
+
+        b.add(vec![ops::Record::Negative(a1.clone()), ops::Record::Positive(b2.clone())],
+              0);
+        b.add(vec![ops::Record::Negative(b2.clone()), ops::Record::Positive(c3.clone())],
+              1);
+        assert_eq!(b.find(&[], 2).collect::<Vec<_>>(), vec![&*c3]);
+    }
 }
