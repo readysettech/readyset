@@ -556,7 +556,7 @@ mod tests {
         put[&a].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query
         assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
@@ -565,7 +565,7 @@ mod tests {
         put[&a].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
         assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
@@ -585,7 +585,7 @@ mod tests {
         put[&a].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to c
         assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
@@ -594,7 +594,7 @@ mod tests {
         put[&b].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
         assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
@@ -615,7 +615,7 @@ mod tests {
         put[&a].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to d
         assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
@@ -624,7 +624,7 @@ mod tests {
         put[&b].send(1);
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
         assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);

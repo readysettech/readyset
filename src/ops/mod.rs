@@ -416,7 +416,7 @@ mod tests {
         // d = [14]
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send another in
         put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
@@ -428,7 +428,7 @@ mod tests {
         // d = [14, 30]
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check state
         // a
