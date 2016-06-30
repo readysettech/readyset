@@ -347,6 +347,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
             let func = Box::new(move |q: Option<Q>, ts: i64| -> Box<Iterator<Item = D>> {
+                // TODO: this should arguably *not* take a timestamp
                 Box::new(NodeFind::new(n.clone(), aqf.clone(), q, ts))
             }) as Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
 
@@ -467,6 +468,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
          node: V,
          ancestors: Vec<(Q, petgraph::graph::NodeIndex)>)
          -> petgraph::graph::NodeIndex {
+
         let idx = self.graph.add_node(Some(sync::Arc::new(node)));
         if ancestors.is_empty() {
             // base record node
