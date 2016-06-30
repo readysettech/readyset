@@ -2,6 +2,9 @@ use ops;
 use query;
 use shortcut;
 
+use std::ops::Deref;
+use std::ops::DerefMut;
+
 use std::collections::VecDeque;
 
 /// This structure provides a storage mechanism that allows limited time-scoped queries. That is,
@@ -144,6 +147,19 @@ impl BufferedStore {
         };
 
         Box::new(results.filter_map(strip_negatives))
+    }
+}
+
+impl Deref for BufferedStore {
+    type Target = shortcut::Store<query::DataType>;
+    fn deref(&self) -> &Self::Target {
+        &self.store
+    }
+}
+
+impl DerefMut for BufferedStore {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.store
     }
 }
 

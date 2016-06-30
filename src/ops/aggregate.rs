@@ -31,9 +31,10 @@ impl Aggregation {
         }
     }
 
-    pub fn new(self, over: usize, cols: usize) -> Aggregator {
+    pub fn new(self, src: flow::NodeIndex, over: usize, cols: usize) -> Aggregator {
         Aggregator {
             op: self,
+            src: src,
             over: over,
             cols: cols,
         }
@@ -42,6 +43,7 @@ impl Aggregation {
 
 pub struct Aggregator {
     op: Aggregation,
+    src: flow::NodeIndex,
     over: usize,
     cols: usize,
 }
@@ -49,11 +51,13 @@ pub struct Aggregator {
 impl NodeOp for Aggregator {
     fn forward(&self,
                u: ops::Update,
-               _: flow::NodeIndex,
+               src: flow::NodeIndex,
                _: i64,
                db: Option<&backlog::BufferedStore>,
                _: &ops::AQ)
                -> Option<ops::Update> {
+
+        assert_eq!(src, self.src);
 
         // Construct the query we'll need to query into ourselves
         let mut q = (0..self.cols)
@@ -247,6 +251,23 @@ impl NodeOp for Aggregator {
             group
         }))
     }
+
+    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        // index all group by columns
+        Some((this, (0..self.cols).into_iter().filter(|&i| i != self.over).collect()))
+            .into_iter()
+            .collect()
+    }
+
+    fn resolve(&self, mut col: usize) -> Vec<(flow::NodeIndex, usize)> {
+        if col == self.cols - 1 {
+            return vec![];
+        }
+        if col >= self.over {
+            col += 1
+        }
+        vec![(self.src, col)]
+    }
 }
 
 #[cfg(test)]
@@ -264,7 +285,7 @@ mod tests {
 
     #[test]
     fn it_forwards() {
-        let c = Aggregation::COUNT.new(1, 2);
+        let c = Aggregation::COUNT.new(0.into(), 1, 2);
 
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
@@ -468,7 +489,7 @@ mod tests {
     fn it_queries() {
         use std::sync;
 
-        let c = Aggregation::COUNT.new(1, 2);
+        let c = Aggregation::COUNT.new(0.into(), 1, 2);
 
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
@@ -496,7 +517,7 @@ mod tests {
     fn it_queries_zeros() {
         use std::sync;
 
-        let c = Aggregation::COUNT.new(1, 2);
+        let c = Aggregation::COUNT.new(0.into(), 1, 2);
 
         let mut aqfs = HashMap::new();
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
@@ -513,5 +534,21 @@ mod tests {
         let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 100.into() && r[1] == 0.into()));
+    }
+
+    #[test]
+    fn it_suggests_indices() {
+        let c = Aggregation::COUNT.new(1.into(), 1, 3);
+        let hm: HashMap<_, _> = Some((0.into(), vec![0, 2]))
+            .into_iter()
+            .collect();
+        assert_eq!(hm, c.suggest_indexes(0.into()));
+    }
+
+    #[test]
+    fn it_resolves() {
+        let c = Aggregation::COUNT.new(1.into(), 1, 3);
+        assert_eq!(c.resolve(0), vec![(1.into(), 0)]);
+        assert_eq!(c.resolve(1), vec![(1.into(), 2)]);
     }
 }

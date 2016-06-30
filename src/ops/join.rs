@@ -189,6 +189,26 @@ impl NodeOp for Joiner {
                 }
             }))
     }
+
+    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        // index all join fields
+        self.join
+            .iter()
+            .flat_map(|(left, rights)| {
+                rights.iter()
+                    .filter(move |&&(right, _)| *left != right)
+                    .flat_map(|&(_, ref lcols)| lcols.iter())
+                    .map(move |lcol| (*left, *lcol))
+            })
+            .fold(HashMap::new(), |mut hm, (node, col)| {
+                hm.entry(node).or_insert_with(Vec::new).push(col);
+                hm
+            })
+    }
+
+    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
+        vec![self.emit[col].clone()]
+    }
 }
 
 #[cfg(test)]
@@ -368,5 +388,25 @@ mod tests {
         };
 
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
+    }
+
+    #[test]
+    fn it_suggests_indices() {
+        let (_, j) = setup();
+        let hm: HashMap<_, _> = vec![
+            (0.into(), vec![0]),
+            (1.into(), vec![0]),
+        ]
+            .into_iter()
+            .collect();
+        assert_eq!(hm, j.suggest_indexes(2.into()));
+    }
+
+    #[test]
+    fn it_resolves() {
+        let (_, j) = setup();
+        assert_eq!(j.resolve(0), vec![(0.into(), 0)]);
+        assert_eq!(j.resolve(1), vec![(0.into(), 1)]);
+        assert_eq!(j.resolve(2), vec![(1.into(), 1)]);
     }
 }

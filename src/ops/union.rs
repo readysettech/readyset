@@ -109,6 +109,15 @@ impl NodeOp for Union {
                 Some(r)
             }))
     }
+
+    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        // index nothing (?)
+        HashMap::new()
+    }
+
+    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
+        self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect()
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +289,22 @@ mod tests {
         };
 
         Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
+    }
+
+    #[test]
+    fn it_suggests_indices() {
+        let (_, u) = setup();
+        assert_eq!(HashMap::new(), u.suggest_indexes(1.into()));
+    }
+
+    #[test]
+    fn it_resolves() {
+        let (_, u) = setup();
+        let r0 = u.resolve(0);
+        assert!(r0.iter().any(|&(n, c)| n == 0.into() && c == 0));
+        assert!(r0.iter().any(|&(n, c)| n == 1.into() && c == 0));
+        let r1 = u.resolve(1);
+        assert!(r1.iter().any(|&(n, c)| n == 0.into() && c == 1));
+        assert!(r1.iter().any(|&(n, c)| n == 1.into() && c == 2));
     }
 }

@@ -79,6 +79,13 @@ pub trait NodeOp {
     /// and emit resulting records as they come in. Note that there may be no query, in which case
     /// all records should be returned.
     fn query<'a>(&'a self, Option<&query::Query>, i64, sync::Arc<AQ>) -> Datas<'a>;
+
+    /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
+    fn suggest_indexes(&self, flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>>;
+
+    /// Resolve where the given field originates from. If this view is materialized, None should be
+    /// returned.
+    fn resolve(&self, usize) -> Vec<(flow::NodeIndex, usize)>;
 }
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
@@ -212,6 +219,27 @@ impl<O> flow::View<query::Query> for Node<O>
         }
         new_u
     }
+
+    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        self.inner.suggest_indexes(this)
+    }
+
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        if self.data.is_some() {
+            None
+        } else {
+            Some(self.inner.resolve(col))
+        }
+    }
+
+    fn add_index(&mut self, col: usize) {
+        if let Some(ref data) = *self.data {
+            let mut w = data.write().unwrap();
+            w.index(col, shortcut::idx::HashIndex::new());
+        } else {
+            unreachable!("should never add index to non-materialized view");
+        }
+    }
 }
 
 pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> Node<O>
@@ -240,6 +268,8 @@ mod tests {
     use std::time;
     use std::sync;
     use std::thread;
+
+    use std::collections::HashMap;
 
     struct Tester(i64);
 
@@ -282,6 +312,14 @@ mod tests {
                     unreachable!();
                 }
             }))
+        }
+
+        fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+            HashMap::new()
+        }
+
+        fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
+            unreachable!();
         }
     }
 

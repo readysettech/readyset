@@ -9,6 +9,7 @@ use std::thread;
 use std::cmp::Ordering;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::BinaryHeap;
 
 pub use petgraph::graph::NodeIndex;
@@ -34,6 +35,17 @@ pub trait View<Q: Clone + Send> {
                i64,
                sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
                -> Option<Self::Update>;
+
+    /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
+    /// The passed node index is the index of the current node.
+    fn suggest_indexes(&self, NodeIndex) -> HashMap<NodeIndex, Vec<usize>>;
+
+    /// Resolve where the given field originates from. If this view is materialized, None should be
+    /// returned.
+    fn resolve(&self, usize) -> Option<Vec<(NodeIndex, usize)>>;
+
+    /// Add an index on the given field.
+    fn add_index(&mut self, usize);
 }
 
 pub trait FillableQuery {
@@ -148,14 +160,63 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                            Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
+        // create an entry in the min map for this node to track how up-to-date it is
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
             if node == self.source {
                 continue;
             }
 
-            // create an entry in the min map for this node to track how up-to-date it is
             // TODO: this probably shouldn't be 0 if we're doing a migration
             self.mins.insert(node, sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
+        }
+
+        // figure out what indices we should add
+        let mut indices = petgraph::BfsIter::new(&self.graph, self.source)
+            .filter(|&node| node != self.source)
+            .flat_map(|node| self.graph[node].as_ref().unwrap().suggest_indexes(node).into_iter())
+            .fold(HashMap::new(), |mut hm, (v, idxs)| {
+                assert!(v != self.source);
+                hm.entry(v).or_insert_with(HashSet::new).extend(idxs.into_iter());
+                hm
+            });
+
+        // only index on materialized views
+        {
+            let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
+            let mut tmp = HashMap::new();
+            while !leftover_indices.is_empty() {
+                for (v, cols) in leftover_indices.drain() {
+                    assert!(v != self.source);
+
+                    let node = self.graph[v].as_ref().unwrap();
+
+                    for col in cols.into_iter() {
+                        let really = node.resolve(col);
+                        if let Some(really) = really {
+                            // this view is not materialized. the index should instead be placed on
+                            // the corresponding columns of this view's inputs
+                            for (v, col) in really.into_iter() {
+                                tmp.entry(v).or_insert_with(HashSet::new).insert(col);
+                            }
+                        } else {
+                            // this view is materialized, so we should index this column
+                            indices.entry(v).or_insert_with(HashSet::new).insert(col);
+                        }
+                    }
+                }
+                leftover_indices.extend(tmp.drain());
+            }
+        }
+
+        // add the indices we found
+        // TODO: how do we add indices to *existing* views during migration?
+        for (v, cols) in indices.into_iter() {
+            let node = &mut self.graph[v];
+            let node = sync::Arc::get_mut(node.as_mut().unwrap()).unwrap();
+            for col in cols {
+                println!("adding index on column {:?} of view {:?}", col, v);
+                node.add_index(col);
+            }
         }
 
         // set up in-channels for each base record node
@@ -464,6 +525,18 @@ mod tests {
             let mut x = self.1.lock().unwrap();
             x.add_assign(u);
             Some(u)
+        }
+
+        fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+            HashMap::new()
+        }
+
+        fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
+            None
+        }
+
+        fn add_index(&mut self, _: usize) {
+            unreachable!();
         }
     }
 
