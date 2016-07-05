@@ -244,7 +244,7 @@ mod tests {
         }
 
         fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
-            unreachable!();
+            vec![]
         }
     }
 
