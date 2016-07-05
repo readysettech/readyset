@@ -187,7 +187,7 @@ impl NodeOp for Joiner {
             .collect()
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
         // index all join fields
         self.join
             .iter()
@@ -197,6 +197,19 @@ impl NodeOp for Joiner {
                     .flat_map(|&(_, ref lcols)| lcols.iter())
                     .map(move |lcol| (*left, *lcol))
             })
+            .chain(self.emit
+                .iter()
+                .enumerate()
+                .filter(|&(_, &(src, col))| {
+                    // also index output fields that are used as join columns.
+                    // the question we want to answer here is: if a record of `src` type came in,
+                    // will column `col` ever be used to join it with another view?
+                    self.join[&src]
+                        .iter()
+                        .filter(|&&(other, _)| other != src)
+                        .any(|&(_, ref cols)| cols.contains(&col))
+                })
+                .map(|(i, _)| (this, i)))
             .fold(HashMap::new(), |mut hm, (node, col)| {
                 hm.entry(node).or_insert_with(Vec::new).push(col);
                 hm
@@ -391,8 +404,9 @@ mod tests {
     fn it_suggests_indices() {
         let (_, j) = setup();
         let hm: HashMap<_, _> = vec![
-            (0.into(), vec![0]),
-            (1.into(), vec![0]),
+            (0.into(), vec![0]), // join column for left
+            (1.into(), vec![0]), // join column for right
+            (2.into(), vec![0]), // output column that is used as join column
         ]
             .into_iter()
             .collect();
