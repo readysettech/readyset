@@ -4,7 +4,6 @@ use query;
 use backlog;
 use ops::NodeOp;
 
-use std::sync;
 use std::collections::HashMap;
 
 pub struct Base {}
@@ -20,11 +19,7 @@ impl NodeOp for Base {
         Some(u)
     }
 
-    fn query<'a>(&'a self,
-                 _: Option<&query::Query>,
-                 _: i64,
-                 _: sync::Arc<ops::AQ>)
-                 -> ops::Datas<'a> {
+    fn query(&self, _: Option<&query::Query>, _: i64, _: &ops::AQ) -> ops::Datas {
         unreachable!("base nodes are always materialized");
     }
 

@@ -4,7 +4,6 @@ use query;
 use backlog;
 use ops::NodeOp;
 
-use std::sync;
 use std::collections::HashMap;
 
 use shortcut;
@@ -162,7 +161,7 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: sync::Arc<ops::AQ>) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
         use std::iter;
 
         assert_eq!(aqfs.len(), 1);
@@ -245,11 +244,13 @@ impl NodeOp for Aggregator {
             }
         }
 
-        Box::new(consolidate.into_iter().map(|(mut group, over): (Vec<query::DataType>, i64)| {
-            group.push(over.into());
-            // TODO: respect q.select
-            group
-        }))
+        consolidate.into_iter()
+            .map(|(mut group, over): (Vec<query::DataType>, i64)| {
+                group.push(over.into());
+                // TODO: respect q.select
+                group
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
@@ -465,7 +466,7 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn source(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
         let data = vec![
                 vec![1.into(), 1.into()],
                 vec![2.into(), 1.into()],
@@ -482,7 +483,7 @@ mod tests {
                          }],
         };
 
-        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
+        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
 
     #[test]
@@ -495,7 +496,7 @@ mod tests {
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
         let aqfs = sync::Arc::new(aqfs);
 
-        let hits = c.query(None, 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = c.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
@@ -508,7 +509,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
+        let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }
@@ -531,7 +532,7 @@ mod tests {
                          }],
         };
 
-        let hits = c.query(Some(&q), 0, aqfs).collect::<Vec<_>>();
+        let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 100.into() && r[1] == 0.into()));
     }

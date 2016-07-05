@@ -34,7 +34,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // send a query to c
-    assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(),
+    assert_eq!(get[&c](None, i64::max_value()),
                vec![vec![1.into(), 2.into()]]);
 
     // update value again
@@ -44,7 +44,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // check that value was updated again
-    let res = get[&c](None, i64::max_value()).collect::<Vec<_>>();
+    let res = get[&c](None, i64::max_value());
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
 }
@@ -111,7 +111,7 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // query articles to see that it was absorbed
-    assert_eq!(get[&article](None, i64::max_value()).collect::<Vec<_>>(),
+    assert_eq!(get[&article](None, i64::max_value()),
                vec![vec![1.into(), 2.into()]]);
 
     // make another article
@@ -122,7 +122,7 @@ fn votes() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    let res = get[&article](None, i64::max_value()).collect::<Vec<_>>();
+    let res = get[&article](None, i64::max_value());
     assert!(res.len() == 2, "articles was {:?}", res);
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
@@ -133,7 +133,7 @@ fn votes() {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that both articles appear in the join view with a vote count of zero
-        let res = get[&end](None, i64::max_value()).collect::<Vec<_>>();
+        let res = get[&end](None, i64::max_value());
         assert!(res.len() == 2, "end was {:?}", res);
         assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 0.into()]));
         assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
@@ -146,12 +146,12 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 1_000_000));
 
     // query vote count to see that the count was updated
-    assert_eq!(get[&vc](None, i64::max_value()).collect::<Vec<_>>(),
+    assert_eq!(get[&vc](None, i64::max_value()),
                vec![vec![1.into(), 1.into()]]);
 
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = get[&end](None, i64::max_value()).collect::<Vec<_>>();
+    let res = get[&end](None, i64::max_value());
     assert!(!res.is_empty());
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 1.into()]));
 
@@ -160,8 +160,7 @@ fn votes() {
                      column: 0,
                      cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
                  }];
-    let res = get[&end](Some(Query::new(&[true, true, true], q)), i64::max_value())
-        .collect::<Vec<_>>();
+    let res = get[&end](Some(Query::new(&[true, true, true], q)), i64::max_value());
     assert_eq!(res.len(), 1);
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 1.into()]));
 
@@ -172,8 +171,7 @@ fn votes() {
                          column: 0,
                          cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                      }];
-        let res = get[&end](Some(Query::new(&[true, true, true], q)), i64::max_value())
-            .collect::<Vec<_>>();
+        let res = get[&end](Some(Query::new(&[true, true, true], q)), i64::max_value());
         assert_eq!(res.len(), 1);
         assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
     }

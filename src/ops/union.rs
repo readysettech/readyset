@@ -4,7 +4,6 @@ use query;
 use backlog;
 use ops::NodeOp;
 
-use std::sync;
 use std::collections::HashMap;
 
 use shortcut;
@@ -54,11 +53,7 @@ impl NodeOp for Union {
         }
     }
 
-    fn query<'a>(&'a self,
-                 q: Option<&query::Query>,
-                 ts: i64,
-                 aqfs: sync::Arc<ops::AQ>)
-                 -> ops::Datas<'a> {
+    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
         use std::iter;
 
         let mut params = HashMap::new();
@@ -96,10 +91,10 @@ impl NodeOp for Union {
         let q = q.and_then(|q| Some(q.to_owned()));
 
         // we select from each source in turn
-        Box::new(params.into_iter()
+        params.into_iter()
             .flat_map(move |(src, params)| {
                 let emit = &self.emit[&src];
-                (aqfs[&src])(params, ts)
+                (aqfs[&src])(params, ts).into_iter()
                 // XXX: the clone here is really sad
                 .map(move |r| emit.iter().map(|ci| r[*ci].clone()).collect::<Vec<_>>())
             })
@@ -107,7 +102,8 @@ impl NodeOp for Union {
                 q.feed(&r[..])
             } else {
                 Some(r)
-            }))
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
@@ -181,7 +177,7 @@ mod tests {
 
         // do a full query, which should return left + right:
         // [a, b, x]
-        let hits = u.query(None, 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = u.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 3);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
@@ -196,7 +192,7 @@ mod tests {
                          }],
         };
 
-        let hits = u.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
@@ -210,7 +206,7 @@ mod tests {
                          }],
         };
 
-        let hits = u.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
@@ -223,7 +219,7 @@ mod tests {
                          }],
         };
 
-        let hits = u.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
@@ -236,11 +232,11 @@ mod tests {
                          }],
         };
 
-        let hits = u.query(Some(&q), 0, aqfs.clone()).collect::<Vec<_>>();
+        let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 0);
     }
 
-    fn left(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn left(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
         let data = vec![
                 vec![1.into(), "a".into()],
                 vec![2.into(), "b".into()],
@@ -262,10 +258,10 @@ mod tests {
             ],
         };
 
-        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
+        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
 
-    fn right(p: ops::Params, _: i64) -> Box<Iterator<Item = Vec<query::DataType>>> {
+    fn right(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
         let data = vec![
                 vec![1.into(), "skipped".into(), "x".into()],
             ];
@@ -288,7 +284,7 @@ mod tests {
                          }],
         };
 
-        Box::new(data.into_iter().filter_map(move |r| q.feed(&r[..])))
+        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
 
     #[test]

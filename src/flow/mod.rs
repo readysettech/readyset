@@ -2,7 +2,6 @@ use petgraph;
 use bus::Bus;
 use clocked_dispatch;
 
-use std;
 use std::sync::mpsc;
 use std::sync;
 use std::thread;
@@ -23,9 +22,10 @@ pub trait View<Q: Clone + Send> {
 
     /// Execute a single concrete query, producing an iterator over all matching records.
     fn find<'a>(&'a self,
-             sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
-             Option<Q>,
-             i64) -> Box<Iterator<Item = Self::Data> + 'a>;
+                &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
+                Option<Q>,
+                i64)
+                -> Vec<Self::Data>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -33,7 +33,7 @@ pub trait View<Q: Clone + Send> {
                Self::Update,
                NodeIndex,
                i64,
-               sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
+               &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>)
                -> Option<Self::Update>;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
@@ -51,49 +51,6 @@ pub trait View<Q: Clone + Send> {
 pub trait FillableQuery {
     type Params;
     fn fill(&mut self, Self::Params);
-}
-
-/// This is nasty little hack to allow View::find() to return an iterator bound to the lifetime of
-/// &self. This makes it find more pleasant to implement, but forces us to do some additional work
-/// on the caller side to ensure that the ref stays around for long enough. Basically, we make sure
-/// to keep around a sync::Arc to the vertex in question, which allows us to transmute the iterator
-/// to 'static (since we know the lifetime bound always holds).
-struct NodeFind<D, P, Q, V: ?Sized>
-    where D: Clone + Send,
-          P: Send,
-          Q: Clone + Send + Sync,
-          V: Send + Sync + View<Q, Data = D, Params = P>
-{
-    _keep: sync::Arc<V>,
-    _x: std::marker::PhantomData<P>,
-    _y: std::marker::PhantomData<Q>,
-    it: Box<Iterator<Item = D>>,
-}
-
-impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync + View<Q, Data = D, Params = P>> NodeFind<D, P, Q, V> {
-    pub fn new(this: sync::Arc<V>,
-               aqfs: sync::Arc<HashMap<NodeIndex,
-                                       Box<Fn(P, i64) -> Box<Iterator<Item = D>> + Send + Sync>>>,
-               q: Option<Q>,
-               ts: i64)
-               -> NodeFind<D, P, Q, V> {
-        use std::mem;
-// ok to make 'static as we hold on to the Arc for at least as long as the iterator lives
-        let it = unsafe { mem::transmute(this.find(aqfs, q, ts)) };
-        NodeFind {
-            _keep: this,
-            _x: std::marker::PhantomData,
-            _y: std::marker::PhantomData,
-            it: it,
-        }
-    }
-}
-
-impl<D: Clone + Send, P: Send, Q: Clone + Send + Sync, V: ?Sized + Send + Sync + View<Q, Data = D, Params = P>> Iterator for NodeFind<D, P, Q, V> {
-    type Item = D;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.it.next()
-    }
 }
 
 /// `Delayed` is used to keep track of messages that cannot yet be safely delivered because it
@@ -156,8 +113,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     pub fn run(&mut self,
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
-                   HashMap<NodeIndex,
-                           Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>>) {
+                   HashMap<NodeIndex, Box<Fn(Option<Q>, i64) -> Vec<D> + 'static + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // create an entry in the min map for this node to track how up-to-date it is
@@ -315,7 +271,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |p: P, ts: i64| -> Box<Iterator<Item = D>> {
+                    let f = Box::new(move |p: P, ts: i64| -> Vec<D> {
                         let mut q_cur = (*q).clone();
                         q_cur.fill(p);
                         if ts != i64::max_value() {
@@ -332,8 +288,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                                 //break
                             }
                         }
-                        Box::new(NodeFind::new(a.clone(), aqf.clone(), Some(q_cur), ts))
-                    }) as Box<Fn(P, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
+                        a.find(&aqf, Some(q_cur), ts)
+                    }) as Box<Fn(P, i64) -> Vec<D> + 'static + Send + Sync>;
                     (ni, f)
                 })
                 .collect();
@@ -346,10 +302,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |q: Option<Q>, ts: i64| -> Box<Iterator<Item = D>> {
+            let func = Box::new(move |q: Option<Q>, ts: i64| -> Vec<D> {
                 // TODO: this should arguably *not* take a timestamp
-                Box::new(NodeFind::new(n.clone(), aqf.clone(), q, ts))
-            }) as Box<Fn(Option<Q>, i64) -> Box<Iterator<Item = D>> + Send + Sync>;
+                n.find(&aqf, q, ts)
+            }) as Box<Fn(Option<Q>, i64) -> Vec<D> + 'static + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -381,7 +337,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 for (src, u, ts) in rx.into_iter() {
                     assert!(ts >= min);
                     if ts == min {
-                        let u = u.and_then(|u| node.process(u, src, ts, aqf.clone()));
+                        let u = u.and_then(|u| node.process(u, src, ts, &aqf));
                         // TODO: notify nodes if global minimum has changed!
                         m.store(ts as isize, sync::atomic::Ordering::Release);
                         tx.broadcast((u, ts));
@@ -434,7 +390,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                             let ts = d.ts;
                             let (src, u) = d.data;
 
-                            let u = node.process(u, src, ts, aqf.clone());
+                            let u = node.process(u, src, ts, &aqf);
                             m.store(ts as isize, sync::atomic::Ordering::Release);
 
                             if u.is_some() {
@@ -511,17 +467,20 @@ mod tests {
         type Params = ();
 
         fn find(&self,
-                 _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>,
-                 _: Option<()>,
-                 _: i64) -> Box<Iterator<Item = Self::Data>> {
-            Box::new(Some(*self.1.lock().unwrap()).into_iter())
+                _: &HashMap<NodeIndex,
+                            Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
+                _: Option<()>,
+                _: i64)
+                -> Vec<Self::Data> {
+            vec![*self.1.lock().unwrap()]
         }
 
         fn process(&self,
                    u: Self::Update,
                    _: NodeIndex,
                    _: i64,
-                   _: sync::Arc<HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Box<Iterator<Item = Self::Data>> + Send + Sync>>>)
+                   _: &HashMap<NodeIndex,
+                               Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
             let mut x = self.1.lock().unwrap();
@@ -561,7 +520,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query
-        assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&a](None, i64::max_value()), vec![1]);
 
         // update value again
         put[&a].send(1);
@@ -570,7 +529,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&a](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&a](None, i64::max_value()), vec![2]);
     }
 
     #[test]
@@ -590,7 +549,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to c
-        assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&c](None, i64::max_value()), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -599,7 +558,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&c](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&c](None, i64::max_value()), vec![2]);
     }
 
     #[test]
@@ -620,7 +579,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to d
-        assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(get[&d](None, i64::max_value()), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -629,6 +588,6 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&d](None, i64::max_value()).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(get[&d](None, i64::max_value()), vec![2]);
     }
 }
