@@ -162,6 +162,13 @@ impl<O> flow::View<query::Query> for Node<O>
             unreachable!("should never add index to non-materialized view");
         }
     }
+
+    fn safe(&self, ts: i64) {
+        if let Some(ref data) = *self.data {
+            let mut w = data.write().unwrap();
+            w.absorb(ts);
+        }
+    }
 }
 
 pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> Node<O>

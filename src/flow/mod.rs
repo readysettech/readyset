@@ -46,6 +46,10 @@ pub trait View<Q: Clone + Send> {
 
     /// Add an index on the given field.
     fn add_index(&mut self, usize);
+
+    /// Called to indicate that the node will not receive any future queries with timestamps
+    /// earlier than or equal to the given timestamp.
+    fn safe(&self, i64);
 }
 
 pub trait FillableQuery {
@@ -90,6 +94,17 @@ pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
     dispatch: clocked_dispatch::Dispatcher<U>,
+
+    // this deserves some attention.
+    // this map is contains, for every node, the set of minimum timestamp trackers it should check
+    // in order to see whether it's safe to absorb up to a given timestamp. For example, say that
+    // node A has descendants B and C. B is materialized, C is not. C has the descendant D, which
+    // is materialized. No queries below B or D should ever reach A, and thus it is safe for A to
+    // absorb updates with a timestamp lower than that of min(ts_B, ts_D). In this case, the map
+    // would contain an entry {A => [ts_B, ts_D]}. The map is inside an arc-lock, such that it can
+    // be shared between threads, but can still be updated if the data flow graph is extended
+    // (which might add additional descendants).
+    min_check: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>>,
 }
 
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
@@ -107,6 +122,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             mins: HashMap::default(),
             wait: Vec::default(),
             dispatch: clocked_dispatch::new(20),
+
+            min_check: HashMap::default(),
         }
     }
 
@@ -172,6 +189,57 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             for col in cols {
                 println!("adding index on column {:?} of view {:?}", col, v);
                 node.add_index(col);
+            }
+        }
+
+        // update min_check
+        {
+            for node in petgraph::BfsIter::new(&self.graph, self.source) {
+                if node == self.source {
+                    continue;
+                }
+
+                // find all of this node's closest materialized descendants and leaves
+                let mut descendants = Vec::new();
+                let mut visit = self.graph.neighbors(node).collect::<Vec<_>>();
+                while !visit.is_empty() {
+                    let mut tmp = Vec::new();
+                    for desc in visit.drain(..) {
+                        let d = self.graph[desc].as_ref().unwrap();
+                        if d.resolve(0).is_none() {
+                            // materialized
+                            descendants.push(desc);
+                        } else {
+                            // not materialized
+                            // is it a leaf node?
+                            let mut neighbors = self.graph.neighbors(desc).peekable();
+                            if neighbors.peek().is_none() {
+                                // yes -- we are bound by its ts since it might issue queries with
+                                // its current timestamp if invoked by a client
+                                descendants.push(desc);
+                            } else {
+                                // no -- look for materialized nodes/leaves in its children
+                                //
+                                // TODO
+                                // what if an external query is issued to *this* node?
+                                // does it break in that case?
+                                tmp.extend(neighbors);
+                            }
+                        }
+                    }
+                    visit.extend(tmp.drain(..));
+                }
+
+                // find all their atomic min counters
+                let mins = descendants.into_iter()
+                    .map(|desc| self.mins[&desc].clone())
+                    .collect::<Vec<_>>();
+
+                // and update the node's entry in min_check so it will see any new nodes
+                let e = self.min_check.entry(node).or_insert_with(sync::Arc::default);
+                let mut cur = e.write().unwrap();
+                cur.clear();
+                cur.extend(mins.into_iter());
             }
         }
 
@@ -278,7 +346,6 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                             while ts > m.load(sync::atomic::Ordering::Acquire) as i64 {
                                 use std::time;
                                 // TODO: be smarter
-                                println!("{:?} is waiting for {:?} to reach {} (currently {})", node, ni, ts, m.load(sync::atomic::Ordering::Acquire));
                                 thread::sleep(time::Duration::from_secs(1));
                                 // TODO
                                 // obviously don't break here
@@ -325,6 +392,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let mut tx = busses.remove(&node).unwrap();
             let rx = start.remove(&node).unwrap();
             let m = self.mins[&node].clone();
+            let min_check = self.min_check[&node].clone();
             let node = self.graph[node].as_ref().unwrap().clone();
 
             // start a thread for managing this node.
@@ -333,6 +401,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 let mut delayed = BinaryHeap::new();
                 let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
                 let mut min = 0i64;
+                let mut desc_min: Option<(usize, i64)> = None;
 
                 for (src, u, ts) in rx.into_iter() {
                     assert!(ts >= min);
@@ -409,6 +478,41 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     if forwarded < min && min != i64::max_value() - 1 {
                         m.store(min as isize, sync::atomic::Ordering::Release);
                         tx.broadcast((None, min));
+                    }
+
+                    // check if descendant min has changed so we can absorb?
+                    let m = min_check.read().unwrap();
+                    let mut previous = 0;
+                    if let Some((n, min)) = desc_min {
+                        // the min certainly hasn't changed if the previous min is still there
+                        let new = m[n].load(sync::atomic::Ordering::Relaxed) as i64;
+                        if new > min {
+                            previous = min;
+                            desc_min = None;
+                        }
+                    }
+                    if desc_min.is_none() {
+                        // we don't know if the current min has changed, so check all descendants
+                        desc_min
+                            = m
+                            .iter()
+                            .map(|m| {
+                                m.load(sync::atomic::Ordering::Relaxed) as i64
+                            })
+                            .enumerate()
+                            .min_by_key(|&(_, m)| m);
+
+                        if let Some((_, m)) = desc_min {
+                            if m > previous {
+                                // min changed -- safe to absorb
+                                node.safe(m - 1);
+                            }
+                        } else {
+                            // there are no materialized descendants
+                            // TODO: what is the right thing to do here?
+                            // for now, we simply always absorb in this case
+                            node.safe(min - 1);
+                        }
                     }
                 }
             }));
@@ -499,6 +603,8 @@ mod tests {
         fn add_index(&mut self, _: usize) {
             unreachable!();
         }
+
+        fn safe(&self, _: i64) {}
     }
 
     impl FillableQuery for () {
