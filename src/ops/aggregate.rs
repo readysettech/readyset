@@ -110,11 +110,11 @@ impl NodeOp for Aggregator {
                     let current = match db {
                         Some(db) => {
                             // TODO: figure out what timestamp to use
-                            let mut matches = db.find(&q[..], i64::max_value());
-                            let current = matches.next();
-                            assert!(current.is_none() || matches.count() == 0,
-                                    "aggregation had more than 1 result");
-                            current.and_then(|r| Some(r[r.len() - 1].clone().into()))
+                            let matches = db.find(&q[..], i64::max_value());
+                            assert!(matches.len() <= 1, "aggregation had more than 1 result");
+                            matches.into_iter()
+                                .next()
+                                .and_then(|r| Some(r[r.len() - 1].clone().into()))
                                 .unwrap_or(self.op.zero())
                         }
                         None => {
