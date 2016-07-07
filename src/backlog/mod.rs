@@ -45,7 +45,9 @@ impl BufferedStore {
         loop {
             match self.backlog.front() {
                 None => break,
-                Some(&(ts, _)) if ts > including => break,
+                Some(&(ts, _)) if ts > including => {
+                    break;
+                }
                 _ => (),
             }
 

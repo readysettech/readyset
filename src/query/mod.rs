@@ -10,11 +10,11 @@ pub enum DataType {
 
 impl DataType {
     pub fn is_none(&self) -> bool {
-        return if let DataType::None = *self {
+        if let DataType::None = *self {
             true
         } else {
             false
-        };
+        }
     }
 }
 

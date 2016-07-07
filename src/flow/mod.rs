@@ -405,6 +405,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                 for (src, u, ts) in rx.into_iter() {
                     assert!(ts >= min);
+
                     if ts == min {
                         let u = u.and_then(|u| node.process(u, src, ts, &aqf));
                         // TODO: notify nodes if global minimum has changed!
@@ -414,8 +415,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     }
 
                     if let Some(u) = u {
-                        // this *may* be taken out again immediately if the min is raised to the given
-                        // ts, but meh, we accept that overhead for the simplicity of the code.
+                        // this *may* be taken out again immediately if the min is raised to the
+                        // given ts, but meh, we accept that overhead for the simplicity of the
+                        // code.
                         delayed.push(Delayed {
                             data: (src, u),
                             ts: ts,
@@ -430,8 +432,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                         continue;
                     }
 
-                    let new_min = freshness
-                        .values()
+                    let new_min = freshness.values()
                         .min()
                         .and_then(|m| Some(*m))
                         .unwrap_or(i64::max_value() - 1);
@@ -493,12 +494,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     }
                     if desc_min.is_none() {
                         // we don't know if the current min has changed, so check all descendants
-                        desc_min
-                            = m
-                            .iter()
-                            .map(|m| {
-                                m.load(sync::atomic::Ordering::Relaxed) as i64
-                            })
+                        desc_min = m.iter()
+                            .map(|m| m.load(sync::atomic::Ordering::Relaxed) as i64)
                             .enumerate()
                             .min_by_key(|&(_, m)| m);
 

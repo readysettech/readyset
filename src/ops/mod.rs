@@ -104,7 +104,7 @@ impl<O> flow::View<query::Query> for Node<O>
         // find and return matching rows
         if let Some(ref data) = *self.data {
             let rlock = data.read().unwrap();
-            if let Some(q) = q {
+            if let Some(ref q) = q {
                 rlock.find(&q.having[..], ts)
                     .into_iter()
                     .map(|r| q.project(r))
@@ -133,8 +133,6 @@ impl<O> flow::View<query::Query> for Node<O>
                 Update::Records(ref rs) => {
                     if let Some(ref mut data) = data {
                         data.add(rs.clone(), ts);
-                        // TODO: we should obviously not really absorb straight away
-                        // data.absorb(ts);
                     }
                 }
             }
