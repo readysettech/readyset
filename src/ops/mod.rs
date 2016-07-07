@@ -100,7 +100,7 @@ impl<O> flow::View<query::Query> for Node<O>
     type Data = Vec<query::DataType>;
     type Params = Params;
 
-    fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: i64) -> Vec<Self::Data> {
+    fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<Self::Data> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
             let rlock = data.read().unwrap();
@@ -113,7 +113,12 @@ impl<O> flow::View<query::Query> for Node<O>
                 rlock.find(&[], ts).into_iter().map(|r| r.iter().cloned().collect()).collect()
             }
         } else {
-            // we are not materialized --- query
+            // we are not materialized --- query.
+            // if no timestamp was given to find, we query using the latest timestamp.
+            //
+            // TODO: what timestamp do we use here? it's not clear. there's always a race in which
+            // our ancestor ends up absorbing that timestamp by the time the query reaches them :/
+            let ts = ts.unwrap_or(i64::max_value());
             self.inner.query(q.as_ref(), ts, aqs)
         }
     }
@@ -285,26 +290,26 @@ mod tests {
 
         // check state
         // a
-        let set = get[&a](None, i64::max_value())
+        let set = get[&a](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&2), format!("2 not in {:?}", set));
         // b
-        let set = get[&b](None, i64::max_value())
+        let set = get[&b](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&18), format!("18 not in {:?}", set));
         // c
-        let set = get[&c](None, i64::max_value())
+        let set = get[&c](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         // d
-        let set = get[&d](None, i64::max_value())
+        let set = get[&d](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();

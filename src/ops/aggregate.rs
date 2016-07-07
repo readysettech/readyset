@@ -109,8 +109,7 @@ impl NodeOp for Aggregator {
                     // find the current value for this group
                     let current = match db {
                         Some(db) => {
-                            // TODO: figure out what timestamp to use
-                            let matches = db.find(&q[..], i64::max_value());
+                            let matches = db.find(&q[..], Some(i64::max_value()));
                             assert!(matches.len() <= 1, "aggregation had more than 1 result");
                             matches.into_iter()
                                 .next()

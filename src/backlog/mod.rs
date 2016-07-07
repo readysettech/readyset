@@ -108,10 +108,8 @@ impl BufferedStore {
     /// timestamp fall at or before the given timestamp.
     pub fn find<'a>(&'a self,
                     conds: &'a [shortcut::cmp::Condition<query::DataType>],
-                    including: i64)
+                    including: Option<i64>)
                     -> Vec<&'a [query::DataType]> {
-        assert!(including >= self.absorbed);
-
         // okay, so we want to:
         //
         //  a) get the base results
@@ -124,6 +122,13 @@ impl BufferedStore {
         //  1) chain in all the positives in the backlog onto the base result iterator
         //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
         //     the backlogged entry if there's a match.
+
+        if including.is_none() {
+            return self.store.find(conds).collect();
+        }
+
+        let including = including.unwrap();
+        assert!(including >= self.absorbed);
 
         let mut relevant = self.backlog
             .iter()
@@ -189,8 +194,8 @@ mod tests {
         let mut b = BufferedStore::new(2);
         b.add(vec![ops::Record::Positive(a1.clone())], 0);
         b.absorb(0);
-        assert_eq!(b.find(&[], 0).len(), 1);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find(&[], Some(0)).len(), 1);
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
     }
 
     #[test]
@@ -199,8 +204,21 @@ mod tests {
 
         let mut b = BufferedStore::new(2);
         b.add(vec![ops::Record::Positive(a1.clone())], 0);
-        assert_eq!(b.find(&[], 0).len(), 1);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find(&[], Some(0)).len(), 1);
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+    }
+
+    #[test]
+    fn no_ts_ignores_backlog() {
+        let a1 = vec![1.into(), "a".into()];
+        let b2 = vec![2.into(), "b".into()];
+
+        let mut b = BufferedStore::new(2);
+        b.add(vec![ops::Record::Positive(a1.clone())], 0);
+        b.add(vec![ops::Record::Positive(b2.clone())], 1);
+        b.absorb(0);
+        assert_eq!(b.find(&[], None).len(), 1);
+        assert!(b.find(&[], None).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
     }
 
     #[test]
@@ -212,9 +230,9 @@ mod tests {
         b.add(vec![ops::Record::Positive(a1.clone())], 0);
         b.add(vec![ops::Record::Positive(b2.clone())], 1);
         b.absorb(0);
-        assert_eq!(b.find(&[], 1).len(), 2);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(1)).len(), 2);
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -226,8 +244,8 @@ mod tests {
         b.add(vec![ops::Record::Positive(a1.clone())], 0);
         b.add(vec![ops::Record::Positive(b2.clone())], 1);
         b.absorb(0);
-        assert_eq!(b.find(&[], 0).len(), 1);
-        assert!(b.find(&[], 0).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find(&[], Some(0)).len(), 1);
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
     }
 
     #[test]
@@ -241,9 +259,9 @@ mod tests {
         b.add(vec![ops::Record::Positive(b2.clone())], 1);
         b.add(vec![ops::Record::Positive(c3.clone())], 2);
         b.absorb(0);
-        assert_eq!(b.find(&[], 1).len(), 2);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(1)).len(), 2);
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -256,8 +274,8 @@ mod tests {
         b.add(vec![ops::Record::Positive(b2.clone())], 1);
         b.add(vec![ops::Record::Negative(a1.clone())], 2);
         b.absorb(2);
-        assert_eq!(b.find(&[], 2).len(), 1);
-        assert!(b.find(&[], 2).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(2)).len(), 1);
+        assert!(b.find(&[], Some(2)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -271,8 +289,8 @@ mod tests {
         b.absorb(1);
         b.add(vec![ops::Record::Negative(a1.clone())], 2);
         b.absorb(2);
-        assert_eq!(b.find(&[], 2).len(), 1);
-        assert!(b.find(&[], 2).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(2)).len(), 1);
+        assert!(b.find(&[], Some(2)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -284,8 +302,8 @@ mod tests {
         b.add(vec![ops::Record::Positive(a1.clone())], 0);
         b.add(vec![ops::Record::Positive(b2.clone())], 1);
         b.add(vec![ops::Record::Negative(a1.clone())], 2);
-        assert_eq!(b.find(&[], 2).len(), 1);
-        assert!(b.find(&[], 2).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(2)).len(), 1);
+        assert!(b.find(&[], Some(2)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -299,17 +317,17 @@ mod tests {
         b.add(vec![ops::Record::Positive(a1.clone()), ops::Record::Positive(b2.clone())],
               0);
         b.absorb(0);
-        assert_eq!(b.find(&[], 0).len(), 2);
-        assert!(b.find(&[], 0).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], 0).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(0)).len(), 2);
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
         b.add(vec![ops::Record::Negative(a1.clone()),
                    ops::Record::Positive(c3.clone()),
                    ops::Record::Negative(c3.clone())],
               1);
         b.absorb(1);
-        assert_eq!(b.find(&[], 1).len(), 1);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(1)).len(), 1);
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -322,16 +340,16 @@ mod tests {
 
         b.add(vec![ops::Record::Positive(a1.clone()), ops::Record::Positive(b2.clone())],
               0);
-        assert_eq!(b.find(&[], 0).len(), 2);
-        assert!(b.find(&[], 0).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], 0).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(0)).len(), 2);
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(b.find(&[], Some(0)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
         b.add(vec![ops::Record::Negative(a1.clone()),
                    ops::Record::Positive(c3.clone()),
                    ops::Record::Negative(c3.clone())],
               1);
-        assert_eq!(b.find(&[], 1).len(), 1);
-        assert!(b.find(&[], 1).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find(&[], Some(1)).len(), 1);
+        assert!(b.find(&[], Some(1)).iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
     }
 
     #[test]
@@ -346,6 +364,6 @@ mod tests {
               0);
         b.add(vec![ops::Record::Negative(b2.clone()), ops::Record::Positive(c3.clone())],
               1);
-        assert_eq!(b.find(&[], 2), vec![&*c3]);
+        assert_eq!(b.find(&[], Some(2)), vec![&*c3]);
     }
 }

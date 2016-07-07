@@ -24,7 +24,7 @@ pub trait View<Q: Clone + Send> {
     fn find<'a>(&'a self,
                 &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
                 Option<Q>,
-                i64)
+                Option<i64>)
                 -> Vec<Self::Data>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
@@ -130,7 +130,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     pub fn run(&mut self,
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
-                   HashMap<NodeIndex, Box<Fn(Option<Q>, i64) -> Vec<D> + 'static + Send + Sync>>) {
+                   HashMap<NodeIndex, Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>>) {
         // TODO: may be called again after more incorporates
 
         // create an entry in the min map for this node to track how up-to-date it is
@@ -355,7 +355,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                                 //break
                             }
                         }
-                        a.find(&aqf, Some(q_cur), ts)
+                        a.find(&aqf, Some(q_cur), Some(ts))
                     }) as Box<Fn(P, i64) -> Vec<D> + 'static + Send + Sync>;
                     (ni, f)
                 })
@@ -369,10 +369,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         for (ni, aqf) in aqfs.iter() {
             let aqf = aqf.clone();
             let n = self.graph[*ni].as_ref().unwrap().clone();
-            let func = Box::new(move |q: Option<Q>, ts: i64| -> Vec<D> {
-                // TODO: this should arguably *not* take a timestamp
-                n.find(&aqf, q, ts)
-            }) as Box<Fn(Option<Q>, i64) -> Vec<D> + 'static + Send + Sync>;
+            let func = Box::new(move |q: Option<Q>| -> Vec<D> {
+                n.find(&aqf, q, None)
+            }) as Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>;
 
             qs.insert(*ni, func);
         }
@@ -572,7 +571,7 @@ mod tests {
                 _: &HashMap<NodeIndex,
                             Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
                 _: Option<()>,
-                _: i64)
+                _: Option<i64>)
                 -> Vec<Self::Data> {
             vec![*self.1.lock().unwrap()]
         }
@@ -624,7 +623,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query
-        assert_eq!(get[&a](None, i64::max_value()), vec![1]);
+        assert_eq!(get[&a](None), vec![1]);
 
         // update value again
         put[&a].send(1);
@@ -633,7 +632,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&a](None, i64::max_value()), vec![2]);
+        assert_eq!(get[&a](None), vec![2]);
     }
 
     #[test]
@@ -653,7 +652,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to c
-        assert_eq!(get[&c](None, i64::max_value()), vec![1]);
+        assert_eq!(get[&c](None), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -662,7 +661,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&c](None, i64::max_value()), vec![2]);
+        assert_eq!(get[&c](None), vec![2]);
     }
 
     #[test]
@@ -683,7 +682,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send a query to d
-        assert_eq!(get[&d](None, i64::max_value()), vec![1]);
+        assert_eq!(get[&d](None), vec![1]);
 
         // update value again
         put[&b].send(1);
@@ -692,6 +691,6 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&d](None, i64::max_value()), vec![2]);
+        assert_eq!(get[&d](None), vec![2]);
     }
 }
