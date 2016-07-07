@@ -246,18 +246,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn materialized() {
+    fn e2e_test(mat: bool) {
         use std::collections::HashSet;
 
         // set up graph
         let mut g = flow::FlowGraph::new();
         let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new(&["x"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new(&["x"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new(&["x"], true, Tester(4)),
+        let a = g.incorporate(new(&["a"], true, Tester(1)), vec![]);
+        let b = g.incorporate(new(&["b"], true, Tester(2)), vec![]);
+        let c = g.incorporate(new(&["c"], mat, Tester(4)),
                               vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new(&["x"], true, Tester(8)), vec![(all.clone(), c)]);
+        let d = g.incorporate(new(&["d"], mat, Tester(8)), vec![(all.clone(), c)]);
         let (put, get) = g.run(10);
 
         // send a value
@@ -270,7 +269,7 @@ mod tests {
         // d = [14]
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send another in
         put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
@@ -282,7 +281,7 @@ mod tests {
         // d = [14, 30]
 
         // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 1_000_000));
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check state
         // a
@@ -290,7 +289,7 @@ mod tests {
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
-        assert!(set.contains(&2));
+        assert!(set.contains(&2), format!("2 not in {:?}", set));
         // b
         let set = get[&b](None, i64::max_value())
             .into_iter()
@@ -314,69 +313,12 @@ mod tests {
     }
 
     #[test]
+    fn materialized() {
+        e2e_test(true);
+    }
+
+    #[test]
     fn not_materialized() {
-        use std::collections::HashSet;
-
-        // set up graph
-        let mut g = flow::FlowGraph::new();
-        let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new(&["x"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new(&["x"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new(&["x"], false, Tester(4)),
-                              vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new(&["x"], false, Tester(8)), vec![(all.clone(), c)]);
-        let (put, get) = g.run(10);
-
-        // send a value
-        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])]));
-
-        // state should now be:
-        // a = [2]
-        // b = []
-        // c = [6]
-        // d = [14]
-
-        // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 10_000_000));
-
-        // send another in
-        put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
-
-        // state should now be:
-        // a = [2]
-        // b = [18]
-        // c = [6, 22]
-        // d = [14, 30]
-
-        // give it some time to propagate
-        thread::sleep(time::Duration::new(0, 10_000_000));
-
-        // check state
-        // a
-        let set = get[&a](None, i64::max_value())
-            .into_iter()
-            .map(|mut v| v.pop().unwrap().into())
-            .collect::<HashSet<i64>>();
-        assert!(set.contains(&2));
-        // b
-        let set = get[&b](None, i64::max_value())
-            .into_iter()
-            .map(|mut v| v.pop().unwrap().into())
-            .collect::<HashSet<i64>>();
-        assert!(set.contains(&18), format!("18 not in {:?}", set));
-        // c
-        let set = get[&c](None, i64::max_value())
-            .into_iter()
-            .map(|mut v| v.pop().unwrap().into())
-            .collect::<HashSet<i64>>();
-        assert!(set.contains(&6), format!("6 not in {:?}", set));
-        assert!(set.contains(&22), format!("22 not in {:?}", set));
-        // d
-        let set = get[&d](None, i64::max_value())
-            .into_iter()
-            .map(|mut v| v.pop().unwrap().into())
-            .collect::<HashSet<i64>>();
-        assert!(set.contains(&14), format!("14 not in {:?}", set));
-        assert!(set.contains(&30), format!("30 not in {:?}", set));
+        e2e_test(false);
     }
 }
