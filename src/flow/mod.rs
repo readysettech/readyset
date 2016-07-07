@@ -439,6 +439,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                     if new_min == min {
                         // min didn't change, so no updates have been released
+                        continue;
                     }
 
                     // the min has changed!
