@@ -1,10 +1,12 @@
 use shortcut;
 use flow;
 
+use std::sync;
+
 #[derive(Eq, PartialOrd, Hash, Debug, Clone)]
 pub enum DataType {
     None,
-    Text(String),
+    Text(sync::Arc<String>),
     Number(i64),
 }
 
@@ -59,23 +61,13 @@ impl Into<i64> for DataType {
 
 impl From<String> for DataType {
     fn from(s: String) -> Self {
-        DataType::Text(s)
-    }
-}
-
-impl Into<String> for DataType {
-    fn into(self) -> String {
-        if let DataType::Text(s) = self {
-            s
-        } else {
-            unreachable!();
-        }
+        DataType::Text(sync::Arc::new(s))
     }
 }
 
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
-        DataType::Text(s.to_owned())
+        DataType::Text(sync::Arc::new(s.to_owned()))
     }
 }
 
