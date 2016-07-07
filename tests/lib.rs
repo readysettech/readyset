@@ -96,7 +96,7 @@ fn votes() {
                                 cmp:
                                     shortcut::Comparison::Equal(shortcut::Value::Const(distributary::DataType::None)),
                             }]);
-    let end = g.incorporate(new(&["id", "title", "votes"], false, j),
+    let end = g.incorporate(new(&["id", "title", "votes"], true, j),
                             vec![(q.clone(), article), (q, vc)]);
 
 
