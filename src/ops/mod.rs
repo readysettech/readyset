@@ -288,33 +288,76 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
 
+        // reads only see records whose timestamp is *smaller* than the global minimum.
+        // thus the 16 above won't be seen below. let's fix that.
+        // first, send a write to increment the global min beyond the 16.
+        put[&a].send(Update::Records(vec![Record::Positive(vec![32.into()])]));
+        // let it propagate and bump the mins
+        thread::sleep(time::Duration::new(0, 10_000_000));
+        // then, send another to make the nodes realize that their descendants' mins have changed.
+        put[&a].send(Update::Records(vec![Record::Positive(vec![0.into()])]));
+        // let that propagate too
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // note that the first of these two updates may or may not be visible at the different
+        // nodes, depending on whether the descendant's min has been updated following an update by
+        // the time the sender of that update is checking for an updated descendant min.
+
         // check state
         // a
         let set = get[&a](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
+        // must see 1+1
         assert!(set.contains(&2), format!("2 not in {:?}", set));
+        // may see 32+1
+        assert!(set.len() == 1 || (set.len() == 2 && set.contains(&33)),
+                format!("32 not the extraneous entry in {:?}", set));
+
         // b
         let set = get[&b](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
+        // must see 16+2
         assert!(set.contains(&18), format!("18 not in {:?}", set));
+        // and nothing else
+        assert_eq!(set.len(), 1);
+
         // c
         let set = get[&c](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
+        // must see 1+1+4
         assert!(set.contains(&6), format!("6 not in {:?}", set));
+        // must see 16+2+4
         assert!(set.contains(&22), format!("22 not in {:?}", set));
+        if mat {
+            // may see 32+1+4
+            assert!(set.len() == 2 || (set.len() == 3 && set.contains(&37)),
+                    format!("37 not the extraneous entry in {:?}", set));
+        } else {
+            // must see 32+1+4 (since it's past the ancestor min)
+            assert!(set.contains(&37), format!("37 not in {:?}", set));
+            // but must *not* see 0+1+4 (since it's not beyond the ancestor min)
+            assert_eq!(set.len(), 3);
+        }
+
         // d
         let set = get[&d](None)
             .into_iter()
             .map(|mut v| v.pop().unwrap().into())
             .collect::<HashSet<i64>>();
+        // must see 1+1+4+8
         assert!(set.contains(&14), format!("14 not in {:?}", set));
+        // must see 16+2+4+8
         assert!(set.contains(&30), format!("30 not in {:?}", set));
+        // must see 32+1+4+8, because leaf views always absorb
+        assert!(set.contains(&45), format!("45 not in {:?}", set));
+        // won't see the 0 entry, because ancestor min hasn't increased
+        assert_eq!(set.len(), 3);
     }
 
     #[test]

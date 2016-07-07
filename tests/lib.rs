@@ -143,15 +143,31 @@ fn votes() {
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 1_000_000));
 
-    // query vote count to see that the count was updated
-    assert_eq!(get[&vc](None),
-               vec![vec![1.into(), 1.into()]]);
+    // this is stupid, but because the system is eventually consistent, we also need to inject two
+    // extra updates. one to advances the global min such that the vote above is visible, and
+    // another for all the nodes to realize that this has happened. unfortunately, this *also*
+    // means that the different nodes may *or may not* see the middle vote.
+    put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 1.into()])]));
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 1_000_000));
+    put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![0.into(), 1.into()])]));
+    // give it too some time to propagate
+    thread::sleep(time::Duration::new(0, 1_000_000));
 
+    // query vote count to see that the count was updated
+    let res = get[&vc](None);
+    assert!(res.iter().all(|r| r[0] == 1.into() && (r[1] == 1.into() || r[1] == 2.into())));
+    assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
     let res = get[&end](None);
-    assert!(!res.is_empty());
-    assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 1.into()]));
+    assert!(res.iter()
+                .any(|r| {
+                    r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())
+                }),
+            "no entry for [1,2,1|2] in {:?}",
+            res);
+    assert!(res.len() <= 2); // could be 2 if we had zero result rows
 
     // check that this is the case also if we query for the ID directly
     let q = vec![shortcut::Condition {
@@ -160,7 +176,8 @@ fn votes() {
                  }];
     let res = get[&end](Some(Query::new(&[true, true, true], q)));
     assert_eq!(res.len(), 1);
-    assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 1.into()]));
+    assert!(res.iter()
+        .any(|r| r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())));
 
     // again, zero values are tricky...
     if false {
