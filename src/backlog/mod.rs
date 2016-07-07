@@ -123,30 +123,41 @@ impl BufferedStore {
         //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
         //     the backlogged entry if there's a match.
 
-        let (positives, mut negatives): (_, Vec<_>) = self.backlog
+        let mut relevant = self.backlog
             .iter()
             .take_while(|&&(ts, _)| ts <= including)
             .flat_map(|&(_, ref group)| group.iter())
             .filter(|r| conds.iter().all(|c| c.matches(&r.rec()[..])))
-            .partition(|r| r.is_positive());
+            .peekable();
 
-        let positives = positives.into_iter().map(|r| r.rec().clone());
-        let results = self.store.find(conds).chain(positives);
-
-        let strip_negatives = move |r: &'a [query::DataType]| -> Option<&'a [query::DataType]> {
-            let revocation = negatives.iter()
-                .position(|neg| neg.rec().iter().enumerate().all(|(i, v)| &r[i] == v));
-
-            if let Some(revocation) = revocation {
-                // order of negatives doesn't matter, so O(1) swap_remove is fine
-                negatives.swap_remove(revocation);
-                None
+        if relevant.peek().is_some() {
+            let (positives, mut negatives): (_, Vec<_>) = relevant.partition(|r| r.is_positive());
+            if negatives.is_empty() {
+                self.store
+                    .find(conds)
+                    .chain(positives.into_iter().map(|r| r.rec()))
+                    .collect()
             } else {
-                Some(r)
-            }
-        };
+                self.store
+                    .find(conds)
+                    .chain(positives.into_iter().map(|r| r.rec()))
+                    .filter_map(|r| {
+                        let revocation = negatives.iter()
+                            .position(|neg| neg.rec().iter().enumerate().all(|(i, v)| &r[i] == v));
 
-        results.filter_map(strip_negatives).collect()
+                        if let Some(revocation) = revocation {
+                            // order of negatives doesn't matter, so O(1) swap_remove is fine
+                            negatives.swap_remove(revocation);
+                            None
+                        } else {
+                            Some(r)
+                        }
+                    })
+                    .collect()
+            }
+        } else {
+            self.store.find(conds).collect()
+        }
     }
 }
 
