@@ -475,13 +475,11 @@ mod tests {
 
         assert_eq!(p.len(), 1);
         let p = p.into_iter().last().unwrap();
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(p),
-                         }],
-        };
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                                           column: 0,
+                                           cmp: shortcut::Comparison::Equal(p),
+                                       }]);
 
         data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
@@ -501,13 +499,11 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
 
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }],
-        };
+                         }]);
 
         let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
@@ -524,13 +520,11 @@ mod tests {
         aqfs.insert(0.into(), Box::new(source) as Box<_>);
         let aqfs = sync::Arc::new(aqfs);
 
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
-                         }],
-        };
+                         }]);
 
         let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);

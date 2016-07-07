@@ -320,26 +320,22 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using join field
-        let q = query::Query {
-            select: vec![true, true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }],
-        };
+                         }]);
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using field from left
-        let q = query::Query {
-            select: vec![true, true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true, true],
+                                  vec![shortcut::Condition {
                              column: 1,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
-                         }],
-        };
+                         }]);
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
@@ -347,13 +343,11 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
 
         // query using field from right
-        let q = query::Query {
-            select: vec![true, true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true, true],
+                                  vec![shortcut::Condition {
                              column: 2,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
-                         }],
-        };
+                         }]);
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
@@ -369,13 +363,11 @@ mod tests {
 
         assert_eq!(p.len(), 1);
         let p = p.into_iter().last().unwrap();
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(p),
-                         }],
-        };
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                                           column: 0,
+                                           cmp: shortcut::Comparison::Equal(p),
+                                       }]);
 
         data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
@@ -389,13 +381,11 @@ mod tests {
 
         assert_eq!(p.len(), 1);
         let p = p.into_iter().last().unwrap();
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(p),
-                         }],
-        };
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                                           column: 0,
+                                           cmp: shortcut::Comparison::Equal(p),
+                                       }]);
 
         data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }

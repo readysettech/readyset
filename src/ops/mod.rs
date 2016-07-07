@@ -254,10 +254,7 @@ mod tests {
 
         // set up graph
         let mut g = flow::FlowGraph::new();
-        let all = query::Query {
-            select: vec![true],
-            having: vec![],
-        };
+        let all = query::Query::new(&[true], vec![]);
         let a = g.incorporate(new(&["x"], true, Tester(1)), vec![]);
         let b = g.incorporate(new(&["x"], true, Tester(2)), vec![]);
         let c = g.incorporate(new(&["x"], true, Tester(4)),
@@ -324,10 +321,7 @@ mod tests {
 
         // set up graph
         let mut g = flow::FlowGraph::new();
-        let all = query::Query {
-            select: vec![true],
-            having: vec![],
-        };
+        let all = query::Query::new(&[true], vec![]);
         let a = g.incorporate(new(&["x"], true, Tester(1)), vec![]);
         let b = g.incorporate(new(&["x"], true, Tester(2)), vec![]);
         let c = g.incorporate(new(&["x"], false, Tester(4)),

@@ -184,13 +184,11 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameters matching on both sides
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
-                         }],
-        };
+                         }]);
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
@@ -198,39 +196,33 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter matching only on left
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }],
-        };
+                         }]);
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
         // query with parameter matching only on right
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 1,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("x".into())),
-                         }],
-        };
+                         }]);
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter with no matches
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![shortcut::Condition {
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(3.into())),
-                         }],
-        };
+                         }]);
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 0);
@@ -244,9 +236,8 @@ mod tests {
 
         assert_eq!(p.len(), 2);
         let mut p = p.into_iter();
-        let q = query::Query {
-            select: vec![true, true],
-            having: vec![
+        let q = query::Query::new(&[true, true],
+                                  vec![
                 shortcut::Condition {
                              column: 0,
                              cmp: shortcut::Comparison::Equal(p.next().unwrap()),
@@ -255,8 +246,7 @@ mod tests {
                              column: 1,
                              cmp: shortcut::Comparison::Equal(p.next().unwrap()),
                          },
-            ],
-        };
+            ]);
 
         data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }
@@ -268,21 +258,19 @@ mod tests {
 
         assert_eq!(p.len(), 3);
         let mut p = p.into_iter();
-        let q = query::Query {
-            select: vec![true, true, true],
-            having: vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(p.next().unwrap()),
-                         },
-                         shortcut::Condition {
-                             column: 1,
-                             cmp: shortcut::Comparison::Equal(p.next().unwrap()),
-                         },
-                         shortcut::Condition {
-                             column: 2,
-                             cmp: shortcut::Comparison::Equal(p.next().unwrap()),
-                         }],
-        };
+        let q = query::Query::new(&[true, true, true],
+                                  vec![shortcut::Condition {
+                                           column: 0,
+                                           cmp: shortcut::Comparison::Equal(p.next().unwrap()),
+                                       },
+                                       shortcut::Condition {
+                                           column: 1,
+                                           cmp: shortcut::Comparison::Equal(p.next().unwrap()),
+                                       },
+                                       shortcut::Condition {
+                                           column: 2,
+                                           cmp: shortcut::Comparison::Equal(p.next().unwrap()),
+                                       }]);
 
         data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
     }

@@ -82,6 +82,7 @@ impl<'a> From<&'a str> for DataType {
 #[derive(Clone)]
 pub struct Query {
     pub select: Vec<bool>,
+    pub selects: usize,
     pub having: Vec<shortcut::Condition<DataType>>,
 }
 
@@ -98,21 +99,19 @@ impl Query {
 
     pub fn project(&self, r: &[DataType]) -> Vec<DataType> {
         assert_eq!(r.len(), self.select.len());
-        r.iter()
-            .enumerate()
-            .filter_map(|(i, f)| {
-                if self.select[i] {
-                    Some(f.clone())
-                } else {
-                    None
-                }
-            })
-            .collect()
+        let mut into = Vec::with_capacity(self.selects);
+        for (i, f) in r.iter().enumerate() {
+            if self.select[i] {
+                into.push(f.clone())
+            }
+        }
+        into
     }
 
     pub fn new(s: &[bool], h: Vec<shortcut::Condition<DataType>>) -> Query {
         Query {
             select: s.iter().cloned().collect(),
+            selects: s.len(),
             having: h,
         }
     }
@@ -154,18 +153,9 @@ mod tests {
         };
         assert_eq!(c_good.matches(&d), true);
         assert_eq!(c_bad.matches(&d), false);
-        let q_good = Query {
-            select: vec![true, false, true],
-            having: vec![c_good.clone()],
-        };
-        let q_bad = Query {
-            select: vec![true, false, true],
-            having: vec![c_bad.clone()],
-        };
-        let q_both = Query {
-            select: vec![true, false, true],
-            having: vec![c_good, c_bad],
-        };
+        let q_good = Query::new(&[true, false, true], vec![c_good.clone()]);
+        let q_bad = Query::new(&[true, false, true], vec![c_bad.clone()]);
+        let q_both = Query::new(&[true, false, true], vec![c_good, c_bad]);
         assert_eq!(q_good.feed(&d), Some(vec!["a".into(), "c".into()]));
         assert_eq!(q_bad.feed(&d), None);
         assert_eq!(q_both.feed(&d), None);
