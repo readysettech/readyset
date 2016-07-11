@@ -387,137 +387,148 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 .map(|(ni, _)| ni)
                 .collect::<Vec<_>>();
 
-            let aqf = aqfs.remove(&node).unwrap();
-            let mut tx = busses.remove(&node).unwrap();
+            let n = self.graph[node].as_ref().unwrap().clone();
             let rx = start.remove(&node).unwrap();
+            let aqf = aqfs.remove(&node).unwrap();
+            let tx = busses.remove(&node).unwrap();
             let m = self.mins[&node].clone();
-            let min_check = self.min_check[&node].clone();
-            let node = self.graph[node].as_ref().unwrap().clone();
+            let mc = self.min_check[&node].clone();
 
             // start a thread for managing this node.
             // basically just a rx->process->tx loop.
-            self.wait.push(thread::spawn(move || {
-                let mut delayed = BinaryHeap::new();
-                let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
-                let mut min = 0i64;
-                let mut desc_min: Option<(usize, i64)> = None;
-
-                for (src, u, ts) in rx.into_iter() {
-                    assert!(ts >= min);
-
-                    if ts == min {
-                        let u = u.and_then(|u| node.process(u, src, ts, &aqf));
-                        // TODO: notify nodes if global minimum has changed!
-                        m.store(ts as isize, sync::atomic::Ordering::Release);
-                        tx.broadcast((u, ts));
-                        continue;
-                    }
-
-                    if let Some(u) = u {
-                        // this *may* be taken out again immediately if the min is raised to the
-                        // given ts, but meh, we accept that overhead for the simplicity of the
-                        // code.
-                        delayed.push(Delayed {
-                            data: (src, u),
-                            ts: ts,
-                        });
-                    }
-
-                    let old_ts = freshness[&src];
-                    *freshness.get_mut(&src).unwrap() = ts;
-
-                    if old_ts != min {
-                        // min can't have changed, so there's nothing to process yet
-                        continue;
-                    }
-
-                    let new_min = freshness.values()
-                        .min()
-                        .and_then(|m| Some(*m))
-                        .unwrap_or(i64::max_value() - 1);
-
-                    if new_min == min {
-                        // min didn't change, so no updates have been released
-                        continue;
-                    }
-
-                    // the min has changed!
-                    min = new_min;
-                    // process any delayed updates *in order*
-
-                    // keep track of the largest timestamp we've processed a message with.
-                    // this is so that, if there was no data for the current ts, we'll still
-                    // remember to forward a None for the latest time.
-                    let mut forwarded = 0;
-
-                    // keep looking for a candidate to send
-                    loop {
-                        // find the smallest in `delay`
-                        let next = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
-                        //  process it if it is early enough
-                        if next <= min {
-                            let d = delayed.pop().unwrap();
-                            let ts = d.ts;
-                            let (src, u) = d.data;
-
-                            let u = node.process(u, src, ts, &aqf);
-                            m.store(ts as isize, sync::atomic::Ordering::Release);
-
-                            if u.is_some() {
-                                forwarded = ts;
-                                tx.broadcast((u, ts));
-                            }
-                            continue;
-                        }
-
-                        // no delayed message has a timestamp <= min
-                        break;
-                    }
-
-                    // make sure all dependents know how up-to-date we are
-                    // even if we didn't send a delayed message for the min
-                    if forwarded < min && min != i64::max_value() - 1 {
-                        m.store(min as isize, sync::atomic::Ordering::Release);
-                        tx.broadcast((None, min));
-                    }
-
-                    // check if descendant min has changed so we can absorb?
-                    let m = min_check.read().unwrap();
-                    let mut previous = 0;
-                    if let Some((n, min)) = desc_min {
-                        // the min certainly hasn't changed if the previous min is still there
-                        let new = m[n].load(sync::atomic::Ordering::Relaxed) as i64;
-                        if new > min {
-                            previous = min;
-                            desc_min = None;
-                        }
-                    }
-                    if desc_min.is_none() {
-                        // we don't know if the current min has changed, so check all descendants
-                        desc_min = m.iter()
-                            .map(|m| m.load(sync::atomic::Ordering::Relaxed) as i64)
-                            .enumerate()
-                            .min_by_key(|&(_, m)| m);
-
-                        if let Some((_, m)) = desc_min {
-                            if m > previous {
-                                // min changed -- safe to absorb
-                                node.safe(m - 1);
-                            }
-                        } else {
-                            // there are no materialized descendants
-                            // TODO: what is the right thing to do here?
-                            // for now, we simply always absorb in this case
-                            node.safe(min - 1);
-                        }
-                    }
-                }
-            }));
+            self.wait
+                .push(thread::spawn(move || {
+                    Self::inner(n, srcs, rx, aqf, tx, m, mc);
+                }));
 
             // TODO: how do we get an &mut bus later for adding recipients?
         }
 
         (incoming, qs)
+    }
+
+    fn inner(node: sync::Arc<View<Q, Update = U, Data = D, Params = P> + Send + Sync>,
+             srcs: Vec<NodeIndex>,
+             rx: mpsc::Receiver<(NodeIndex, Option<U>, i64)>,
+             aqf: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<D> + Send + Sync>>>,
+             mut tx: Bus<(Option<U>, i64)>,
+             m: sync::Arc<sync::atomic::AtomicIsize>,
+             min_check: sync::Arc<sync::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>) {
+        let mut delayed = BinaryHeap::new();
+        let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
+        let mut min = 0i64;
+        let mut desc_min: Option<(usize, i64)> = None;
+
+        for (src, u, ts) in rx.into_iter() {
+            assert!(ts >= min);
+
+            if ts == min {
+                let u = u.and_then(|u| node.process(u, src, ts, &aqf));
+                // TODO: notify nodes if global minimum has changed!
+                m.store(ts as isize, sync::atomic::Ordering::Release);
+                tx.broadcast((u, ts));
+                continue;
+            }
+
+            if let Some(u) = u {
+                // this *may* be taken out again immediately if the min is raised to the
+                // given ts, but meh, we accept that overhead for the simplicity of the
+                // code.
+                delayed.push(Delayed {
+                    data: (src, u),
+                    ts: ts,
+                });
+            }
+
+            let old_ts = freshness[&src];
+            *freshness.get_mut(&src).unwrap() = ts;
+
+            if old_ts != min {
+                // min can't have changed, so there's nothing to process yet
+                continue;
+            }
+
+            let new_min = freshness.values()
+                .min()
+                .and_then(|m| Some(*m))
+                .unwrap_or(i64::max_value() - 1);
+
+            if new_min == min {
+                // min didn't change, so no updates have been released
+                continue;
+            }
+
+            // the min has changed!
+            min = new_min;
+            // process any delayed updates *in order*
+
+            // keep track of the largest timestamp we've processed a message with.
+            // this is so that, if there was no data for the current ts, we'll still
+            // remember to forward a None for the latest time.
+            let mut forwarded = 0;
+
+            // keep looking for a candidate to send
+            loop {
+                // find the smallest in `delay`
+                let next = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
+                //  process it if it is early enough
+                if next <= min {
+                    let d = delayed.pop().unwrap();
+                    let ts = d.ts;
+                    let (src, u) = d.data;
+
+                    let u = node.process(u, src, ts, &aqf);
+                    m.store(ts as isize, sync::atomic::Ordering::Release);
+
+                    if u.is_some() {
+                        forwarded = ts;
+                        tx.broadcast((u, ts));
+                    }
+                    continue;
+                }
+
+                // no delayed message has a timestamp <= min
+                break;
+            }
+
+            // make sure all dependents know how up-to-date we are
+            // even if we didn't send a delayed message for the min
+            if forwarded < min && min != i64::max_value() - 1 {
+                m.store(min as isize, sync::atomic::Ordering::Release);
+                tx.broadcast((None, min));
+            }
+
+            // check if descendant min has changed so we can absorb?
+            let m = min_check.read().unwrap();
+            let mut previous = 0;
+            if let Some((n, min)) = desc_min {
+                // the min certainly hasn't changed if the previous min is still there
+                let new = m[n].load(sync::atomic::Ordering::Relaxed) as i64;
+                if new > min {
+                    previous = min;
+                    desc_min = None;
+                }
+            }
+            if desc_min.is_none() {
+                // we don't know if the current min has changed, so check all descendants
+                desc_min = m.iter()
+                    .map(|m| m.load(sync::atomic::Ordering::Relaxed) as i64)
+                    .enumerate()
+                    .min_by_key(|&(_, m)| m);
+
+                if let Some((_, m)) = desc_min {
+                    if m > previous {
+                        // min changed -- safe to absorb
+                        node.safe(m - 1);
+                    }
+                } else {
+                    // there are no materialized descendants
+                    // TODO: what is the right thing to do here?
+                    // for now, we simply always absorb in this case
+                    node.safe(min - 1);
+                }
+            }
+        }
     }
 
     pub fn incorporate<V: 'static + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
