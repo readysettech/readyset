@@ -7,6 +7,7 @@ use flow;
 use query;
 use backlog;
 use shortcut;
+use parking_lot;
 
 use std::sync;
 use std::collections::HashMap;
@@ -89,7 +90,7 @@ pub trait NodeOp {
 
 pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     fields: Vec<String>,
-    data: sync::Arc<Option<sync::RwLock<backlog::BufferedStore>>>,
+    data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
     inner: sync::Arc<O>,
 }
 
@@ -103,7 +104,7 @@ impl<O> flow::View<query::Query> for Node<O>
     fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<Self::Data> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
-            let rlock = data.read().unwrap();
+            let rlock = data.read();
             if let Some(ref q) = q {
                 rlock.find(&q.having[..], ts)
                     .into_iter()
@@ -130,7 +131,7 @@ impl<O> flow::View<query::Query> for Node<O>
                aqs: &AQ)
                -> Option<Self::Update> {
         use std::ops::Deref;
-        let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write().unwrap()));
+        let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write()));
 
         let new_u = self.inner.forward(u, src, ts, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
         if let Some(ref new_u) = new_u {
@@ -159,7 +160,7 @@ impl<O> flow::View<query::Query> for Node<O>
 
     fn add_index(&mut self, col: usize) {
         if let Some(ref data) = *self.data {
-            let mut w = data.write().unwrap();
+            let mut w = data.write();
             w.index(col, shortcut::idx::HashIndex::new());
         } else {
             unreachable!("should never add index to non-materialized view");
@@ -168,7 +169,7 @@ impl<O> flow::View<query::Query> for Node<O>
 
     fn safe(&self, ts: i64) {
         if let Some(ref data) = *self.data {
-            let mut w = data.write().unwrap();
+            let mut w = data.write();
             w.absorb(ts);
         }
     }
@@ -180,7 +181,7 @@ pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> 
 {
     let mut data = None;
     if materialized {
-        data = Some(sync::RwLock::new(backlog::BufferedStore::new(fields.len())));
+        data = Some(parking_lot::RwLock::new(backlog::BufferedStore::new(fields.len())));
     }
 
     Node {

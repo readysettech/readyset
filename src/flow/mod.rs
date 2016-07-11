@@ -1,6 +1,7 @@
 use petgraph;
 use bus::Bus;
 use clocked_dispatch;
+use parking_lot;
 
 use std::sync::mpsc;
 use std::sync;
@@ -104,7 +105,7 @@ pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P
     // would contain an entry {A => [ts_B, ts_D]}. The map is inside an arc-lock, such that it can
     // be shared between threads, but can still be updated if the data flow graph is extended
     // (which might add additional descendants).
-    min_check: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>>,
+    min_check: HashMap<petgraph::graph::NodeIndex, sync::Arc<parking_lot::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>>,
 }
 
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
@@ -237,7 +238,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                 // and update the node's entry in min_check so it will see any new nodes
                 let e = self.min_check.entry(node).or_insert_with(sync::Arc::default);
-                let mut cur = e.write().unwrap();
+                let mut cur = e.write();
                 cur.clear();
                 cur.extend(mins.into_iter());
             }
@@ -413,7 +414,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
              aqf: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<D> + Send + Sync>>>,
              mut tx: Bus<(Option<U>, i64)>,
              m: sync::Arc<sync::atomic::AtomicIsize>,
-             min_check: sync::Arc<sync::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>) {
+             min_check: sync::Arc<parking_lot::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>) {
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
         let mut min = 0i64;
@@ -499,7 +500,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             }
 
             // check if descendant min has changed so we can absorb?
-            let m = min_check.read().unwrap();
+            let m = min_check.read();
             let mut previous = 0;
             if let Some((n, min)) = desc_min {
                 // the min certainly hasn't changed if the previous min is still there

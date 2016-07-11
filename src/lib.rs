@@ -1,6 +1,7 @@
 #![feature(optin_builtin_traits)]
 
 extern crate clocked_dispatch;
+extern crate parking_lot;
 extern crate petgraph;
 extern crate shortcut;
 extern crate bus;

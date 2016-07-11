@@ -8,6 +8,7 @@ petgraph = "0.2"
 bus = "1.0.0"
 shortcut = "3.2.1"
 clocked-dispatch = "2.1"
+parking_lot = {version = "0.2", features = ["nightly"]}
 
 criterion = { git = "https://github.com/japaric/criterion.rs.git" }
 docopt = "0.6"
