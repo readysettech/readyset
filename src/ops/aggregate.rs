@@ -254,7 +254,7 @@ impl NodeOp for Aggregator {
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
         // index all group by columns
-        Some((this, (0..self.cols).into_iter().filter(|&i| i != self.over).collect()))
+        Some((this, (0..self.cols).into_iter().filter(|&i| i != self.cols - 1).collect()))
             .into_iter()
             .collect()
     }
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let c = Aggregation::COUNT.new(1.into(), 1, 3);
-        let hm: HashMap<_, _> = Some((0.into(), vec![0, 2]))
+        let hm: HashMap<_, _> = Some((0.into(), vec![0, 1]))
             .into_iter()
             .collect();
         assert_eq!(hm, c.suggest_indexes(0.into()));
