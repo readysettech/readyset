@@ -345,15 +345,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                         q_cur.fill(p);
                         if ts != i64::max_value() {
                             while ts > m.load(sync::atomic::Ordering::Acquire) as i64 {
-                                use std::time;
-                                // TODO: be smarter
-                                thread::sleep(time::Duration::from_secs(1));
-                                // TODO
-                                // obviously don't break here
-                                // we currently break because timestamps aren't propagated unless
-                                // records are, and so other nodes are likely to never know that they
-                                // are really sufficiently up-to-date
-                                //break
+                                thread::yield_now();
                             }
                         }
                         a.find(&aqf, Some(q_cur), Some(ts))
