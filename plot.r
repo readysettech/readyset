@@ -1,12 +1,7 @@
-sync <- read.table(text=grep("GET|PUT", readLines("sync.log"), value=T))
-sync[,4] = "sync"
-sswap <- read.table(text=grep("GET|PUT", readLines("sync-swap.log"), value=T))
-sswap[,4] = "sync+swap"
-park <- read.table(text=grep("GET|PUT", readLines("parking_lot.log"), value=T))
-park[,4] = "park"
-pswap <- read.table(text=grep("GET|PUT", readLines("parking_lot-swap.log"), value=T))
-pswap[,4] = "park+swap"
-t <- rbind(sync, sswap, park, pswap)
+cur <- read.table(text=grep("GET|PUT", readLines("current.log"), value=T))
+cur[,4] = "current"
+#t <- rbind(cur, a, b, c)
+t <- cur
 t <- subset(t, grepl("GET|PUT", t[,2]))
 
 t[,2] = sub("[0-9]?:", "", t[,2])
