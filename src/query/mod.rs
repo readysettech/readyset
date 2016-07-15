@@ -71,7 +71,7 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Query {
     pub select: Vec<bool>,
     pub selects: usize,
