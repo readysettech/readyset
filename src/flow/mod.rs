@@ -46,7 +46,7 @@ pub trait View<Q: Clone + Send> {
     fn resolve(&self, usize) -> Option<Vec<(NodeIndex, usize)>>;
 
     /// Add an index on the given field.
-    fn add_index(&mut self, usize);
+    fn add_index(&self, usize);
 
     /// Called to indicate that the node will not receive any future queries with timestamps
     /// earlier than or equal to the given timestamp.
@@ -57,6 +57,23 @@ pub trait FillableQuery {
     type Params;
     fn fill(&mut self, Self::Params);
 }
+
+/// Holds flow graph node state that may change as new nodes are added to the graph.
+struct Context<T: Clone + Send> {
+    bus: Bus<(Option<T>, i64)>,
+
+    // this deserves some attention.
+    // this contains the set of minimum timestamp trackers it should check in order to see whether
+    // it's safe to absorb up to a given timestamp. For example, say that node A has descendants B
+    // and C. B is materialized, C is not. C has the descendant D, which is materialized. No
+    // queries below B or D should ever reach A, and thus it is safe for A to absorb updates with
+    // a timestamp lower than that of min(ts_B, ts_D). In this case, the map would contain an
+    // entry {A => [ts_B, ts_D]}. The map is inside an arc-lock, such that it can be shared
+    // between threads, but can still be updated if the data flow graph is extended (which might
+    // add additional descendants).
+    min_check: Vec<sync::Arc<sync::atomic::AtomicIsize>>,
+}
+type SharedContext<T: Clone + Send> = sync::Arc<parking_lot::Mutex<Context<T>>>;
 
 /// `Delayed` is used to keep track of messages that cannot yet be safely delivered because it
 /// would violate the in-order guarantees.
@@ -96,16 +113,7 @@ pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P
     wait: Vec<thread::JoinHandle<()>>,
     dispatch: clocked_dispatch::Dispatcher<U>,
 
-    // this deserves some attention.
-    // this map is contains, for every node, the set of minimum timestamp trackers it should check
-    // in order to see whether it's safe to absorb up to a given timestamp. For example, say that
-    // node A has descendants B and C. B is materialized, C is not. C has the descendant D, which
-    // is materialized. No queries below B or D should ever reach A, and thus it is safe for A to
-    // absorb updates with a timestamp lower than that of min(ts_B, ts_D). In this case, the map
-    // would contain an entry {A => [ts_B, ts_D]}. The map is inside an arc-lock, such that it can
-    // be shared between threads, but can still be updated if the data flow graph is extended
-    // (which might add additional descendants).
-    min_check: HashMap<petgraph::graph::NodeIndex, sync::Arc<parking_lot::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>>,
+    contexts: HashMap<petgraph::graph::NodeIndex, SharedContext<U>>,
 }
 
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
@@ -123,8 +131,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             mins: HashMap::default(),
             wait: Vec::default(),
             dispatch: clocked_dispatch::new(20),
-
-            min_check: HashMap::default(),
+            contexts: HashMap::default(),
         }
     }
 
@@ -132,16 +139,25 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
                    HashMap<NodeIndex, Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>>) {
-        // TODO: may be called again after more incorporates
+        use std::collections::hash_map::Entry;
 
-        // create an entry in the min map for this node to track how up-to-date it is
+        // allocate contexts for all new nodes
+        let mut new = HashSet::new();
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
+
             if node == self.source {
                 continue;
             }
 
-            // TODO: this probably shouldn't be 0 if we're doing a migration
-            self.mins.insert(node, sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
+            if let Entry::Vacant(v) = self.contexts.entry(node) {
+                new.insert(node);
+                v.insert(sync::Arc::new(parking_lot::Mutex::new(Context {
+                    // create a bus for the outgoing records from this node.
+                    // size buf/2 since the sync_channels consuming from the bus are also buffered.
+                    bus: Bus::new(buf / 2),
+                    min_check: Vec::new(),
+                })));
+            }
         }
 
         // figure out what indices we should add
@@ -183,64 +199,12 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
 
         // add the indices we found
-        // TODO: how do we add indices to *existing* views during migration?
         for (v, cols) in indices.into_iter() {
-            let node = &mut self.graph[v];
-            let node = sync::Arc::get_mut(node.as_mut().unwrap()).unwrap();
+            let node = self.graph[v].as_ref().unwrap();
             for col in cols {
                 println!("adding index on column {:?} of view {:?}", col, v);
+                // TODO: don't re-add indices that already exist
                 node.add_index(col);
-            }
-        }
-
-        // update min_check
-        {
-            for node in petgraph::BfsIter::new(&self.graph, self.source) {
-                if node == self.source {
-                    continue;
-                }
-
-                // find all of this node's closest materialized descendants and leaves
-                let mut descendants = Vec::new();
-                let mut visit = self.graph.neighbors(node).collect::<Vec<_>>();
-                while !visit.is_empty() {
-                    let mut tmp = Vec::new();
-                    for desc in visit.drain(..) {
-                        let d = self.graph[desc].as_ref().unwrap();
-                        if d.resolve(0).is_none() {
-                            // materialized
-                            descendants.push(desc);
-                        } else {
-                            // not materialized
-                            // is it a leaf node?
-                            let mut neighbors = self.graph.neighbors(desc).peekable();
-                            if neighbors.peek().is_none() {
-                                // yes -- we are bound by its ts since it might issue queries with
-                                // its current timestamp if invoked by a client
-                                descendants.push(desc);
-                            } else {
-                                // no -- look for materialized nodes/leaves in its children
-                                //
-                                // TODO
-                                // what if an external query is issued to *this* node?
-                                // does it break in that case?
-                                tmp.extend(neighbors);
-                            }
-                        }
-                    }
-                    visit.extend(tmp.drain(..));
-                }
-
-                // find all their atomic min counters
-                let mins = descendants.into_iter()
-                    .map(|desc| self.mins[&desc].clone())
-                    .collect::<Vec<_>>();
-
-                // and update the node's entry in min_check so it will see any new nodes
-                let e = self.min_check.entry(node).or_insert_with(sync::Arc::default);
-                let mut cur = e.write();
-                cur.clear();
-                cur.extend(mins.into_iter());
             }
         }
 
@@ -248,6 +212,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         let mut incoming = HashMap::new();
         let mut start = HashMap::new();
         for base in self.graph.neighbors(self.source) {
+            if !new.contains(&base) {
+                continue;
+            }
+
             let (tx, rx) = self.dispatch.new(format!("{}-in", base.index()),
                                              format!("{}-out", base.index()));
 
@@ -264,43 +232,116 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             start.insert(base, px_rx);
         }
 
-        // set up the internal data-flow graph channels
-        let mut busses = HashMap::new();
-        for node in petgraph::BfsIter::new(&self.graph, self.source) {
-            if node == self.source {
-                continue;
-            }
+        {
+            // take all the locks to prevent the system from moving as we change the graph
+            // note that we need to clone them all to avoid holding a borrow to self
+            let contexts = self.contexts.clone();
 
-            // create a bus for the outgoing records from this node.
-            // size buf/2 since the sync_channels consuming from the bus are also buffered.
-            busses.insert(node, Bus::new(buf / 2));
+            // the locks need to be taken in order so that an upstream node isn't holding the lock
+            // while trying to send to a downstream node that we have already locked.
+            let mut keys = contexts.keys().collect::<Vec<_>>();
+            keys.sort();
 
-            if !start.contains_key(&node) {
-                // this node should receive updates from all its ancestors
-                let ancestors = self.graph
-                    .neighbors_directed(node, petgraph::EdgeDirection::Incoming);
-                let (tx, rx) = mpsc::sync_channel(buf / 2);
+            let mut locks: HashMap<_, _> =
+                keys.into_iter().map(|n| (n, contexts[n].lock())).collect();
 
-                for ancestor in ancestors {
-                    // since we're doing a BFS, we know that all of them already have a bus.
-                    let rx = busses.get_mut(&ancestor).unwrap().add_rx();
-                    let tx = tx.clone();
-
-                    // since Rust doesn't currently support select very well, we need one thread
-                    // per incoming edge, all sharing a single mpsc channel into the node in
-                    // question.
-                    thread::spawn(move || {
-                        for (u, ts) in rx.into_iter() {
-                            if let Err(..) = tx.send((ancestor, u, ts)) {
-                                break;
-                            }
-                        }
-                    });
+            // create an entry in the min map for this node to track how up-to-date it is
+            for node in petgraph::BfsIter::new(&self.graph, self.source) {
+                if node == self.source {
+                    continue;
                 }
 
-                // this is now what the node should receive on
-                start.insert(node, rx);
+                if let Entry::Vacant(v) = self.mins.entry(node) {
+                    // TODO
+                    // figure out where it should start -- should really be the initialization time of
+                    // the new node, but when will that be?
+                    v.insert(sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
+                }
             }
+
+            // update min_check
+            {
+                for node in petgraph::BfsIter::new(&self.graph, self.source) {
+                    if node == self.source {
+                        continue;
+                    }
+
+                    // find all of this node's closest materialized descendants and leaves
+                    let mut descendants = Vec::new();
+                    let mut visit = self.graph.neighbors(node).collect::<Vec<_>>();
+                    while !visit.is_empty() {
+                        let mut tmp = Vec::new();
+                        for desc in visit.drain(..) {
+                            let d = self.graph[desc].as_ref().unwrap();
+                            if d.resolve(0).is_none() {
+                                // materialized
+                                descendants.push(desc);
+                            } else {
+                                // not materialized
+                                // is it a leaf node?
+                                let mut neighbors = self.graph.neighbors(desc).peekable();
+                                if neighbors.peek().is_none() {
+                                    // yes -- we are bound by its ts since it might issue queries with
+                                    // its current timestamp if invoked by a client
+                                    descendants.push(desc);
+                                } else {
+                                    // no -- look for materialized nodes/leaves in its children
+                                    //
+                                    // TODO
+                                    // what if an external query is issued to *this* node?
+                                    // does it break in that case?
+                                    tmp.extend(neighbors);
+                                }
+                            }
+                        }
+                        visit.extend(tmp.drain(..));
+                    }
+
+                    // find all their atomic min counters
+                    let mins = descendants.into_iter()
+                        .map(|desc| self.mins[&desc].clone())
+                        .collect::<Vec<_>>();
+
+                    // and update the node's entry in min_check so it will see any new nodes
+                    let cur = locks.get_mut(&node).unwrap();
+                    cur.min_check.clear();
+                    cur.min_check.extend(mins.into_iter());
+                }
+            }
+
+            // set up the internal data-flow graph channels
+            for node in new.iter() {
+                if !start.contains_key(&node) {
+                    // this node should receive updates from all its ancestors
+                    let ancestors = self.graph
+                        .neighbors_directed(*node, petgraph::EdgeDirection::Incoming);
+                    let (tx, rx) = mpsc::sync_channel(buf / 2);
+
+                    for ancestor in ancestors {
+                        // since we're doing a BFS, we know that all of them already have a bus.
+                        let rx = locks.get_mut(&ancestor).unwrap().bus.add_rx();
+                        let tx = tx.clone();
+
+                        // since Rust doesn't currently support select very well, we need one thread
+                        // per incoming edge, all sharing a single mpsc channel into the node in
+                        // question.
+                        thread::spawn(move || {
+                            for (u, ts) in rx.into_iter() {
+                                if let Err(..) = tx.send((ancestor, u, ts)) {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+
+                    // this is now what the node should receive on
+                    start.insert(*node, rx);
+                }
+            }
+
+            // TODO: start initialization of new views? or something?
+
+            // we're now done modifying all node contexts, so it's safe to release our locks
         }
 
         // in order to query a node, we need to know how to query all its ancestors. specifically,
@@ -312,6 +353,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         // function list is emtpy.
         //
         // we build the ancestor query functions inductively below.
+        // TODO: technically we could re-use aqfs from previous nodes
         let mut aqfs = HashMap::new();
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
             if node == self.source {
@@ -359,54 +401,49 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
         // expose .query in a friendly format to outsiders
         let mut qs = HashMap::with_capacity(aqfs.len());
-        for (ni, aqf) in aqfs.iter() {
+        for node in new.iter() {
+            let aqf = aqfs[node].clone();
             let aqf = aqf.clone();
-            let n = self.graph[*ni].as_ref().unwrap().clone();
+            let n = self.graph[*node].as_ref().unwrap().clone();
             let func = Box::new(move |q: Option<Q>| -> Vec<D> {
                 n.find(&aqf, q, None)
             }) as Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>;
 
-            qs.insert(*ni, func);
+            qs.insert(*node, func);
         }
 
         // spin up all the worker threads
-        for node in petgraph::BfsIter::new(&self.graph, self.source) {
-            if node == self.source {
-                continue;
-            }
-
+        for node in new.iter() {
             let srcs = self.graph
-                .edges_directed(node, petgraph::EdgeDirection::Incoming)
+                .edges_directed(*node, petgraph::EdgeDirection::Incoming)
                 .map(|(ni, _)| ni)
                 .collect::<Vec<_>>();
 
-            let n = self.graph[node].as_ref().unwrap().clone();
+            let name = *node;
+            let n = self.graph[*node].as_ref().unwrap().clone();
             let rx = start.remove(&node).unwrap();
             let aqf = aqfs.remove(&node).unwrap();
-            let tx = busses.remove(&node).unwrap();
-            let m = self.mins[&node].clone();
-            let mc = self.min_check[&node].clone();
+            let ctx = self.contexts[node].clone();
+            let m = self.mins[node].clone();
 
             // start a thread for managing this node.
             // basically just a rx->process->tx loop.
             self.wait
                 .push(thread::spawn(move || {
-                    Self::inner(n, srcs, rx, aqf, tx, m, mc);
+                    Self::inner(name, n, srcs, rx, aqf, ctx, m);
                 }));
-
-            // TODO: how do we get an &mut bus later for adding recipients?
         }
 
         (incoming, qs)
     }
 
-    fn inner(node: sync::Arc<View<Q, Update = U, Data = D, Params = P> + Send + Sync>,
+    fn inner(name: NodeIndex,
+             node: sync::Arc<View<Q, Update = U, Data = D, Params = P> + Send + Sync>,
              srcs: Vec<NodeIndex>,
              rx: mpsc::Receiver<(NodeIndex, Option<U>, i64)>,
              aqf: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<D> + Send + Sync>>>,
-             mut tx: Bus<(Option<U>, i64)>,
-             m: sync::Arc<sync::atomic::AtomicIsize>,
-             min_check: sync::Arc<parking_lot::RwLock<Vec<sync::Arc<sync::atomic::AtomicIsize>>>>) {
+             ctx: SharedContext<U>,
+             m: sync::Arc<sync::atomic::AtomicIsize>) {
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
         let mut min = 0i64;
@@ -417,9 +454,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
             if ts == min {
                 let u = u.and_then(|u| node.process(u, src, ts, &aqf));
-                // TODO: notify nodes if global minimum has changed!
                 m.store(ts as isize, sync::atomic::Ordering::Release);
-                tx.broadcast((u, ts));
+
+                ctx.lock().bus.broadcast((u, ts));
                 continue;
             }
 
@@ -475,7 +512,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                     if u.is_some() {
                         forwarded = ts;
-                        tx.broadcast((u, ts));
+                        ctx.lock().bus.broadcast((u, ts));
                     }
                     continue;
                 }
@@ -488,11 +525,12 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             // even if we didn't send a delayed message for the min
             if forwarded < min && min != i64::max_value() - 1 {
                 m.store(min as isize, sync::atomic::Ordering::Release);
-                tx.broadcast((None, min));
+                ctx.lock().bus.broadcast((None, min));
             }
 
             // check if descendant min has changed so we can absorb?
-            let m = min_check.read();
+            let mut ctx = ctx.lock();
+            let m = &mut ctx.min_check;
             let mut previous = 0;
             if let Some((n, min)) = desc_min {
                 // the min certainly hasn't changed if the previous min is still there
@@ -502,6 +540,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     desc_min = None;
                 }
             }
+
             if desc_min.is_none() {
                 // we don't know if the current min has changed, so check all descendants
                 desc_min = m.iter()
@@ -551,6 +590,8 @@ impl<Q, U, D, P> Drop for FlowGraph<Q, U, D, P>
           P: Send
 {
     fn drop(&mut self) {
+        // need to clear all contexts so the every bus is closed
+        self.contexts.clear();
         for w in self.wait.drain(..) {
             w.join().unwrap();
         }
@@ -601,7 +642,7 @@ mod tests {
             None
         }
 
-        fn add_index(&mut self, _: usize) {
+        fn add_index(&self, _: usize) {
             unreachable!();
         }
 

@@ -158,7 +158,7 @@ impl<O> flow::View<query::Query> for Node<O>
         }
     }
 
-    fn add_index(&mut self, col: usize) {
+    fn add_index(&self, col: usize) {
         if let Some(ref data) = *self.data {
             let mut w = data.write();
             w.index(col, shortcut::idx::HashIndex::new());
