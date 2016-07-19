@@ -738,4 +738,73 @@ mod tests {
         // check that value was updated again
         assert_eq!(get[&d](None), vec![2]);
     }
+
+    #[test]
+    fn disjoint_migration() {
+        // set up graph
+        let mut g = FlowGraph::new();
+        let _ = g.incorporate(Counter("x".into(), Default::default()), vec![]);
+        let (_, _) = g.run(10);
+
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
+        let c = g.incorporate(Counter("c".into(), Default::default()),
+                              vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let (put, get) = g.run(10);
+
+        // send a value on a
+        put[&a].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // send a query to d
+        assert_eq!(get[&d](None), vec![1]);
+
+        // update value again
+        put[&b].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // check that value was updated again
+        assert_eq!(get[&d](None), vec![2]);
+    }
+
+    #[test]
+    fn overlap_migration() {
+        // set up graph
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let x = g.incorporate(Counter("x".into(), Default::default()), vec![((), a)]);
+        let (put_1, get_1) = g.run(10);
+
+        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
+        let c = g.incorporate(Counter("c".into(), Default::default()),
+                              vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let (put, get) = g.run(10);
+
+        // send a value on a
+        put_1[&a].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // see that result appeared at d
+        assert_eq!(get[&d](None), vec![1]);
+
+        // and at x
+        assert_eq!(get_1[&x](None), vec![1]);
+
+        // update value again
+        put[&b].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // check that value was updated again
+        assert_eq!(get[&d](None), vec![2]);
+    }
 }
