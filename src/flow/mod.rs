@@ -215,100 +215,126 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             }
         }
 
-        // take all the locks to prevent the system from moving as we change the graph
-        // the locks need to be taken in order so that an upstream node isn't holding the lock
-        // while trying to send to a downstream node that we have already locked.
-        let mut keys = self.contexts.keys().collect::<Vec<_>>();
-        keys.sort();
-
-        let mut locks: HashMap<_, _> =
-            keys.into_iter().map(|n| (n, self.contexts[n].lock())).collect();
-
-        // update min_check
-        {
-            for node in petgraph::BfsIter::new(&self.graph, self.source) {
-                if node == self.source {
-                    continue;
-                }
-
-                // find all of this node's closest materialized descendants and leaves
-                let mut descendants = Vec::new();
-                let mut visit = self.graph.neighbors(node).collect::<Vec<_>>();
-                while !visit.is_empty() {
-                    let mut tmp = Vec::new();
-                    for desc in visit.drain(..) {
-                        let d = self.graph[desc].as_ref().unwrap();
-                        if d.resolve(0).is_none() {
-                            // materialized
-                            descendants.push(desc);
-                        } else {
-                            // not materialized
-                            // is it a leaf node?
-                            let mut neighbors = self.graph.neighbors(desc).peekable();
-                            if neighbors.peek().is_none() {
-                                // yes -- we are bound by its ts since it might issue queries with
-                                // its current timestamp if invoked by a client
-                                descendants.push(desc);
-                            } else {
-                                // no -- look for materialized nodes/leaves in its children
-                                //
-                                // TODO
-                                // what if an external query is issued to *this* node?
-                                // does it break in that case?
-                                tmp.extend(neighbors);
-                            }
-                        }
-                    }
-                    visit.extend(tmp.drain(..));
-                }
-
-                // find all their atomic min counters
-                let mins = descendants.into_iter()
-                    .map(|desc| self.mins[&desc].clone())
-                    .collect::<Vec<_>>();
-
-                // and update the node's entry in min_check so it will see any new nodes
-                let cur = locks.get_mut(&node).unwrap();
-                cur.min_check.clear();
-                cur.min_check.extend(mins.into_iter());
-            }
-        }
-
-        // set up the internal data-flow graph channels
+        // set up input multiplexer for each new node
+        let mut new_ins = HashMap::with_capacity(new.len());
         for node in new.iter() {
             if !start.contains_key(&node) {
                 // this node should receive updates from all its ancestors
-                let ancestors = self.graph
-                    .neighbors_directed(*node, petgraph::EdgeDirection::Incoming);
                 let (tx, rx) = mpsc::sync_channel(buf / 2);
-
-                for ancestor in ancestors {
-                    // since we're doing a BFS, we know that all of them already have a bus.
-                    let rx = locks.get_mut(&ancestor).unwrap().bus.add_rx();
-                    let tx = tx.clone();
-
-                    // since Rust doesn't currently support select very well, we need one thread
-                    // per incoming edge, all sharing a single mpsc channel into the node in
-                    // question.
-                    thread::spawn(move || {
-                        for (u, ts) in rx.into_iter() {
-                            if let Err(..) = tx.send((ancestor, u, ts)) {
-                                break;
-                            }
-                        }
-                    });
-                }
-
-                // this is now what the node should receive on
+                new_ins.insert(*node, tx);
                 start.insert(*node, rx);
             }
         }
 
-        // we're now done modifying all node contexts, so it's safe to release our locks
-        //
-        // TODO
-        // this shouldn't be 0, but rather the min of the processed_ts of each new node's ancestors
-        new.iter().map(|n| (*n, 0)).collect()
+        // there are two things we need to do in order to set up all the contexts correctly (this
+        // includes setting up new ones as well as updating old ones). first, we need to ensure
+        // that every node's min_check contains all of its immediate children. second, we need to
+        // add every node to its parents' output buses. note that we update the nodes in BFS order.
+        // this is necessary because the locks need to be taken such that an upstream node isn't
+        // holding the lock while trying to send to a downstream node that we have already locked.
+        let mut max_absorbed = HashMap::new();
+        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+            if node == self.source {
+                continue;
+            }
+
+            let mut ctx = self.contexts[&node].lock();
+
+            // find all of this node's closest materialized descendants and leaves
+            let mut descendants = Vec::new();
+            let mut visit = self.graph.neighbors(node).collect::<Vec<_>>();
+            while !visit.is_empty() {
+                let mut tmp = Vec::new();
+                for desc in visit.drain(..) {
+                    let d = self.graph[desc].as_ref().unwrap();
+                    if d.resolve(0).is_none() {
+                        // materialized
+                        descendants.push(desc);
+                    } else {
+                        // not materialized
+                        // is it a leaf node?
+                        let mut neighbors = self.graph.neighbors(desc).peekable();
+                        if neighbors.peek().is_none() {
+                            // yes -- we are bound by its ts since it might issue queries with
+                            // its current timestamp if invoked by a client
+                            descendants.push(desc);
+                        } else {
+                            // no -- look for materialized nodes/leaves in its children
+                            //
+                            // TODO
+                            // what if an external query is issued to *this* node?
+                            // does it break in that case?
+                            tmp.extend(neighbors);
+                        }
+                    }
+                }
+                visit.extend(tmp.drain(..));
+            }
+
+            // keep track of how much each node *may* have absorbed, as this places a lower bound
+            // on what timestamp its new children can initialize on. we know that this value can't
+            // increase until all new children have been initialized, because those new children
+            // will be the new min with their processed_ts = 0.
+            let may_have_absorbed = descendants.iter()
+                .filter(|&n| !new.contains(n))
+                .map(|&n| &self.mins[&n])
+                .map(|m| m.load(sync::atomic::Ordering::Relaxed) as i64)
+                .min();
+
+            // if the view used to have no children, it is allowed to absorb immediately. in that
+            // case, we should consider it to be absorbed up to its processed_ts.
+            let may_have_absorbed =
+                may_have_absorbed.unwrap_or_else(|| {
+                    self.mins[&node].load(sync::atomic::Ordering::Relaxed) as i64
+                });
+
+            max_absorbed.insert(node, may_have_absorbed);
+
+            // find all their atomic min counters
+            let mins = descendants.into_iter()
+                .map(|desc| self.mins[&desc].clone())
+                .collect::<Vec<_>>();
+
+            // and update the node's entry in min_check so it will see any new nodes
+            ctx.min_check.clear();
+            ctx.min_check.extend(mins.into_iter());
+
+            // if the node has any new children, add those as receivers to our output bus
+            for new_child in self.graph
+                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                .filter(|ni| new.contains(ni)) {
+                let tx = new_ins[&new_child].clone();
+                let rx = ctx.bus.add_rx();
+
+                // since Rust doesn't currently support select very well, we need one thread
+                // per incoming edge, all sharing a single mpsc channel into the node in
+                // question.
+                thread::spawn(move || {
+                    for (u, ts) in rx.into_iter() {
+                        if let Err(..) = tx.send((node, u, ts)) {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+
+        // when a node initializes itself, it is going to query all its ancestors at some ts. that
+        // ts needs to be >= the latest timestamp absorbed by those ancestors. at this point, the
+        // ancestors all know about the new children (with ts = 0), so they won't absorb any more
+        // until the children have initialized, so it's safe to initialize at whatever the max
+        // absorbed ts was amongst all parents.
+        new.iter()
+            .map(|&n| {
+                self.graph
+                    .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
+                    .filter(|&n| n != self.source)
+                    .map(|p| max_absorbed[&p])
+                    .max()
+                    .map(move |init_ts| (n, init_ts))
+                    .unwrap_or((n, 0)) // base nodes can init at any time
+            })
+            .collect()
     }
 
     /// Builds the ancestor query function for all nodes.
