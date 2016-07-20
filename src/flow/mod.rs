@@ -495,6 +495,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         let mut min = 0i64;
         let mut desc_min: Option<(usize, i64)> = None;
 
+        // TODO
+        assert_eq!(init_ts, 0);
+
         for (src, u, ts) in input.into_iter() {
             assert!(ts >= min);
 
@@ -843,6 +846,44 @@ mod tests {
 
         // and at x
         assert_eq!(get_1[&x](None), vec![1]);
+
+        // update value again
+        put[&b].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // check that value was updated again
+        assert_eq!(get[&d](None), vec![2]);
+    }
+
+    #[test]
+    #[ignore]
+    fn migration_initialization() {
+        // set up graph
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let x = g.incorporate(Counter("x".into(), Default::default()), vec![((), a)]);
+        let (put_1, get_1) = g.run(10);
+
+        // send a value on a
+        put_1[&a].send(1);
+
+        // give it some time to propagate
+        thread::sleep(time::Duration::new(0, 10_000_000));
+
+        // see that result appeared at x
+        assert_eq!(get_1[&x](None), vec![1]);
+
+        // perform migration
+        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
+        let c = g.incorporate(Counter("c".into(), Default::default()),
+                              vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let (put, get) = g.run(10);
+
+        // check that new views see old data
+        assert_eq!(get[&d](None), vec![1]);
 
         // update value again
         put[&b].send(1);
