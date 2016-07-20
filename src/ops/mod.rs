@@ -124,6 +124,20 @@ impl<O> flow::View<query::Query> for Node<O>
         }
     }
 
+    fn init_at(&self, init_ts: i64, aqs: &AQ) {
+        if aqs.len() == 0 {
+            // base tables have no state to import
+            return;
+        }
+
+        // we only need to initialize if we are materialized
+        if let Some(ref data) = *self.data {
+            // we need to initialize this view before it can start accepting updates. we issue a
+            // None query to all our ancestors, and then store all the materialized results.
+            data.write().batch_import(self.inner.query(None, init_ts, aqs), init_ts);
+        }
+    }
+
     fn process(&self,
                u: Self::Update,
                src: flow::NodeIndex,

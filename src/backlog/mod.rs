@@ -98,6 +98,16 @@ impl BufferedStore {
         self.backlog.push_back((ts, r));
     }
 
+    /// Important and absorb a set of records at the given timestamp.
+    pub fn batch_import(&mut self, rs: Vec<Vec<query::DataType>>, ts: i64) {
+        assert!(self.backlog.is_empty());
+        assert!(self.absorbed < ts);
+        for row in rs.into_iter() {
+            self.store.insert(row);
+        }
+        self.absorbed = ts;
+    }
+
     /// Find all entries that matched the given conditions just after the given point in time.
     ///
     /// This method will panic if the given timestamp falls before the last absorbed timestamp, as

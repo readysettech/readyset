@@ -49,6 +49,163 @@ fn it_works() {
 }
 
 #[test]
+fn it_works_w_mat() {
+    // set up graph
+    let mut g = distributary::FlowGraph::new();
+    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let mut cols = HashMap::new();
+    cols.insert(a, 2);
+    cols.insert(b, 2);
+    let u = distributary::Union::new(emits, cols);
+    let q = distributary::Query::new(&[true, true], Vec::new());
+    let c = g.incorporate(distributary::new(&["a", "b"], true, u),
+                          vec![(q.clone(), a), (q, b)]);
+    let (put, get) = g.run(10);
+
+    // send a few values on a
+    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
+    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 3.into()])]));
+
+    // give them some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    // we should see at least the first one, and possibly the second
+    // the third won't be seen, because its timestamp hasn't been passed yet
+    let res = get[&c](None);
+    assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
+    assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
+
+    // update value again (and again send some secondary updates)
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 5.into()])]));
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 6.into()])]));
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    let res = get[&c](None);
+    assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), 3.into()]));
+    assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
+    assert!(res.len() == 4 || res.iter().any(|r| r == &vec![2.into(), 5.into()]));
+}
+
+#[test]
+fn it_migrates_wo_mat() {
+    // set up graph
+    let mut g = distributary::FlowGraph::new();
+    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+    let (put_1, _) = g.run(10);
+
+    // send a value on a
+    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 1_000_000));
+
+    // add more of graph
+    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let mut cols = HashMap::new();
+    cols.insert(a, 2);
+    cols.insert(b, 2);
+    let u = distributary::Union::new(emits, cols);
+    let q = distributary::Query::new(&[true, true], Vec::new());
+    let c = g.incorporate(distributary::new(&["a", "b"], false, u),
+                          vec![(q.clone(), a), (q, b)]);
+    let (put, get) = g.run(10);
+
+    // send a query to c
+    assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
+
+    // update value again
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 1_000_000));
+
+    // check that value was updated again
+    let res = get[&c](None);
+    assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
+}
+
+#[test]
+fn it_migrates_w_mat() {
+    // set up graph
+    let mut g = distributary::FlowGraph::new();
+    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+    let (put_1, _) = g.run(10);
+
+    // send a few values on a
+    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
+    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 3.into()])]));
+
+    // give them some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // add the rest of the graph
+    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+                          vec![]);
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let mut cols = HashMap::new();
+    cols.insert(a, 2);
+    cols.insert(b, 2);
+    let u = distributary::Union::new(emits, cols);
+    let q = distributary::Query::new(&[true, true], Vec::new());
+    let c = g.incorporate(distributary::new(&["a", "b"], true, u),
+                          vec![(q.clone(), a), (q, b)]);
+    let (put, get) = g.run(10);
+
+    // wait a bit for initialization
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    // we should see at least the first one, and possibly the second
+    // the third won't be seen, because its timestamp hasn't been passed yet
+    let res = get[&c](None);
+    assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
+    assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
+
+    // update value again (and again send some secondary updates)
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 5.into()])]));
+    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 6.into()])]));
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    let res = get[&c](None);
+    assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), 3.into()]));
+    assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
+    assert!(res.len() == 4 || res.iter().any(|r| r == &vec![2.into(), 5.into()]));
+}
+
+#[test]
 fn votes() {
     use distributary::{Base, Union, Query, Aggregation, Joiner, new};
 

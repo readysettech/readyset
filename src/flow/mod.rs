@@ -51,6 +51,14 @@ pub trait View<Q: Clone + Send> {
     /// Called to indicate that the node will not receive any future queries with timestamps
     /// earlier than or equal to the given timestamp.
     fn safe(&self, i64);
+
+    /// Called when a view is added after the system has already been operational (i.e., ts > 0).
+    /// This is called before the view is given any operations to process, and should initialize
+    /// any internal state (such as materialized data) such that the node is ready to process
+    /// subsequent updates at timestamps after the given initialization timestamp.
+    fn init_at(&self,
+               i64,
+               &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>);
 }
 
 pub trait FillableQuery {
@@ -319,11 +327,16 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             }
         }
 
+        let latest =
+            self.mins.values().map(|m| m.load(sync::atomic::Ordering::Relaxed) as i64).max();
+
         // when a node initializes itself, it is going to query all its ancestors at some ts. that
         // ts needs to be >= the latest timestamp absorbed by those ancestors. at this point, the
         // ancestors all know about the new children (with ts = 0), so they won't absorb any more
         // until the children have initialized, so it's safe to initialize at whatever the max
         // absorbed ts was amongst all parents.
+        //
+        // TODO: fix wrong init_ts for new nodes that only depend on other new nodes
         new.iter()
             .map(|&n| {
                 self.graph
@@ -332,7 +345,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     .map(|p| max_absorbed[&p])
                     .max()
                     .map(move |init_ts| (n, init_ts))
-                    .unwrap_or((n, 0)) // base nodes can init at any time
+                    .or(latest.clone().map(|m| (n, m))) // base nodes are fully up-to-date
+                    .unwrap_or((n, 0)) // if there are no nodes, up-to-date is 0
             })
             .collect()
     }
@@ -495,8 +509,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         let mut min = 0i64;
         let mut desc_min: Option<(usize, i64)> = None;
 
-        // TODO
-        assert_eq!(init_ts, 0);
+        if init_ts != 0 {
+            inner.init_at(init_ts, &aqfs);
+            processed_ts.store(init_ts as isize, sync::atomic::Ordering::Release);
+        }
 
         for (src, u, ts) in input.into_iter() {
             assert!(ts >= min);
@@ -662,12 +678,16 @@ mod tests {
         type Params = ();
 
         fn find(&self,
-                _: &HashMap<NodeIndex,
-                            Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
+                aqf: &HashMap<NodeIndex,
+                              Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
                 _: Option<()>,
                 _: Option<i64>)
                 -> Vec<Self::Data> {
-            vec![*self.1.lock().unwrap()]
+            if aqf.len() == 0 {
+                vec![*self.1.lock().unwrap()]
+            } else {
+                vec![aqf.values().map(|f| f((), 0)[0]).sum()]
+            }
         }
 
         fn process(&self,
@@ -685,6 +705,19 @@ mod tests {
 
         fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
             HashMap::new()
+        }
+
+        fn init_at(&self,
+                   init_ts: i64,
+                   aqf: &HashMap<NodeIndex,
+                                 Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>) {
+            if aqf.len() == 0 {
+                // base table is already initialized
+                return;
+            }
+
+            let mut x = self.1.lock().unwrap();
+            *x = self.find(aqf, None, None)[0];
         }
 
         fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -858,7 +891,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn migration_initialization() {
         // set up graph
         let mut g = FlowGraph::new();
