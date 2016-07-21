@@ -436,6 +436,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             .filter(|n| !self.contexts.contains_key(n))
             .collect::<HashSet<_>>();
 
+        // TODO: transform the graph to aid in view re-use
+
         // create an entry in the min map for each new node to track how up-to-date it is
         for node in new.iter() {
             self.mins.insert(*node, sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
