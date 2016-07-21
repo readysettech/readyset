@@ -516,7 +516,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
 
     fn inner(state: NodeState<Q, U, D, P>) {
-        let NodeState { name, inner, srcs, input, aqfs, context, processed_ts, init_ts } = state;
+        let NodeState { name: _name, inner, srcs, input, aqfs, context, processed_ts, init_ts } =
+            state;
 
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
@@ -722,7 +723,7 @@ mod tests {
         }
 
         fn init_at(&self,
-                   init_ts: i64,
+                   _: i64,
                    aqf: &HashMap<NodeIndex,
                                  Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>) {
             if aqf.len() == 0 {
