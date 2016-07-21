@@ -1,5 +1,6 @@
 pub mod base;
 pub mod aggregate;
+pub mod latest;
 pub mod join;
 pub mod union;
 

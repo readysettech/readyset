@@ -117,7 +117,7 @@ impl BufferedStore {
     /// Completes in `O(Store::find + b)` where `b` is the number of records in the backlog whose
     /// timestamp fall at or before the given timestamp.
     pub fn find<'a>(&'a self,
-                    conds: &'a [shortcut::cmp::Condition<query::DataType>],
+                    conds: &[shortcut::cmp::Condition<query::DataType>],
                     including: Option<i64>)
                     -> Vec<&'a [query::DataType]> {
         // okay, so we want to:

@@ -6,7 +6,7 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 [dependencies]
 petgraph = "0.2"
 bus = "1.0.0"
-shortcut = "3.2.1"
+shortcut = "3.3"
 clocked-dispatch = "2.1"
 parking_lot = {version = "0.2", features = ["nightly"]}
 
