@@ -336,19 +336,33 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         // until the children have initialized, so it's safe to initialize at whatever the max
         // absorbed ts was amongst all parents.
         //
-        // TODO: fix wrong init_ts for new nodes that only depend on other new nodes
-        new.iter()
-            .map(|&n| {
-                self.graph
-                    .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
-                    .filter(|&n| n != self.source)
-                    .map(|p| max_absorbed[&p])
-                    .max()
-                    .map(move |init_ts| (n, init_ts))
-                    .or(latest.clone().map(|m| (n, m))) // base nodes are fully up-to-date
-                    .unwrap_or((n, 0)) // if there are no nodes, up-to-date is 0
-            })
-            .collect()
+        // we need to iterate through the nodes in BFS order so that we can set max_absorbed for
+        // the new nodes along the way. if we didn't, new nodes that only depend on other new nodes
+        // would observe only max_absorbed[..] = 0 and hence would see their init_ts at 0. this is
+        // not correct. and furthermore, even if those new nodes *tried* to init at that time, they
+        // would fail, because that time would be in the absorbed state.
+        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+            if !new.contains(&node) {
+                continue;
+            }
+
+            let may_find_at = self.graph
+                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                .filter(|&n| n != self.source)
+                .map(|p| max_absorbed[&p])
+                .max()
+                .or(latest.clone()); // base nodes are fully up-to-date
+
+            if let Some(ts) = may_find_at {
+                max_absorbed.insert(node, ts);
+            } else {
+                // None would be if there were no previous nodes (and so latest wasn't set).
+                // in that case, the correct value for max_absorbed is 0, which is what it'll
+                // already be.
+            }
+        }
+
+        new.iter().map(|&n| (n, max_absorbed.remove(&n).unwrap())).collect()
     }
 
     /// Builds the ancestor query function for all nodes.

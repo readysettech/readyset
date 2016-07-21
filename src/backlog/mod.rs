@@ -138,8 +138,11 @@ impl BufferedStore {
         }
 
         let including = including.unwrap();
-        assert!(including >= self.absorbed);
+        if including == self.absorbed {
+            return self.store.find(conds).collect();
+        }
 
+        assert!(including > self.absorbed);
         let mut relevant = self.backlog
             .iter()
             .take_while(|&&(ts, _)| ts <= including)
