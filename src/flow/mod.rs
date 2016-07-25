@@ -689,6 +689,12 @@ mod tests {
     use std::collections::HashMap;
     struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
+    impl Counter {
+        pub fn new(name: &str) -> Counter {
+            Counter(name.into(), Default::default())
+        }
+    }
+
     impl View<()> for Counter {
         type Update = u32;
         type Data = u32;
@@ -757,7 +763,7 @@ mod tests {
     fn simple_graph() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
         let (put, get) = g.run(10);
 
         // send a value
@@ -783,10 +789,9 @@ mod tests {
     fn join_graph() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
-        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
-        let c = g.incorporate(Counter("c".into(), Default::default()),
-                              vec![((), a), ((), b)]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
         let (put, get) = g.run(10);
 
         // send a value on a
@@ -812,11 +817,10 @@ mod tests {
     fn join_and_forward() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
-        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
-        let c = g.incorporate(Counter("c".into(), Default::default()),
-                              vec![((), a), ((), b)]);
-        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), c)]);
         let (put, get) = g.run(10);
 
         // send a value on a
@@ -842,14 +846,13 @@ mod tests {
     fn disjoint_migration() {
         // set up graph
         let mut g = FlowGraph::new();
-        let _ = g.incorporate(Counter("x".into(), Default::default()), vec![]);
+        let _ = g.incorporate(Counter::new("x"), vec![]);
         let (_, _) = g.run(10);
 
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
-        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
-        let c = g.incorporate(Counter("c".into(), Default::default()),
-                              vec![((), a), ((), b)]);
-        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), c)]);
         let (put, get) = g.run(10);
 
         // send a value on a
@@ -875,14 +878,13 @@ mod tests {
     fn overlap_migration() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
-        let x = g.incorporate(Counter("x".into(), Default::default()), vec![((), a)]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let x = g.incorporate(Counter::new("x"), vec![((), a)]);
         let (put_1, get_1) = g.run(10);
 
-        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
-        let c = g.incorporate(Counter("c".into(), Default::default()),
-                              vec![((), a), ((), b)]);
-        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), c)]);
         let (put, get) = g.run(10);
 
         // send a value on a
@@ -911,8 +913,8 @@ mod tests {
     fn migration_initialization() {
         // set up graph
         let mut g = FlowGraph::new();
-        let a = g.incorporate(Counter("a".into(), Default::default()), vec![]);
-        let x = g.incorporate(Counter("x".into(), Default::default()), vec![((), a)]);
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let x = g.incorporate(Counter::new("x"), vec![((), a)]);
         let (put_1, get_1) = g.run(10);
 
         // send a value on a
@@ -925,10 +927,9 @@ mod tests {
         assert_eq!(get_1[&x](None), vec![1]);
 
         // perform migration
-        let b = g.incorporate(Counter("b".into(), Default::default()), vec![]);
-        let c = g.incorporate(Counter("c".into(), Default::default()),
-                              vec![((), a), ((), b)]);
-        let d = g.incorporate(Counter("d".into(), Default::default()), vec![((), c)]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), c)]);
         let (put, get) = g.run(10);
 
         // check that new views see old data
