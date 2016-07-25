@@ -917,7 +917,7 @@ mod tests {
         // set up graph
         let mut g = FlowGraph::new();
         let _ = g.incorporate(Counter::new("x"), vec![]);
-        let (_, _) = g.run(10);
+        let (_p, _g) = g.run(10);
 
         let a = g.incorporate(Counter::new("a"), vec![]);
         let b = g.incorporate(Counter::new("b"), vec![]);
@@ -935,13 +935,13 @@ mod tests {
         assert_eq!(get[&d](None), vec![1]);
 
         // update value again
-        put[&b].send(1);
+        put[&b].send(2);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that value was updated again
-        assert_eq!(get[&d](None), vec![2]);
+        assert_eq!(get[&d](None), vec![3]);
     }
 
     #[test]
@@ -1001,6 +1001,9 @@ mod tests {
         let c = g.incorporate(Counter::new("c"), vec![((), a), ((), b)]);
         let d = g.incorporate(Counter::new("d"), vec![((), c)]);
         let (put, get) = g.run(10);
+
+        // give it some time to initialize
+        thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that new views see old data
         assert_eq!(get[&d](None), vec![1]);
