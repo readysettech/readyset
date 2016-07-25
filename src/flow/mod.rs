@@ -518,6 +518,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
 
     fn inner(state: NodeState<Q, U, D, P>) {
+        use std::collections::VecDeque;
+
         let NodeState { name: _name, inner, srcs, input, aqfs, context, processed_ts, init_ts } =
             state;
 
@@ -526,13 +528,81 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         let mut min = 0i64;
         let mut desc_min: Option<(usize, i64)> = None;
 
+        // if there are queued items that we missed during migration, we want to handle those
+        // first. however, we also don't want to completely block the sender either. we'd instead
+        // like to apply smooth back pressure to the node above us. we do this by processing two
+        // updates from the queue for every one we read from the incoming channel. note that
+        // reading from the channel just entails adding to the back of the queue (since we need to
+        // process in order).
+        let mut missed = VecDeque::new();
+        let mut siphon = false;
+
         if init_ts != 0 {
-            inner.init_at(init_ts, &aqfs);
-            processed_ts.store(init_ts as isize, sync::atomic::Ordering::Release);
+            let mig_done = sync::Arc::new(sync::atomic::AtomicBool::new(false));
+
+            // spin off the migration in a separate thread so we don't block our upstream
+            let aqfs_cp = aqfs.clone();
+            let inner_cp = inner.clone();
+            let mig_done_cp = mig_done.clone();
+            let proc_ts = processed_ts.clone();
+
+            let mig = thread::spawn(move || {
+                inner_cp.init_at(init_ts, &aqfs_cp);
+                proc_ts.store(init_ts as isize, sync::atomic::Ordering::Release);
+                mig_done_cp.store(true, sync::atomic::Ordering::SeqCst);
+            });
+
+            // we now want to wait for the migration to be done, but also receive anything on our
+            // incoming channel. once the migration is done, we want to start processing normally.
+            // there is, unfortunately, no neat way to achieve this currently, as Rust doesn't
+            // currently have a good select!() mechanism, which would allow us to have the
+            // migration thread send us a message on some one-off channel when it was done. and
+            // even if it did, clocked-dispatch doesn't currently support it.
+            //
+            // so, we instead resort to good-ol' polling.
+            while !mig_done.load(sync::atomic::Ordering::SeqCst) {
+                use std::sync::mpsc;
+                match input.try_recv() {
+                    Ok(x) => missed.push_back(x),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // there are no more things
+                        // we're just waiting for migration to finish
+                        // then we need to process the backlog
+                        // and then we can finish
+                        // no need to keep trying to receive
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // wait and try again
+                        thread::yield_now();
+                    }
+                }
+            }
+
+            mig.join().unwrap();
         }
 
-        for (src, u, ts) in input.into_iter() {
+        'rx: while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
             assert!(ts >= min);
+
+            // for every two updates we process, we want to receive once from our input, to avoid
+            // blocking our upstream completely. we do this by alternating a flag, only reading
+            // from our input when the flag is true (and we still have a backlog).
+            if !missed.is_empty() {
+                if siphon {
+                    // we didn't receive last time through, so we'll receive now. there might be
+                    // nothing for us, in which case we might as well use the time to keep
+                    // processing our backlog instead.
+                    if let Ok(x) = input.try_recv() {
+                        missed.push_back(x);
+                    }
+                    siphon = false;
+                } else {
+                    // we received last time, so to achieve the 2:1 ratio, we shouldn't receive
+                    // this time. instead, just set the flag so we'll receive next time.
+                    siphon = true;
+                }
+            }
 
             if ts == min {
                 let u = u.and_then(|u| inner.process(u, src, ts, &aqfs));
