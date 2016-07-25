@@ -113,7 +113,7 @@ fn it_migrates_wo_mat() {
     put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // add more of graph
     let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
@@ -131,6 +131,9 @@ fn it_migrates_wo_mat() {
                           vec![(q.clone(), a), (q, b)]);
     let (put, get) = g.run(10);
 
+    // wait a bit for initialization
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
     // send a query to c
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
 
@@ -138,7 +141,7 @@ fn it_migrates_wo_mat() {
     put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
     let res = get[&c](None);
@@ -264,7 +267,7 @@ fn votes() {
     put[&article1].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query articles to see that it was absorbed
     assert_eq!(get[&article](None), vec![vec![1.into(), 2.into()]]);
@@ -273,7 +276,7 @@ fn votes() {
     put[&article2].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
@@ -298,7 +301,7 @@ fn votes() {
     put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // this is stupid, but because the system is eventually consistent, we also need to inject two
     // extra updates. one to advances the global min such that the vote above is visible, and
@@ -306,10 +309,10 @@ fn votes() {
     // means that the different nodes may *or may not* see the middle vote.
     put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 1.into()])]));
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
     put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![0.into(), 1.into()])]));
     // give it too some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query vote count to see that the count was updated
     let res = get[&vc](None);
