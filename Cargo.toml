@@ -10,7 +10,6 @@ shortcut = "3.3"
 clocked-dispatch = "2.1"
 parking_lot = {version = "0.2", features = ["nightly"]}
 
-criterion = { git = "https://github.com/japaric/criterion.rs.git" }
 docopt = "0.6"
 rand = "0.3"
 randomkit = "0.1.0"
