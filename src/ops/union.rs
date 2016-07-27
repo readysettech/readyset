@@ -36,16 +36,16 @@ impl NodeOp for Union {
             ops::Update::Records(rs) => {
                 Some(ops::Update::Records(rs.into_iter()
                     .map(|rec| {
-                        let (r, pos) = rec.extract();
+                        let (r, pos, ts) = rec.extract();
 
                         // yield selected columns for this source
                         let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
 
                         // return new row with appropriate sign
                         if pos {
-                            ops::Record::Positive(res)
+                            ops::Record::Positive(res, ts)
                         } else {
-                            ops::Record::Negative(res)
+                            ops::Record::Negative(res, ts)
                         }
                     })
                     .collect()))
@@ -96,12 +96,12 @@ impl NodeOp for Union {
                 let emit = &self.emit[&src];
                 (aqfs[&src])(params, ts).into_iter()
                 // XXX: the clone here is really sad
-                .map(move |r| emit.iter().map(|ci| r[*ci].clone()).collect::<Vec<_>>())
+                .map(move |(r, ts)| (emit.iter().map(|ci| r[*ci].clone()).collect::<Vec<_>>(), ts))
             })
-            .filter_map(move |r| if let Some(ref q) = q {
-                q.feed(&r[..])
+            .filter_map(move |(r, ts)| if let Some(ref q) = q {
+                q.feed(&r[..]).map(move |r| (r, ts))
             } else {
-                Some(r)
+                Some((r, ts))
             })
             .collect()
     }
@@ -152,7 +152,7 @@ mod tests {
         let left = vec![1.into(), "a".into()];
         match u.forward(left.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(left)]);
+                assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
             }
         }
 
@@ -160,7 +160,8 @@ mod tests {
         let right = vec![1.into(), "skipped".into(), "x".into()];
         match u.forward(right.clone().into(), 1.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()])]);
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);
             }
         }
     }
@@ -176,9 +177,9 @@ mod tests {
         // [a, b, x]
         let hits = u.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameters matching on both sides
         let q = query::Query::new(&[true, true],
@@ -189,8 +190,8 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter matching only on left
         let q = query::Query::new(&[true, true],
@@ -201,7 +202,7 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into()));
 
         // query with parameter matching only on right
         let q = query::Query::new(&[true, true],
@@ -212,7 +213,7 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter with no matches
         let q = query::Query::new(&[true, true],
@@ -225,10 +226,10 @@ mod tests {
         assert_eq!(hits.len(), 0);
     }
 
-    fn left(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
+    fn left(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
         let data = vec![
-                vec![1.into(), "a".into()],
-                vec![2.into(), "b".into()],
+                (vec![1.into(), "a".into()], 0),
+                (vec![2.into(), "b".into()], 1),
             ];
 
         assert_eq!(p.len(), 2);
@@ -245,12 +246,12 @@ mod tests {
                          },
             ]);
 
-        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
     }
 
-    fn right(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
+    fn right(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
         let data = vec![
-                vec![1.into(), "skipped".into(), "x".into()],
+                (vec![1.into(), "skipped".into(), "x".into()], 2),
             ];
 
         assert_eq!(p.len(), 3);
@@ -269,7 +270,7 @@ mod tests {
                                            cmp: shortcut::Comparison::Equal(p.next().unwrap()),
                                        }]);
 
-        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
     }
 
     #[test]

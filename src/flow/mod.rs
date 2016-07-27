@@ -23,10 +23,11 @@ pub trait View<Q: Clone + Send> {
 
     /// Execute a single concrete query, producing an iterator over all matching records.
     fn find<'a>(&'a self,
-                &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
+                &HashMap<NodeIndex,
+                         Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>,
                 Option<Q>,
                 Option<i64>)
-                -> Vec<Self::Data>;
+                -> Vec<(Self::Data, i64)>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -34,7 +35,8 @@ pub trait View<Q: Clone + Send> {
                Self::Update,
                NodeIndex,
                i64,
-               &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>)
+               &HashMap<NodeIndex,
+                        Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
                -> Option<Self::Update>;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
@@ -58,7 +60,8 @@ pub trait View<Q: Clone + Send> {
     /// subsequent updates at timestamps after the given initialization timestamp.
     fn init_at(&self,
                i64,
-               &HashMap<NodeIndex, Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>);
+               &HashMap<NodeIndex,
+                        Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>);
 }
 
 pub trait FillableQuery {
@@ -88,7 +91,7 @@ struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Se
     inner: sync::Arc<View<Q, Update = U, Data = D, Params = P> + Send + Sync>,
     srcs: Vec<NodeIndex>,
     input: mpsc::Receiver<(NodeIndex, Option<U>, i64)>,
-    aqfs: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<D> + Send + Sync>>>,
+    aqfs: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<(D, i64)> + Send + Sync>>>,
     context: SharedContext<U>,
     processed_ts: sync::Arc<sync::atomic::AtomicIsize>,
     init_ts: i64,
@@ -381,7 +384,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     fn make_aqfs(&self)
                  -> HashMap<NodeIndex,
                             sync::Arc<HashMap<NodeIndex,
-                                              Box<Fn(P, i64) -> Vec<D> + 'static + Send + Sync>>>> {
+                                              Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>>>> {
         // TODO: technically we could re-use aqfs for "old" nodes
         let mut aqfs = HashMap::new();
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
@@ -411,7 +414,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     // find the ancestor query functions for the ancestor's .query
                     let aqf = aqfs[&ni].clone();
                     // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |p: P, ts: i64| -> Vec<D> {
+                    let f = Box::new(move |p: P, ts: i64| -> Vec<(D, i64)> {
                         let mut q_cur = (*q).clone();
                         q_cur.fill(p);
                         if ts != i64::max_value() {
@@ -420,7 +423,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                             }
                         }
                         a.find(&aqf, Some(q_cur), Some(ts))
-                    }) as Box<Fn(P, i64) -> Vec<D> + 'static + Send + Sync>;
+                    }) as Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>;
                     (ni, f)
                 })
                 .collect();
@@ -486,7 +489,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let aqf = aqf.clone();
             let n = self.graph[*node].as_ref().unwrap().clone();
             let func = Box::new(move |q: Option<Q>| -> Vec<D> {
-                n.find(&aqf, q, None)
+                n.find(&aqf, q, None).into_iter().map(|(r, _)| r).collect()
             }) as Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>;
 
             qs.insert(*node, func);
@@ -777,14 +780,14 @@ mod tests {
 
         fn find(&self,
                 aqf: &HashMap<NodeIndex,
-                              Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>,
+                              Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>,
                 _: Option<()>,
                 _: Option<i64>)
-                -> Vec<Self::Data> {
+                -> Vec<(Self::Data, i64)> {
             if aqf.len() == 0 {
-                vec![*self.1.lock().unwrap()]
+                vec![(*self.1.lock().unwrap(), 0)]
             } else {
-                vec![aqf.values().map(|f| f((), 0)[0]).sum()]
+                vec![(aqf.values().map(|f| f((), 0)[0].0).sum(), 0)]
             }
         }
 
@@ -793,7 +796,7 @@ mod tests {
                    _: NodeIndex,
                    _: i64,
                    _: &HashMap<NodeIndex,
-                               Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>)
+                               Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
                    -> Option<Self::Update> {
             use std::ops::AddAssign;
             let mut x = self.1.lock().unwrap();
@@ -808,14 +811,14 @@ mod tests {
         fn init_at(&self,
                    _: i64,
                    aqf: &HashMap<NodeIndex,
-                                 Box<Fn(Self::Params, i64) -> Vec<Self::Data> + Send + Sync>>) {
+                                 Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>) {
             if aqf.len() == 0 {
                 // base table is already initialized
                 return;
             }
 
             let mut x = self.1.lock().unwrap();
-            *x = self.find(aqf, None, None)[0];
+            *x = self.find(aqf, None, None)[0].0;
         }
 
         fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {

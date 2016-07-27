@@ -101,7 +101,8 @@ impl NodeOp for Latest {
 
                     // if there was a previous latest for this key, revoke old record
                     if let Some(current) = current {
-                        out.push(ops::Record::Negative(current.iter().cloned().collect()));
+                        out.push(ops::Record::Negative(current.0.iter().cloned().collect(),
+                                                       current.1));
                     }
                     out.push(r);
                 }
@@ -111,7 +112,7 @@ impl NodeOp for Latest {
                 // handled groups above, and this loop here. maybe just kill it?
                 for r in neg.into_iter() {
                     // we can swap_remove here because we know self.keys is in reverse sorted order
-                    let (mut r, _) = r.extract();
+                    let (mut r, _, _) = r.extract();
                     let group: Vec<_> = self.key.iter().map(|&i| r.swap_remove(i)).collect();
                     assert!(handled.contains(&group));
                 }
@@ -154,7 +155,7 @@ mod tests {
         let src = flow::NodeIndex::new(0);
 
         let c = Latest::new(src, vec![0]);
-        let u = vec![1.into(), 1.into()].into();
+        let u = (vec![1.into(), 1.into()], 0).into();
 
         // first record for a group should emit just a positive
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -163,11 +164,11 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r)], 0);
+                    s.add(vec![ops::Record::Positive(r, ts)], 0);
                     s.absorb(0);
                 }
                 _ => unreachable!(),
@@ -176,7 +177,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = vec![2.into(), 2.into()].into();
+        let u = (vec![2.into(), 2.into()], 1).into();
 
         // first record for a second group should also emit just a positive
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -185,11 +186,11 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 2.into());
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r)], 1);
+                    s.add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -198,7 +199,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = vec![1.into(), 2.into()].into();
+        let u = (vec![1.into(), 2.into()], 2).into();
 
         // new record for existing group should revoke the old latest, and emit the new
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -207,20 +208,20 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r)], 2);
+                    s.add(vec![ops::Record::Negative(r, ts)], 2);
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                     // add to store
-                    s.add(vec![ops::Record::Positive(r)], 3);
+                    s.add(vec![ops::Record::Positive(r, ts)], 3);
                     s.absorb(3);
                 }
                 _ => unreachable!(),
@@ -230,27 +231,28 @@ mod tests {
         }
 
         let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into()]),
-             ops::Record::Negative(vec![1.into(), 2.into()]),
-             ops::Record::Positive(vec![1.into(), 3.into()]),
-             ops::Record::Negative(vec![2.into(), 2.into()]),
-             ops::Record::Positive(vec![2.into(), 4.into()]),
+             ops::Record::Negative(vec![1.into(), 1.into()], 0),
+             ops::Record::Negative(vec![1.into(), 2.into()], 2),
+             ops::Record::Positive(vec![1.into(), 3.into()], 3),
+             ops::Record::Negative(vec![2.into(), 2.into()], 1),
+             ops::Record::Positive(vec![2.into(), 4.into()], 3),
         ]);
 
         // negatives and positives should still result in only one new current for each group
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
+        // TODO: check output ts
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[0] == 1.into() && r[1] == 2.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[0] == 1.into() && r[1] == 3.into()
                 } else {
                     false
@@ -258,14 +260,14 @@ mod tests {
             }));
             // group 2 lost 2 and gained 4
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[0] == 2.into() && r[1] == 2.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[0] == 2.into() && r[1] == 4.into()
                 } else {
                     false
@@ -283,26 +285,28 @@ mod tests {
 
         let c = Latest::new(src, vec![0, 1]);
 
-        let u = vec![1.into(), 1.into(), 1.into()].into();
+        let u = (vec![1.into(), 1.into(), 1.into()], 0).into();
+
         if let Some(ops::Update::Records(rs)) = c.forward(u, src, 0, Some(&s), &HashMap::new()) {
             s.add(rs, 1);
             s.absorb(1);
         }
 
         // first record for a second group should also emit just a positive
-        let u = vec![1.into(), 2.into(), 2.into()].into();
+        let u = (vec![1.into(), 2.into(), 2.into()], 1).into();
+
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                     assert_eq!(r[2], 2.into());
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r)], 2);
+                    s.add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
@@ -311,7 +315,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = vec![1.into(), 1.into(), 2.into()].into();
+        let u = (vec![1.into(), 1.into(), 2.into()], 2).into();
 
         // new record for existing group should revoke the old latest, and emit the new
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -320,22 +324,22 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(r[2], 1.into());
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r)], 3);
+                    s.add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(r[2], 2.into());
                     // add to store
-                    s.add(vec![ops::Record::Positive(r)], 4);
+                    s.add(vec![ops::Record::Positive(r, ts)], 4);
                     s.absorb(4);
                 }
                 _ => unreachable!(),
@@ -345,11 +349,11 @@ mod tests {
         }
 
         let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into(), 1.into()]),
-             ops::Record::Negative(vec![1.into(), 1.into(), 2.into()]),
-             ops::Record::Positive(vec![1.into(), 1.into(), 3.into()]),
-             ops::Record::Negative(vec![1.into(), 2.into(), 2.into()]),
-             ops::Record::Positive(vec![1.into(), 2.into(), 4.into()]),
+             ops::Record::Negative(vec![1.into(), 1.into(), 1.into()], 0),
+             ops::Record::Negative(vec![1.into(), 1.into(), 2.into()], 2),
+             ops::Record::Positive(vec![1.into(), 1.into(), 3.into()], 3),
+             ops::Record::Negative(vec![1.into(), 2.into(), 2.into()], 1),
+             ops::Record::Positive(vec![1.into(), 2.into(), 4.into()], 3),
         ]);
 
         // negatives and positives should still result in only one new current for each group
@@ -358,14 +362,14 @@ mod tests {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[1] == 1.into() && r[2] == 2.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[1] == 1.into() && r[2] == 3.into()
                 } else {
                     false
@@ -373,14 +377,14 @@ mod tests {
             }));
             // group 2 lost 2 and gained 4
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[1] == 2.into() && r[2] == 2.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[1] == 2.into() && r[2] == 4.into()
                 } else {
                     false

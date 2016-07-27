@@ -15,15 +15,15 @@ use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Record {
-    Positive(Vec<query::DataType>),
-    Negative(Vec<query::DataType>),
+    Positive(Vec<query::DataType>, i64),
+    Negative(Vec<query::DataType>, i64),
 }
 
 impl Record {
     pub fn rec(&self) -> &[query::DataType] {
         match *self {
-            Record::Positive(ref v) => &v[..],
-            Record::Negative(ref v) => &v[..],
+            Record::Positive(ref v, _) => &v[..],
+            Record::Negative(ref v, _) => &v[..],
         }
     }
 
@@ -35,17 +35,30 @@ impl Record {
         }
     }
 
-    pub fn extract(self) -> (Vec<query::DataType>, bool) {
-        match self {
-            Record::Positive(v) => (v, true),
-            Record::Negative(v) => (v, false),
+    pub fn ts(&self) -> i64 {
+        match *self {
+            Record::Positive(_, ts) => ts,
+            Record::Negative(_, ts) => ts,
         }
+    }
+
+    pub fn extract(self) -> (Vec<query::DataType>, bool, i64) {
+        match self {
+            Record::Positive(v, ts) => (v, true, ts),
+            Record::Negative(v, ts) => (v, false, ts),
+        }
+    }
+}
+
+impl From<(Vec<query::DataType>, i64)> for Record {
+    fn from(other: (Vec<query::DataType>, i64)) -> Self {
+        Record::Positive(other.0, other.1)
     }
 }
 
 impl From<Vec<query::DataType>> for Record {
     fn from(other: Vec<query::DataType>) -> Self {
-        Record::Positive(other)
+        (other, 0).into()
     }
 }
 
@@ -66,10 +79,16 @@ impl From<Vec<query::DataType>> for Update {
     }
 }
 
+impl From<(Vec<query::DataType>, i64)> for Update {
+    fn from(other: (Vec<query::DataType>, i64)) -> Self {
+        Update::Records(vec![other.into()])
+    }
+}
+
 pub type Params = Vec<shortcut::Value<query::DataType>>;
 pub type AQ = HashMap<flow::NodeIndex,
-                      Box<Fn(Params, i64) -> Vec<Vec<query::DataType>> + Send + Sync>>;
-pub type Datas = Vec<Vec<query::DataType>>;
+                      Box<Fn(Params, i64) -> Vec<(Vec<query::DataType>, i64)> + Send + Sync>>;
+pub type Datas = Vec<(Vec<query::DataType>, i64)>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
 /// `flow::View`, and for good reason. This is effectively the behavior of a node when there is no
@@ -120,17 +139,20 @@ impl<O> flow::View<query::Query> for Node<O>
     type Data = Vec<query::DataType>;
     type Params = Params;
 
-    fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<Self::Data> {
+    fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
             let rlock = data.read();
             if let Some(ref q) = q {
                 rlock.find(&q.having[..], ts)
                     .into_iter()
-                    .map(|r| q.project(r))
+                    .map(|(r, ts)| (q.project(r), ts))
                     .collect()
             } else {
-                rlock.find(&[], ts).into_iter().map(|r| r.iter().cloned().collect()).collect()
+                rlock.find(&[], ts)
+                    .into_iter()
+                    .map(|(r, ts)| (r.iter().cloned().collect(), ts))
+                    .collect()
             }
         } else {
             // we are not materialized --- query.
@@ -249,9 +271,10 @@ mod tests {
             // forward
             match u {
                 Update::Records(mut rs) => {
-                    if let Some(Record::Positive(r)) = rs.pop() {
+                    if let Some(Record::Positive(r, ts)) = rs.pop() {
                         if let query::DataType::Number(r) = r[0] {
-                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()])]))
+                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()],
+                                                                       ts)]))
                         } else {
                             unreachable!();
                         }
@@ -266,9 +289,9 @@ mod tests {
             // query all ancestors, emit r + c for each
             let rs = aqs.iter().flat_map(|(_, aq)| aq(vec![], ts));
             let c = self.0;
-            rs.map(move |r| {
+            rs.map(move |(r, ts)| {
                     if let query::DataType::Number(r) = r[0] {
-                        vec![(r + c).into()]
+                        (vec![(r + c).into()], ts)
                     } else {
                         unreachable!();
                     }

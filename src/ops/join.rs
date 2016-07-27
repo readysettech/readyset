@@ -36,23 +36,25 @@ impl Joiner {
     }
 
     fn join<'a>(&'a self,
-                left: Vec<query::DataType>,
+                left: (Vec<query::DataType>, i64),
                 on: &'a (flow::NodeIndex, Vec<usize>),
                 ts: i64,
                 aqfs: &ops::AQ)
-                -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
+                -> Box<Iterator<Item = (Vec<query::DataType>, i64)> + 'a> {
         // figure out the join values for this record
         let params = on.1
             .iter()
-            .map(|col| shortcut::Value::Const(left[*col].clone()))
+            .map(|col| shortcut::Value::Const(left.0[*col].clone()))
             .collect();
 
         // send the parameters to start the query.
         let rx = (*aqfs[&on.0])(params, ts);
 
-        Box::new(rx.into_iter().map(move |right| {
+        Box::new(rx.into_iter().map(move |(right, rts)| {
+            use std::cmp;
+
             // weave together r and j according to join rules
-            self.emit
+            let r = self.emit
                 .iter()
                 .map(|&(source, column)| {
                     if source == on.0 {
@@ -64,10 +66,21 @@ impl Joiner {
                         // later column. ugh.
                         right[column].clone()
                     } else {
-                        left[column].clone()
+                        left.0[column].clone()
                     }
                 })
-                .collect()
+                .collect();
+
+            // we need to be careful here.
+            // we want to emit a record with the *same* timestamp regardless of which side of the
+            // join is left and right. this is particularly important when the left is a negative,
+            // because we want the resulting negative records to have the same timestamp as the
+            // original positive we sent. however, the original positive *could* have been produced
+            // by a right, not a left. in that case, the positive has the timestamp of the right!
+            // we solve this by making the output timestamp always be the max of the left and
+            // right, as this must be the timestamp that resulted in the join output in the first
+            // place.
+            (r, cmp::max(left.1, rts))
         }))
     }
 }
@@ -98,14 +111,14 @@ impl NodeOp for Joiner {
                 // instead of once per received record.
                 Some(ops::Update::Records(rs.into_iter()
                     .flat_map(|rec| {
-                        let (r, pos) = rec.extract();
+                        let (r, pos, lts) = rec.extract();
 
-                        self.join(r, join, ts - 1, aqfs).map(move |res| {
+                        self.join((r, lts), join, ts, aqfs).map(move |(res, ts)| {
                             // return new row with appropriate sign
                             if pos {
-                                ops::Record::Positive(res)
+                                ops::Record::Positive(res, ts)
                             } else {
-                                ops::Record::Negative(res)
+                                ops::Record::Negative(res, ts)
                             }
                         })
                     })
@@ -177,11 +190,11 @@ impl NodeOp for Joiner {
                 // TODO: respect q.select
                 self.join(left, on, ts, &*aqfs2)
             })
-            .filter_map(move |r| {
+            .filter_map(move |(r, ts)| {
                 if let Some(ref q) = q {
-                    q.feed(&r[..]) // XXX: unnecessary to do a copy here, no?
+                    q.feed(&r[..]).map(|r| (r, ts))
                 } else {
-                    Some(r)
+                    Some((r, ts))
                 }
             })
             .collect()
@@ -279,7 +292,7 @@ mod tests {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
+                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 2)]);
             }
         }
 
@@ -295,6 +308,7 @@ mod tests {
                 // and both join results should be present
                 assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
                 assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
+                // TODO r.ts()
             }
         }
 
@@ -312,9 +326,13 @@ mod tests {
         // [ax, ay, bz]
         let hits = j.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+        // TODO: test output ts
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using join field
         let q = query::Query::new(&[true, true, true],
@@ -325,7 +343,8 @@ mod tests {
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using field from left
         let q = query::Query::new(&[true, true, true],
@@ -336,8 +355,10 @@ mod tests {
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
 
         // query using field from right
         let q = query::Query::new(&[true, true, true],
@@ -348,14 +369,15 @@ mod tests {
 
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
     }
 
-    fn left(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
+    fn left(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
         let data = vec![
-                vec![1.into(), "a".into()],
-                vec![2.into(), "b".into()],
-                vec![3.into(), "c".into()],
+                (vec![1.into(), "a".into()], 0),
+                (vec![2.into(), "b".into()], 1),
+                (vec![3.into(), "c".into()], 2),
             ];
 
         assert_eq!(p.len(), 1);
@@ -366,14 +388,14 @@ mod tests {
                                            cmp: shortcut::Comparison::Equal(p),
                                        }]);
 
-        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
     }
 
-    fn right(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
+    fn right(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
         let data = vec![
-                vec![1.into(), "x".into()],
-                vec![1.into(), "y".into()],
-                vec![2.into(), "z".into()],
+                (vec![1.into(), "x".into()], 0),
+                (vec![1.into(), "y".into()], 1),
+                (vec![2.into(), "z".into()], 2),
             ];
 
         assert_eq!(p.len(), 1);
@@ -384,7 +406,7 @@ mod tests {
                                            cmp: shortcut::Comparison::Equal(p),
                                        }]);
 
-        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
     }
 
     #[test]

@@ -10,12 +10,24 @@ pub struct Base {}
 
 impl NodeOp for Base {
     fn forward(&self,
-               u: ops::Update,
+               mut u: ops::Update,
                _: flow::NodeIndex,
-               _: i64,
+               ts: i64,
                _: Option<&backlog::BufferedStore>,
                _: &ops::AQ)
                -> Option<ops::Update> {
+
+        // basically our only job is to record timestamps
+        match u {
+            ops::Update::Records(ref mut rs) => {
+                for r in rs.iter_mut() {
+                    match *r {
+                        ops::Record::Positive(_, ref mut rts) => *rts = ts,
+                        ops::Record::Negative(_, ref mut rts) => *rts = ts,
+                    }
+                }
+            }
+        }
         Some(u)
     }
 

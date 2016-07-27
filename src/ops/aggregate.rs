@@ -79,14 +79,14 @@ impl NodeOp for Aggregator {
                 // execute two queries.
                 let mut consolidate = HashMap::new();
                 for rec in rs.into_iter() {
-                    let (r, pos) = rec.extract();
+                    let (r, pos, ts) = rec.extract();
                     let val = r[self.over].clone().into();
                     let group = r.into_iter()
                         .enumerate()
                         .filter(|&(i, _)| i != self.over)
                         .collect::<Vec<_>>();
 
-                    consolidate.entry(group).or_insert_with(Vec::new).push((val, pos));
+                    consolidate.entry(group).or_insert_with(Vec::new).push((val, pos, ts));
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
@@ -107,14 +107,14 @@ impl NodeOp for Aggregator {
                     }
 
                     // find the current value for this group
-                    let current = match db {
+                    let (current, old_ts) = match db {
                         Some(db) => {
                             let matches = db.find(&q[..], Some(i64::max_value()));
                             assert!(matches.len() <= 1, "aggregation had more than 1 result");
                             matches.into_iter()
                                 .next()
-                                .and_then(|r| Some(r[r.len() - 1].clone().into()))
-                                .unwrap_or(self.op.zero())
+                                .and_then(|(r, ts)| Some((r[r.len() - 1].clone().into(), ts)))
+                                .unwrap_or((self.op.zero(), 0))
                         }
                         None => {
                             // TODO
@@ -142,17 +142,18 @@ impl NodeOp for Aggregator {
 
                     // revoke old value
                     rec.push(current.into());
-                    out.push(ops::Record::Negative(rec.clone()));
+                    out.push(ops::Record::Negative(rec.clone(), old_ts));
 
                     // update value using self.op
+                    let new_ts = diffs.iter().map(|&(_, _, ts)| ts).max().unwrap();
                     let new = diffs.into_iter()
                         .fold(current,
-                              |current, (diff, is_pos)| self.op.update(current, diff, is_pos));
+                              |current, (diff, is_pos, _)| self.op.update(current, diff, is_pos));
 
                     // emit new value
                     rec.pop();
                     rec.push(new.into());
-                    out.push(ops::Record::Positive(rec));
+                    out.push(ops::Record::Positive(rec, new_ts));
                 }
 
                 Some(ops::Update::Records(out))
@@ -206,15 +207,18 @@ impl NodeOp for Aggregator {
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
         let mut consolidate = HashMap::new();
-        for rec in rx.into_iter() {
+        for (rec, ts) in rx.into_iter() {
+            use std::cmp;
+
             let (group, mut over): (_, Vec<_>) =
                 rec.into_iter().enumerate().partition(|&(fi, _)| fi != self.over);
             assert_eq!(over.len(), 1);
             let group = group.into_iter().map(|(_, v)| v).collect();
             let over = over.pop().unwrap().1.into();
 
-            let cur = consolidate.entry(group).or_insert(self.op.zero());
-            *cur = self.op.update(*cur, over, true);
+            let cur = consolidate.entry(group).or_insert((self.op.zero(), ts));
+            cur.0 = self.op.update(cur.0, over, true);
+            cur.1 = cmp::max(ts, cur.1);
         }
 
         if consolidate.is_empty() {
@@ -238,16 +242,16 @@ impl NodeOp for Aggregator {
                 if group.iter().all(|g| !g.is_none()) {
                     // we didn't match any groups, but all the group-by parameters are given.
                     // we can add a zero row!
-                    consolidate.insert(group, self.op.zero());
+                    consolidate.insert(group, (self.op.zero(), 0));
                 }
             }
         }
 
         consolidate.into_iter()
-            .map(|(mut group, over): (Vec<query::DataType>, i64)| {
+            .map(|(mut group, (over, ts)): (Vec<query::DataType>, (i64, i64))| {
                 group.push(over.into());
                 // TODO: respect q.select
-                group
+                (group, ts)
             })
             .collect()
     }
@@ -290,7 +294,7 @@ mod tests {
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
 
-        let u = vec![1.into(), 1.into()].into();
+        let u = (vec![1.into(), 1.into()], 0).into();
 
         // first row for a group should emit -0 and +1 for that group
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -299,17 +303,17 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, _) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 0.into());
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
-                    s.add(vec![ops::Record::Positive(r)], 0);
+                    s.add(vec![ops::Record::Positive(r, ts)], 0);
                     s.absorb(0);
                 }
                 _ => unreachable!(),
@@ -318,7 +322,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = vec![2.into(), 2.into()].into();
+        let u = (vec![2.into(), 2.into()], 1).into();
 
         // first row for a second group should emit -0 and +1 for that new group
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -327,17 +331,17 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, _) => {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 0.into());
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
-                    s.add(vec![ops::Record::Positive(r)], 1);
+                    s.add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -346,7 +350,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = vec![1.into(), 2.into()].into();
+        let u = (vec![1.into(), 2.into()], 2).into();
 
         // second row for a group should emit -1 and +2
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -355,14 +359,14 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, _) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, _) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                 }
@@ -372,7 +376,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Record::Negative(vec![1.into(), 1.into()]).into();
+        let u = ops::Record::Negative(vec![1.into(), 1.into()], 0).into();
 
         // negative row for a group should emit -1 and +0
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -381,14 +385,14 @@ mod tests {
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                ops::Record::Negative(r, _) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                ops::Record::Positive(r, _) => {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 0.into());
                 }
@@ -399,30 +403,31 @@ mod tests {
         }
 
         let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into()]),
-             ops::Record::Positive(vec![1.into(), 1.into()]),
-             ops::Record::Positive(vec![1.into(), 2.into()]),
-             ops::Record::Negative(vec![2.into(), 2.into()]),
-             ops::Record::Positive(vec![2.into(), 2.into()]),
-             ops::Record::Positive(vec![2.into(), 3.into()]),
-             ops::Record::Positive(vec![2.into(), 1.into()]),
-             ops::Record::Positive(vec![3.into(), 3.into()]),
+             ops::Record::Negative(vec![1.into(), 1.into()], 0),
+             ops::Record::Positive(vec![1.into(), 1.into()], 3),
+             ops::Record::Positive(vec![1.into(), 2.into()], 2),
+             ops::Record::Negative(vec![2.into(), 2.into()], 1),
+             ops::Record::Positive(vec![2.into(), 2.into()], 3),
+             ops::Record::Positive(vec![2.into(), 3.into()], 4),
+             ops::Record::Positive(vec![2.into(), 1.into()], 4),
+             ops::Record::Positive(vec![3.into(), 3.into()], 4),
         ]);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
+        // TODO: check for correct output ts'es
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[0] == 1.into() && r[1] == 1.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[0] == 1.into() && r[1] == 2.into()
                 } else {
                     false
@@ -430,14 +435,14 @@ mod tests {
             }));
             // group 2 lost 1 and gained 3
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[0] == 2.into() && r[1] == 1.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[0] == 2.into() && r[1] == 3.into()
                 } else {
                     false
@@ -445,14 +450,14 @@ mod tests {
             }));
             // group 3 lost 1 (well, 0) and gained 1
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r) = *r {
+                if let ops::Record::Negative(ref r, _) = *r {
                     r[0] == 3.into() && r[1] == 0.into()
                 } else {
                     false
                 }
             }));
             assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r) = *r {
+                if let ops::Record::Positive(ref r, _) = *r {
                     r[0] == 3.into() && r[1] == 1.into()
                 } else {
                     false
@@ -465,11 +470,11 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::Params, _: i64) -> Vec<Vec<query::DataType>> {
+    fn source(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
         let data = vec![
-                vec![1.into(), 1.into()],
-                vec![2.into(), 1.into()],
-                vec![2.into(), 2.into()],
+                (vec![1.into(), 1.into()], 0),
+                (vec![2.into(), 1.into()], 1),
+                (vec![2.into(), 2.into()], 2),
             ];
 
         assert_eq!(p.len(), 1);
@@ -480,7 +485,7 @@ mod tests {
                                            cmp: shortcut::Comparison::Equal(p),
                                        }]);
 
-        data.into_iter().filter_map(move |r| q.feed(&r[..])).collect()
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
     }
 
     #[test]
@@ -495,8 +500,8 @@ mod tests {
 
         let hits = c.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == 1.into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
 
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
@@ -506,7 +511,7 @@ mod tests {
 
         let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
@@ -527,7 +532,7 @@ mod tests {
 
         let hits = c.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 100.into() && r[1] == 0.into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 100.into() && r[1] == 0.into()));
     }
 
     #[test]
