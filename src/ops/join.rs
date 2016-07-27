@@ -306,9 +306,9 @@ mod tests {
                 // they should all have the correct values from the provided left
                 assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
                 // and both join results should be present
-                assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
-                assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
-                // TODO r.ts()
+                // with ts set to be the max of left and right
+                assert!(rs.iter().any(|r| r.rec()[2] == "x".into() && r.ts() == 0));
+                assert!(rs.iter().any(|r| r.rec()[2] == "y".into() && r.ts() == 1));
             }
         }
 
@@ -326,13 +326,18 @@ mod tests {
         // [ax, ay, bz]
         let hits = j.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 3);
-        // TODO: test output ts
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
+            .any(|&(ref r, ts)| {
+                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
+            }));
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
+            .any(|&(ref r, ts)| {
+                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
+            }));
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+            .any(|&(ref r, ts)| {
+                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
+            }));
 
         // query using join field
         let q = query::Query::new(&[true, true, true],
@@ -344,7 +349,9 @@ mod tests {
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+            .any(|&(ref r, ts)| {
+                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
+            }));
 
         // query using field from left
         let q = query::Query::new(&[true, true, true],
@@ -356,9 +363,13 @@ mod tests {
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
+            .any(|&(ref r, ts)| {
+                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
+            }));
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
+            .any(|&(ref r, ts)| {
+                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
+            }));
 
         // query using field from right
         let q = query::Query::new(&[true, true, true],
@@ -370,7 +381,9 @@ mod tests {
         let hits = j.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
-            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
+            .any(|&(ref r, ts)| {
+                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
+            }));
     }
 
     fn left(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {

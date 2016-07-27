@@ -177,9 +177,9 @@ mod tests {
         // [a, b, x]
         let hits = u.query(None, 0, &aqfs);
         assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameters matching on both sides
         let q = query::Query::new(&[true, true],
@@ -190,8 +190,8 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter matching only on left
         let q = query::Query::new(&[true, true],
@@ -202,7 +202,7 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
 
         // query with parameter matching only on right
         let q = query::Query::new(&[true, true],
@@ -213,7 +213,7 @@ mod tests {
 
         let hits = u.query(Some(&q), 0, &aqfs);
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter with no matches
         let q = query::Query::new(&[true, true],
