@@ -266,11 +266,8 @@ mod tests {
         // let r_y1 = vec![1.into(), "y".into()];
         // let r_z2 = vec![2.into(), "z".into()];
 
-        // to shorten stuff a little:
-        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)]);
-
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.forward(t(l_c3.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.forward(l_c3.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
@@ -278,7 +275,7 @@ mod tests {
         }
 
         // forward b2 from left; should produce [b2*z2]
-        match j.forward(t(l_b2.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.forward(l_b2.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
@@ -287,7 +284,7 @@ mod tests {
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.forward(t(l_a1.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.forward(l_a1.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);

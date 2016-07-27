@@ -154,7 +154,7 @@ mod tests {
         let src = flow::NodeIndex::new(0);
 
         let c = Latest::new(src, vec![0]);
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
+        let u = vec![1.into(), 1.into()].into();
 
         // first record for a group should emit just a positive
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -176,7 +176,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
+        let u = vec![2.into(), 2.into()].into();
 
         // first record for a second group should also emit just a positive
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -198,7 +198,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
+        let u = vec![1.into(), 2.into()].into();
 
         // new record for existing group should revoke the old latest, and emit the new
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -283,16 +283,14 @@ mod tests {
 
         let c = Latest::new(src, vec![0, 1]);
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into(),
-                                                                     1.into()])]);
+        let u = vec![1.into(), 1.into(), 1.into()].into();
         if let Some(ops::Update::Records(rs)) = c.forward(u, src, 0, Some(&s), &HashMap::new()) {
             s.add(rs, 1);
             s.absorb(1);
         }
 
         // first record for a second group should also emit just a positive
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into(),
-                                                                     2.into()])]);
+        let u = vec![1.into(), 2.into(), 2.into()].into();
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
@@ -313,8 +311,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into(),
-                                                                     2.into()])]);
+        let u = vec![1.into(), 1.into(), 2.into()].into();
 
         // new record for existing group should revoke the old latest, and emit the new
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());

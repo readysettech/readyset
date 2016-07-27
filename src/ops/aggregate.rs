@@ -290,7 +290,7 @@ mod tests {
         let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 1.into()])]);
+        let u = vec![1.into(), 1.into()].into();
 
         // first row for a group should emit -0 and +1 for that group
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -318,7 +318,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![2.into(), 2.into()])]);
+        let u = vec![2.into(), 2.into()].into();
 
         // first row for a second group should emit -0 and +1 for that new group
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -346,7 +346,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 2.into()])]);
+        let u = vec![1.into(), 2.into()].into();
 
         // second row for a group should emit -1 and +2
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());
@@ -372,7 +372,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()])]);
+        let u = ops::Record::Negative(vec![1.into(), 1.into()]).into();
 
         // negative row for a group should emit -1 and +0
         let out = c.forward(u, src, 0, Some(&s), &HashMap::new());

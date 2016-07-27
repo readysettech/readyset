@@ -43,9 +43,27 @@ impl Record {
     }
 }
 
+impl From<Vec<query::DataType>> for Record {
+    fn from(other: Vec<query::DataType>) -> Self {
+        Record::Positive(other)
+    }
+}
+
 #[derive(Clone)]
 pub enum Update {
     Records(Vec<Record>),
+}
+
+impl From<Record> for Update {
+    fn from(other: Record) -> Self {
+        Update::Records(vec![other])
+    }
+}
+
+impl From<Vec<query::DataType>> for Update {
+    fn from(other: Vec<query::DataType>) -> Self {
+        Update::Records(vec![other.into()])
+    }
 }
 
 pub type Params = Vec<shortcut::Value<query::DataType>>;
@@ -281,7 +299,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(Update::Records(vec![Record::Positive(vec![1.into()])]));
+        put[&a].send(vec![1.into()]);
 
         // state should now be:
         // a = [2]
@@ -293,7 +311,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send another in
-        put[&b].send(Update::Records(vec![Record::Positive(vec![16.into()])]));
+        put[&b].send(vec![16.into()]);
 
         // state should now be:
         // a = [2]
@@ -307,11 +325,11 @@ mod tests {
         // reads only see records whose timestamp is *smaller* than the global minimum.
         // thus the 16 above won't be seen below. let's fix that.
         // first, send a write to increment the global min beyond the 16.
-        put[&a].send(Update::Records(vec![Record::Positive(vec![32.into()])]));
+        put[&a].send(vec![32.into()]);
         // let it propagate and bump the mins
         thread::sleep(time::Duration::new(0, 10_000_000));
         // then, send another to make the nodes realize that their descendants' mins have changed.
-        put[&a].send(Update::Records(vec![Record::Positive(vec![0.into()])]));
+        put[&a].send(vec![0.into()]);
         // let that propagate too
         thread::sleep(time::Duration::new(0, 10_000_000));
 

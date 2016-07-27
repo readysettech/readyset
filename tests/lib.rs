@@ -28,7 +28,7 @@ fn it_works() {
     let (put, get) = g.run(10);
 
     // send a value on a
-    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+    put[&a].send(vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 1_000_000));
@@ -37,7 +37,7 @@ fn it_works() {
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
 
     // update value again
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+    put[&b].send(vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 1_000_000));
@@ -70,9 +70,9 @@ fn it_works_w_mat() {
     let (put, get) = g.run(10);
 
     // send a few values on a
-    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
-    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
-    put[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 3.into()])]));
+    put[&a].send(vec![1.into(), 1.into()]);
+    put[&a].send(vec![1.into(), 2.into()]);
+    put[&a].send(vec![1.into(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -85,9 +85,9 @@ fn it_works_w_mat() {
     assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 5.into()])]));
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 6.into()])]));
+    put[&b].send(vec![2.into(), 4.into()]);
+    put[&b].send(vec![2.into(), 5.into()]);
+    put[&b].send(vec![2.into(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -110,7 +110,7 @@ fn it_migrates_wo_mat() {
     let (put_1, _) = g.run(10);
 
     // send a value on a
-    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+    put_1[&a].send(vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -138,7 +138,7 @@ fn it_migrates_wo_mat() {
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
 
     // update value again
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+    put[&b].send(vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -158,9 +158,9 @@ fn it_migrates_w_mat() {
     let (put_1, _) = g.run(10);
 
     // send a few values on a
-    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
-    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
-    put_1[&a].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 3.into()])]));
+    put_1[&a].send(vec![1.into(), 1.into()]);
+    put_1[&a].send(vec![1.into(), 2.into()]);
+    put_1[&a].send(vec![1.into(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -192,9 +192,9 @@ fn it_migrates_w_mat() {
     assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 5.into()])]));
-    put[&b].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 6.into()])]));
+    put[&b].send(vec![2.into(), 4.into()]);
+    put[&b].send(vec![2.into(), 5.into()]);
+    put[&b].send(vec![2.into(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -264,7 +264,7 @@ fn votes() {
     let (put, get) = g.run(10);
 
     // make one article
-    put[&article1].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 2.into()])]));
+    put[&article1].send(vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -273,7 +273,7 @@ fn votes() {
     assert_eq!(get[&article](None), vec![vec![1.into(), 2.into()]]);
 
     // make another article
-    put[&article2].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 4.into()])]));
+    put[&article2].send(vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -298,7 +298,7 @@ fn votes() {
     }
 
     // create a vote (user 1 votes for article 1)
-    put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![1.into(), 1.into()])]));
+    put[&vote].send(vec![1.into(), 1.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -307,10 +307,10 @@ fn votes() {
     // extra updates. one to advances the global min such that the vote above is visible, and
     // another for all the nodes to realize that this has happened. unfortunately, this *also*
     // means that the different nodes may *or may not* see the middle vote.
-    put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![2.into(), 1.into()])]));
+    put[&vote].send(vec![2.into(), 1.into()]);
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
-    put[&vote].send(distributary::Update::Records(vec![distributary::Record::Positive(vec![0.into(), 1.into()])]));
+    put[&vote].send(vec![0.into(), 1.into()]);
     // give it too some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 

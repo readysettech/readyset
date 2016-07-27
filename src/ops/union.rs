@@ -148,12 +148,9 @@ mod tests {
     fn it_works() {
         let (aqfs, u) = setup();
 
-        // to shorten stuff a little:
-        let t = |r| ops::Update::Records(vec![ops::Record::Positive(r)]);
-
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.forward(t(left.clone()), 0.into(), 0, None, &aqfs).unwrap() {
+        match u.forward(left.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left)]);
             }
@@ -161,7 +158,7 @@ mod tests {
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.forward(t(right.clone()), 1.into(), 0, None, &aqfs).unwrap() {
+        match u.forward(right.clone().into(), 1.into(), 0, None, &aqfs).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()])]);
             }

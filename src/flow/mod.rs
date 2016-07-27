@@ -124,13 +124,18 @@ impl<T> Ord for Delayed<T> {
     }
 }
 
-pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Send> {
+pub struct FlowGraph<Q, U, D, P> where
+    Q: Clone + Send + Sync,
+    U: Clone + Send,
+    D: Clone + Send,
+    P: Send
+{
     graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
                            Option<sync::Arc<Q>>>,
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
-    dispatch: clocked_dispatch::Dispatcher<U>,
+    dispatch: clocked_dispatch::Dispatcher<D>,
 
     contexts: HashMap<petgraph::graph::NodeIndex, SharedContext<U>>,
 }
@@ -138,7 +143,7 @@ pub struct FlowGraph<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     where Q: 'static + FillableQuery<Params = P> + Clone + Send + Sync,
           U: 'static + Clone + Send,
-          D: 'static + Clone + Send,
+          D: 'static + Clone + Send + Into<U>,
           P: 'static + Send
 {
     pub fn new() -> FlowGraph<Q, U, D, P> {
@@ -427,7 +432,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<U>>,
+               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<D>>,
                    HashMap<NodeIndex, Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>>) {
 
         // which nodes are new?
@@ -459,8 +464,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let (px_tx, px_rx) = mpsc::sync_channel(buf);
             let root = self.source;
             thread::spawn(move || {
-                for (u, ts) in rx.into_iter() {
-                    px_tx.send((root, u, ts as i64)).unwrap();
+                for (r, ts) in rx.into_iter() {
+                    px_tx.send((root, r.map(|r| r.into()), ts as i64)).unwrap();
                 }
             });
             incoming.insert(base, tx);
