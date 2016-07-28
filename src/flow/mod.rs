@@ -723,6 +723,11 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
     }
 
+    // TODO
+    // we need a better way of ensuring that the Q for each node matches what the node *thinks*
+    // that query should be. for example, an aggregation expects to be able to query over all the
+    // fields except its input field (self.over), latest expects the query to be on all key fields
+    // (and only those fields), in order, etc.
     pub fn incorporate<V: 'static + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
         (&mut self,
          node: V,
