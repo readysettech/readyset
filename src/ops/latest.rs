@@ -13,15 +13,18 @@ pub struct Latest {
     src: flow::NodeIndex,
     // MUST be in reverse sorted order!
     key: Vec<usize>,
+    key_m: HashMap<usize, usize>,
 }
 
 impl Latest {
     pub fn new(src: flow::NodeIndex, mut keys: Vec<usize>) -> Latest {
         keys.sort();
+        let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
         keys.reverse();
         Latest {
             src: src,
             key: keys,
+            key_m: key_m,
         }
     }
 }
@@ -122,10 +125,80 @@ impl NodeOp for Latest {
         }
     }
 
-    fn query(&self, _: Option<&query::Query>, _: i64, _: &ops::AQ) -> ops::Datas {
-        // how would we do this? downstream doesn't expose timestamps per record to us :/
-        // this also means that you can't add a latest in a migration :(
-        unimplemented!();
+    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
+        use std::iter;
+
+        assert_eq!(aqfs.len(), 1);
+
+        // we need to figure out what parameters to pass to our source to get only the rows
+        // relevant to our query.
+        let mut params: Vec<shortcut::Value<query::DataType>> =
+            iter::repeat(shortcut::Value::Const(query::DataType::None))
+                .take(self.key.len())
+                .collect();
+
+        // we find all conditions that filter over a field present in the input (so everything
+        // except conditions on self.over), and use those as parameters.
+        if let Some(q) = q {
+            for c in q.having.iter() {
+                // non-key conditionals need to be matched against per group after
+                // to match the semantics you'd get if the query was run against
+                // the materialized output directly.
+                if let Some(col) = self.key_m.get(&c.column) {
+                    match c.cmp {
+                        shortcut::Comparison::Equal(ref v) => {
+                            *params.get_mut(*col).unwrap() = v.clone();
+                        }
+                    }
+                }
+            }
+        }
+
+        // now, query our ancestor, and aggregate into groups.
+        let rx = (*aqfs.iter().next().unwrap().1)(params, ts);
+
+        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
+        // aggregated state in memory until we've seen all rows.
+        let mut consolidate = HashMap::<_, (Vec<_>, i64)>::new();
+        for (rec, ts) in rx.into_iter() {
+            use std::collections::hash_map::Entry;
+
+            let (group, rest): (Vec<_>, _) =
+                rec.into_iter().enumerate().partition(|&(ref fi, _)| self.key_m.contains_key(fi));
+            assert_eq!(group.len(), self.key.len());
+
+            let group = group.into_iter().map(|(_, v)| v).collect();
+            match consolidate.entry(group) {
+                Entry::Occupied(mut e) => {
+                    let e = e.get_mut();
+                    if e.1 < ts {
+                        e.1 = ts;
+                        e.0.clear();
+                        e.0.extend(rest.into_iter().map(|(_, v)| v));
+                    }
+                }
+                Entry::Vacant(v) => {
+                    v.insert((rest.into_iter().map(|(_, v)| v).collect(), ts));
+                }
+            }
+        }
+
+        consolidate.into_iter()
+            .map(|(group, (rest, ts)): (Vec<_>, (Vec<_>, i64))| {
+                let all = group.len() + rest.len();
+                let mut group = group.into_iter();
+                let mut rest = rest.into_iter();
+                let mut row = Vec::with_capacity(all);
+                for i in 0..all {
+                    if self.key_m.contains_key(&i) {
+                        row.push(group.next().unwrap());
+                    } else {
+                        row.push(rest.next().unwrap());
+                    }
+                }
+                (row, ts)
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
@@ -144,7 +217,9 @@ mod tests {
 
     use ops;
     use flow;
+    use query;
     use backlog;
+    use shortcut;
 
     use ops::NodeOp;
     use std::collections::HashMap;
@@ -399,6 +474,53 @@ mod tests {
         } else {
             unreachable!();
         }
+    }
+
+    fn source(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
+        let data = vec![
+                (vec![1.into(), 1.into()], 0),
+                (vec![2.into(), 2.into()], 2),
+                (vec![2.into(), 1.into()], 1),
+                (vec![1.into(), 2.into()], 3),
+                (vec![3.into(), 3.into()], 4),
+            ];
+
+        assert_eq!(p.len(), 1);
+        let p = p.into_iter().last().unwrap();
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                                           column: 0,
+                                           cmp: shortcut::Comparison::Equal(p),
+                                       }]);
+
+        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
+    }
+
+    #[test]
+    fn it_queries() {
+        use std::sync;
+
+        let l = Latest::new(0.into(), vec![0]);
+
+        let mut aqfs = HashMap::new();
+        aqfs.insert(0.into(), Box::new(source) as Box<_>);
+        let aqfs = sync::Arc::new(aqfs);
+
+        let hits = l.query(None, 0, &aqfs);
+        assert_eq!(hits.len(), 3);
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 3 && r[0] == 1.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 4 && r[0] == 3.into() && r[1] == 3.into()));
+
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
+                         }]);
+
+        let hits = l.query(Some(&q), 0, &aqfs);
+        assert_eq!(hits.len(), 1);
+        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
