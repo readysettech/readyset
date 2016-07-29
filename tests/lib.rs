@@ -163,7 +163,7 @@ fn it_migrates_w_mat() {
     put_1[&a].send(vec![1.into(), 3.into()]);
 
     // give them some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::new(0, 100_000_000));
 
     // add the rest of the graph
     let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
@@ -182,7 +182,7 @@ fn it_migrates_w_mat() {
     let (put, get) = g.run(10);
 
     // wait a bit for initialization
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::new(0, 100_000_000));
 
     // send a query to c
     // we should see at least the first one, and possibly the second
@@ -197,7 +197,7 @@ fn it_migrates_w_mat() {
     put[&b].send(vec![2.into(), 6.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::new(0, 100_000_000));
 
     // check that value was updated again
     let res = get[&c](None);
