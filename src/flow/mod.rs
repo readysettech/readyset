@@ -1,5 +1,4 @@
 use petgraph;
-use bus::Bus;
 use clocked_dispatch;
 use parking_lot;
 
@@ -71,7 +70,7 @@ pub trait FillableQuery {
 
 /// Holds flow graph node state that may change as new nodes are added to the graph.
 struct Context<T: Clone + Send> {
-    bus: Bus<(Option<T>, i64)>,
+    txs: Vec<mpsc::SyncSender<(NodeIndex, Option<T>, i64)>>,
 
     // this deserves some attention.
     // this contains the set of minimum timestamp trackers it should check in order to see whether
@@ -220,25 +219,18 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         use std::collections::hash_map::Entry;
 
         // allocate contexts for all new nodes
-        for node in new.iter() {
-            if let Entry::Vacant(v) = self.contexts.entry(*node) {
-                v.insert(sync::Arc::new(parking_lot::Mutex::new(Context {
-                    // create a bus for the outgoing records from this node.
-                    // size buf/2 since the sync_channels consuming from the bus are also buffered.
-                    bus: Bus::new(buf / 2),
-                    min_check: Vec::new(),
-                })));
-            }
-        }
-
-        // set up input multiplexer for each new node
         let mut new_ins = HashMap::with_capacity(new.len());
         for node in new.iter() {
-            if !start.contains_key(&node) {
-                // this node should receive updates from all its ancestors
-                let (tx, rx) = mpsc::sync_channel(buf / 2);
-                new_ins.insert(*node, tx);
-                start.insert(*node, rx);
+            if let Entry::Vacant(v) = self.contexts.entry(*node) {
+                let (tx, rx) = mpsc::sync_channel(buf);
+                v.insert(sync::Arc::new(parking_lot::Mutex::new(Context {
+                    txs: vec![],
+                    min_check: Vec::new(),
+                })));
+                if !start.contains_key(node) {
+                    new_ins.insert(*node, tx);
+                    start.insert(*node, rx);
+                }
             }
         }
 
@@ -319,19 +311,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             for new_child in self.graph
                 .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
                 .filter(|ni| new.contains(ni)) {
-                let tx = new_ins[&new_child].clone();
-                let rx = ctx.bus.add_rx();
-
-                // since Rust doesn't currently support select very well, we need one thread
-                // per incoming edge, all sharing a single mpsc channel into the node in
-                // question.
-                thread::spawn(move || {
-                    for (u, ts) in rx.into_iter() {
-                        if let Err(..) = tx.send((node, u, ts)) {
-                            break;
-                        }
-                    }
-                });
+                ctx.txs.push(new_ins[&new_child].clone());
             }
         }
 
@@ -528,8 +508,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     fn inner(state: NodeState<Q, U, D, P>) {
         use std::collections::VecDeque;
 
-        let NodeState { name: _name, inner, srcs, input, aqfs, context, processed_ts, init_ts } =
-            state;
+        let NodeState { name, inner, srcs, input, aqfs, context, processed_ts, init_ts } = state;
 
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
@@ -616,7 +595,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 let u = u.and_then(|u| inner.process(u, src, ts, &aqfs));
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
-                context.lock().bus.broadcast((u, ts));
+                for tx in context.lock().txs.iter_mut() {
+                    tx.send((name, u.clone(), ts)).unwrap();
+                }
                 continue;
             }
 
@@ -672,7 +653,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                     if u.is_some() {
                         forwarded = ts;
-                        context.lock().bus.broadcast((u, ts));
+                        for tx in context.lock().txs.iter_mut() {
+                            tx.send((name, u.clone(), ts)).unwrap();
+                        }
                     }
                     continue;
                 }
@@ -685,7 +668,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             // even if we didn't send a delayed message for the min
             if forwarded < min && min != i64::max_value() - 1 {
                 processed_ts.store(min as isize, sync::atomic::Ordering::Release);
-                context.lock().bus.broadcast((None, min));
+                for tx in context.lock().txs.iter_mut() {
+                    tx.send((name, None, min)).unwrap();
+                }
             }
 
             // check if descendant min has changed so we can absorb?
