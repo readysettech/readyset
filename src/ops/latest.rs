@@ -39,8 +39,6 @@ impl NodeOp for Latest {
                -> Option<ops::Update> {
 
         assert_eq!(src, self.src);
-        assert!(db.is_some(), "LATEST views must be materialized");
-        let db = db.unwrap();
 
         // Construct the query we'll need to query into ourselves to find current latest
         let mut q = self.key
@@ -83,10 +81,19 @@ impl NodeOp for Latest {
                     }
 
                     // find the current value for this group
-                    let matches = db.find(&q[..], Some(i64::max_value()));
-                    println!("{:?}: {:?}", q, matches);
-                    assert!(matches.len() <= 1, "latest group has more than 1 record");
-                    let current = matches.into_iter().next();
+                    let current = match db {
+                        Some(db) => {
+                            let matches = db.find(&q[..], Some(i64::max_value()));
+                            println!("{:?}: {:?}", q, matches);
+                            assert!(matches.len() <= 1, "latest group has more than 1 record");
+                            matches.into_iter().next()
+                        }
+                        None => {
+                            // TODO: query ancestor (self.query?) based on self.key columns
+                            unimplemented!()
+                        }
+                    };
+
 
                     // get back values from query (to avoid cloning again)
                     let mut group = Vec::with_capacity(self.key.len());
