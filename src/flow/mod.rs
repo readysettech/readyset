@@ -2,6 +2,8 @@ use petgraph;
 use clocked_dispatch;
 use parking_lot;
 
+use std::fmt;
+use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync;
 use std::thread;
@@ -15,7 +17,7 @@ pub use petgraph::graph::NodeIndex;
 
 // TODO: add an "uninstantiated query" type
 
-pub trait View<Q: Clone + Send> {
+pub trait View<Q: Clone + Send>: Debug {
     type Update: Clone + Send;
     type Data: Clone + Send;
     type Params: Send;
@@ -713,7 +715,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     // that query should be. for example, an aggregation expects to be able to query over all the
     // fields except its input field (self.over), latest expects the query to be on all key fields
     // (and only those fields), in order, etc.
-    pub fn incorporate<V: 'static + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
+    pub fn incorporate<V: 'static + Debug + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
         (&mut self,
          node: V,
          ancestors: Vec<(Q, petgraph::graph::NodeIndex)>)
@@ -730,6 +732,18 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             }
         }
         idx
+    }
+}
+
+impl<Q, U, D, P> Debug for FlowGraph<Q, U, D, P>
+    where Q: Clone + Debug + Send + Sync,
+          U: Clone + Send,
+          D: Clone + Send,
+          P: Send
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let dotgraph = petgraph::dot::Dot::new(&self.graph);
+        write!(f, "{:?}", dotgraph)
     }
 }
 
@@ -755,6 +769,8 @@ mod tests {
     use std::sync;
     use std::thread;
     use std::collections::HashMap;
+
+    #[derive(Debug)]
     struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
     impl Counter {

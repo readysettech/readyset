@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use shortcut;
 
+#[derive(Debug)]
 pub enum Aggregation {
     COUNT,
     SUM,
@@ -40,6 +41,7 @@ impl Aggregation {
     }
 }
 
+#[derive(Debug)]
 pub struct Aggregator {
     op: Aggregation,
     src: flow::NodeIndex,

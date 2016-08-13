@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use shortcut;
 
+#[derive(Debug)]
 pub struct Latest {
     src: flow::NodeIndex,
     // MUST be in reverse sorted order!

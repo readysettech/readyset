@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use shortcut;
 
+#[derive(Debug)]
 pub struct Union {
     emit: HashMap<flow::NodeIndex, Vec<usize>>,
     cols: HashMap<flow::NodeIndex, usize>,

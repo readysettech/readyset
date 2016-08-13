@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use shortcut;
 
+#[derive(Debug)]
 pub struct Joiner {
     emit: Vec<(flow::NodeIndex, usize)>,
     /// For a given node index `n`, this gives the set of nodes that should be joined against in

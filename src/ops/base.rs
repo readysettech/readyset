@@ -6,6 +6,7 @@ use ops::NodeOp;
 
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct Base {}
 
 impl NodeOp for Base {

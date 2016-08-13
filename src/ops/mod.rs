@@ -10,6 +10,8 @@ use backlog;
 use shortcut;
 use parking_lot;
 
+use std::fmt;
+use std::fmt::Debug;
 use std::sync;
 use std::collections::HashMap;
 
@@ -132,8 +134,16 @@ pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
     inner: sync::Arc<O>,
 }
 
+impl<O> Debug for Node<O>
+    where O: NodeOp + Debug + Sized + 'static + Send + Sync
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", *self.inner)
+    }
+}
+
 impl<O> flow::View<query::Query> for Node<O>
-    where O: NodeOp + Sized + 'static + Send + Sync
+    where O: NodeOp + Debug + Sized + 'static + Send + Sync
 {
     type Update = Update;
     type Data = Vec<query::DataType>;
@@ -258,6 +268,7 @@ mod tests {
 
     use std::collections::HashMap;
 
+    #[derive(Debug)]
     struct Tester(i64);
 
     impl NodeOp for Tester {
