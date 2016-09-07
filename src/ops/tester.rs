@@ -29,7 +29,8 @@ impl NodeOp for Tester {
             ops::Update::Records(mut rs) => {
                 if let Some(ops::Record::Positive(r, ts)) = rs.pop() {
                     if let query::DataType::Number(r) = r[0] {
-                        Some(ops::Update::Records(vec![ops::Record::Positive(vec![(r + self.0).into()],
+                        Some(ops::Update::Records(vec![ops::Record::Positive(vec![(r + self.0)
+                                                                                      .into()],
                                                                              ts)]))
                     } else {
                         unreachable!();

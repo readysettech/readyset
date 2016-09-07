@@ -103,7 +103,7 @@ pub type Datas = Vec<(Vec<query::DataType>, i64)>;
 ///
 /// It *might* be possible to merge forward and query (after all, they do very similar things), but
 /// I haven't found a nice interface for that yet.
-pub trait NodeOp : Debug {
+pub trait NodeOp: Debug {
     /// When a new update comes in to a node, this function is called with that update. The
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
