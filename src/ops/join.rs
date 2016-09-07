@@ -3,6 +3,7 @@ use flow;
 use query;
 use backlog;
 use ops::NodeOp;
+use ops::NodeType;
 
 use std::collections::HashMap;
 
@@ -83,6 +84,12 @@ impl Joiner {
             // place.
             (r, cmp::max(left.1, rts))
         }))
+    }
+}
+
+impl From<Joiner> for NodeType {
+    fn from(b: Joiner) -> NodeType {
+        NodeType::JoinNode(b)
     }
 }
 

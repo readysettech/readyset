@@ -3,6 +3,7 @@ use flow;
 use query;
 use backlog;
 use ops::NodeOp;
+use ops::NodeType;
 
 use std::collections::HashMap;
 
@@ -22,6 +23,12 @@ impl Union {
             emit: emit,
             cols: cols,
         }
+    }
+}
+
+impl From<Union> for NodeType {
+    fn from(b: Union) -> NodeType {
+        NodeType::UnionNode(b)
     }
 }
 

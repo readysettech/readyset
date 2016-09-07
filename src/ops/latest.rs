@@ -3,6 +3,7 @@ use flow;
 use query;
 use backlog;
 use ops::NodeOp;
+use ops::NodeType;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -27,6 +28,12 @@ impl Latest {
             key: keys,
             key_m: key_m,
         }
+    }
+}
+
+impl From<Latest> for NodeType {
+    fn from(b: Latest) -> NodeType {
+        NodeType::LatestNode(b)
     }
 }
 

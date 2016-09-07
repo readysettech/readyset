@@ -13,6 +13,7 @@ mod backlog;
 pub use flow::FlowGraph;
 pub use flow::NodeIndex;
 pub use ops::new;
+pub use ops::NodeType;
 pub use ops::Update;
 pub use ops::Record;
 pub use ops::base::Base;

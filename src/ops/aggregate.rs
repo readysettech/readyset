@@ -3,6 +3,7 @@ use flow;
 use query;
 use backlog;
 use ops::NodeOp;
+use ops::NodeType;
 
 use std::collections::HashMap;
 
@@ -47,6 +48,12 @@ pub struct Aggregator {
     src: flow::NodeIndex,
     over: usize,
     cols: usize,
+}
+
+impl From<Aggregator> for NodeType {
+    fn from(b: Aggregator) -> NodeType {
+        NodeType::AggregateNode(b)
+    }
 }
 
 impl NodeOp for Aggregator {

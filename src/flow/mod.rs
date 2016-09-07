@@ -15,6 +15,8 @@ use std::collections::BinaryHeap;
 
 pub use petgraph::graph::NodeIndex;
 
+use ops;
+
 // TODO: add an "uninstantiated query" type
 
 pub trait View<Q: Clone + Send>: Debug {
@@ -63,6 +65,11 @@ pub trait View<Q: Clone + Send>: Debug {
                i64,
                &HashMap<NodeIndex,
                         Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>);
+
+    /// Returns the underlying operator for this view (if any).
+    /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
+    /// transformations.
+    fn operator(&self) -> Option<&ops::NodeType>;
 }
 
 pub trait FillableQuery {
@@ -145,7 +152,7 @@ pub struct FlowGraph<Q, U, D, P> where
 }
 
 impl<Q, U, D, P> FlowGraph<Q, U, D, P>
-    where Q: 'static + FillableQuery<Params = P> + Clone + Send + Sync,
+    where Q: 'static + FillableQuery<Params = P> + Clone + Debug + Send + Sync,
           U: 'static + Clone + Send,
           D: 'static + Clone + Send + Into<U>,
           P: 'static + Send
@@ -770,6 +777,8 @@ mod tests {
     use std::thread;
     use std::collections::HashMap;
 
+    use ops;
+
     #[derive(Debug)]
     struct Counter(String, sync::Arc<sync::Mutex<u32>>);
 
@@ -836,6 +845,10 @@ mod tests {
         }
 
         fn safe(&self, _: i64) {}
+
+        fn operator(&self) -> Option<&ops::NodeType> {
+            None
+        }
     }
 
     impl FillableQuery for () {

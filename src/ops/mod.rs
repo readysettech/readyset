@@ -3,6 +3,7 @@ pub mod aggregate;
 pub mod latest;
 pub mod join;
 pub mod union;
+pub mod tester;
 
 use flow;
 use query;
@@ -10,6 +11,7 @@ use backlog;
 use shortcut;
 use parking_lot;
 
+use std::convert;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync;
@@ -101,7 +103,7 @@ pub type Datas = Vec<(Vec<query::DataType>, i64)>;
 ///
 /// It *might* be possible to merge forward and query (after all, they do very similar things), but
 /// I haven't found a nice interface for that yet.
-pub trait NodeOp {
+pub trait NodeOp : Debug {
     /// When a new update comes in to a node, this function is called with that update. The
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
@@ -128,23 +130,93 @@ pub trait NodeOp {
     fn resolve(&self, usize) -> Vec<(flow::NodeIndex, usize)>;
 }
 
-pub struct Node<O: NodeOp + Sized + 'static + Send + Sync> {
-    fields: Vec<String>,
-    data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
-    inner: sync::Arc<O>,
+pub enum NodeType {
+    BaseNode(base::Base),
+    AggregateNode(aggregate::Aggregator),
+    JoinNode(join::Joiner),
+    LatestNode(latest::Latest),
+    UnionNode(union::Union),
+    TestNode(tester::Tester),
 }
 
-impl<O> Debug for Node<O>
-    where O: NodeOp + Debug + Sized + 'static + Send + Sync
-{
+impl NodeOp for NodeType {
+    fn forward(&self,
+               u: Update,
+               src: flow::NodeIndex,
+               ts: i64,
+               db: Option<&backlog::BufferedStore>,
+               aqfs: &AQ)
+               -> Option<Update> {
+        match *self {
+            NodeType::BaseNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::AggregateNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::JoinNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::LatestNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::UnionNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::TestNode(ref n) => n.forward(u, src, ts, db, aqfs),
+        }
+    }
+
+    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &AQ) -> Datas {
+        match *self {
+            NodeType::BaseNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::AggregateNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::JoinNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::LatestNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::UnionNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::TestNode(ref n) => n.query(q, ts, aqfs),
+        }
+    }
+
+    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        match *self {
+            NodeType::BaseNode(ref n) => n.suggest_indexes(this),
+            NodeType::AggregateNode(ref n) => n.suggest_indexes(this),
+            NodeType::JoinNode(ref n) => n.suggest_indexes(this),
+            NodeType::LatestNode(ref n) => n.suggest_indexes(this),
+            NodeType::UnionNode(ref n) => n.suggest_indexes(this),
+            NodeType::TestNode(ref n) => n.suggest_indexes(this),
+        }
+    }
+
+    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
+        match *self {
+            NodeType::BaseNode(ref n) => n.resolve(col),
+            NodeType::AggregateNode(ref n) => n.resolve(col),
+            NodeType::JoinNode(ref n) => n.resolve(col),
+            NodeType::LatestNode(ref n) => n.resolve(col),
+            NodeType::UnionNode(ref n) => n.resolve(col),
+            NodeType::TestNode(ref n) => n.resolve(col),
+        }
+    }
+}
+
+impl Debug for NodeType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            NodeType::BaseNode(ref n) => write!(f, "{:?}", n),
+            NodeType::AggregateNode(ref n) => write!(f, "{:?}", n),
+            NodeType::JoinNode(ref n) => write!(f, "{:?}", n),
+            NodeType::LatestNode(ref n) => write!(f, "{:?}", n),
+            NodeType::UnionNode(ref n) => write!(f, "{:?}", n),
+            NodeType::TestNode(ref n) => write!(f, "{:?}", n),
+        }
+    }
+}
+
+pub struct Node {
+    fields: Vec<String>,
+    data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
+    inner: sync::Arc<NodeType>,
+}
+
+impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", *self.inner)
     }
 }
 
-impl<O> flow::View<query::Query> for Node<O>
-    where O: NodeOp + Debug + Sized + 'static + Send + Sync
-{
+impl flow::View<query::Query> for Node {
     type Update = Update;
     type Data = Vec<query::DataType>;
     type Params = Params;
@@ -238,11 +310,16 @@ impl<O> flow::View<query::Query> for Node<O>
             w.absorb(ts);
         }
     }
+
+    fn operator(&self) -> Option<&NodeType> {
+        Some(&*self.inner)
+    }
 }
 
-pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> Node<O>
+pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -> Node
     where &'a S: Into<String>,
-          O: NodeOp + Sized + 'static + Send + Sync
+          NO: NodeOp,
+          NodeType: convert::From<NO>
 {
     let mut data = None;
     if materialized {
@@ -252,7 +329,7 @@ pub fn new<'a, S: ?Sized, O>(fields: &[&'a S], materialized: bool, inner: O) -> 
     Node {
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
-        inner: sync::Arc::new(inner),
+        inner: sync::Arc::new(NodeType::from(inner)),
     }
 }
 
@@ -268,68 +345,17 @@ mod tests {
 
     use std::collections::HashMap;
 
-    #[derive(Debug)]
-    struct Tester(i64);
-
-    impl NodeOp for Tester {
-        fn forward(&self,
-                   u: Update,
-                   _: flow::NodeIndex,
-                   _: i64,
-                   _: Option<&backlog::BufferedStore>,
-                   _: &AQ)
-                   -> Option<Update> {
-            // forward
-            match u {
-                Update::Records(mut rs) => {
-                    if let Some(Record::Positive(r, ts)) = rs.pop() {
-                        if let query::DataType::Number(r) = r[0] {
-                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()],
-                                                                       ts)]))
-                        } else {
-                            unreachable!();
-                        }
-                    } else {
-                        unreachable!();
-                    }
-                }
-            }
-        }
-
-        fn query<'a>(&'a self, _: Option<&query::Query>, ts: i64, aqs: &AQ) -> Datas {
-            // query all ancestors, emit r + c for each
-            let rs = aqs.iter().flat_map(|(_, aq)| aq(vec![], ts));
-            let c = self.0;
-            rs.map(move |(r, ts)| {
-                    if let query::DataType::Number(r) = r[0] {
-                        (vec![(r + c).into()], ts)
-                    } else {
-                        unreachable!();
-                    }
-                })
-                .collect()
-        }
-
-        fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-            HashMap::new()
-        }
-
-        fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
-            vec![]
-        }
-    }
-
     fn e2e_test(mat: bool) {
         use std::collections::HashSet;
 
         // set up graph
         let mut g = flow::FlowGraph::new();
         let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new(&["a"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new(&["b"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new(&["c"], mat, Tester(4)),
+        let a = g.incorporate(new(&["a"], true, tester::Tester(1)), vec![]);
+        let b = g.incorporate(new(&["b"], true, tester::Tester(2)), vec![]);
+        let c = g.incorporate(new(&["c"], mat, tester::Tester(4)),
                               vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new(&["d"], mat, Tester(8)), vec![(all.clone(), c)]);
+        let d = g.incorporate(new(&["d"], mat, tester::Tester(8)), vec![(all.clone(), c)]);
         let (put, get) = g.run(10);
 
         // send a value

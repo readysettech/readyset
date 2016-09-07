@@ -3,11 +3,18 @@ use flow;
 use query;
 use backlog;
 use ops::NodeOp;
+use ops::NodeType;
 
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Base {}
+
+impl From<Base> for NodeType {
+    fn from(b: Base) -> NodeType {
+        NodeType::BaseNode(b)
+    }
+}
 
 impl NodeOp for Base {
     fn forward(&self,
