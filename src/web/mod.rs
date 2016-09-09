@@ -1,19 +1,20 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
 use flow::{FlowGraph, NodeIndex, FillableQuery};
-use query::DataType;
+use query::{DataType, Query};
 use petgraph::EdgeDirection;
-use std::fmt::Debug;
+use std::collections::HashMap;
+use shortcut;
 
 struct Endpoint {
     node: NodeIndex,
     arguments: Vec<String>,
 }
 
-pub fn run<Q, U, P>(mut soup: FlowGraph<Q, U, Vec<DataType>, P>) -> HttpResult<Listening>
-    where Q: 'static + FillableQuery<Params = P> + Clone + Debug + Send + Sync,
-          U: 'static + Clone + Send + From<Vec<DataType>>,
-          P: 'static + Send
+pub fn run<U, P>(mut soup: FlowGraph<Query, U, Vec<DataType>, P>) -> HttpResult<Listening>
+    where U: 'static + Clone + Send + From<Vec<DataType>>,
+          P: 'static + Send,
+          Query: FillableQuery<Params = P>
 {
     let mut router = TreeRouter::new();
 
@@ -61,19 +62,39 @@ pub fn run<Q, U, P>(mut soup: FlowGraph<Q, U, Vec<DataType>, P>) -> HttpResult<L
         let get = get.remove(&ep.node).unwrap();
         insert_routes! {
             &mut router => {
-                path => Get: Box::new(move |_: Context, mut res: Response| {
+                path => Get: Box::new(move |ctx: Context, mut res: Response| {
                     use rustc_serialize::json::ToJson;
                     use rustful::header::ContentType;
+
+                    let mut arg = None;
+                    if !ctx.query.is_empty() {
+                        use std::iter;
+                        let conds = ep.arguments.iter().enumerate().filter_map(|(i, arg)| {
+                            if ctx.query.contains_key(arg) {
+                                let arg = if let Ok(n) = ctx.query.parse(arg) {
+                                    let n: i64 = n;
+                                    n.into()
+                                } else {
+                                    ctx.query.get(arg).unwrap().into_owned().into()
+                                };
+
+                                Some(shortcut::Condition {
+                                    column: i,
+                                    cmp:
+                                        shortcut::Comparison::Equal(shortcut::Value::Const(arg))
+                                })
+                            } else {
+                                None
+                            }
+                        }).collect();
+                        arg = Some(Query::new(&iter::repeat(true).take(ep.arguments.len()).collect::<Vec<_>>(), conds));
+                    };
+
+                    let data = get(arg).into_iter().map(|row| {
+                        ep.arguments.clone().into_iter().zip(row.into_iter()).collect::<HashMap<_, _>>()
+                    }).collect::<Vec<_>>();
                     res.headers_mut().set(ContentType::json());
-                    res.send(format!("{}", get(None).to_json()));
-                    // let q = Query::new(&[true, true, true],
-                    // vec![shortcut::Condition {
-                    // column: 0,
-                    // cmp:
-                    // shortcut::Comparison::Equal(shortcut::Value::Const(id.into())),
-                    // }]);
-                    // let res: Vec<_> = getter(Some(q));
-                    //
+                    res.send(format!("{}", data.to_json()));
                 }) as Box<Handler>,
             }
         };
