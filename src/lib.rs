@@ -4,6 +4,10 @@ extern crate clocked_dispatch;
 extern crate parking_lot;
 extern crate petgraph;
 extern crate shortcut;
+extern crate rustc_serialize;
+
+#[macro_use]
+extern crate rustful;
 
 mod flow;
 mod query;
@@ -23,3 +27,5 @@ pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use query::Query;
 pub use query::DataType;
+
+pub mod web;

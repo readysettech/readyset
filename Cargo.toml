@@ -13,12 +13,20 @@ docopt = "0.6"
 rand = "0.3"
 randomkit = "0.1.0"
 
+# for web
+rustful = "0.9"
+rustc-serialize = "0.3"
+
 [profile.release]
 debug=true
 
 [lib]
 name = "distributary"
 path = "src/lib.rs"
+
+[[bin]]
+name = "web"
+path = "src/web/main.rs"
 
 [[bin]]
 name = "bench_votes"

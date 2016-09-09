@@ -1,6 +1,7 @@
 use shortcut;
 use flow;
 
+use rustc_serialize::json::{ToJson, Json};
 use std::sync;
 
 #[derive(Eq, PartialOrd, Hash, Debug, Clone)]
@@ -16,6 +17,17 @@ impl DataType {
             true
         } else {
             false
+        }
+    }
+}
+
+impl ToJson for DataType {
+    fn to_json(&self) -> Json {
+        use std::ops::Deref;
+        match *self {
+            DataType::None => Json::Null,
+            DataType::Number(n) => Json::I64(n),
+            DataType::Text(ref s) => Json::String(s.deref().clone()),
         }
     }
 }
