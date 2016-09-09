@@ -1,5 +1,19 @@
 #!/bin/sh
-echo "PUT"
+echo "Build"
+cargo build --bin web
+res=$?
+if [ "$res" -ne 0 ]; then
+	exit "$res"
+fi
+
+echo "Start"
+cargo run --bin web >/dev/null &
+pid=$(pgrep target/debug/web)
+
+# wait for server to be ready
+sleep 1
+
+echo "Seed"
 curl --data-raw '{"id": 1, "title": "hello"}' -H "Content-Type: application/json" localhost:8080/article
 curl --data-raw '{"id": 2, "title": "world"}' -H "Content-Type: application/json" localhost:8080/article
 curl --data-raw '{"user": 1, "id": 1}' -H "Content-Type: application/json" localhost:8080/vote
@@ -26,3 +40,6 @@ echo "Where id=1 && title=hello"
 curl -s "localhost:8080/awvc?id=1&title=hello" | json
 echo "Where id=2 && title=hello"
 curl -s "localhost:8080/awvc?id=2&title=hello" | json
+
+kill "$pid" 2>/dev/null >/dev/null
+wait "$pid" 2>/dev/null >/dev/null
