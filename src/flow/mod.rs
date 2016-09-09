@@ -70,6 +70,12 @@ pub trait View<Q: Clone + Send>: Debug {
     /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
     /// transformations.
     fn operator(&self) -> Option<&ops::NodeType>;
+
+    /// Returns the name of this view.
+    fn name(&self) -> &str;
+
+    /// Returns the arguments to this view.
+    fn args(&self) -> &[String];
 }
 
 pub trait FillableQuery {
@@ -168,6 +174,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             dispatch: clocked_dispatch::new(20),
             contexts: HashMap::default(),
         }
+    }
+
+    pub fn graph(&self) -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>, Option<sync::Arc<Q>>>, NodeIndex) {
+        (&self.graph, self.source)
     }
 
     fn add_indices(&mut self) {

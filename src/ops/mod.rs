@@ -210,6 +210,7 @@ impl Debug for NodeType {
 }
 
 pub struct Node {
+    name: String,
     fields: Vec<String>,
     data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
     inner: sync::Arc<NodeType>,
@@ -217,7 +218,7 @@ pub struct Node {
 
 impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", *self.inner)
+        write!(f, "{:?}({:?})", self.name, *self.inner)
     }
 }
 
@@ -319,10 +320,19 @@ impl flow::View<query::Query> for Node {
     fn operator(&self) -> Option<&NodeType> {
         Some(&*self.inner)
     }
+
+    fn name(&self) -> &str {
+        &*self.name
+    }
+
+    fn args(&self) -> &[String] {
+        &self.fields[..]
+    }
 }
 
-pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -> Node
+pub fn new<'a, NS, S: ?Sized, NO>(name: NS, fields: &[&'a S], materialized: bool, inner: NO) -> Node
     where &'a S: Into<String>,
+          NS: Into<String>,
           NO: NodeOp,
           NodeType: convert::From<NO>
 {
@@ -332,6 +342,7 @@ pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -
     }
 
     Node {
+        name: name.into(),
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(NodeType::from(inner)),
