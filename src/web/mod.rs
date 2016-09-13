@@ -87,11 +87,19 @@ pub fn run<U, P>(mut soup: FlowGraph<Query, U, Vec<DataType>, P>) -> HttpResult<
                                 None
                             }
                         }).collect();
-                        arg = Some(Query::new(&iter::repeat(true).take(ep.arguments.len()).collect::<Vec<_>>(), conds));
+                        arg = Some(Query::new(
+                                &iter::repeat(true).take(ep.arguments.len()).collect::<Vec<_>>(),
+                                conds
+                                ));
                     };
 
                     let data = get(arg).into_iter().map(|row| {
-                        ep.arguments.clone().into_iter().zip(row.into_iter()).collect::<HashMap<_, _>>()
+                        ep
+                            .arguments
+                            .clone()
+                            .into_iter()
+                            .zip(row.into_iter())
+                            .collect::<HashMap<_, _>>()
                     }).collect::<Vec<_>>();
                     res.headers_mut().set(ContentType::json());
                     res.send(format!("{}", data.to_json()));
