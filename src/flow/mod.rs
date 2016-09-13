@@ -846,6 +846,7 @@ mod tests {
         fn process(&self,
                    u: Self::Update,
                    _: NodeIndex,
+                   _: Option<&()>,
                    _: i64,
                    _: &HashMap<NodeIndex,
                                Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
@@ -885,6 +886,14 @@ mod tests {
 
         fn operator(&self) -> Option<&ops::NodeType> {
             None
+        }
+
+        fn name(&self) -> &str {
+            ""
+        }
+
+        fn args(&self) -> &[String] {
+            &[]
         }
     }
 

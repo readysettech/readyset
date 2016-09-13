@@ -449,11 +449,11 @@ mod tests {
         // set up graph
         let mut g = flow::FlowGraph::new();
         let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new(&["a"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new(&["b"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new(&["c"], mat, Tester(4)),
+        let a = g.incorporate(new("a", &["a"], true, Tester(1)), vec![]);
+        let b = g.incorporate(new("b", &["b"], true, Tester(2)), vec![]);
+        let c = g.incorporate(new("c", &["c"], mat, Tester(4)),
                               vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new(&["d"], mat, Tester(8)), vec![(all.clone(), c)]);
+        let d = g.incorporate(new("d", &["d"], mat, Tester(8)), vec![(all.clone(), c)]);
         let (put, get) = g.run(10);
 
         // send a value
