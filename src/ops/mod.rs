@@ -53,6 +53,16 @@ impl Record {
     }
 }
 
+impl From<(Vec<query::DataType>, i64, bool)> for Record {
+    fn from(other: (Vec<query::DataType>, i64, bool)) -> Self {
+        if other.2 {
+            Record::Positive(other.0, other.1)
+        } else {
+            Record::Negative(other.0, other.1)
+        }
+    }
+}
+
 impl From<(Vec<query::DataType>, i64)> for Record {
     fn from(other: (Vec<query::DataType>, i64)) -> Self {
         Record::Positive(other.0, other.1)
@@ -268,12 +278,28 @@ impl flow::View<query::Query> for Node {
     }
 
     fn process(&self,
-               u: Self::Update,
+               mut u: Self::Update,
                src: flow::NodeIndex,
+               q: Option<&query::Query>,
                ts: i64,
                aqs: &AQ)
                -> Option<Self::Update> {
         use std::ops::Deref;
+
+        if let Some(q) = q {
+            // the incoming update has not been projected through the query, and so does not fit
+            // the expected input format. let's fix that.
+            match u {
+                Update::Records(ref mut rs) => {
+                    for r in rs.iter_mut() {
+                        let projected = q.project(&r.rec()[..]);
+                        *r = (projected, r.ts(), r.is_positive()).into();
+                    }
+                }
+            }
+        }
+
+        // lock the materialization if this view is materialized
         let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write()));
 
         let new_u = self.inner.forward(u, src, ts, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
