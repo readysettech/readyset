@@ -8,7 +8,8 @@ fi
 
 echo "Start"
 cargo run --bin web >/dev/null &
-pid=$(pgrep target/debug/web)
+sleep 1
+pid=$(pgrep -f target/debug/web)
 
 # wait for server to be ready
 sleep 1
