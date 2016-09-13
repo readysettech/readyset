@@ -34,14 +34,20 @@ fn main() {
     let emit = vec![(article, 0), (article, 1), (article, 2), (article, 3),(vc, 1)];
     let j = Joiner::new(emit, join);
     // query to article/vc should select all fields, and query on id
-    let q = Query::new(&[true, true, true, true],
+    let q_a = Query::new(&[true, true, true, true],
+                       vec![shortcut::Condition {
+                                column: 0,
+                                cmp:
+                                    shortcut::Comparison::Equal(shortcut::Value::Const(distributary::DataType::None)),
+                            }]);
+    let q_vc = Query::new(&[true, true],
                        vec![shortcut::Condition {
                                 column: 0,
                                 cmp:
                                     shortcut::Comparison::Equal(shortcut::Value::Const(distributary::DataType::None)),
                             }]);
     g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
-                  vec![(q.clone(), article), (q, vc)]);
+                  vec![(q_a, article), (q_vc, vc)]);
 
     web::run(g).unwrap();
 }
