@@ -17,8 +17,6 @@ fn main() {
     let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 
     let q = Query::new(&[true, true], Vec::new());
-    // TODO fix hacky workaround
-    g.incorporate(new("uservotes", &["user", "id"], true, Base {}), vec![(q.clone(), vote)]);
     // add vote count
     let vc = g.incorporate(new("votecount",
                                &["id", "votes"],
@@ -35,7 +33,7 @@ fn main() {
     // emit first, second, and third field from article (id + user + title + url)
     // and second field from right (votes)
     let emit = vec![(article, 0), (article, 1), (article, 2), (article, 3), (vc, 1)];
-    let j = Joiner::new(emit.clone(), join.clone());
+    let j = Joiner::new(emit, join);
     // query to article/vc should select all fields, and query on id
     let q_a = Query::new(&[true, true, true, true],
                          vec![shortcut::Condition {
@@ -57,19 +55,14 @@ fn main() {
                                             )
                                         ),
                             }]);
-    g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
-                  vec![(q_a.clone(), article), (q_vc.clone(), vc)]);
-
-
-    // TODO remove this hacky solution - also requires the clone()s to be removed above
-    let awvc_inner = g.incorporate(new("awvcinner", &["id", "user", "title", "url", "votes"], true, Joiner::new(emit, join)),
-                                   vec![(q_a, article), (q_vc, vc)]);
+    let awvc = g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
+                  vec![(q_a, article), (q_vc, vc)]);
 
     let q = Query::new(&[false, true, false, false, true], Vec::new());
     g.incorporate(new("karma",
                       &["user", "votes"],
                       true,
-                      Aggregation::SUM.new(awvc_inner, 1, 2)),
-                  vec![(q, awvc_inner)]);
+                      Aggregation::SUM.new(awvc, 1, 2)),
+                  vec![(q, awvc)]);
     web::run(g).unwrap();
 }
