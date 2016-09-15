@@ -13,6 +13,13 @@ docopt = "0.6"
 rand = "0.3"
 randomkit = "0.1.0"
 
+postgres = "0.11"
+r2d2 = "0.7"
+r2d2_postgres = "0.10"
+time = "0.1"
+
+bmemcached = "0.2"
+
 [profile.release]
 debug=true
 
@@ -23,3 +30,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "bench_votes"
 path = "benchmarks/votes.rs"
+
+[[bin]]
+name = "gen_voter"
+path = "benchmarks/gen_voter.rs"
