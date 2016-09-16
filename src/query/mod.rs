@@ -4,7 +4,7 @@ use flow;
 use rustc_serialize::json::{ToJson, Json};
 use std::sync;
 
-#[derive(Eq, PartialOrd, Hash, Debug, Clone)]
+#[derive(Eq, PartialOrd, Hash, Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
     None,
     Text(sync::Arc<String>),

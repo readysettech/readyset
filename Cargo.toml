@@ -23,6 +23,10 @@ memcache = {git="https://github.com/aisk/rust-memcache.git"}
 rustful = "0.9"
 rustc-serialize = "0.3"
 
+tarpc = "0.6"
+serde = "0.8"
+serde_macros = "0.8"
+
 [profile.release]
 debug=true
 
