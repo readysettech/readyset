@@ -20,12 +20,19 @@ time = "0.1"
 
 memcache = {git="https://github.com/aisk/rust-memcache.git"}
 
+rustful = "0.9"
+rustc-serialize = "0.3"
+
 [profile.release]
 debug=true
 
 [lib]
 name = "distributary"
 path = "src/lib.rs"
+
+[[bin]]
+name = "web"
+path = "src/web/main.rs"
 
 [[bin]]
 name = "bench_votes"

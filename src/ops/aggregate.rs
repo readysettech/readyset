@@ -80,6 +80,10 @@ impl NodeOp for Aggregator {
 
         match u {
             ops::Update::Records(rs) => {
+                if rs.is_empty() {
+                    return None;
+                }
+
                 assert_eq!(rs.get(0).and_then(|c| Some(c.rec().len())).unwrap_or(0),
                            self.cols);
 
