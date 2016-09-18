@@ -3,14 +3,25 @@ use flow;
 
 use std::sync;
 
+/// The main type used for user data throughout the codebase.
+///
+/// Having this be an enum allows for our code to be agnostic about the types of user data except
+/// when type information is specifically necessary.
 #[derive(Eq, PartialOrd, Hash, Debug, Clone)]
 pub enum DataType {
+    /// A placeholder value -- is considered equal to every other `DataType` value.
     None,
+    /// A string-like value.
     Text(sync::Arc<String>),
+    /// A numeric value.
     Number(i64),
 }
 
 impl DataType {
+    /// Detect if this `DataType` is none.
+    ///
+    /// Since we re-implement `PartialEq` for `DataType` to always return `true` for `None`, it can
+    /// actually be somewhat hard to do this right for users.
     pub fn is_none(&self) -> bool {
         if let DataType::None = *self {
             true
@@ -71,14 +82,17 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
+/// `Query` provides a mechanism for filtering and projecting records.
 #[derive(Clone, Debug)]
 pub struct Query {
-    pub select: Vec<bool>,
-    pub selects: usize,
+    select: Vec<bool>,
+    selects: usize,
+    /// The filtering conditions set for this query.
     pub having: Vec<shortcut::Condition<DataType>>,
 }
 
 impl Query {
+    /// Filter and project the given record `r` through this query.
     pub fn feed(&self, r: &[DataType]) -> Option<Vec<DataType>> {
         if self.having.iter().all(|c| c.matches(r)) {
             // Data matches -- project and return
@@ -89,6 +103,7 @@ impl Query {
         }
     }
 
+    /// Project the given record `r` through the selection of this query.
     pub fn project(&self, r: &[DataType]) -> Vec<DataType> {
         assert_eq!(r.len(), self.select.len());
         let mut into = Vec::with_capacity(self.selects);
@@ -100,6 +115,8 @@ impl Query {
         into
     }
 
+    /// Construct a new `Query` that selects the fields marked `true` in `s` for all rows that
+    /// match the set of conditions in `h`.
     pub fn new(s: &[bool], h: Vec<shortcut::Condition<DataType>>) -> Query {
         Query {
             select: s.iter().cloned().collect(),

@@ -9,13 +9,17 @@ use std::collections::HashMap;
 
 use shortcut;
 
+/// Supported aggregation operators.
 #[derive(Debug)]
 pub enum Aggregation {
+    /// Count the number of records for each group. The value for the `over` column is ignored.
     COUNT,
+    /// Sum the value of the `over` column for all records of each group.
     SUM,
 }
 
 impl Aggregation {
+    /// Zero value for this aggregation.
     pub fn zero(&self) -> i64 {
         match *self {
             Aggregation::COUNT => 0,
@@ -23,6 +27,8 @@ impl Aggregation {
         }
     }
 
+    /// Procedure for computing the new value for this aggregation given the current value and a
+    /// positive or negative delta.
     pub fn update(&self, old: i64, delta: i64, positive: bool) -> i64 {
         match *self {
             Aggregation::COUNT if positive => old + 1,
@@ -32,6 +38,12 @@ impl Aggregation {
         }
     }
 
+    /// Construct a new `Aggregator` that performs this operation.
+    ///
+    /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
+    /// from the `src` node in the graph), and use all other received columns as the group
+    /// identifier. `cols` should be set to the number of columns in this view (that is, the number
+    /// of group identifier columns + 1).
     pub fn new(self, src: flow::NodeIndex, over: usize, cols: usize) -> Aggregator {
         Aggregator {
             op: self,
@@ -42,6 +54,27 @@ impl Aggregation {
     }
 }
 
+/// Aggregator implementas a Soup node that performans common aggregation operations such as counts
+/// and sums.
+///
+/// `Aggregator` nodes are constructed through `Aggregation` variants using `Aggregation::new`.
+///
+/// Logically, the aggregated value for all groups start out as `self.op.zero()`. Thus, when the
+/// first record is received for a group, `Aggregator` will output a negative for the *zero row*,
+/// followed by a positive for the newly aggregated value.
+///
+/// When a new record arrives, the aggregator will first query the currently aggregated value for
+/// the new record's group by doing a query into its own output. The aggregated column
+/// (`self.over`) of the incoming record is then combined with the current aggregation value using
+/// `self.op.update`. The output record is constructed by concatenating the columns identifying the
+/// group, and appending the aggregated value. For example, for a sum with `self.over == 1`, a
+/// previous sum of `3`, and an incoming record with `[a, 1, x]`, the output would be `[a, x, 4]`.
+///
+/// Note that the code below also tries to be somewhat clever when given multiple records. Rather
+/// than doing one lookup for every record, it will find all *groups*, query once for each group,
+/// apply all the per-group deltas, and then emit one record for every group (well, a negative and
+/// a positive). This increases the complexity of the code, but also saves a lot of work when
+/// downstream of a join that may produce many records with the same group.
 #[derive(Debug)]
 pub struct Aggregator {
     op: Aggregation,

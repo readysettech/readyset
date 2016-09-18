@@ -65,8 +65,6 @@
 //!    the materialized views.
 //!  - [`petgraph`](https://github.com/bluss/petgraph) provides graph construction and traversal
 //!    mechanisms that are used by `FlowGraph` to maintain the data flow graph.
-//!  - [`bus`](https://github.com/jonhoo/bus) provides the broadcast channel primitive used to feed
-//!    forward output records of a view to all related child views.
 //!  - [`clocked-dispatch`](https://github.com/jonhoo/clocked-dispatch) provides a serialization
 //!    mechanism that assigns records that are sent across disparate channels (i.e., to different
 //!    base types) monotonically increasing global timestamps.
@@ -363,6 +361,7 @@
 //! the bottom of `FlowGraph::inner`.
 //!
 #![feature(optin_builtin_traits)]
+#![deny(missing_docs)]
 
 extern crate clocked_dispatch;
 extern crate parking_lot;
@@ -378,8 +377,6 @@ pub use flow::FlowGraph;
 pub use flow::NodeIndex;
 pub use ops::new;
 pub use ops::NodeType;
-pub use ops::Update;
-pub use ops::Record;
 pub use ops::base::Base;
 pub use ops::aggregate::*;
 pub use ops::join::Joiner;
