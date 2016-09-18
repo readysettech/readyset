@@ -9,6 +9,11 @@ use std::collections::HashMap;
 
 use shortcut;
 
+/// Joiner provides a 2-way join between two views.
+///
+/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
+/// `.join` such that it can express "query this view first, then use one of its columns to query
+/// this other view".
 #[derive(Debug)]
 pub struct Joiner {
     emit: Vec<(flow::NodeIndex, usize)>,
@@ -20,6 +25,33 @@ pub struct Joiner {
 }
 
 impl Joiner {
+    /// Construct a new join operator.
+    ///
+    /// Joins are currently somewhat verbose to construct, though the process isn't too complex.
+    /// Let us look at a SQL join such as
+    ///
+    /// ```sql
+    /// SELECT a.0, b.0
+    /// FROM a JOIN b USING (a.0 == b.1)
+    /// ```
+    ///
+    /// First, we construct the `emit` argument by indicating, for each output, which source and
+    /// column should be used. `vec![(a, 0), (b, 1)]` in this case.
+    ///
+    /// Next, we have to tell the `Joiner` how to construct an output row given an input row of any
+    /// type. We do this with a map from each source node to a list join fields. In the above
+    /// example, the map would look like this:
+    ///
+    /// ```rust,ignore
+    /// // if we get an `a`, query `b` and join using `a`'s 0th field
+    /// map.insert(a, vec![(b, vec![0])]);
+    /// // if we get a `b`, query `a` and join using `b`'s 1st field
+    /// map.insert(b, vec![(a, vec![1])]);
+    /// ```
+    ///
+    /// Also, that's a lie. Because of stupid code, the first entry in the vector for each node `n`
+    /// must be a list of the fields of `n` used in the join. This is so that we can more easily
+    /// support non-materialized join nodes. Plz fix this if you have some spare time.
     pub fn new(emit: Vec<(flow::NodeIndex, usize)>,
                join: HashMap<flow::NodeIndex, Vec<(flow::NodeIndex, Vec<usize>)>>)
                -> Joiner {

@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::sync;
 use std::collections::HashMap;
 
+/// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Record {
     Positive(Vec<query::DataType>, i64),
@@ -65,8 +66,10 @@ impl From<Vec<query::DataType>> for Record {
     }
 }
 
+/// Update is the smallest unit of data transmitted over edges in a data flow graph.
 #[derive(Clone)]
 pub enum Update {
+    /// This update holds a set of records.
     Records(Vec<Record>),
 }
 
@@ -88,10 +91,10 @@ impl From<(Vec<query::DataType>, i64)> for Update {
     }
 }
 
-pub type Params = Vec<shortcut::Value<query::DataType>>;
-pub type AQ = HashMap<flow::NodeIndex,
-                      Box<Fn(Params, i64) -> Vec<(Vec<query::DataType>, i64)> + Send + Sync>>;
-pub type Datas = Vec<(Vec<query::DataType>, i64)>;
+type Params = Vec<shortcut::Value<query::DataType>>;
+type AQ = HashMap<flow::NodeIndex,
+                  Box<Fn(Params, i64) -> Vec<(Vec<query::DataType>, i64)> + Send + Sync>>;
+type Datas = Vec<(Vec<query::DataType>, i64)>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
 /// `flow::View`, and for good reason. This is effectively the behavior of a node when there is no
@@ -129,13 +132,20 @@ pub trait NodeOp: Debug {
     fn resolve(&self, usize) -> Vec<(flow::NodeIndex, usize)>;
 }
 
+/// The set of node types supported by distributary.
 pub enum NodeType {
+    /// A base node. See `Base`.
     BaseNode(base::Base),
+    /// An aggregation. See `Aggregator`.
     AggregateNode(aggregate::Aggregator),
+    /// A join. See `Joiner`.
     JoinNode(join::Joiner),
+    /// A latest. See `Latest`.
     LatestNode(latest::Latest),
+    /// A union. See `Union`.
     UnionNode(union::Union),
     #[cfg(test)]
+    /// A test operator for testing purposes.
     TestNode(tests::Tester),
 }
 
@@ -321,6 +331,12 @@ impl flow::View<query::Query> for Node {
     }
 }
 
+/// Construct a new `View` from one of the `NodeType` variants.
+///
+/// This methods takes a distributary operator and turns it into a full `View`, which can then be
+/// used as a node in a `FlowGraph`. By setting `materialied` to true, the operator's outputs will
+/// be materialized and transparently used for queries when they arrive. `fields` is used to give
+/// human-friendly names to emitted values.
 pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -> Node
     where &'a S: Into<String>,
           NO: NodeOp,
@@ -341,6 +357,8 @@ pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::AQ;
+    use super::Datas;
     use flow;
     use query;
     use backlog;
