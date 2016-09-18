@@ -9,12 +9,24 @@ use clocked_dispatch;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+/// Available RPC methods
 pub mod ext {
     use query::DataType;
     use std::collections::HashMap;
     service! {
+        /// Query the given `view` for all records whose columns match the given values.
+        ///
+        /// If `args = None`, all records are returned. Otherwise, all records are returned whose
+        /// `i`th column matches the value contained in `args[i]` (or any value if `args[i] =
+        /// None`).
         rpc query(view: usize, args: Option<Vec<Option<DataType>>>) -> Vec<Vec<DataType>>;
+
+        /// Insert a new record into the given view.
+        ///
+        /// `args` gives the column values for the new record.
         rpc insert(view: usize, args: Vec<DataType>) -> ();
+
+        /// List all available views, their names, and whether they are writeable.
         rpc list() -> HashMap<String, (usize, bool)>;
     }
 }

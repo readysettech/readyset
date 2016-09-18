@@ -143,6 +143,88 @@ impl<T> Ord for Delayed<T> {
     }
 }
 
+/// `FlowGraph` is the main entry point for all of distributary. It provides methods to construct,
+/// update, and execute a data flow graph.
+///
+/// The `FlowGraph` is heavily parameterized to simplify testing. Admittedly, the type signature
+/// could probably be simplified while maintaining enough flexibility for testing, but oh well. The
+/// type arguments are:
+///
+///  - `Q`: The type used for queries that are assigned to the edges of the graph.
+///  - `U`: The type used for updates that propagate through the graph.
+///  - `D`: The type used for records (`D`ata), i.e., what is returned by view queries, and what is
+///         inserted by users of `FlowGraph` using the channels returned by `run()`.
+///  - `P`: The type used for parameters given to views to query them. This could probably be
+///         merged with `Q` in some sensible fashion by giving `Q` an associated type.
+///
+/// When a new `FlowGraph` has been constructed, it will first be used to construct a graph using
+/// `incorporate()`. This method takes a `View` and a set of ancestor nodes (with associated
+/// queries). In general, any `NodeType` can be used to make a view by passing it to `new` along
+/// with its field names and a boolean marking whether that node should be materialized. To
+/// construct a simple two-node graph that logs votes and keeps vote counts up to date:
+///
+/// ```
+/// use distributary::*;
+///
+/// let mut g = FlowGraph::new();
+///
+/// // set up a base node and a view
+/// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
+/// let votecount = g.incorporate(
+///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
+///     vec![(Query::new(&[true, true], Vec::new()), vote)]
+/// );
+/// # drop(vote);
+/// # drop(votecount);
+/// ```
+///
+/// Once a graph has been constructed, `run()` should be called to start execution of the data flow
+/// graph. `run()` returns objects that can be used to insert records and query the various views
+/// in the graph:
+///
+/// ```
+/// # #[macro_use] extern crate shortcut;
+/// # #[macro_use] extern crate distributary;
+/// # fn main() {
+/// # use std::time::Duration;
+/// # use std::thread::sleep;
+/// # use shortcut;
+/// # use distributary::*;
+/// # let mut g = FlowGraph::new();
+/// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
+/// # let votecount = g.incorporate(
+/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
+/// #     vec![(Query::new(&[true, true], Vec::new()), vote)]
+/// # );
+/// // start the data flow graph
+/// let (put, get) = g.run(10);
+///
+/// // put can now be used to insert votes
+/// put[&vote].send(vec![1.into(), 1.into()]);
+/// put[&vote].send(vec![2.into(), 1.into()]);
+/// put[&vote].send(vec![3.into(), 1.into()]);
+/// put[&vote].send(vec![1.into(), 2.into()]);
+/// put[&vote].send(vec![2.into(), 2.into()]);
+///
+/// // allow them to propagate before querying
+/// sleep(Duration::from_millis(100));
+///
+/// // get can be used to query votecount
+/// assert_eq!(
+///     {
+///         use shortcut::{Condition,Comparison,Value};
+///         get[&votecount](Some(Query::new(
+///             &[true, true], // select both fields
+///             vec![Condition {
+///                 column: 0, // filter on id
+///                 cmp: Comparison::Equal(Value::Const(1.into())), // == 1
+///             }]
+///         )))
+///     }[0], // get the first (and only) result row
+///     vec![1.into(), 3.into()]
+/// )
+/// # }
+/// ```
 pub struct FlowGraph<Q, U, D, P> where
     Q: Clone + Send + Sync,
     U: Clone + Send,
@@ -165,6 +247,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
           D: 'static + Clone + Send + Into<U>,
           P: 'static + Send
 {
+    /// Construct a new, empy data flow graph.
     pub fn new() -> FlowGraph<Q, U, D, P> {
         let mut graph = petgraph::Graph::new();
         let source = graph.add_node(None);
@@ -178,10 +261,17 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
     }
 
+    /// Return a reference to the internal graph, as well as the identifier for the root node.
     pub fn graph(&self) -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>, Option<sync::Arc<Q>>>, NodeIndex) {
         (&self.graph, self.source)
     }
 
+    /// Query all nodes for what indices they believe should be maintained, and apply those to the
+    /// graph.
+    ///
+    /// This function is somewhat complicated by the fact that we need to push indices through
+    /// non-materialized views so that they end up on the columns of the views that will actually
+    /// query into a table of some sort.
     fn add_indices(&mut self) {
         // figure out what indices we should add
         let mut indices = petgraph::BfsIter::new(&self.graph, self.source)
@@ -232,6 +322,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
     }
 
+    /// Build and update the node state used by `FlowGraph::inner` to track information about its
+    /// outgoing neighbors for the purposes of absorbption.
     fn build_contexts(&mut self,
                       start: &mut HashMap<NodeIndex, mpsc::Receiver<(NodeIndex, Option<U>, i64)>>,
                       new: &HashSet<NodeIndex>,
@@ -434,6 +526,36 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         aqfs
     }
 
+    /// Execute any changes to the data flow graph since the last call to `run()`.
+    ///
+    /// `run()` sets up ancestor query functions, finds indices, and builds the state each new node
+    /// needs to keep track of in order to function correctly. This includes telling any existing
+    /// ancestors of new nodes about their new children.
+    ///
+    /// Once the necessary bookkeeping has been done, `run()` will spawn two different types of
+    /// threads (ignoring `clocked_dispatch`):
+    ///
+    ///  - For every node, a thread is spawned that runs `FlowGraph::inner()` for that node.
+    ///    `inner()` listens for incoming records from all of a node's ancestors, delays them if
+    ///    necessary, and then calls the node's `process()` method to process the received updates.
+    ///  - For every `Base` node, a thread is spawned that listens for incoming records from the
+    ///    `clocked_dispatch` dispatcher, and wraps the record in a tuple with
+    ///
+    ///     - source node
+    ///     - the record as a `U`
+    ///     - time stamp
+    ///
+    ///    This is done so that the `Base` nodes can use the same `.inner` method as the other
+    ///    nodes in the graph (i.e., so that they can process the same kind of incoming tuples)
+    ///    without requiring the user to insert those tuples.
+    ///
+    /// It may be instructive to read through `FlowGraph::inner()`, as well as look at what state
+    /// is passed to it in `NodeState` to better understand what each node is doing.
+    /// `FlowGraph::run()` is likely to be less interesting.
+    ///
+    /// `run()` will return two maps, one mapping the `NodeIndex` of every `Base` node to a channel
+    /// on which new records can be sent, and one mapping the `NodeIndex` of every node to a
+    /// function that will query that node when called.
     pub fn run(&mut self,
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<D>>,
@@ -537,7 +659,6 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
         (incoming, qs)
     }
-
 
     fn inner(state: NodeState<Q, U, D, P>) {
         use std::collections::VecDeque;
@@ -754,6 +875,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
     }
 
+    /// Add the given `View` node into the graph as a child of the given ancestors.
     // TODO
     // we need a better way of ensuring that the Q for each node matches what the node *thinks*
     // that query should be. for example, an aggregation expects to be able to query over all the

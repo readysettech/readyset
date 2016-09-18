@@ -16,8 +16,8 @@ fn main() {
     // add vote base table
     let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 
-    // add vote count
     let q = Query::new(&[true, true], Vec::new());
+    // add vote count
     let vc = g.incorporate(new("votecount",
                                &["id", "votes"],
                                true,
@@ -55,8 +55,14 @@ fn main() {
                                             )
                                         ),
                             }]);
-    g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
+    let awvc = g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
                   vec![(q_a, article), (q_vc, vc)]);
 
+    let q = Query::new(&[false, true, false, false, true], Vec::new());
+    g.incorporate(new("karma",
+                      &["user", "votes"],
+                      true,
+                      Aggregation::SUM.new(awvc, 1, 2)),
+                  vec![(q, awvc)]);
     web::run(g).unwrap();
 }

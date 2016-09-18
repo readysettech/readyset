@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use shortcut;
 
+/// A union of a set of views.
 #[derive(Debug)]
 pub struct Union {
     emit: HashMap<flow::NodeIndex, Vec<usize>>,
@@ -16,6 +17,10 @@ pub struct Union {
 }
 
 impl Union {
+    /// Construct a new union operator.
+    ///
+    /// When receiving an update from node `a`, a union expects `a` to have `cols[a]` output
+    /// columns, and will emit the columns selected in `emit[a]`.
     pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>,
                cols: HashMap<flow::NodeIndex, usize>)
                -> Union {

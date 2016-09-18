@@ -2,7 +2,6 @@ use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
 use flow::{FlowGraph, NodeIndex, FillableQuery};
 use query::{DataType, Query};
-use petgraph::EdgeDirection;
 use std::collections::HashMap;
 use shortcut;
 
@@ -11,6 +10,17 @@ struct Endpoint {
     arguments: Vec<String>,
 }
 
+/// Start exposing the given `FlowGraph` over HTTP.
+///
+/// All base nodes are available for writing by POSTing to `localhost:8080/<view>`. Each POST
+/// should contain a single JSON object representing the record with field names equal to those
+/// passed to `new()`.
+///
+/// All nodes are available for reading by GETing from `localhost:8080/<view>`. Without further
+/// arguments, the view is queried without filters. Equality filters can be added using query
+/// parameters such as `?id=1`. A JSON array with all matching records is returned. Each record is
+/// represented as a JSON object with field names as dictated by those passed to `new()` for the
+/// view being queried.
 pub fn run<U, P>(mut soup: FlowGraph<Query, U, Vec<DataType>, P>) -> HttpResult<Listening>
     where U: 'static + Clone + Send + From<Vec<DataType>>,
           P: 'static + Send,
@@ -33,7 +43,13 @@ pub fn run<U, P>(mut soup: FlowGraph<Query, U, Vec<DataType>, P>) -> HttpResult<
         // and the leaves to outputs
         // TODO: we may want to allow non-leaves to be outputs too
         (graph.neighbors(source).map(&ni2ep).collect::<Vec<_>>(),
-         graph.externals(EdgeDirection::Outgoing).map(&ni2ep).collect::<Vec<_>>())
+         graph.node_indices()
+            .filter(|ni| {
+                let nw = graph.node_weight(*ni);
+                nw.is_some() && nw.unwrap().as_ref().is_some()
+            })
+            .map(&ni2ep)
+            .collect::<Vec<_>>())
     };
 
     let (mut put, mut get) = soup.run(10);
