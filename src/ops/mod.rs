@@ -357,6 +357,8 @@ pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::AQ;
+    use super::Datas;
     use flow;
     use query;
     use backlog;
