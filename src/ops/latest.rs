@@ -10,6 +10,10 @@ use std::collections::HashSet;
 
 use shortcut;
 
+/// Latest provides an operator that will maintain the last record for every group.
+///
+/// Whenever a new record arrives for a group, the latest operator will negative the previous
+/// latest for that group.
 #[derive(Debug)]
 pub struct Latest {
     src: flow::NodeIndex,
@@ -19,6 +23,11 @@ pub struct Latest {
 }
 
 impl Latest {
+    /// Construct a new latest operator.
+    ///
+    /// `src` should be the ancestor the operation is performed over, and `keys` should be a list
+    /// of fields used to group records by. The latest record *within each group* will be
+    /// maintained.
     pub fn new(src: flow::NodeIndex, mut keys: Vec<usize>) -> Latest {
         keys.sort();
         let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();

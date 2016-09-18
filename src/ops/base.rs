@@ -7,6 +7,11 @@ use ops::NodeType;
 
 use std::collections::HashMap;
 
+/// Base is used to represent the root nodes of the distributary data flow graph.
+///
+/// These nodes perform no computation, and their job is merely to persist all received updates and
+/// forward them to interested downstream operators. A base node should only be sent updates of the
+/// type corresponding to the node's type.
 #[derive(Debug)]
 pub struct Base {}
 
