@@ -15,11 +15,12 @@ shortcut = "3.3"
 clocked-dispatch = "3.0"
 parking_lot = {version = "0.2", features = ["nightly"]}
 
-docopt = "0.6"
+# for benchmarks
+# cli
+clap = "2.13"
+# distributions
 rand = "0.3"
 randomkit = "0.1.0"
-
-# for benchmarks
 # postgresql
 postgres = { version = "0.11", optional = true }
 r2d2 = { version = "0.7", optional = true }
