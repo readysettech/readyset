@@ -51,7 +51,10 @@ $ cargo build --bin vote --release
 ```
 
 The `--release` enables compilation optimizations, and is necessary to
-get sensible numbers. Once compiled, the benchmarker can be run with
+get sensible numbers. Note that compiling with optimizations will also
+take longer than a regular debug build.
+
+Once compiled, the benchmarker can be run with
 ```console
 $ target/release/vote --runtime 30 --prepopulate-articles 10000 soup://
 ```
@@ -59,7 +62,10 @@ $ target/release/vote --runtime 30 --prepopulate-articles 10000 soup://
 ### Benchmarks against other targets
 
 To compare distributary's performance against other backends, the `vote`
-binary has to be compiled with the appropriate feature enabled:
+binary has to be compiled with the appropriate feature enabled. You can
+enable multiple features by compiling with `--features "b_x b_y"`. The
+additional features pull in more dependencies, so compilation will be
+slower.
 
 | target | `--features` | invocation argument | notes
 |--------|--------------|------------|------
