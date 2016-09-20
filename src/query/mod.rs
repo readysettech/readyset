@@ -9,7 +9,8 @@ use std::sync;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
-#[derive(Eq, PartialOrd, Hash, Debug, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialOrd, Hash, Debug, Clone)]
+#[cfg_attr(feature="b_binsoup", derive(Serialize, Deserialize))]
 pub enum DataType {
     /// A placeholder value -- is considered equal to every other `DataType` value.
     None,

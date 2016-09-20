@@ -362,7 +362,7 @@
 //!
 #![feature(optin_builtin_traits)]
 #![feature(plugin, custom_derive)]
-#![plugin(serde_macros)]
+#![cfg_attr(feature="b_binsoup", plugin(serde_macros))]
 #![deny(missing_docs)]
 
 extern crate clocked_dispatch;
@@ -378,8 +378,8 @@ extern crate rustc_serialize;
 extern crate rustful;
 
 #[macro_use]
+#[cfg(feature="b_binsoup")]
 extern crate tarpc;
-
 
 mod flow;
 mod query;
@@ -402,5 +402,6 @@ pub use query::DataType;
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
 
+#[cfg(feature="b_binsoup")]
 /// srv provides a networked RPC server for accessing the data flow graph.
 pub mod srv;

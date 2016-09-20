@@ -5,6 +5,9 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [features]
 web = ["rustful", "rustc-serialize"]
+b_mc = ["memcache"]
+b_psql = ["postgres", "r2d2", "r2d2_postgres"]
+b_binsoup = ["tarpc", "serde", "serde_macros"]
 
 [dependencies]
 petgraph = "0.2"
@@ -16,20 +19,25 @@ docopt = "0.6"
 rand = "0.3"
 randomkit = "0.1.0"
 
-postgres = "0.11"
-r2d2 = "0.7"
-r2d2_postgres = "0.10"
-time = "0.1"
-
-memcache = {git="https://github.com/aisk/rust-memcache.git"}
+# for benchmarks
+# psql
+postgres = { version = "0.11", optional = true }
+r2d2 = { version = "0.7", optional = true }
+r2d2_postgres = { version = "0.10", optional = true }
+# mc
+memcache = {git="https://github.com/aisk/rust-memcache.git", optional = true }
+# binsoup
+tarpc = { version = "0.6", optional = true }
+serde = { version = "0.8", optional = true }
+serde_macros = { version = "0.8", optional = true }
 
 # for web
 rustful = { version = "0.9", optional = true }
 rustc-serialize = { version = "0.3", optional = true }
 
-tarpc = "0.6"
-serde = "0.8"
-serde_macros = "0.8"
+[replace]
+# https://github.com/serde-rs/aster/issues/105
+"aster:0.26.1" = { git = "https://github.com/jchlapinski/aster" }
 
 [profile.release]
 debug=true
