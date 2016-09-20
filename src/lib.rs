@@ -367,9 +367,12 @@ extern crate clocked_dispatch;
 extern crate parking_lot;
 extern crate petgraph;
 extern crate shortcut;
+
+#[cfg(feature="web")]
 extern crate rustc_serialize;
 
 #[macro_use]
+#[cfg(feature="web")]
 extern crate rustful;
 
 mod flow;
@@ -389,5 +392,6 @@ pub use ops::latest::Latest;
 pub use query::Query;
 pub use query::DataType;
 
+#[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;

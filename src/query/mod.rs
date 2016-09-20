@@ -1,6 +1,7 @@
 use shortcut;
 use flow;
 
+#[cfg(feature="web")]
 use rustc_serialize::json::{ToJson, Json};
 use std::sync;
 
@@ -32,6 +33,7 @@ impl DataType {
     }
 }
 
+#[cfg(feature="web")]
 impl ToJson for DataType {
     fn to_json(&self) -> Json {
         use std::ops::Deref;

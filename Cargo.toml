@@ -3,6 +3,9 @@ name = "distributary"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
+[features]
+web = ["rustful", "rustc-serialize"]
+
 [dependencies]
 petgraph = "0.2"
 shortcut = "3.3"
@@ -14,8 +17,8 @@ rand = "0.3"
 randomkit = "0.1.0"
 
 # for web
-rustful = "0.9"
-rustc-serialize = "0.3"
+rustful = { version = "0.9", optional = true }
+rustc-serialize = { version = "0.3", optional = true }
 
 [profile.release]
 debug=true

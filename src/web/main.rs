@@ -5,6 +5,7 @@ use distributary::*;
 
 use std::collections::HashMap;
 
+#[cfg(feature="web")]
 fn main() {
     // set up graph
     let mut g = distributary::FlowGraph::new();
@@ -56,7 +57,7 @@ fn main() {
                                         ),
                             }]);
     let awvc = g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j),
-                  vec![(q_a, article), (q_vc, vc)]);
+                             vec![(q_a, article), (q_vc, vc)]);
 
     let q = Query::new(&[false, true, false, false, true], Vec::new());
     g.incorporate(new("karma",
@@ -65,4 +66,9 @@ fn main() {
                       Aggregation::SUM.new(awvc, 1, 2)),
                   vec![(q, awvc)]);
     web::run(g).unwrap();
+}
+
+#[cfg(not(feature="web"))]
+fn main() {
+    unreachable!("compile with --features=web to build the web frontend");
 }
