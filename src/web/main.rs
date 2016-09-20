@@ -1,12 +1,13 @@
+#[cfg(feature="web")]
 extern crate distributary;
+#[cfg(feature="web")]
 extern crate shortcut;
-
-use distributary::*;
-
-use std::collections::HashMap;
 
 #[cfg(feature="web")]
 fn main() {
+    use distributary::*;
+    use std::collections::HashMap;
+
     // set up graph
     let mut g = distributary::FlowGraph::new();
 
