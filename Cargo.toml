@@ -51,9 +51,5 @@ name = "web"
 path = "src/web/main.rs"
 
 [[bin]]
-name = "bench_votes"
-path = "benchmarks/votes.rs"
-
-[[bin]]
-name = "gen_voter"
-path = "benchmarks/gen_voter.rs"
+name = "vote"
+path = "benchmarks/vote.rs"
