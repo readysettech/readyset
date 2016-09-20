@@ -10,9 +10,9 @@ use std::collections::HashMap;
 fn it_works() {
     // set up graph
     let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}),
                           vec![]);
-    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}),
                           vec![]);
 
     let mut emits = HashMap::new();
@@ -23,7 +23,7 @@ fn it_works() {
     cols.insert(b, 2);
     let u = distributary::Union::new(emits, cols);
     let q = distributary::Query::new(&[true, true], Vec::new());
-    let c = g.incorporate(distributary::new(&["a", "b"], false, u),
+    let c = g.incorporate(distributary::new("c", &["a", "b"], false, u),
                           vec![(q.clone(), a), (q, b)]);
     let (put, get) = g.run(10);
 
@@ -52,9 +52,9 @@ fn it_works() {
 fn it_works_w_mat() {
     // set up graph
     let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}),
                           vec![]);
-    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}),
                           vec![]);
 
     let mut emits = HashMap::new();
@@ -65,7 +65,7 @@ fn it_works_w_mat() {
     cols.insert(b, 2);
     let u = distributary::Union::new(emits, cols);
     let q = distributary::Query::new(&[true, true], Vec::new());
-    let c = g.incorporate(distributary::new(&["a", "b"], true, u),
+    let c = g.incorporate(distributary::new("c", &["a", "b"], true, u),
                           vec![(q.clone(), a), (q, b)]);
     let (put, get) = g.run(10);
 
@@ -105,7 +105,7 @@ fn it_works_w_mat() {
 fn it_migrates_wo_mat() {
     // set up graph
     let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}),
                           vec![]);
     let (put_1, _) = g.run(10);
 
@@ -116,7 +116,7 @@ fn it_migrates_wo_mat() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // add more of graph
-    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}),
                           vec![]);
 
     let mut emits = HashMap::new();
@@ -127,7 +127,7 @@ fn it_migrates_wo_mat() {
     cols.insert(b, 2);
     let u = distributary::Union::new(emits, cols);
     let q = distributary::Query::new(&[true, true], Vec::new());
-    let c = g.incorporate(distributary::new(&["a", "b"], false, u),
+    let c = g.incorporate(distributary::new("c", &["a", "b"], false, u),
                           vec![(q.clone(), a), (q, b)]);
     let (put, get) = g.run(10);
 
@@ -153,7 +153,7 @@ fn it_migrates_wo_mat() {
 fn it_migrates_w_mat() {
     // set up graph
     let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}),
                           vec![]);
     let (put_1, _) = g.run(10);
 
@@ -166,7 +166,7 @@ fn it_migrates_w_mat() {
     thread::sleep(time::Duration::new(0, 100_000_000));
 
     // add the rest of the graph
-    let b = g.incorporate(distributary::new(&["a", "b"], true, distributary::Base {}),
+    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}),
                           vec![]);
 
     let mut emits = HashMap::new();
@@ -177,7 +177,7 @@ fn it_migrates_w_mat() {
     cols.insert(b, 2);
     let u = distributary::Union::new(emits, cols);
     let q = distributary::Query::new(&[true, true], Vec::new());
-    let c = g.incorporate(distributary::new(&["a", "b"], true, u),
+    let c = g.incorporate(distributary::new("c", &["a", "b"], true, u),
                           vec![(q.clone(), a), (q, b)]);
     let (put, get) = g.run(10);
 
@@ -216,8 +216,8 @@ fn votes() {
     let mut g = distributary::FlowGraph::new();
 
     // add article base nodes (we use two so we can exercise unions too)
-    let article1 = g.incorporate(new(&["id", "title"], true, Base {}), vec![]);
-    let article2 = g.incorporate(new(&["id", "title"], true, Base {}), vec![]);
+    let article1 = g.incorporate(new("article1", &["id", "title"], true, Base {}), vec![]);
+    let article2 = g.incorporate(new("article2", &["id", "title"], true, Base {}), vec![]);
 
     // add a (stupid) union of article1 + article2
     let mut emits = HashMap::new();
@@ -228,15 +228,18 @@ fn votes() {
     cols.insert(article2, 2);
     let u = Union::new(emits, cols);
     let q = Query::new(&[true, true], Vec::new());
-    let article = g.incorporate(new(&["id", "title"], false, u),
+    let article = g.incorporate(new("article", &["id", "title"], false, u),
                                 vec![(q.clone(), article1), (q, article2)]);
 
     // add vote base table
-    let vote = g.incorporate(new(&["user", "id"], true, Base {}), vec![]);
+    let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 
     // add vote count
     let q = Query::new(&[true, true], Vec::new());
-    let vc = g.incorporate(new(&["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
+    let vc = g.incorporate(new("vc",
+                               &["id", "votes"],
+                               true,
+                               Aggregation::COUNT.new(vote, 0, 2)),
                            vec![(q, vote)]);
 
     // add final join
@@ -256,7 +259,7 @@ fn votes() {
                                 cmp:
                                     shortcut::Comparison::Equal(shortcut::Value::Const(distributary::DataType::None)),
                             }]);
-    let end = g.incorporate(new(&["id", "title", "votes"], true, j),
+    let end = g.incorporate(new("end", &["id", "title", "votes"], true, j),
                             vec![(q.clone(), article), (q, vc)]);
 
 

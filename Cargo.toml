@@ -3,6 +3,12 @@ name = "distributary"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
+[features]
+web = ["rustful", "rustc-serialize"]
+b_memcached = ["memcache"]
+b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
+b_netsoup = ["tarpc", "serde", "serde_macros"]
+
 [dependencies]
 petgraph = "0.2"
 shortcut = "3.3"
@@ -13,6 +19,26 @@ docopt = "0.6"
 rand = "0.3"
 randomkit = "0.1.0"
 
+# for benchmarks
+# postgresql
+postgres = { version = "0.11", optional = true }
+r2d2 = { version = "0.7", optional = true }
+r2d2_postgres = { version = "0.10", optional = true }
+# memcached
+memcache = {git="https://github.com/aisk/rust-memcache.git", optional = true }
+# netsoup
+tarpc = { version = "0.6", optional = true }
+serde = { version = "0.8", optional = true }
+serde_macros = { version = "0.8", optional = true }
+
+# for web
+rustful = { version = "0.9", optional = true }
+rustc-serialize = { version = "0.3", optional = true }
+
+[replace]
+# https://github.com/serde-rs/aster/issues/105
+"aster:0.26.1" = { git = "https://github.com/jchlapinski/aster" }
+
 [profile.release]
 debug=true
 
@@ -21,5 +47,9 @@ name = "distributary"
 path = "src/lib.rs"
 
 [[bin]]
-name = "bench_votes"
-path = "benchmarks/votes.rs"
+name = "web"
+path = "src/web/main.rs"
+
+[[bin]]
+name = "vote"
+path = "benchmarks/vote.rs"

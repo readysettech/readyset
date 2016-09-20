@@ -361,12 +361,25 @@
 //! the bottom of `FlowGraph::inner`.
 //!
 #![feature(optin_builtin_traits)]
+#![feature(plugin, custom_derive)]
+#![cfg_attr(feature="b_netsoup", plugin(serde_macros))]
 #![deny(missing_docs)]
 
 extern crate clocked_dispatch;
 extern crate parking_lot;
 extern crate petgraph;
 extern crate shortcut;
+
+#[cfg(feature="web")]
+extern crate rustc_serialize;
+
+#[macro_use]
+#[cfg(feature="web")]
+extern crate rustful;
+
+#[macro_use]
+#[cfg(feature="b_netsoup")]
+extern crate tarpc;
 
 mod flow;
 mod query;
@@ -384,3 +397,11 @@ pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use query::Query;
 pub use query::DataType;
+
+#[cfg(feature="web")]
+/// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
+pub mod web;
+
+#[cfg(feature="b_netsoup")]
+/// srv provides a networked RPC server for accessing the data flow graph.
+pub mod srv;

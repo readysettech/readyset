@@ -54,6 +54,16 @@ impl Record {
     }
 }
 
+impl From<(Vec<query::DataType>, i64, bool)> for Record {
+    fn from(other: (Vec<query::DataType>, i64, bool)) -> Self {
+        if other.2 {
+            Record::Positive(other.0, other.1)
+        } else {
+            Record::Negative(other.0, other.1)
+        }
+    }
+}
+
 impl From<(Vec<query::DataType>, i64)> for Record {
     fn from(other: (Vec<query::DataType>, i64)) -> Self {
         Record::Positive(other.0, other.1)
@@ -220,6 +230,7 @@ impl Debug for NodeType {
 }
 
 pub struct Node {
+    name: String,
     fields: Vec<String>,
     data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
     inner: sync::Arc<NodeType>,
@@ -227,7 +238,7 @@ pub struct Node {
 
 impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", *self.inner)
+        write!(f, "{:?}({:?})", self.name, *self.inner)
     }
 }
 
@@ -277,12 +288,28 @@ impl flow::View<query::Query> for Node {
     }
 
     fn process(&self,
-               u: Self::Update,
+               mut u: Self::Update,
                src: flow::NodeIndex,
+               q: Option<&query::Query>,
                ts: i64,
                aqs: &AQ)
                -> Option<Self::Update> {
         use std::ops::Deref;
+
+        if let Some(q) = q {
+            // the incoming update has not been projected through the query, and so does not fit
+            // the expected input format. let's fix that.
+            match u {
+                Update::Records(ref mut rs) => {
+                    for r in rs.iter_mut() {
+                        let projected = q.project(&r.rec()[..]);
+                        *r = (projected, r.ts(), r.is_positive()).into();
+                    }
+                }
+            }
+        }
+
+        // lock the materialization if this view is materialized
         let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write()));
 
         let new_u = self.inner.forward(u, src, ts, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
@@ -329,16 +356,25 @@ impl flow::View<query::Query> for Node {
     fn operator(&self) -> Option<&NodeType> {
         Some(&*self.inner)
     }
+
+    fn name(&self) -> &str {
+        &*self.name
+    }
+
+    fn args(&self) -> &[String] {
+        &self.fields[..]
+    }
 }
 
 /// Construct a new `View` from one of the `NodeType` variants.
 ///
 /// This methods takes a distributary operator and turns it into a full `View`, which can then be
 /// used as a node in a `FlowGraph`. By setting `materialied` to true, the operator's outputs will
-/// be materialized and transparently used for queries when they arrive. `fields` is used to give
-/// human-friendly names to emitted values.
-pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -> Node
+/// be materialized and transparently used for queries when they arrive. `name` and `fields` are
+/// used to give human-friendly values for the node and its record columns respectively.
+pub fn new<'a, NS, S: ?Sized, NO>(name: NS, fields: &[&'a S], materialized: bool, inner: NO) -> Node
     where &'a S: Into<String>,
+          NS: Into<String>,
           NO: NodeOp,
           NodeType: convert::From<NO>
 {
@@ -348,6 +384,7 @@ pub fn new<'a, S: ?Sized, NO>(fields: &[&'a S], materialized: bool, inner: NO) -
     }
 
     Node {
+        name: name.into(),
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(NodeType::from(inner)),
@@ -430,11 +467,11 @@ mod tests {
         // set up graph
         let mut g = flow::FlowGraph::new();
         let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new(&["a"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new(&["b"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new(&["c"], mat, Tester(4)),
+        let a = g.incorporate(new("a", &["a"], true, Tester(1)), vec![]);
+        let b = g.incorporate(new("b", &["b"], true, Tester(2)), vec![]);
+        let c = g.incorporate(new("c", &["c"], mat, Tester(4)),
                               vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new(&["d"], mat, Tester(8)), vec![(all.clone(), c)]);
+        let d = g.incorporate(new("d", &["d"], mat, Tester(8)), vec![(all.clone(), c)]);
         let (put, get) = g.run(10);
 
         // send a value

@@ -1,6 +1,8 @@
 use shortcut;
 use flow;
 
+#[cfg(feature="web")]
+use rustc_serialize::json::{ToJson, Json};
 use std::sync;
 
 /// The main type used for user data throughout the codebase.
@@ -8,6 +10,7 @@ use std::sync;
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
 #[derive(Eq, PartialOrd, Hash, Debug, Clone)]
+#[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
 pub enum DataType {
     /// A placeholder value -- is considered equal to every other `DataType` value.
     None,
@@ -27,6 +30,18 @@ impl DataType {
             true
         } else {
             false
+        }
+    }
+}
+
+#[cfg(feature="web")]
+impl ToJson for DataType {
+    fn to_json(&self) -> Json {
+        use std::ops::Deref;
+        match *self {
+            DataType::None => Json::Null,
+            DataType::Number(n) => Json::I64(n),
+            DataType::Text(ref s) => Json::String(s.deref().clone()),
         }
     }
 }

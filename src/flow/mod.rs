@@ -37,6 +37,7 @@ pub trait View<Q: Clone + Send>: Debug {
     fn process(&self,
                Self::Update,
                NodeIndex,
+               Option<&Q>,
                i64,
                &HashMap<NodeIndex,
                         Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
@@ -70,6 +71,12 @@ pub trait View<Q: Clone + Send>: Debug {
     /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
     /// transformations.
     fn operator(&self) -> Option<&ops::NodeType>;
+
+    /// Returns the name of this view.
+    fn name(&self) -> &str;
+
+    /// Returns the arguments to this view.
+    fn args(&self) -> &[String];
 }
 
 pub trait FillableQuery {
@@ -101,6 +108,7 @@ struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Se
     input: mpsc::Receiver<(NodeIndex, Option<U>, i64)>,
     aqfs: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<(D, i64)> + Send + Sync>>>,
     context: SharedContext<U>,
+    ancestor_qs: HashMap<NodeIndex, sync::Arc<Q>>,
     processed_ts: sync::Arc<sync::atomic::AtomicIsize>,
     init_ts: i64,
 }
@@ -161,9 +169,9 @@ impl<T> Ord for Delayed<T> {
 /// let mut g = FlowGraph::new();
 ///
 /// // set up a base node and a view
-/// let vote = g.incorporate(new(&["user", "id"], true, Base {}), vec![]);
+/// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 /// let votecount = g.incorporate(
-///     new(&["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
+///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
 ///     vec![(Query::new(&[true, true], Vec::new()), vote)]
 /// );
 /// # drop(vote);
@@ -183,9 +191,9 @@ impl<T> Ord for Delayed<T> {
 /// # use shortcut;
 /// # use distributary::*;
 /// # let mut g = FlowGraph::new();
-/// # let vote = g.incorporate(new(&["user", "id"], true, Base {}), vec![]);
+/// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 /// # let votecount = g.incorporate(
-/// #     new(&["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
+/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
 /// #     vec![(Query::new(&[true, true], Vec::new()), vote)]
 /// # );
 /// // start the data flow graph
@@ -251,6 +259,11 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             dispatch: clocked_dispatch::new(20),
             contexts: HashMap::default(),
         }
+    }
+
+    /// Return a reference to the internal graph, as well as the identifier for the root node.
+    pub fn graph(&self) -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>, Option<sync::Arc<Q>>>, NodeIndex) {
+        (&self.graph, self.source)
     }
 
     /// Query all nodes for what indices they believe should be maintained, and apply those to the
@@ -615,6 +628,18 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 .map(|(ni, _)| ni)
                 .collect::<Vec<_>>();
 
+            let ancestor_qs = srcs.iter()
+                .map(|&ni| ni)
+                .filter(|&ni| ni != self.source)
+                .map(|ni| {
+                    (ni,
+                     self.graph
+                        .find_edge(ni, node)
+                        .map(|e| self.graph[e].as_ref().unwrap().clone())
+                        .unwrap())
+                })
+                .collect();
+
             let state = NodeState {
                 name: node,
                 inner: self.graph[node].as_ref().unwrap().clone(),
@@ -623,6 +648,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 aqfs: aqfs.remove(&node).unwrap(),
                 context: self.contexts[&node].clone(),
                 processed_ts: self.mins[&node].clone(),
+                ancestor_qs: ancestor_qs,
                 init_ts: init_ts,
             };
 
@@ -637,7 +663,15 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     fn inner(state: NodeState<Q, U, D, P>) {
         use std::collections::VecDeque;
 
-        let NodeState { name, inner, srcs, input, aqfs, context, processed_ts, init_ts } = state;
+        let NodeState { name,
+                        inner,
+                        srcs,
+                        input,
+                        aqfs,
+                        context,
+                        processed_ts,
+                        ancestor_qs,
+                        init_ts } = state;
 
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
@@ -699,6 +733,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
 
         'rx: while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
+            use std::ops::Deref;
             assert!(ts >= min);
 
             // for every two updates we process, we want to receive once from our input, to avoid
@@ -721,7 +756,9 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             }
 
             if ts == min {
-                let u = u.and_then(|u| inner.process(u, src, ts, &aqfs));
+                let u = u.and_then(|u| {
+                    inner.process(u, src, ancestor_qs.get(&src).map(Deref::deref), ts, &aqfs)
+                });
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
                 for tx in context.lock().txs.iter_mut() {
@@ -777,7 +814,8 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     let ts = d.ts;
                     let (src, u) = d.data;
 
-                    let u = inner.process(u, src, ts, &aqfs);
+                    let u =
+                        inner.process(u, src, ancestor_qs.get(&src).map(Deref::deref), ts, &aqfs);
                     processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
                     if u.is_some() {
@@ -930,6 +968,7 @@ mod tests {
         fn process(&self,
                    u: Self::Update,
                    _: NodeIndex,
+                   _: Option<&()>,
                    _: i64,
                    _: &HashMap<NodeIndex,
                                Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
@@ -969,6 +1008,14 @@ mod tests {
 
         fn operator(&self) -> Option<&ops::NodeType> {
             None
+        }
+
+        fn name(&self) -> &str {
+            ""
+        }
+
+        fn args(&self) -> &[String] {
+            &[]
         }
     }
 
