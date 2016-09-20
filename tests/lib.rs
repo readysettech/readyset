@@ -31,7 +31,7 @@ fn it_works() {
     put[&a].send(vec![1.into(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
@@ -40,7 +40,7 @@ fn it_works() {
     put[&b].send(vec![2.into(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 1_000_000));
+    thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
     let res = get[&c](None);
