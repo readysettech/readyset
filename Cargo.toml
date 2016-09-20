@@ -5,8 +5,8 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [features]
 web = ["rustful", "rustc-serialize"]
-b_mc = ["memcache"]
-b_psql = ["postgres", "r2d2", "r2d2_postgres"]
+b_memcached = ["memcache"]
+b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_netsoup = ["tarpc", "serde", "serde_macros"]
 
 [dependencies]
@@ -20,11 +20,11 @@ rand = "0.3"
 randomkit = "0.1.0"
 
 # for benchmarks
-# psql
+# postgresql
 postgres = { version = "0.11", optional = true }
 r2d2 = { version = "0.7", optional = true }
 r2d2_postgres = { version = "0.10", optional = true }
-# mc
+# memcached
 memcache = {git="https://github.com/aisk/rust-memcache.git", optional = true }
 # netsoup
 tarpc = { version = "0.6", optional = true }
