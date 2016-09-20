@@ -3,6 +3,9 @@ name = "distributary"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
+[features]
+web = ["rustful", "rustc-serialize"]
+
 [dependencies]
 petgraph = "0.2"
 shortcut = "3.3"
@@ -20,8 +23,9 @@ time = "0.1"
 
 memcache = {git="https://github.com/aisk/rust-memcache.git"}
 
-rustful = "0.9"
-rustc-serialize = "0.3"
+# for web
+rustful = { version = "0.9", optional = true }
+rustc-serialize = { version = "0.3", optional = true }
 
 tarpc = "0.6"
 serde = "0.8"
