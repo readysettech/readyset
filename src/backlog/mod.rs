@@ -1,10 +1,10 @@
 use ops;
 use query;
 use shortcut;
-use parking_lot;
 
 use std::mem;
 use std::ptr;
+use std::sync;
 use std::sync::atomic;
 use std::sync::atomic::AtomicPtr;
 
@@ -20,7 +20,7 @@ type S = (shortcut::Store<query::DataType>, LL);
 pub struct BufferedStore {
     cols: usize,
     absorbed: atomic::AtomicIsize,
-    store: parking_lot::RwLock<S>,
+    store: sync::RwLock<S>,
 }
 
 #[derive(Debug)]
@@ -112,8 +112,7 @@ impl BufferedStore {
         BufferedStore {
             cols: cols,
             absorbed: atomic::AtomicIsize::new(-1),
-            store: parking_lot::RwLock::new((shortcut::Store::new(cols + 1 /* ts */),
-                                             LL::new(None))),
+            store: sync::RwLock::new((shortcut::Store::new(cols + 1 /* ts */), LL::new(None))),
         }
     }
 
@@ -129,7 +128,7 @@ impl BufferedStore {
             return;
         }
 
-        let mut store = self.store.write();
+        let mut store = self.store.write().unwrap();
         self.absorbed.store(including, atomic::Ordering::Release);
         loop {
             match store.1.after() {
@@ -196,7 +195,7 @@ impl BufferedStore {
     /// This method assumes that there are no other concurrent writers.
     pub unsafe fn add(&self, r: Vec<ops::Record>, ts: i64) {
         assert!(ts > self.absorbed.load(atomic::Ordering::Acquire) as i64);
-        self.store.read().1.adopt(Box::new(LL::new(Some((ts, r)))));
+        self.store.read().unwrap().1.adopt(Box::new(LL::new(Some((ts, r)))));
     }
 
     /// Safe wrapper around `add` for when you have an exclusive reference
@@ -206,7 +205,7 @@ impl BufferedStore {
 
     /// Important and absorb a set of records at the given timestamp.
     pub fn batch_import(&self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
-        let mut lock = self.store.write();
+        let mut lock = self.store.write().unwrap();
         assert!(lock.1.next.load(atomic::Ordering::Acquire) as *const LL == ptr::null());
         assert!(self.absorbed.load(atomic::Ordering::Acquire) < ts as isize);
         for (mut row, ts) in rs.into_iter() {
@@ -266,7 +265,7 @@ impl BufferedStore {
         where T: 'a,
               F: 'a + FnOnce(Vec<(&[query::DataType], i64)>) -> T
     {
-        let store = self.store.read();
+        let store = self.store.read().unwrap();
 
         // okay, so we want to:
         //
@@ -334,7 +333,7 @@ impl BufferedStore {
     }
 
     pub fn index<I: Into<shortcut::Index<query::DataType>>>(&self, column: usize, indexer: I) {
-        self.store.write().0.index(column, indexer);
+        self.store.write().unwrap().0.index(column, indexer);
     }
 }
 

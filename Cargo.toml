@@ -13,7 +13,6 @@ b_netsoup = ["tarpc", "serde", "serde_macros"]
 petgraph = "0.2"
 shortcut = "3.3"
 clocked-dispatch = "3.0"
-parking_lot = {version = "0.2", features = ["nightly"]}
 
 # for benchmarks
 # cli

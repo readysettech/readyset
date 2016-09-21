@@ -1,6 +1,5 @@
 use petgraph;
 use clocked_dispatch;
-use parking_lot;
 
 use std::fmt;
 use std::fmt::Debug;
@@ -99,7 +98,7 @@ struct Context<T: Clone + Send> {
     // add additional descendants).
     min_check: Vec<sync::Arc<sync::atomic::AtomicIsize>>,
 }
-type SharedContext<T: Clone + Send> = sync::Arc<parking_lot::Mutex<Context<T>>>;
+type SharedContext<T: Clone + Send> = sync::Arc<sync::Mutex<Context<T>>>;
 
 struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Send> {
     name: NodeIndex,
@@ -336,7 +335,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         for node in new.iter() {
             if let Entry::Vacant(v) = self.contexts.entry(*node) {
                 let (tx, rx) = mpsc::sync_channel(buf);
-                v.insert(sync::Arc::new(parking_lot::Mutex::new(Context {
+                v.insert(sync::Arc::new(sync::Mutex::new(Context {
                     txs: vec![],
                     min_check: Vec::new(),
                 })));
@@ -359,7 +358,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 continue;
             }
 
-            let mut ctx = self.contexts[&node].lock();
+            let mut ctx = self.contexts[&node].lock().unwrap();
 
             // find all of this node's closest materialized descendants and leaves
             let mut descendants = Vec::new();
@@ -761,7 +760,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 });
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
-                for tx in context.lock().txs.iter_mut() {
+                for tx in context.lock().unwrap().txs.iter_mut() {
                     tx.send((name, u.clone(), ts)).unwrap();
                 }
                 continue;
@@ -820,7 +819,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
                     if u.is_some() {
                         forwarded = ts;
-                        for tx in context.lock().txs.iter_mut() {
+                        for tx in context.lock().unwrap().txs.iter_mut() {
                             tx.send((name, u.clone(), ts)).unwrap();
                         }
                     }
@@ -835,13 +834,13 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             // even if we didn't send a delayed message for the min
             if forwarded < min && min != i64::max_value() - 1 {
                 processed_ts.store(min as isize, sync::atomic::Ordering::Release);
-                for tx in context.lock().txs.iter_mut() {
+                for tx in context.lock().unwrap().txs.iter_mut() {
                     tx.send((name, None, min)).unwrap();
                 }
             }
 
             // check if descendant min has changed so we can absorb?
-            let mut ctx = context.lock();
+            let mut ctx = context.lock().unwrap();
             let mc = &mut ctx.min_check;
             let mut previous = 0;
             if let Some((n, min)) = desc_min {

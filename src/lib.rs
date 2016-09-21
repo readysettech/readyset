@@ -69,11 +69,6 @@
 //!    mechanism that assigns records that are sent across disparate channels (i.e., to different
 //!    base types) monotonically increasing global timestamps.
 //!
-//! For performance reasons, Soup also uses the
-//! [`parking_lot`](https://github.com/Amanieu/parking_lot) crate instead of the locking primitives
-//! provided by Rust's standard library. It is unlikely that this matters to you, even if you are
-//! doing internal Soup development.
-//!
 //! # Data flow
 //!
 //! To provide some holistic insight into how the system works, an instructive exercise is to
@@ -366,7 +361,6 @@
 #![deny(missing_docs)]
 
 extern crate clocked_dispatch;
-extern crate parking_lot;
 extern crate petgraph;
 extern crate shortcut;
 
