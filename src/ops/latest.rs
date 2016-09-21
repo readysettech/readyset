@@ -270,7 +270,7 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 1);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -293,7 +293,7 @@ mod tests {
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 2);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
@@ -316,7 +316,7 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -326,7 +326,7 @@ mod tests {
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 3);
                     // add to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
                     s.absorb(3);
                 }
                 _ => unreachable!(),
@@ -392,7 +392,7 @@ mod tests {
         let u = (vec![1.into(), 1.into(), 1.into()], 1).into();
 
         if let Some(ops::Update::Records(rs)) = c.forward(u, src, 1, Some(&s), &HashMap::new()) {
-            s.add(rs, 1);
+            s.safe_add(rs, 1);
             s.absorb(1);
         }
 
@@ -411,7 +411,7 @@ mod tests {
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 2);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
@@ -435,7 +435,7 @@ mod tests {
                     assert_eq!(r[2], 1.into());
                     assert_eq!(ts, 1);
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -446,7 +446,7 @@ mod tests {
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 3);
                     // add to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
                     s.absorb(3);
                 }
                 _ => unreachable!(),

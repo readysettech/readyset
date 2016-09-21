@@ -362,7 +362,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    s.add(vec![ops::Record::Positive(r, ts)], 1);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -392,7 +392,7 @@ mod tests {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 2);
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
