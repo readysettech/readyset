@@ -155,12 +155,13 @@ impl NodeOp for Aggregator {
                     // find the current value for this group
                     let (current, old_ts) = match db {
                         Some(db) => {
-                            let matches = db.find(&q[..], Some(i64::max_value()));
-                            assert!(matches.len() <= 1, "aggregation had more than 1 result");
-                            matches.into_iter()
-                                .next()
-                                .and_then(|(r, ts)| Some((r[r.len() - 1].clone().into(), ts)))
-                                .unwrap_or((self.op.zero(), 0))
+                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
+                                assert!(rs.len() <= 1, "aggregation had more than 1 result");
+                                rs.into_iter()
+                                    .next()
+                                    .and_then(|(r, ts)| Some((r[r.len() - 1].clone().into(), ts)))
+                                    .unwrap_or((self.op.zero(), 0))
+                            })
                         }
                         None => {
                             // TODO

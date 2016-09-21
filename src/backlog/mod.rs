@@ -1,11 +1,14 @@
 use ops;
 use query;
 use shortcut;
+use parking_lot;
 
-use std::ops::Deref;
-use std::ops::DerefMut;
+use std::mem;
+use std::ptr;
+use std::sync::atomic;
+use std::sync::atomic::AtomicPtr;
 
-use std::collections::VecDeque;
+type S = (shortcut::Store<query::DataType>, LL);
 
 /// This structure provides a storage mechanism that allows limited time-scoped queries. That is,
 /// callers of `find()` may choose to *ignore* a suffix of the latest updates added with `add()`.
@@ -16,9 +19,67 @@ use std::collections::VecDeque;
 /// efficiency, as every find incurs a *linear scan* of all updates in the backlog.
 pub struct BufferedStore {
     cols: usize,
-    absorbed: i64,
-    store: shortcut::Store<query::DataType>,
-    backlog: VecDeque<(i64, Vec<ops::Record>)>,
+    absorbed: atomic::AtomicIsize,
+    store: parking_lot::RwLock<S>,
+}
+
+struct LL {
+    // next is never mutatated, only overwritten or read
+    next: AtomicPtr<LL>,
+    entry: Option<(i64, Vec<ops::Record>)>,
+}
+
+impl LL {
+    fn after(&self) -> Option<*mut LL> {
+        let next = self.next.load(atomic::Ordering::Acquire);
+        if next as *const LL == ptr::null() {
+            // there's no next
+            return None;
+        }
+
+        return Some(next);
+    }
+
+    fn take(&mut self) -> Option<(i64, Vec<ops::Record>)> {
+        self.after().map(|next| {
+            // steal the next and bypass
+            let next = unsafe { Box::from_raw(next) };
+            self.next.store(next.next.load(atomic::Ordering::Acquire),
+                            atomic::Ordering::Release);
+            next.entry.expect("only first LL should have None entry")
+        })
+    }
+}
+
+struct LLIter<'a>(&'a LL);
+impl<'a> Iterator for LLIter<'a> {
+    type Item = &'a (i64, Vec<ops::Record>);
+    fn next(&mut self) -> Option<Self::Item> {
+        use std::mem;
+
+        loop {
+            // we assume that the current node has already been yielded
+            // so, we first advance, and then check for a value
+            let next = self.0.after();
+
+            if next.is_none() {
+                // no next, so nothing more to iterate over
+                return None;
+            }
+
+            self.0 = unsafe { mem::transmute(next.unwrap()) };
+
+            // if we moved to a node that has a value, yield it
+            if let Some(ref e) = self.0.entry {
+                return Some(e);
+            }
+            // otherwise move again
+        }
+    }
+}
+
+fn lliter<'a>(lock: &'a parking_lot::RwLockReadGuard<'a, S>) -> LLIter<'a> {
+    LLIter(&lock.1)
 }
 
 impl BufferedStore {
@@ -26,9 +87,12 @@ impl BufferedStore {
     pub fn new(cols: usize) -> BufferedStore {
         BufferedStore {
             cols: cols,
-            absorbed: -1,
-            store: shortcut::Store::new(cols + 1 /* ts */),
-            backlog: VecDeque::new(),
+            absorbed: atomic::AtomicIsize::new(-1),
+            store: parking_lot::RwLock::new((shortcut::Store::new(cols + 1 /* ts */),
+                                             LL {
+                next: AtomicPtr::new(unsafe { mem::transmute::<*const LL, *mut LL>(ptr::null()) }),
+                entry: None,
+            })),
         }
     }
 
@@ -38,26 +102,38 @@ impl BufferedStore {
     ///
     /// This operation will take time proportional to the number of entries in the backlog whose
     /// timestamp is less than or equal to the given timestamp.
-    pub fn absorb(&mut self, including: i64) {
-        if including <= self.absorbed {
+    pub fn absorb(&self, including: i64) {
+        let including = including as isize;
+        if including <= self.absorbed.load(atomic::Ordering::Acquire) {
             return;
         }
 
-        self.absorbed = including;
+        let mut store = self.store.write();
+        self.absorbed.store(including, atomic::Ordering::Release);
         loop {
-            match self.backlog.front() {
-                None => break,
-                Some(&(ts, _)) if ts > including => {
-                    break;
+            match store.1.after() {
+                Some(next) => {
+                    // there's a next node to process
+                    // check its timestamp
+                    let n = unsafe { mem::transmute::<*mut LL, &LL>(next) };
+                    assert!(n.entry.is_some());
+                    if n.entry.as_ref().unwrap().0 as isize > including {
+                        // it's too new, we're done
+                        break;
+                    }
                 }
-                _ => (),
+                None => break,
             }
 
-            for r in self.backlog.pop_front().unwrap().1.into_iter() {
+            for r in store.1
+                .take()
+                .expect("no concurrent access, so if .after() is Some, so should .take()")
+                .1
+                .into_iter() {
                 match r {
                     ops::Record::Positive(mut r, ts) => {
                         r.push(query::DataType::Number(ts));
-                        self.store.insert(r);
+                        store.0.insert(r);
                     }
                     ops::Record::Negative(r, ts) => {
                         // we need a cond that will match this row.
@@ -77,7 +153,7 @@ impl BufferedStore {
                         // by returning true for the first invocation of the filter function, and
                         // false for all subsequent invocations.
                         let mut first = true;
-                        self.store.delete_filter(&conds[..], |_| {
+                        store.0.delete_filter(&conds[..], |_| {
                             if first {
                                 first = false;
                                 true
@@ -96,21 +172,28 @@ impl BufferedStore {
     /// This method should never be called twice with the same timestamp, and the given timestamp
     /// must not yet have been absorbed.
     ///
-    /// This operation completes in amortized constant-time.
-    pub fn add(&mut self, r: Vec<ops::Record>, ts: i64) {
-        assert!(ts > self.absorbed);
-        self.backlog.push_back((ts, r));
+    /// This method assumes that there are no other concurrent writers.
+    pub unsafe fn add(&self, r: Vec<ops::Record>, ts: i64) {
+        assert!(ts > self.absorbed.load(atomic::Ordering::Acquire) as i64);
+
+        let add = Box::into_raw(Box::new(LL {
+            next: AtomicPtr::new(mem::transmute::<*const LL, *mut LL>(ptr::null())),
+            entry: Some((ts, r)),
+        }));
+
+        self.store.read().1.next.store(add, atomic::Ordering::Release);
     }
 
     /// Important and absorb a set of records at the given timestamp.
-    pub fn batch_import(&mut self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
-        assert!(self.backlog.is_empty());
-        assert!(self.absorbed < ts);
+    pub fn batch_import(&self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
+        let mut lock = self.store.write();
+        assert!(lock.1.next.load(atomic::Ordering::Acquire) as *const LL == ptr::null());
+        assert!(self.absorbed.load(atomic::Ordering::Acquire) < ts as isize);
         for (mut row, ts) in rs.into_iter() {
             row.push(query::DataType::Number(ts));
-            self.store.insert(row);
+            lock.0.insert(row);
         }
-        self.absorbed = ts;
+        self.absorbed.store(ts as isize, atomic::Ordering::Release);
     }
 
     fn extract_ts<'a>(&self, r: &'a [query::DataType]) -> (&'a [query::DataType], i64) {
@@ -123,16 +206,48 @@ impl BufferedStore {
 
     /// Find all entries that matched the given conditions just after the given point in time.
     ///
+    /// Equivalent to running `find_and(&q.having[..], including)`, but projecting through the
+    /// given query before results are returned. If not query is given, the returned records are
+    /// cloned.
+    pub fn find(&self,
+                q: Option<query::Query>,
+                including: Option<i64>)
+                -> Vec<(Vec<query::DataType>, i64)> {
+        self.find_and(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]),
+                      including,
+                      |rs| {
+            rs.into_iter()
+                .map(|(r, ts)| {
+                    if let Some(ref q) = q {
+                        (q.project(r), ts)
+                    } else {
+                        (r.iter().cloned().collect(), ts)
+                    }
+                })
+                .collect()
+        })
+    }
+
+    /// Find all entries that matched the given conditions just after the given point in time.
+    ///
+    /// Returned records are passed to `then` before being returned.
+    ///
     /// This method will panic if the given timestamp falls before the last absorbed timestamp, as
     /// it cannot guarantee correct results in that case. Queries *at* the time of the last absorb
     /// are fine.
     ///
     /// Completes in `O(Store::find + b)` where `b` is the number of records in the backlog whose
     /// timestamp fall at or before the given timestamp.
-    pub fn find<'a>(&'a self,
-                    conds: &[shortcut::cmp::Condition<query::DataType>],
-                    including: Option<i64>)
-                    -> Vec<(&'a [query::DataType], i64)> {
+    pub fn find_and<'a, F, T>(&self,
+                              conds: &[shortcut::cmp::Condition<query::DataType>],
+                              including: Option<i64>,
+                              then: F)
+                              -> T
+        where T: 'a,
+              F: 'a + FnOnce(Vec<(&[query::DataType], i64)>) -> T
+    {
+        let store = self.store.read();
+
         // okay, so we want to:
         //
         //  a) get the base results
@@ -145,19 +260,18 @@ impl BufferedStore {
         //  1) chain in all the positives in the backlog onto the base result iterator
         //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
         //     the backlogged entry if there's a match.
-
         if including.is_none() {
-            return self.store.find(conds).map(|r| self.extract_ts(r)).collect();
+            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
         }
 
         let including = including.unwrap();
-        if including == self.absorbed {
-            return self.store.find(conds).map(|r| self.extract_ts(r)).collect();
+        let absorbed = self.absorbed.load(atomic::Ordering::Acquire) as i64;
+        if including == absorbed {
+            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
         }
 
-        assert!(including > self.absorbed);
-        let mut relevant = self.backlog
-            .iter()
+        assert!(including > absorbed);
+        let mut relevant = lliter(&store)
             .take_while(|&&(ts, _)| ts <= including)
             .flat_map(|&(_, ref group)| group.iter())
             .filter(|r| conds.iter().all(|c| c.matches(&r.rec()[..])))
@@ -166,13 +280,13 @@ impl BufferedStore {
         if relevant.peek().is_some() {
             let (positives, mut negatives): (_, Vec<_>) = relevant.partition(|r| r.is_positive());
             if negatives.is_empty() {
-                self.store
+                then(store.0
                     .find(conds)
                     .map(|r| self.extract_ts(r))
                     .chain(positives.into_iter().map(|r| (r.rec(), r.ts())))
-                    .collect()
+                    .collect())
             } else {
-                self.store
+                then(store.0
                     .find(conds)
                     .map(|r| self.extract_ts(r))
                     .chain(positives.into_iter().map(|r| (r.rec(), r.ts())))
@@ -191,33 +305,19 @@ impl BufferedStore {
                             Some((r, ts))
                         }
                     })
-                    .collect()
+                    .collect())
             }
         } else {
-            self.store.find(conds).map(|r| self.extract_ts(r)).collect()
+            then(store.0.find(conds).map(|r| self.extract_ts(r)).collect())
         }
     }
-}
 
-impl Deref for BufferedStore {
-    type Target = shortcut::Store<query::DataType>;
-    fn deref(&self) -> &Self::Target {
-        &self.store
+    pub fn index<I: Into<shortcut::Index<query::DataType>>>(&self, column: usize, indexer: I) {
+        self.store.write().0.index(column, indexer);
     }
 }
 
-impl DerefMut for BufferedStore {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.store
-    }
-}
-
-#[cfg(test)]
 mod tests {
-    use super::*;
-
-    use ops;
-
     #[test]
     fn store_only() {
         let a1 = vec![1.into(), "a".into()];

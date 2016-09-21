@@ -100,10 +100,13 @@ impl NodeOp for Latest {
                     // find the current value for this group
                     let current = match db {
                         Some(db) => {
-                            let matches = db.find(&q[..], Some(i64::max_value()));
-                            println!("{:?}: {:?}", q, matches);
-                            assert!(matches.len() <= 1, "latest group has more than 1 record");
-                            matches.into_iter().next()
+                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
+                                println!("{:?}: {:?}", q, rs);
+                                assert!(rs.len() <= 1, "latest group has more than 1 record");
+                                rs.into_iter()
+                                    .next()
+                                    .map(|(r, ts)| (r.into_iter().cloned().collect(), ts))
+                            })
                         }
                         None => {
                             // TODO: query ancestor (self.query?) based on self.key columns
@@ -128,8 +131,7 @@ impl NodeOp for Latest {
 
                     // if there was a previous latest for this key, revoke old record
                     if let Some(current) = current {
-                        out.push(ops::Record::Negative(current.0.iter().cloned().collect(),
-                                                       current.1));
+                        out.push(ops::Record::Negative(current.0, current.1));
                     }
                     out.push(r);
                 }
