@@ -37,10 +37,6 @@ serde_macros = { version = "0.8", optional = true }
 rustful = { version = "0.9", optional = true }
 rustc-serialize = { version = "0.3", optional = true }
 
-[replace]
-# https://github.com/serde-rs/aster/issues/105
-"aster:0.26.1" = { git = "https://github.com/jchlapinski/aster" }
-
 [profile.release]
 debug=true
 
