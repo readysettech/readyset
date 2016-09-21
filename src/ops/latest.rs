@@ -100,10 +100,13 @@ impl NodeOp for Latest {
                     // find the current value for this group
                     let current = match db {
                         Some(db) => {
-                            let matches = db.find(&q[..], Some(i64::max_value()));
-                            println!("{:?}: {:?}", q, matches);
-                            assert!(matches.len() <= 1, "latest group has more than 1 record");
-                            matches.into_iter().next()
+                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
+                                println!("{:?}: {:?}", q, rs);
+                                assert!(rs.len() <= 1, "latest group has more than 1 record");
+                                rs.into_iter()
+                                    .next()
+                                    .map(|(r, ts)| (r.into_iter().cloned().collect(), ts))
+                            })
                         }
                         None => {
                             // TODO: query ancestor (self.query?) based on self.key columns
@@ -128,8 +131,7 @@ impl NodeOp for Latest {
 
                     // if there was a previous latest for this key, revoke old record
                     if let Some(current) = current {
-                        out.push(ops::Record::Negative(current.0.iter().cloned().collect(),
-                                                       current.1));
+                        out.push(ops::Record::Negative(current.0, current.1));
                     }
                     out.push(r);
                 }
@@ -268,7 +270,7 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 1);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -291,7 +293,7 @@ mod tests {
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 2);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
@@ -314,7 +316,7 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -324,7 +326,7 @@ mod tests {
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 3);
                     // add to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
                     s.absorb(3);
                 }
                 _ => unreachable!(),
@@ -390,7 +392,7 @@ mod tests {
         let u = (vec![1.into(), 1.into(), 1.into()], 1).into();
 
         if let Some(ops::Update::Records(rs)) = c.forward(u, src, 1, Some(&s), &HashMap::new()) {
-            s.add(rs, 1);
+            s.safe_add(rs, 1);
             s.absorb(1);
         }
 
@@ -409,7 +411,7 @@ mod tests {
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 2);
                     // add back to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),
@@ -433,7 +435,7 @@ mod tests {
                     assert_eq!(r[2], 1.into());
                     assert_eq!(ts, 1);
                     // remove from store
-                    s.add(vec![ops::Record::Negative(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -444,7 +446,7 @@ mod tests {
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 3);
                     // add to store
-                    s.add(vec![ops::Record::Positive(r, ts)], 3);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
                     s.absorb(3);
                 }
                 _ => unreachable!(),

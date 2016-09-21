@@ -1,11 +1,14 @@
 use ops;
 use query;
 use shortcut;
+use parking_lot;
 
-use std::ops::Deref;
-use std::ops::DerefMut;
+use std::mem;
+use std::ptr;
+use std::sync::atomic;
+use std::sync::atomic::AtomicPtr;
 
-use std::collections::VecDeque;
+type S = (shortcut::Store<query::DataType>, LL);
 
 /// This structure provides a storage mechanism that allows limited time-scoped queries. That is,
 /// callers of `find()` may choose to *ignore* a suffix of the latest updates added with `add()`.
@@ -16,9 +19,91 @@ use std::collections::VecDeque;
 /// efficiency, as every find incurs a *linear scan* of all updates in the backlog.
 pub struct BufferedStore {
     cols: usize,
-    absorbed: i64,
-    store: shortcut::Store<query::DataType>,
-    backlog: VecDeque<(i64, Vec<ops::Record>)>,
+    absorbed: atomic::AtomicIsize,
+    store: parking_lot::RwLock<S>,
+}
+
+#[derive(Debug)]
+struct LL {
+    // next is never mutatated, only overwritten or read
+    next: AtomicPtr<LL>,
+    entry: Option<(i64, Vec<ops::Record>)>,
+}
+
+impl LL {
+    fn new(e: Option<(i64, Vec<ops::Record>)>) -> LL {
+        LL {
+            next: AtomicPtr::new(unsafe { mem::transmute::<*const LL, *mut LL>(ptr::null()) }),
+            entry: e,
+        }
+    }
+
+    fn adopt(&self, next: Box<LL>) {
+        // TODO
+        // avoid having to iterate to the last node all over again for every add.
+        // one way to do this would be to keep a pointer to the last LL.
+        // we probably don't want to keep this inside each LL though...
+        self.last().next.store(Box::into_raw(next), atomic::Ordering::Release);
+    }
+
+    fn last<'a>(&'a self) -> &'a LL {
+        if let Some(n) = self.after() {
+            unsafe { mem::transmute::<_, &LL>(n) }.last()
+        } else {
+            self
+        }
+    }
+
+    fn after(&self) -> Option<*mut LL> {
+        let next = self.next.load(atomic::Ordering::Acquire);
+        if next as *const LL == ptr::null() {
+            // there's no next
+            return None;
+        }
+
+        return Some(next);
+    }
+
+    fn take(&mut self) -> Option<(i64, Vec<ops::Record>)> {
+        self.after().map(|next| {
+            // steal the next and bypass
+            let next = unsafe { Box::from_raw(next) };
+            self.next.store(next.next.load(atomic::Ordering::Acquire),
+                            atomic::Ordering::Release);
+            next.entry.expect("only first LL should have None entry")
+        })
+    }
+
+    fn iter<'a>(&'a self) -> LLIter<'a> {
+        LLIter(self)
+    }
+}
+
+struct LLIter<'a>(&'a LL);
+impl<'a> Iterator for LLIter<'a> {
+    type Item = &'a (i64, Vec<ops::Record>);
+    fn next(&mut self) -> Option<Self::Item> {
+        use std::mem;
+
+        loop {
+            // we assume that the current node has already been yielded
+            // so, we first advance, and then check for a value
+            let next = self.0.after();
+
+            if next.is_none() {
+                // no next, so nothing more to iterate over
+                return None;
+            }
+
+            self.0 = unsafe { mem::transmute(next.unwrap()) };
+
+            // if we moved to a node that has a value, yield it
+            if let Some(ref e) = self.0.entry {
+                return Some(e);
+            }
+            // otherwise move again
+        }
+    }
 }
 
 impl BufferedStore {
@@ -26,9 +111,9 @@ impl BufferedStore {
     pub fn new(cols: usize) -> BufferedStore {
         BufferedStore {
             cols: cols,
-            absorbed: -1,
-            store: shortcut::Store::new(cols + 1 /* ts */),
-            backlog: VecDeque::new(),
+            absorbed: atomic::AtomicIsize::new(-1),
+            store: parking_lot::RwLock::new((shortcut::Store::new(cols + 1 /* ts */),
+                                             LL::new(None))),
         }
     }
 
@@ -38,26 +123,38 @@ impl BufferedStore {
     ///
     /// This operation will take time proportional to the number of entries in the backlog whose
     /// timestamp is less than or equal to the given timestamp.
-    pub fn absorb(&mut self, including: i64) {
-        if including <= self.absorbed {
+    pub fn absorb(&self, including: i64) {
+        let including = including as isize;
+        if including <= self.absorbed.load(atomic::Ordering::Acquire) {
             return;
         }
 
-        self.absorbed = including;
+        let mut store = self.store.write();
+        self.absorbed.store(including, atomic::Ordering::Release);
         loop {
-            match self.backlog.front() {
-                None => break,
-                Some(&(ts, _)) if ts > including => {
-                    break;
+            match store.1.after() {
+                Some(next) => {
+                    // there's a next node to process
+                    // check its timestamp
+                    let n = unsafe { mem::transmute::<*mut LL, &LL>(next) };
+                    assert!(n.entry.is_some());
+                    if n.entry.as_ref().unwrap().0 as isize > including {
+                        // it's too new, we're done
+                        break;
+                    }
                 }
-                _ => (),
+                None => break,
             }
 
-            for r in self.backlog.pop_front().unwrap().1.into_iter() {
+            for r in store.1
+                .take()
+                .expect("no concurrent access, so if .after() is Some, so should .take()")
+                .1
+                .into_iter() {
                 match r {
                     ops::Record::Positive(mut r, ts) => {
                         r.push(query::DataType::Number(ts));
-                        self.store.insert(r);
+                        store.0.insert(r);
                     }
                     ops::Record::Negative(r, ts) => {
                         // we need a cond that will match this row.
@@ -77,7 +174,7 @@ impl BufferedStore {
                         // by returning true for the first invocation of the filter function, and
                         // false for all subsequent invocations.
                         let mut first = true;
-                        self.store.delete_filter(&conds[..], |_| {
+                        store.0.delete_filter(&conds[..], |_| {
                             if first {
                                 first = false;
                                 true
@@ -96,21 +193,27 @@ impl BufferedStore {
     /// This method should never be called twice with the same timestamp, and the given timestamp
     /// must not yet have been absorbed.
     ///
-    /// This operation completes in amortized constant-time.
-    pub fn add(&mut self, r: Vec<ops::Record>, ts: i64) {
-        assert!(ts > self.absorbed);
-        self.backlog.push_back((ts, r));
+    /// This method assumes that there are no other concurrent writers.
+    pub unsafe fn add(&self, r: Vec<ops::Record>, ts: i64) {
+        assert!(ts > self.absorbed.load(atomic::Ordering::Acquire) as i64);
+        self.store.read().1.adopt(Box::new(LL::new(Some((ts, r)))));
+    }
+
+    /// Safe wrapper around `add` for when you have an exclusive reference
+    pub fn safe_add(&mut self, r: Vec<ops::Record>, ts: i64) {
+        unsafe { self.add(r, ts) };
     }
 
     /// Important and absorb a set of records at the given timestamp.
-    pub fn batch_import(&mut self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
-        assert!(self.backlog.is_empty());
-        assert!(self.absorbed < ts);
+    pub fn batch_import(&self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
+        let mut lock = self.store.write();
+        assert!(lock.1.next.load(atomic::Ordering::Acquire) as *const LL == ptr::null());
+        assert!(self.absorbed.load(atomic::Ordering::Acquire) < ts as isize);
         for (mut row, ts) in rs.into_iter() {
             row.push(query::DataType::Number(ts));
-            self.store.insert(row);
+            lock.0.insert(row);
         }
-        self.absorbed = ts;
+        self.absorbed.store(ts as isize, atomic::Ordering::Release);
     }
 
     fn extract_ts<'a>(&self, r: &'a [query::DataType]) -> (&'a [query::DataType], i64) {
@@ -123,16 +226,48 @@ impl BufferedStore {
 
     /// Find all entries that matched the given conditions just after the given point in time.
     ///
+    /// Equivalent to running `find_and(&q.having[..], including)`, but projecting through the
+    /// given query before results are returned. If not query is given, the returned records are
+    /// cloned.
+    pub fn find(&self,
+                q: Option<query::Query>,
+                including: Option<i64>)
+                -> Vec<(Vec<query::DataType>, i64)> {
+        self.find_and(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]),
+                      including,
+                      |rs| {
+            rs.into_iter()
+                .map(|(r, ts)| {
+                    if let Some(ref q) = q {
+                        (q.project(r), ts)
+                    } else {
+                        (r.iter().cloned().collect(), ts)
+                    }
+                })
+                .collect()
+        })
+    }
+
+    /// Find all entries that matched the given conditions just after the given point in time.
+    ///
+    /// Returned records are passed to `then` before being returned.
+    ///
     /// This method will panic if the given timestamp falls before the last absorbed timestamp, as
     /// it cannot guarantee correct results in that case. Queries *at* the time of the last absorb
     /// are fine.
     ///
     /// Completes in `O(Store::find + b)` where `b` is the number of records in the backlog whose
     /// timestamp fall at or before the given timestamp.
-    pub fn find<'a>(&'a self,
-                    conds: &[shortcut::cmp::Condition<query::DataType>],
-                    including: Option<i64>)
-                    -> Vec<(&'a [query::DataType], i64)> {
+    pub fn find_and<'a, F, T>(&self,
+                              conds: &[shortcut::cmp::Condition<query::DataType>],
+                              including: Option<i64>,
+                              then: F)
+                              -> T
+        where T: 'a,
+              F: 'a + FnOnce(Vec<(&[query::DataType], i64)>) -> T
+    {
+        let store = self.store.read();
+
         // okay, so we want to:
         //
         //  a) get the base results
@@ -145,18 +280,18 @@ impl BufferedStore {
         //  1) chain in all the positives in the backlog onto the base result iterator
         //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
         //     the backlogged entry if there's a match.
-
         if including.is_none() {
-            return self.store.find(conds).map(|r| self.extract_ts(r)).collect();
+            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
         }
 
         let including = including.unwrap();
-        if including == self.absorbed {
-            return self.store.find(conds).map(|r| self.extract_ts(r)).collect();
+        let absorbed = self.absorbed.load(atomic::Ordering::Acquire) as i64;
+        if including == absorbed {
+            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
         }
 
-        assert!(including > self.absorbed);
-        let mut relevant = self.backlog
+        assert!(including > absorbed);
+        let mut relevant = store.1
             .iter()
             .take_while(|&&(ts, _)| ts <= including)
             .flat_map(|&(_, ref group)| group.iter())
@@ -166,13 +301,13 @@ impl BufferedStore {
         if relevant.peek().is_some() {
             let (positives, mut negatives): (_, Vec<_>) = relevant.partition(|r| r.is_positive());
             if negatives.is_empty() {
-                self.store
+                then(store.0
                     .find(conds)
                     .map(|r| self.extract_ts(r))
                     .chain(positives.into_iter().map(|r| (r.rec(), r.ts())))
-                    .collect()
+                    .collect())
             } else {
-                self.store
+                then(store.0
                     .find(conds)
                     .map(|r| self.extract_ts(r))
                     .chain(positives.into_iter().map(|r| (r.rec(), r.ts())))
@@ -191,44 +326,82 @@ impl BufferedStore {
                             Some((r, ts))
                         }
                     })
-                    .collect()
+                    .collect())
             }
         } else {
-            self.store.find(conds).map(|r| self.extract_ts(r)).collect()
+            then(store.0.find(conds).map(|r| self.extract_ts(r)).collect())
         }
     }
-}
 
-impl Deref for BufferedStore {
-    type Target = shortcut::Store<query::DataType>;
-    fn deref(&self) -> &Self::Target {
-        &self.store
-    }
-}
-
-impl DerefMut for BufferedStore {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.store
+    pub fn index<I: Into<shortcut::Index<query::DataType>>>(&self, column: usize, indexer: I) {
+        self.store.write().0.index(column, indexer);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use super::LL;
     use ops;
+
+    #[test]
+    fn ll() {
+        let mut start = LL::new(None);
+        assert_eq!(start.iter().count(), 0);
+
+        start.adopt(Box::new(LL::new(Some((1, vec![])))));
+        assert_eq!(start.iter().count(), 1);
+
+        start.adopt(Box::new(LL::new(Some((2, vec![])))));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(1, vec![])));
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        start.adopt(Box::new(LL::new(Some((3, vec![])))));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(1, vec![])));
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((1, vec![])));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((2, vec![])));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((3, vec![])));
+        assert_eq!(start.iter().count(), 0);
+    }
 
     #[test]
     fn store_only() {
         let a1 = vec![1.into(), "a".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
         b.absorb(0);
-        assert_eq!(b.find(&[], Some(0)).len(), 1);
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find_and(&[], Some(0), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter().any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
     }
 
     #[test]
@@ -236,11 +409,12 @@ mod tests {
         let a1 = vec![1.into(), "a".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        assert_eq!(b.find(&[], Some(0)).len(), 1);
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        assert_eq!(b.find_and(&[], Some(0), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
     }
 
     #[test]
@@ -249,13 +423,14 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
         b.absorb(0);
-        assert_eq!(b.find(&[], None).len(), 1);
-        assert!(b.find(&[], None)
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find_and(&[], None, |rs| rs.len()), 1);
+        assert!(b.find_and(&[], None, |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
     }
 
     #[test]
@@ -264,16 +439,18 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
         b.absorb(0);
-        assert_eq!(b.find(&[], Some(1)).len(), 2);
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(1), |rs| rs.len()), 2);
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -282,13 +459,14 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
         b.absorb(0);
-        assert_eq!(b.find(&[], Some(0)).len(), 1);
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
+        assert_eq!(b.find_and(&[], Some(0), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
     }
 
     #[test]
@@ -298,17 +476,19 @@ mod tests {
         let c3 = vec![3.into(), "c".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
-        b.add(vec![ops::Record::Positive(c3.clone(), 2)], 2);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Positive(c3.clone(), 2)], 2);
         b.absorb(0);
-        assert_eq!(b.find(&[], Some(1)).len(), 2);
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(1), |rs| rs.len()), 2);
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -317,14 +497,15 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
-        b.add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
         b.absorb(2);
-        assert_eq!(b.find(&[], Some(2)).len(), 1);
-        assert!(b.find(&[], Some(2))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(2), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(2), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -333,15 +514,16 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
         b.absorb(1);
-        b.add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
         b.absorb(2);
-        assert_eq!(b.find(&[], Some(2)).len(), 1);
-        assert!(b.find(&[], Some(2))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(2), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(2), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -350,13 +532,14 @@ mod tests {
         let b2 = vec![2.into(), "b".into()];
 
         let mut b = BufferedStore::new(2);
-        b.add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
-        b.add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
-        b.add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
-        assert_eq!(b.find(&[], Some(2)).len(), 1);
-        assert!(b.find(&[], Some(2))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
+        b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0)], 2);
+        assert_eq!(b.find_and(&[], Some(2), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(2), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -367,26 +550,30 @@ mod tests {
 
         let mut b = BufferedStore::new(2);
 
-        b.add(vec![ops::Record::Positive(a1.clone(), 0), ops::Record::Positive(b2.clone(), 1)],
-              0);
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0),
+                        ops::Record::Positive(b2.clone(), 1)],
+                   0);
         b.absorb(0);
-        assert_eq!(b.find(&[], Some(0)).len(), 2);
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(0), |rs| rs.len()), 2);
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
 
-        b.add(vec![ops::Record::Negative(a1.clone(), 0),
-                   ops::Record::Positive(c3.clone(), 2),
-                   ops::Record::Negative(c3.clone(), 2)],
-              1);
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0),
+                        ops::Record::Positive(c3.clone(), 2),
+                        ops::Record::Negative(c3.clone(), 2)],
+                   1);
         b.absorb(1);
-        assert_eq!(b.find(&[], Some(1)).len(), 1);
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert_eq!(b.find_and(&[], Some(1), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -397,24 +584,28 @@ mod tests {
 
         let mut b = BufferedStore::new(2);
 
-        b.add(vec![ops::Record::Positive(a1.clone(), 0), ops::Record::Positive(b2.clone(), 1)],
-              0);
-        assert_eq!(b.find(&[], Some(0)).len(), 2);
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(b.find(&[], Some(0))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        b.safe_add(vec![ops::Record::Positive(a1.clone(), 0),
+                        ops::Record::Positive(b2.clone(), 1)],
+                   0);
+        assert_eq!(b.find_and(&[], Some(0), |rs| rs.len()), 2);
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+        }));
+        assert!(b.find_and(&[], Some(0), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
 
-        b.add(vec![ops::Record::Negative(a1.clone(), 0),
-                   ops::Record::Positive(c3.clone(), 2),
-                   ops::Record::Negative(c3.clone(), 2)],
-              1);
-        assert_eq!(b.find(&[], Some(1)).len(), 1);
-        assert!(b.find(&[], Some(1))
-            .iter()
-            .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0),
+                        ops::Record::Positive(c3.clone(), 2),
+                        ops::Record::Negative(c3.clone(), 2)],
+                   1);
+        assert_eq!(b.find_and(&[], Some(1), |rs| rs.len()), 1);
+        assert!(b.find_and(&[], Some(1), |rs| {
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
+        }));
     }
 
     #[test]
@@ -425,10 +616,12 @@ mod tests {
 
         let mut b = BufferedStore::new(2);
 
-        b.add(vec![ops::Record::Negative(a1.clone(), 0), ops::Record::Positive(b2.clone(), 1)],
-              0);
-        b.add(vec![ops::Record::Negative(b2.clone(), 1), ops::Record::Positive(c3.clone(), 2)],
-              1);
-        assert_eq!(b.find(&[], Some(2)), vec![(&*c3, 2)]);
+        b.safe_add(vec![ops::Record::Negative(a1.clone(), 0),
+                        ops::Record::Positive(b2.clone(), 1)],
+                   0);
+        b.safe_add(vec![ops::Record::Negative(b2.clone(), 1),
+                        ops::Record::Positive(c3.clone(), 2)],
+                   1);
+        b.find_and(&[], Some(2), |rs| assert_eq!(rs, vec![(&*c3, 2)]));
     }
 }

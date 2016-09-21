@@ -155,12 +155,13 @@ impl NodeOp for Aggregator {
                     // find the current value for this group
                     let (current, old_ts) = match db {
                         Some(db) => {
-                            let matches = db.find(&q[..], Some(i64::max_value()));
-                            assert!(matches.len() <= 1, "aggregation had more than 1 result");
-                            matches.into_iter()
-                                .next()
-                                .and_then(|(r, ts)| Some((r[r.len() - 1].clone().into(), ts)))
-                                .unwrap_or((self.op.zero(), 0))
+                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
+                                assert!(rs.len() <= 1, "aggregation had more than 1 result");
+                                rs.into_iter()
+                                    .next()
+                                    .and_then(|(r, ts)| Some((r[r.len() - 1].clone().into(), ts)))
+                                    .unwrap_or((self.op.zero(), 0))
+                            })
                         }
                         None => {
                             // TODO
@@ -361,7 +362,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    s.add(vec![ops::Record::Positive(r, ts)], 1);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
                     s.absorb(1);
                 }
                 _ => unreachable!(),
@@ -391,7 +392,7 @@ mod tests {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 2);
-                    s.add(vec![ops::Record::Positive(r, ts)], 2);
+                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
                     s.absorb(2);
                 }
                 _ => unreachable!(),

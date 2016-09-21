@@ -8,7 +8,6 @@ use flow;
 use query;
 use backlog;
 use shortcut;
-use parking_lot;
 
 use std::convert;
 use std::fmt;
@@ -232,7 +231,7 @@ impl Debug for NodeType {
 pub struct Node {
     name: String,
     fields: Vec<String>,
-    data: sync::Arc<Option<parking_lot::RwLock<backlog::BufferedStore>>>,
+    data: sync::Arc<Option<backlog::BufferedStore>>,
     inner: sync::Arc<NodeType>,
 }
 
@@ -250,18 +249,7 @@ impl flow::View<query::Query> for Node {
     fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
-            let rlock = data.read();
-            if let Some(ref q) = q {
-                rlock.find(&q.having[..], ts)
-                    .into_iter()
-                    .map(|(r, ts)| (q.project(r), ts))
-                    .collect()
-            } else {
-                rlock.find(&[], ts)
-                    .into_iter()
-                    .map(|(r, ts)| (r.iter().cloned().collect(), ts))
-                    .collect()
-            }
+            data.find(q, ts)
         } else {
             // we are not materialized --- query.
             // if no timestamp was given to find, we query using the latest timestamp.
@@ -283,7 +271,7 @@ impl flow::View<query::Query> for Node {
         if let Some(ref data) = *self.data {
             // we need to initialize this view before it can start accepting updates. we issue a
             // None query to all our ancestors, and then store all the materialized results.
-            data.write().batch_import(self.inner.query(None, init_ts, aqs), init_ts);
+            data.batch_import(self.inner.query(None, init_ts, aqs), init_ts);
         }
     }
 
@@ -309,15 +297,15 @@ impl flow::View<query::Query> for Node {
             }
         }
 
-        // lock the materialization if this view is materialized
-        let mut data = self.data.deref().as_ref().and_then(|l| Some(l.write()));
-
-        let new_u = self.inner.forward(u, src, ts, data.as_ref().and_then(|d| Some(&**d)), &*aqs);
+        let new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref(), &*aqs);
         if let Some(ref new_u) = new_u {
             match *new_u {
                 Update::Records(ref rs) => {
-                    if let Some(ref mut data) = data {
-                        data.add(rs.clone(), ts);
+                    if let Some(data) = self.data.deref().as_ref() {
+                        // NOTE: data.add requires that we guarantee that there are not concurrent
+                        // writers. since each node only processes one update at the time, this is
+                        // the case.
+                        unsafe { data.add(rs.clone(), ts) };
                     }
                 }
             }
@@ -339,8 +327,7 @@ impl flow::View<query::Query> for Node {
 
     fn add_index(&self, col: usize) {
         if let Some(ref data) = *self.data {
-            let mut w = data.write();
-            w.index(col, shortcut::idx::HashIndex::new());
+            data.index(col, shortcut::idx::HashIndex::new());
         } else {
             unreachable!("should never add index to non-materialized view");
         }
@@ -348,8 +335,7 @@ impl flow::View<query::Query> for Node {
 
     fn safe(&self, ts: i64) {
         if let Some(ref data) = *self.data {
-            let mut w = data.write();
-            w.absorb(ts);
+            data.absorb(ts);
         }
     }
 
@@ -380,7 +366,7 @@ pub fn new<'a, NS, S: ?Sized, NO>(name: NS, fields: &[&'a S], materialized: bool
 {
     let mut data = None;
     if materialized {
-        data = Some(parking_lot::RwLock::new(backlog::BufferedStore::new(fields.len())));
+        data = Some(backlog::BufferedStore::new(fields.len()));
     }
 
     Node {
