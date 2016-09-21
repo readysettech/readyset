@@ -23,6 +23,7 @@ pub struct BufferedStore {
     store: parking_lot::RwLock<S>,
 }
 
+#[derive(Debug)]
 struct LL {
     // next is never mutatated, only overwritten or read
     next: AtomicPtr<LL>,
@@ -30,6 +31,29 @@ struct LL {
 }
 
 impl LL {
+    fn new(e: Option<(i64, Vec<ops::Record>)>) -> LL {
+        LL {
+            next: AtomicPtr::new(unsafe { mem::transmute::<*const LL, *mut LL>(ptr::null()) }),
+            entry: e,
+        }
+    }
+
+    fn adopt(&self, next: Box<LL>) {
+        // TODO
+        // avoid having to iterate to the last node all over again for every add.
+        // one way to do this would be to keep a pointer to the last LL.
+        // we probably don't want to keep this inside each LL though...
+        self.last().next.store(Box::into_raw(next), atomic::Ordering::Release);
+    }
+
+    fn last<'a>(&'a self) -> &'a LL {
+        if let Some(n) = self.after() {
+            unsafe { mem::transmute::<_, &LL>(n) }.last()
+        } else {
+            self
+        }
+    }
+
     fn after(&self) -> Option<*mut LL> {
         let next = self.next.load(atomic::Ordering::Acquire);
         if next as *const LL == ptr::null() {
@@ -48,6 +72,10 @@ impl LL {
                             atomic::Ordering::Release);
             next.entry.expect("only first LL should have None entry")
         })
+    }
+
+    fn iter<'a>(&'a self) -> LLIter<'a> {
+        LLIter(self)
     }
 }
 
@@ -78,10 +106,6 @@ impl<'a> Iterator for LLIter<'a> {
     }
 }
 
-fn lliter<'a>(lock: &'a parking_lot::RwLockReadGuard<'a, S>) -> LLIter<'a> {
-    LLIter(&lock.1)
-}
-
 impl BufferedStore {
     /// Allocate a new buffered `Store`.
     pub fn new(cols: usize) -> BufferedStore {
@@ -89,10 +113,7 @@ impl BufferedStore {
             cols: cols,
             absorbed: atomic::AtomicIsize::new(-1),
             store: parking_lot::RwLock::new((shortcut::Store::new(cols + 1 /* ts */),
-                                             LL {
-                next: AtomicPtr::new(unsafe { mem::transmute::<*const LL, *mut LL>(ptr::null()) }),
-                entry: None,
-            })),
+                                             LL::new(None))),
         }
     }
 
@@ -175,13 +196,7 @@ impl BufferedStore {
     /// This method assumes that there are no other concurrent writers.
     pub unsafe fn add(&self, r: Vec<ops::Record>, ts: i64) {
         assert!(ts > self.absorbed.load(atomic::Ordering::Acquire) as i64);
-
-        let add = Box::into_raw(Box::new(LL {
-            next: AtomicPtr::new(mem::transmute::<*const LL, *mut LL>(ptr::null())),
-            entry: Some((ts, r)),
-        }));
-
-        self.store.read().1.next.store(add, atomic::Ordering::Release);
+        self.store.read().1.adopt(Box::new(LL::new(Some((ts, r)))));
     }
 
     /// Safe wrapper around `add` for when you have an exclusive reference
@@ -276,7 +291,8 @@ impl BufferedStore {
         }
 
         assert!(including > absorbed);
-        let mut relevant = lliter(&store)
+        let mut relevant = store.1
+            .iter()
             .take_while(|&&(ts, _)| ts <= including)
             .flat_map(|&(_, ref group)| group.iter())
             .filter(|r| conds.iter().all(|c| c.matches(&r.rec()[..])))
@@ -325,7 +341,55 @@ impl BufferedStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::LL;
     use ops;
+
+    #[test]
+    fn ll() {
+        let mut start = LL::new(None);
+        assert_eq!(start.iter().count(), 0);
+
+        start.adopt(Box::new(LL::new(Some((1, vec![])))));
+        assert_eq!(start.iter().count(), 1);
+
+        start.adopt(Box::new(LL::new(Some((2, vec![])))));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(1, vec![])));
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        start.adopt(Box::new(LL::new(Some((3, vec![])))));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(1, vec![])));
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((1, vec![])));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(2, vec![])));
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((2, vec![])));
+        {
+            let mut it = start.iter();
+            assert_eq!(it.next(), Some(&(3, vec![])));
+            assert_eq!(it.next(), None);
+        }
+
+        let x = start.take();
+        assert_eq!(x, Some((3, vec![])));
+        assert_eq!(start.iter().count(), 0);
+    }
 
     #[test]
     fn store_only() {
