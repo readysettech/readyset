@@ -230,8 +230,10 @@ pub struct FlowGraph<Q, U, D, P> where
     D: Clone + Send,
     P: Send
 {
-    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
-                           Option<sync::Arc<Q>>>,
+    graph: petgraph::Graph<
+        Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
+        Option<sync::Arc<Q>>
+    >,
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
@@ -261,7 +263,12 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     }
 
     /// Return a reference to the internal graph, as well as the identifier for the root node.
-    pub fn graph(&self) -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>, Option<sync::Arc<Q>>>, NodeIndex) {
+    pub fn graph(&self) -> (
+        &petgraph::Graph<
+            Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
+            Option<sync::Arc<Q>>
+        >,
+        NodeIndex) {
         (&self.graph, self.source)
     }
 
@@ -473,10 +480,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     /// the arguments to b.query should be q2, along with a function that lets b query from a. that
     /// function should call a.query with q1, and a way for a to query its ancestors. this
     /// continues all the way back to the base nodes whose ancestor query function list is emtpy.
-    fn make_aqfs(&self)
-                 -> HashMap<NodeIndex,
-                            sync::Arc<HashMap<NodeIndex,
-                                              Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>>>> {
+    fn make_aqfs(&self) -> HashMap<
+        NodeIndex,
+        sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>>>
+        > {
         // TODO: technically we could re-use aqfs for "old" nodes
         let mut aqfs = HashMap::new();
         for node in petgraph::BfsIter::new(&self.graph, self.source) {
@@ -982,10 +989,10 @@ mod tests {
             HashMap::new()
         }
 
-        fn init_at(&self,
-                   _: i64,
-                   aqf: &HashMap<NodeIndex,
-                                 Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>) {
+        fn init_at(&self, _: i64, aqf: &HashMap<
+               NodeIndex,
+               Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>
+               >) {
             if aqf.len() == 0 {
                 // base table is already initialized
                 return;

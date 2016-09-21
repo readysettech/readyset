@@ -86,7 +86,8 @@ impl ext::Service for Server {
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
-pub fn run<T>(mut soup: FG, addr: T) -> tarpc::ServeHandle<<T::Listener as tarpc::transport::Listener>::Dialer>
+pub fn run<T>(mut soup: FG, addr: T)
+    -> tarpc::ServeHandle<<T::Listener as tarpc::transport::Listener>::Dialer>
     where T: tarpc::transport::Transport
 {
     // Figure out what inputs and outputs to expose
