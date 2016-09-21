@@ -21,6 +21,8 @@ clap = "2.13"
 # distributions
 rand = "0.3"
 randomkit = "0.1.0"
+# sampling
+hdrsample = "2.1"
 # postgresql
 postgres = { version = "0.11", optional = true }
 r2d2 = { version = "0.7", optional = true }
