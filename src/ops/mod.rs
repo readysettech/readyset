@@ -3,6 +3,7 @@ pub mod aggregate;
 pub mod latest;
 pub mod join;
 pub mod union;
+pub mod identity;
 
 use flow;
 use flow::NodeIndex;
@@ -161,6 +162,8 @@ pub enum NodeType {
     LatestNode(latest::Latest),
     /// A union. See `Union`.
     UnionNode(union::Union),
+    /// A identity operation. See `Identity`.
+    IdentityNode(identity::Identity),
     #[cfg(test)]
     /// A test operator for testing purposes.
     TestNode(tests::Tester),
@@ -191,6 +194,7 @@ impl NodeOp for NodeType {
             NodeType::JoinNode(ref n) => n.forward(u, src, ts, db),
             NodeType::LatestNode(ref n) => n.forward(u, src, ts, db),
             NodeType::UnionNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::IdentityNode(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.forward(u, src, ts, db),
         }
@@ -203,6 +207,7 @@ impl NodeOp for NodeType {
             NodeType::JoinNode(ref n) => n.query(q, ts),
             NodeType::LatestNode(ref n) => n.query(q, ts),
             NodeType::UnionNode(ref n) => n.query(q, ts),
+            NodeType::IdentityNode(ref n) => n.query(q, ts),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.query(q, ts),
         }
@@ -215,6 +220,7 @@ impl NodeOp for NodeType {
             NodeType::JoinNode(ref n) => n.suggest_indexes(this),
             NodeType::LatestNode(ref n) => n.suggest_indexes(this),
             NodeType::UnionNode(ref n) => n.suggest_indexes(this),
+            NodeType::IdentityNode(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.suggest_indexes(this),
         }
@@ -227,6 +233,7 @@ impl NodeOp for NodeType {
             NodeType::JoinNode(ref n) => n.resolve(col),
             NodeType::LatestNode(ref n) => n.resolve(col),
             NodeType::UnionNode(ref n) => n.resolve(col),
+            NodeType::IdentityNode(ref n) => n.resolve(col),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.resolve(col),
         }
@@ -249,6 +256,7 @@ impl Debug for NodeType {
             NodeType::JoinNode(ref n) => write!(f, "{:?}", n),
             NodeType::LatestNode(ref n) => write!(f, "{:?}", n),
             NodeType::UnionNode(ref n) => write!(f, "{:?}", n),
+            NodeType::IdentityNode(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]
             NodeType::TestNode(ref n) => write!(f, "{:?}", n),
         }
