@@ -356,11 +356,13 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         // there are two things we need to do in order to set up all the contexts correctly (this
         // includes setting up new ones as well as updating old ones). first, we need to ensure
         // that every node's min_check contains all of its immediate children. second, we need to
-        // add every node to its parents' output buses. note that we update the nodes in BFS order.
-        // this is necessary because the locks need to be taken such that an upstream node isn't
-        // holding the lock while trying to send to a downstream node that we have already locked.
+        // add every node to its parents' output buses. note that we update the nodes in
+        // topological order. this is necessary because the locks need to be taken such that an
+        // upstream node isn't holding the lock while trying to send to a downstream node that we
+        // have already locked.
         let mut max_absorbed = HashMap::new();
-        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
+        while let Some(node) = topo.next(&self.graph) {
             if node == self.source {
                 continue;
             }
@@ -443,12 +445,13 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         // until the children have initialized, so it's safe to initialize at whatever the max
         // absorbed ts was amongst all parents.
         //
-        // we need to iterate through the nodes in BFS order so that we can set max_absorbed for
-        // the new nodes along the way. if we didn't, new nodes that only depend on other new nodes
-        // would observe only max_absorbed[..] = 0 and hence would see their init_ts at 0. this is
-        // not correct. and furthermore, even if those new nodes *tried* to init at that time, they
-        // would fail, because that time would be in the absorbed state.
-        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+        // we need to iterate through the nodes in topological order so that we can set
+        // max_absorbed for the new nodes along the way. if we didn't, new nodes that only depend
+        // on other new nodes would observe only max_absorbed[..] = 0 and hence would see their
+        // init_ts at 0. this is not correct. and furthermore, even if those new nodes *tried* to
+        // init at that time, they would fail, because that time would be in the absorbed state.
+        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
+        while let Some(node) = topo.next(&self.graph) {
             if !new.contains(&node) {
                 continue;
             }
@@ -486,7 +489,10 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         > {
         // TODO: technically we could re-use aqfs for "old" nodes
         let mut aqfs = HashMap::new();
-        for node in petgraph::BfsIter::new(&self.graph, self.source) {
+        // we need to iterate in topological order so that all ancestor query functions are
+        // available before we try to consturct one for the child.
+        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
+        while let Some(node) = topo.next(&self.graph) {
             if node == self.source {
                 continue;
             }
@@ -1054,6 +1060,53 @@ mod tests {
 
         // check that value was updated again
         assert_eq!(get[&a](None), vec![2]);
+    }
+
+    #[test]
+    fn topo_graph1() {
+        // This test + topo_graph2 check that the system can correctly initialize graphs regardless
+        // of the order the nodes appear in. Specifically, they set up the following two graphs:
+        //
+        //      A   B       A   B
+        //      |   |       |   |
+        //      C   |       |   C
+        //       \ /         \ /
+        //        D           D
+        //
+        //     graph1       graph2
+        //
+        // A plain BFS exploration would set up D before C in one of these cases, which would break
+        // things since C had not yet been initialized. By building both, we ensure that the code
+        // handles this case (probably by using a topological traversal).
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), a)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), b), ((), c)]);
+        let (put, get) = g.run(10);
+        assert!(get.contains_key(&a));
+        assert!(get.contains_key(&b));
+        assert!(get.contains_key(&c));
+        assert!(get.contains_key(&d));
+        assert!(put.contains_key(&a));
+        assert!(put.contains_key(&b));
+    }
+
+    #[test]
+    fn topo_graph2() {
+        // See topo_graph1.
+        let mut g = FlowGraph::new();
+        let a = g.incorporate(Counter::new("a"), vec![]);
+        let b = g.incorporate(Counter::new("b"), vec![]);
+        let c = g.incorporate(Counter::new("c"), vec![((), b)]);
+        let d = g.incorporate(Counter::new("d"), vec![((), a), ((), c)]);
+        let (put, get) = g.run(10);
+        assert!(get.contains_key(&a));
+        assert!(get.contains_key(&b));
+        assert!(get.contains_key(&c));
+        assert!(get.contains_key(&d));
+        assert!(put.contains_key(&a));
+        assert!(put.contains_key(&b));
     }
 
     #[test]
