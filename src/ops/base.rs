@@ -22,12 +22,15 @@ impl From<Base> for NodeType {
 }
 
 impl NodeOp for Base {
+    fn prime(&mut self, _: &ops::Graph) -> Vec<flow::NodeIndex> {
+        vec![]
+    }
+
     fn forward(&self,
                mut u: ops::Update,
                _: flow::NodeIndex,
                ts: i64,
-               _: Option<&backlog::BufferedStore>,
-               _: &ops::AQ)
+               _: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
 
         // basically our only job is to record timestamps
@@ -44,7 +47,7 @@ impl NodeOp for Base {
         Some(u)
     }
 
-    fn query(&self, _: Option<&query::Query>, _: i64, _: &ops::AQ) -> ops::Datas {
+    fn query(&self, _: Option<&query::Query>, _: i64) -> ops::Datas {
         unreachable!("base nodes are always materialized");
     }
 
@@ -55,5 +58,9 @@ impl NodeOp for Base {
     fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
         // base tables are always materialized
         unreachable!();
+    }
+
+    fn is_base(&self) -> bool {
+        true
     }
 }

@@ -13,20 +13,20 @@ use shortcut;
 #[derive(Debug)]
 pub struct Union {
     emit: HashMap<flow::NodeIndex, Vec<usize>>,
+    srcs: HashMap<flow::NodeIndex, ops::V>,
     cols: HashMap<flow::NodeIndex, usize>,
 }
 
 impl Union {
     /// Construct a new union operator.
     ///
-    /// When receiving an update from node `a`, a union expects `a` to have `cols[a]` output
-    /// columns, and will emit the columns selected in `emit[a]`.
-    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>,
-               cols: HashMap<flow::NodeIndex, usize>)
+    /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
+    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>)
                -> Union {
         Union {
             emit: emit,
-            cols: cols,
+            srcs: HashMap::new(),
+            cols: HashMap::new(),
         }
     }
 }
@@ -38,12 +38,17 @@ impl From<Union> for NodeType {
 }
 
 impl NodeOp for Union {
+    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
+        self.srcs.extend(self.emit.keys().map(|&n| (n, g[n].as_ref().unwrap().clone())));
+        self.cols.extend(self.srcs.iter().map(|(ni, n)| (*ni, n.args().len())));
+        self.emit.keys().cloned().collect()
+    }
+
     fn forward(&self,
                u: ops::Update,
                from: flow::NodeIndex,
                _: i64,
-               _: Option<&backlog::BufferedStore>,
-               _: &ops::AQ)
+               _: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
         match u {
             ops::Update::Records(rs) => {
@@ -66,48 +71,41 @@ impl NodeOp for Union {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
         use std::iter;
 
         let mut params = HashMap::new();
-        for src in aqfs.keys() {
-            // Set up parameters for querying all rows in this src.
-            let mut p: Vec<shortcut::Value<query::DataType>> =
-                iter::repeat(shortcut::Value::Const(query::DataType::None))
-                    .take(self.cols[src])
-                    .collect();
+        for src in self.srcs.keys() {
+            params.insert(*src, None);
 
             // Avoid scanning rows that wouldn't match the query anyway. We do this by finding all
             // conditions that filter over a field present in left, and use those as parameters.
             let emit = &self.emit[src];
             if let Some(q) = q {
-                for c in q.having.iter() {
-                    // TODO: note that we assume here that the query to the left node is
-                    // implemented as an equality constraint. This is probably not necessarily
-                    // true.
-                    let coli = emit[c.column];
-
-                    // we can only push it down if it's an equality comparison
-                    match c.cmp {
-                        shortcut::Comparison::Equal(ref v) => {
-                            // yay!
-                            *p.get_mut(coli).unwrap() = v.clone();
-                        }
+                let p: Vec<_> = q.having.iter().map(|c| {
+                    shortcut::Condition{
+                        column: emit[c.column],
+                        cmp: c.cmp.clone(),
                     }
+                }).collect();
+
+                if !p.is_empty() {
+                    params.insert(*src, Some(p));
                 }
             }
-
-            params.insert(*src, p);
         }
-
-        // we need an owned copy of the query
-        let q = q.and_then(|q| Some(q.to_owned()));
 
         // we select from each source in turn
         params.into_iter()
             .flat_map(move |(src, params)| {
                 let emit = &self.emit[&src];
-                (aqfs[&src])(params, ts).into_iter()
+                self.srcs[&src].find(params.map(|cs| {
+                    let mut select: Vec<_> = iter::repeat(false).take(self.cols[&src]).collect();
+                    for c in emit {
+                        select[*c] = true;
+                    }
+                    query::Query::new(&select[..], cs)
+                }), Some(ts)).into_iter()
                 // XXX: the clone here is really sad
                 .map(move |(r, ts)| (emit.iter().map(|ci| r[*ci].clone()).collect::<Vec<_>>(), ts))
             })

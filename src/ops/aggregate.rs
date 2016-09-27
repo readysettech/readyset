@@ -44,12 +44,13 @@ impl Aggregation {
     /// from the `src` node in the graph), and use all other received columns as the group
     /// identifier. `cols` should be set to the number of columns in this view (that is, the number
     /// of group identifier columns + 1).
-    pub fn new(self, src: flow::NodeIndex, over: usize, cols: usize) -> Aggregator {
+    pub fn new(self, src: flow::NodeIndex, over: usize) -> Aggregator {
         Aggregator {
             op: self,
             src: src,
+            srcn: None,
             over: over,
-            cols: cols,
+            cols: 0,
         }
     }
 }
@@ -79,6 +80,7 @@ impl Aggregation {
 pub struct Aggregator {
     op: Aggregation,
     src: flow::NodeIndex,
+    srcn: Option<ops::V>,
     over: usize,
     cols: usize,
 }
@@ -90,12 +92,17 @@ impl From<Aggregator> for NodeType {
 }
 
 impl NodeOp for Aggregator {
+    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
+        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        self.cols = self.srcn.as_ref().unwrap().args().len();
+        vec![self.src]
+    }
+
     fn forward(&self,
                u: ops::Update,
                src: flow::NodeIndex,
                _: i64,
-               db: Option<&backlog::BufferedStore>,
-               _: &ops::AQ)
+               db: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
 
         assert_eq!(src, self.src);
@@ -208,20 +215,17 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
         use std::iter;
 
-        assert_eq!(aqfs.len(), 1);
+        // we're fetching everything from our parent
+        let mut params = None;
 
-        // we need to figure out what parameters to pass to our source to get only the rows
-        // relevant to our query.
-        let mut params: Vec<shortcut::Value<query::DataType>> =
-            iter::repeat(shortcut::Value::Const(query::DataType::None)).take(self.cols).collect();
-
-        // we find all conditions that filter over a field present in the input (so everything
-        // except conditions on self.over), and use those as parameters.
+        // however, if there are some conditions that filter over a field present in the input (so
+        // everything except conditions on self.over), we should use those as parameters to speed
+        // things up.
         if let Some(q) = q {
-            for c in q.having.iter() {
+            params = Some(q.having.iter().map(|c| {
                 // FIXME: we could technically support querying over the output of the aggregation,
                 // but a) it would be inefficient, and b) we'd have to restructure this function a
                 // fair bit so that we keep that part of the query around for after we've got the
@@ -239,17 +243,21 @@ impl NodeOp for Aggregator {
                     col += 1;
                 }
 
-                match c.cmp {
-                    shortcut::Comparison::Equal(ref v) => {
-                        *params.get_mut(col).unwrap() = v.clone();
-                    }
+                shortcut::Condition{
+                    column: col,
+                    cmp: c.cmp.clone(),
                 }
+            }).collect::<Vec<_>>());
+
+            if params.as_ref().unwrap().len() == 0 {
+                params = None;
             }
         }
-        params.remove(self.over);
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = (*aqfs.iter().next().unwrap().1)(params, ts);
+        let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
+            query::Query::new(&iter::repeat(true).take(self.cols).collect::<Vec<_>>(), ps)
+        }), Some(ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.

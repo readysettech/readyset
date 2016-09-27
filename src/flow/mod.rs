@@ -16,31 +16,28 @@ pub use petgraph::graph::NodeIndex;
 
 use ops;
 
-// TODO: add an "uninstantiated query" type
-
-pub trait View<Q: Clone + Send>: Debug {
+pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     type Update: Clone + Send;
     type Data: Clone + Send;
-    type Params: Send;
 
-    /// Execute a single concrete query, producing an iterator over all matching records.
-    fn find<'a>(&'a self,
-                &HashMap<NodeIndex,
-                         Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>,
-                Option<Q>,
-                Option<i64>)
-                -> Vec<(Self::Data, i64)>;
+    /// Method to prime a view before forwarding commences.
+    ///
+    /// This method is run once after a view is created, but before it is started (and thus, before
+    /// it receives any updates). The node should obtain handles to any parent nodes it needs from
+    /// the provided graph, and return a list of the nodes it depends on. The nodes in the returned
+    /// list are the ones this node will receive forwarded updates for. If the returned list is
+    /// empty, the node is assumed to be a base node.
+    ///
+    /// Note that this method may be called before the entire graph has been assembled. Only the
+    /// ancestors (all the way to the root) are guaranteed to be present.
+    fn prime(&mut self, &petgraph::Graph<Option<sync::Arc<View<Q, Update=Self::Update, Data=Self::Data>>>, ()>) -> Vec<NodeIndex>;
+
+    /// Execute a single query, producing all matching records.
+    fn find<'a>(&'a self, Option<Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
-    fn process(&self,
-               Self::Update,
-               NodeIndex,
-               Option<&Q>,
-               i64,
-               &HashMap<NodeIndex,
-                        Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>)
-               -> Option<Self::Update>;
+    fn process(&self, Self::Update, NodeIndex, i64) -> Option<Self::Update>;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     /// The passed node index is the index of the current node.
@@ -61,10 +58,7 @@ pub trait View<Q: Clone + Send>: Debug {
     /// This is called before the view is given any operations to process, and should initialize
     /// any internal state (such as materialized data) such that the node is ready to process
     /// subsequent updates at timestamps after the given initialization timestamp.
-    fn init_at(&self,
-               i64,
-               &HashMap<NodeIndex,
-                        Box<Fn(Self::Params, i64) -> Vec<(Self::Data, i64)> + Send + Sync>>);
+    fn init_at(&self, i64);
 
     /// Returns the underlying operator for this view (if any).
     /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
@@ -76,11 +70,6 @@ pub trait View<Q: Clone + Send>: Debug {
 
     /// Returns the arguments to this view.
     fn args(&self) -> &[String];
-}
-
-pub trait FillableQuery {
-    type Params;
-    fn fill(&mut self, Self::Params);
 }
 
 /// Holds flow graph node state that may change as new nodes are added to the graph.
@@ -100,14 +89,12 @@ struct Context<T: Clone + Send> {
 }
 type SharedContext<T: Clone + Send> = sync::Arc<sync::Mutex<Context<T>>>;
 
-struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send, P: Send> {
+struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send> {
     name: NodeIndex,
-    inner: sync::Arc<View<Q, Update = U, Data = D, Params = P> + Send + Sync>,
+    inner: sync::Arc<View<Q, Update = U, Data = D>>,
     srcs: Vec<NodeIndex>,
     input: mpsc::Receiver<(NodeIndex, Option<U>, i64)>,
-    aqfs: sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<(D, i64)> + Send + Sync>>>,
     context: SharedContext<U>,
-    ancestor_qs: HashMap<NodeIndex, sync::Arc<Q>>,
     processed_ts: sync::Arc<sync::atomic::AtomicIsize>,
     init_ts: i64,
 }
@@ -224,16 +211,12 @@ impl<T> Ord for Delayed<T> {
 /// )
 /// # }
 /// ```
-pub struct FlowGraph<Q, U, D, P> where
+pub struct FlowGraph<Q, U, D> where
     Q: Clone + Send + Sync,
     U: Clone + Send,
-    D: Clone + Send,
-    P: Send
+    D: Clone + Send
 {
-    graph: petgraph::Graph<
-        Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
-        Option<sync::Arc<Q>>
-    >,
+    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D>>>,()>,
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
@@ -242,14 +225,13 @@ pub struct FlowGraph<Q, U, D, P> where
     contexts: HashMap<petgraph::graph::NodeIndex, SharedContext<U>>,
 }
 
-impl<Q, U, D, P> FlowGraph<Q, U, D, P>
-    where Q: 'static + FillableQuery<Params = P> + Clone + Debug + Send + Sync,
+impl<Q, U, D> FlowGraph<Q, U, D>
+    where Q: 'static + Clone + Debug + Send + Sync,
           U: 'static + Clone + Send,
-          D: 'static + Clone + Send + Into<U>,
-          P: 'static + Send
+          D: 'static + Clone + Send + Into<U>
 {
     /// Construct a new, empy data flow graph.
-    pub fn new() -> FlowGraph<Q, U, D, P> {
+    pub fn new() -> FlowGraph<Q, U, D> {
         let mut graph = petgraph::Graph::new();
         let source = graph.add_node(None);
         FlowGraph {
@@ -264,10 +246,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
     /// Return a reference to the internal graph, as well as the identifier for the root node.
     pub fn graph(&self) -> (
-        &petgraph::Graph<
-            Option<sync::Arc<View<Q, Update=U, Data=D, Params=P> + 'static + Send + Sync>>,
-            Option<sync::Arc<Q>>
-        >,
+        &petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D>>>, ()>,
         NodeIndex) {
         (&self.graph, self.source)
     }
@@ -475,69 +454,6 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         new.iter().map(|&n| (n, max_absorbed.remove(&n).unwrap())).collect()
     }
 
-    /// Builds the ancestor query function for all nodes.
-    ///
-    /// In order to query a node, we need to know how to query all its ancestors. specifically, we
-    /// need to combine the query along the edges to all ancestors witht he query function on those
-    /// ancestors. for example, if we have a --[q1]--> b --[q2]--> c, and c wants to query from be,
-    /// the arguments to b.query should be q2, along with a function that lets b query from a. that
-    /// function should call a.query with q1, and a way for a to query its ancestors. this
-    /// continues all the way back to the base nodes whose ancestor query function list is emtpy.
-    fn make_aqfs(&self) -> HashMap<
-        NodeIndex,
-        sync::Arc<HashMap<NodeIndex, Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>>>
-        > {
-        // TODO: technically we could re-use aqfs for "old" nodes
-        let mut aqfs = HashMap::new();
-        // we need to iterate in topological order so that all ancestor query functions are
-        // available before we try to consturct one for the child.
-        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
-        while let Some(node) = topo.next(&self.graph) {
-            if node == self.source {
-                continue;
-            }
-
-            if self.graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming).next() ==
-               Some(self.source) {
-                // we're a base node, so we can be queried without any ancestor query functions
-                aqfs.insert(node, sync::Arc::new(HashMap::new()));
-                continue;
-            }
-
-            // since we're doing a bfs, the ancestor queries for all our ancestors are already in
-            // aqfs. the arguments we need are the queries stored in edges to us executed using the
-            // .query for each corresponding ancestor.
-            let aqf = self.graph
-                .edges_directed(node, petgraph::EdgeDirection::Incoming)
-                .map(|(ni, e)| {
-                    // get the query for this ancestor
-                    let q = e.as_ref().unwrap().clone();
-                    // find the ancestor's node
-                    let a = self.graph[ni].as_ref().unwrap().clone();
-                    // and its min value
-                    let m = self.mins[&ni].clone();
-                    // find the ancestor query functions for the ancestor's .query
-                    let aqf = aqfs[&ni].clone();
-                    // execute the ancestor's .query using the query that connects it to us
-                    let f = Box::new(move |p: P, ts: i64| -> Vec<(D, i64)> {
-                        let mut q_cur = (*q).clone();
-                        q_cur.fill(p);
-                        if ts != i64::max_value() {
-                            while ts > m.load(sync::atomic::Ordering::Acquire) as i64 {
-                                thread::yield_now();
-                            }
-                        }
-                        a.find(&aqf, Some(q_cur), Some(ts))
-                    }) as Box<Fn(P, i64) -> Vec<(D, i64)> + 'static + Send + Sync>;
-                    (ni, f)
-                })
-                .collect();
-
-            aqfs.insert(node, sync::Arc::new(aqf));
-        }
-        aqfs
-    }
-
     /// Execute any changes to the data flow graph since the last call to `run()`.
     ///
     /// `run()` sets up ancestor query functions, finds indices, and builds the state each new node
@@ -614,17 +530,12 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         // and hook them into existing contexts (i.e., connect buses and update min_checks)
         let init_at = self.build_contexts(&mut start, &new, buf);
 
-        // set up query functions
-        let mut aqfs = self.make_aqfs();
-
         // expose queries in a friendly format to outsiders
-        let mut qs = HashMap::with_capacity(aqfs.len());
+        let mut qs = HashMap::with_capacity(init_at.len());
         for node in new.iter() {
-            let aqf = aqfs[node].clone();
-            let aqf = aqf.clone();
             let n = self.graph[*node].as_ref().unwrap().clone();
             let func = Box::new(move |q: Option<Q>| -> Vec<D> {
-                n.find(&aqf, q, None).into_iter().map(|(r, _)| r).collect()
+                n.find(q, None).into_iter().map(|(r, _)| r).collect()
             }) as Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>;
 
             qs.insert(*node, func);
@@ -640,27 +551,13 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                 .map(|(ni, _)| ni)
                 .collect::<Vec<_>>();
 
-            let ancestor_qs = srcs.iter()
-                .map(|&ni| ni)
-                .filter(|&ni| ni != self.source)
-                .map(|ni| {
-                    (ni,
-                     self.graph
-                        .find_edge(ni, node)
-                        .map(|e| self.graph[e].as_ref().unwrap().clone())
-                        .unwrap())
-                })
-                .collect();
-
             let state = NodeState {
                 name: node,
                 inner: self.graph[node].as_ref().unwrap().clone(),
                 srcs: srcs,
                 input: start.remove(&node).unwrap(),
-                aqfs: aqfs.remove(&node).unwrap(),
                 context: self.contexts[&node].clone(),
                 processed_ts: self.mins[&node].clone(),
-                ancestor_qs: ancestor_qs,
                 init_ts: init_ts,
             };
 
@@ -672,17 +569,15 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         (incoming, qs)
     }
 
-    fn inner(state: NodeState<Q, U, D, P>) {
+    fn inner(state: NodeState<Q, U, D>) {
         use std::collections::VecDeque;
 
         let NodeState { name,
                         inner,
                         srcs,
                         input,
-                        aqfs,
                         context,
                         processed_ts,
-                        ancestor_qs,
                         init_ts } = state;
 
         let mut delayed = BinaryHeap::new();
@@ -703,13 +598,12 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
             let mig_done = sync::Arc::new(sync::atomic::AtomicBool::new(false));
 
             // spin off the migration in a separate thread so we don't block our upstream
-            let aqfs_cp = aqfs.clone();
             let inner_cp = inner.clone();
             let mig_done_cp = mig_done.clone();
             let proc_ts = processed_ts.clone();
 
             let mig = thread::spawn(move || {
-                inner_cp.init_at(init_ts, &aqfs_cp);
+                inner_cp.init_at(init_ts);
                 proc_ts.store(init_ts as isize, sync::atomic::Ordering::Release);
                 mig_done_cp.store(true, sync::atomic::Ordering::SeqCst);
             });
@@ -745,7 +639,6 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
         }
 
         'rx: while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
-            use std::ops::Deref;
             assert!(ts >= min);
 
             // for every two updates we process, we want to receive once from our input, to avoid
@@ -769,7 +662,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
 
             if ts == min {
                 let u = u.and_then(|u| {
-                    inner.process(u, src, ancestor_qs.get(&src).map(Deref::deref), ts, &aqfs)
+                    inner.process(u, src, ts)
                 });
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
@@ -826,8 +719,7 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
                     let ts = d.ts;
                     let (src, u) = d.data;
 
-                    let u =
-                        inner.process(u, src, ancestor_qs.get(&src).map(Deref::deref), ts, &aqfs);
+                    let u = inner.process(u, src, ts);
                     processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
                     if u.is_some() {
@@ -893,31 +785,28 @@ impl<Q, U, D, P> FlowGraph<Q, U, D, P>
     // that query should be. for example, an aggregation expects to be able to query over all the
     // fields except its input field (self.over), latest expects the query to be on all key fields
     // (and only those fields), in order, etc.
-    pub fn incorporate<V: 'static + Debug + Send + Sync + View<Q, Update = U, Data = D, Params = P>>
-        (&mut self,
-         node: V,
-         ancestors: Vec<(Q, petgraph::graph::NodeIndex)>)
-         -> petgraph::graph::NodeIndex {
+    pub fn incorporate<V: View<Q, Update = U, Data = D>>(&mut self, mut node: V)
+        -> petgraph::graph::NodeIndex {
 
+        let ancestors = node.prime(&self.graph);
         let idx = self.graph.add_node(Some(sync::Arc::new(node)));
         if ancestors.is_empty() {
             // base record node
-            self.graph.add_edge(self.source, idx, None);
+            self.graph.add_edge(self.source, idx, ());
         } else {
             // derived node -- add edges from all ancestor nodes to node
-            for (q, ancestor) in ancestors.into_iter() {
-                self.graph.add_edge(ancestor, idx, Some(sync::Arc::new(q)));
+            for ancestor in ancestors.into_iter() {
+                self.graph.add_edge(ancestor, idx, ());
             }
         }
         idx
     }
 }
 
-impl<Q, U, D, P> Debug for FlowGraph<Q, U, D, P>
+impl<Q, U, D> Debug for FlowGraph<Q, U, D>
     where Q: Clone + Debug + Send + Sync,
           U: Clone + Send,
-          D: Clone + Send,
-          P: Send
+          D: Clone + Send
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let dotgraph = petgraph::dot::Dot::new(&self.graph);
@@ -925,11 +814,10 @@ impl<Q, U, D, P> Debug for FlowGraph<Q, U, D, P>
     }
 }
 
-impl<Q, U, D, P> Drop for FlowGraph<Q, U, D, P>
+impl<Q, U, D> Drop for FlowGraph<Q, U, D>
     where Q: Clone + Send + Sync,
           U: Clone + Send,
-          D: Clone + Send,
-          P: Send
+          D: Clone + Send
 {
     fn drop(&mut self) {
         // need to clear all contexts so the every bus is closed

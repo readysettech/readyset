@@ -5,8 +5,10 @@ pub mod join;
 pub mod union;
 
 use flow;
+use flow::NodeIndex;
 use query;
 use backlog;
+use petgraph;
 use shortcut;
 
 use std::convert;
@@ -100,10 +102,9 @@ impl From<(Vec<query::DataType>, i64)> for Update {
     }
 }
 
-type Params = Vec<shortcut::Value<query::DataType>>;
-type AQ = HashMap<flow::NodeIndex,
-                  Box<Fn(Params, i64) -> Vec<(Vec<query::DataType>, i64)> + Send + Sync>>;
 type Datas = Vec<(Vec<query::DataType>, i64)>;
+pub type V = sync::Arc<flow::View<query::Query, Update = Update, Data = Vec<query::DataType>>>;
+pub type Graph = petgraph::Graph<Option<V>, ()>;
 
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
 /// `flow::View`, and for good reason. This is effectively the behavior of a node when there is no
@@ -115,23 +116,20 @@ type Datas = Vec<(Vec<query::DataType>, i64)>;
 /// It *might* be possible to merge forward and query (after all, they do very similar things), but
 /// I haven't found a nice interface for that yet.
 pub trait NodeOp: Debug {
+    /// See View::prime
+    fn prime(&mut self, &Graph) -> Vec<NodeIndex>;
+
     /// When a new update comes in to a node, this function is called with that update. The
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
     /// appropriately.
-    fn forward(&self,
-               Update,
-               flow::NodeIndex,
-               i64,
-               Option<&backlog::BufferedStore>,
-               &AQ)
-               -> Option<Update>;
+    fn forward(&self, Update, flow::NodeIndex, i64, Option<&backlog::BufferedStore>) -> Option<Update>;
 
     /// Called whenever this node is being queried for records, and it is not materialized. The
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
     /// and emit resulting records as they come in. Note that there may be no query, in which case
     /// all records should be returned.
-    fn query(&self, Option<&query::Query>, i64, &AQ) -> Datas;
+    fn query(&self, Option<&query::Query>, i64) -> Datas;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     fn suggest_indexes(&self, flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>>;
@@ -139,6 +137,11 @@ pub trait NodeOp: Debug {
     /// Resolve where the given field originates from. If this view is materialized, None should be
     /// returned.
     fn resolve(&self, usize) -> Vec<(flow::NodeIndex, usize)>;
+
+    /// Returns true for base node types.
+    fn is_base(&self) -> bool {
+        false
+    }
 }
 
 /// The set of node types supported by distributary.
@@ -159,33 +162,44 @@ pub enum NodeType {
 }
 
 impl NodeOp for NodeType {
+    fn prime(&mut self, g: &Graph) -> Vec<NodeIndex> {
+        match *self {
+            NodeType::BaseNode(ref mut n) => n.prime(g),
+            NodeType::AggregateNode(ref mut n) => n.prime(g),
+            NodeType::JoinNode(ref mut n) => n.prime(g),
+            NodeType::LatestNode(ref mut n) => n.prime(g),
+            NodeType::UnionNode(ref mut n) => n.prime(g),
+            #[cfg(test)]
+            NodeType::TestNode(ref mut n) => n.prime(g),
+        }
+    }
+
     fn forward(&self,
                u: Update,
                src: flow::NodeIndex,
                ts: i64,
-               db: Option<&backlog::BufferedStore>,
-               aqfs: &AQ)
+               db: Option<&backlog::BufferedStore>)
                -> Option<Update> {
         match *self {
-            NodeType::BaseNode(ref n) => n.forward(u, src, ts, db, aqfs),
-            NodeType::AggregateNode(ref n) => n.forward(u, src, ts, db, aqfs),
-            NodeType::JoinNode(ref n) => n.forward(u, src, ts, db, aqfs),
-            NodeType::LatestNode(ref n) => n.forward(u, src, ts, db, aqfs),
-            NodeType::UnionNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::BaseNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::AggregateNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::JoinNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::LatestNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::UnionNode(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.forward(u, src, ts, db, aqfs),
+            NodeType::TestNode(ref n) => n.forward(u, src, ts, db),
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &AQ) -> Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> Datas {
         match *self {
-            NodeType::BaseNode(ref n) => n.query(q, ts, aqfs),
-            NodeType::AggregateNode(ref n) => n.query(q, ts, aqfs),
-            NodeType::JoinNode(ref n) => n.query(q, ts, aqfs),
-            NodeType::LatestNode(ref n) => n.query(q, ts, aqfs),
-            NodeType::UnionNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::BaseNode(ref n) => n.query(q, ts),
+            NodeType::AggregateNode(ref n) => n.query(q, ts),
+            NodeType::JoinNode(ref n) => n.query(q, ts),
+            NodeType::LatestNode(ref n) => n.query(q, ts),
+            NodeType::UnionNode(ref n) => n.query(q, ts),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.query(q, ts, aqfs),
+            NodeType::TestNode(ref n) => n.query(q, ts),
         }
     }
 
@@ -210,6 +224,14 @@ impl NodeOp for NodeType {
             NodeType::UnionNode(ref n) => n.resolve(col),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.resolve(col),
+        }
+    }
+
+    fn is_base(&self) -> bool {
+        if let NodeType::BaseNode(..) = *self {
+            true
+        } else {
+            false
         }
     }
 }
@@ -244,9 +266,12 @@ impl Debug for Node {
 impl flow::View<query::Query> for Node {
     type Update = Update;
     type Data = Vec<query::DataType>;
-    type Params = Params;
 
-    fn find(&self, aqs: &AQ, q: Option<query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
+    fn prime(&mut self, g: &Graph) -> Vec<NodeIndex> {
+        sync::Arc::get_mut(&mut self.inner).expect("prime should have exclusive access").prime(g)
+    }
+
+    fn find(&self, q: Option<query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
             data.find(q, ts)
@@ -257,12 +282,14 @@ impl flow::View<query::Query> for Node {
             // TODO: what timestamp do we use here? it's not clear. there's always a race in which
             // our ancestor ends up absorbing that timestamp by the time the query reaches them :/
             let ts = ts.unwrap_or(i64::max_value());
-            self.inner.query(q.as_ref(), ts, aqs)
+            self.inner.query(q.as_ref(), ts)
         }
+
+        // TODO: apply query if there is one before returning.
     }
 
-    fn init_at(&self, init_ts: i64, aqs: &AQ) {
-        if aqs.len() == 0 {
+    fn init_at(&self, init_ts: i64) {
+        if self.inner.is_base() {
             // base tables have no state to import
             return;
         }
@@ -271,33 +298,21 @@ impl flow::View<query::Query> for Node {
         if let Some(ref data) = *self.data {
             // we need to initialize this view before it can start accepting updates. we issue a
             // None query to all our ancestors, and then store all the materialized results.
-            data.batch_import(self.inner.query(None, init_ts, aqs), init_ts);
+            data.batch_import(self.inner.query(None, init_ts), init_ts);
         }
     }
 
     fn process(&self,
-               mut u: Self::Update,
+               u: Self::Update,
                src: flow::NodeIndex,
-               q: Option<&query::Query>,
-               ts: i64,
-               aqs: &AQ)
+               ts: i64)
                -> Option<Self::Update> {
         use std::ops::Deref;
 
-        if let Some(q) = q {
-            // the incoming update has not been projected through the query, and so does not fit
-            // the expected input format. let's fix that.
-            match u {
-                Update::Records(ref mut rs) => {
-                    for r in rs.iter_mut() {
-                        let projected = q.project(&r.rec()[..]);
-                        *r = (projected, r.ts(), r.is_positive()).into();
-                    }
-                }
-            }
-        }
+        // TODO: the incoming update has not been projected through the query, and so does not fit
+        // the expected input format. let's fix that.
 
-        let new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref(), &*aqs);
+        let new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
         if let Some(ref new_u) = new_u {
             match *new_u {
                 Update::Records(ref rs) => {

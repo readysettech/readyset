@@ -1,5 +1,4 @@
 use shortcut;
-use flow;
 
 #[cfg(feature="web")]
 use rustc_serialize::json::{ToJson, Json};
@@ -137,23 +136,6 @@ impl Query {
             select: s.iter().cloned().collect(),
             selects: s.len(),
             having: h,
-        }
-    }
-}
-
-impl flow::FillableQuery for Query {
-    type Params = Vec<shortcut::Value<DataType>>;
-
-    fn fill(&mut self, mut p: Self::Params) {
-        // insert all the query arguments
-        p.reverse(); // so we can pop below
-        for c in self.having.iter_mut() {
-            match c.cmp {
-                shortcut::Comparison::Equal(ref mut v @ shortcut::Value::Const(DataType::None)) => {
-                    *v = p.pop().expect("not enough query parameters were given");
-                }
-                _ => (),
-            }
         }
     }
 }
