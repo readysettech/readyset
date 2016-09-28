@@ -18,6 +18,9 @@ fn main() {
     // add vote base table
     let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
 
+    g.incorporate(new("user", &["id", "username", "hash"], true, Base {}),
+                             vec![]);
+
     let q = Query::new(&[true, true], Vec::new());
     // add vote count
     let vc = g.incorporate(new("votecount",
