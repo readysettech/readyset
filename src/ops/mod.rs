@@ -395,9 +395,9 @@ pub fn new<'a, NS, S: ?Sized, NO>(name: NS, fields: &[&'a S], materialized: bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::AQ;
     use super::Datas;
     use flow;
+    use flow::NodeIndex;
     use query;
     use backlog;
 
@@ -407,7 +407,13 @@ mod tests {
     use std::collections::HashMap;
 
     #[derive(Debug)]
-    pub struct Tester(pub i64);
+    pub struct Tester(i64, Vec<NodeIndex>, Vec<V>);
+
+    impl Tester {
+        pub fn new(ts: i64, anc: Vec<NodeIndex>) -> Tester {
+            Tester(ts, anc, vec![])
+        }
+    }
 
     impl From<Tester> for NodeType {
         fn from(b: Tester) -> NodeType {
@@ -416,12 +422,16 @@ mod tests {
     }
 
     impl NodeOp for Tester {
+        fn prime(&mut self, g: &Graph) -> Vec<NodeIndex> {
+            self.2.extend(self.1.iter().map(|&i| g[i].as_ref().unwrap().clone()));
+            self.1.clone()
+        }
+
         fn forward(&self,
                    u: Update,
                    _: flow::NodeIndex,
                    _: i64,
-                   _: Option<&backlog::BufferedStore>,
-                   _: &AQ)
+                   _: Option<&backlog::BufferedStore>)
                    -> Option<Update> {
             // forward
             match u {
@@ -440,9 +450,9 @@ mod tests {
             }
         }
 
-        fn query<'a>(&'a self, _: Option<&query::Query>, ts: i64, aqs: &AQ) -> Datas {
+        fn query<'a>(&'a self, _: Option<&query::Query>, ts: i64) -> Datas {
             // query all ancestors, emit r + c for each
-            let rs = aqs.iter().flat_map(|(_, aq)| aq(vec![], ts));
+            let rs = self.2.iter().flat_map(|n| n.find(None, Some(ts)));
             let c = self.0;
             rs.map(move |(r, ts)| {
                     if let query::DataType::Number(r) = r[0] {
@@ -467,12 +477,10 @@ mod tests {
 
         // set up graph
         let mut g = flow::FlowGraph::new();
-        let all = query::Query::new(&[true], vec![]);
-        let a = g.incorporate(new("a", &["a"], true, Tester(1)), vec![]);
-        let b = g.incorporate(new("b", &["b"], true, Tester(2)), vec![]);
-        let c = g.incorporate(new("c", &["c"], mat, Tester(4)),
-                              vec![(all.clone(), a), (all.clone(), b)]);
-        let d = g.incorporate(new("d", &["d"], mat, Tester(8)), vec![(all.clone(), c)]);
+        let a = g.incorporate(new("a", &["a"], true, Tester::new(1, vec![])));
+        let b = g.incorporate(new("b", &["b"], true, Tester::new(2, vec![])));
+        let c = g.incorporate(new("c", &["c"], mat, Tester::new(4, vec![a, b])));
+        let d = g.incorporate(new("d", &["d"], mat, Tester::new(8, vec![c])));
         let (put, get) = g.run(10);
 
         // send a value
