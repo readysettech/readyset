@@ -58,6 +58,12 @@ impl Joiner {
             unimplemented!();
         }
 
+        // we technically want this assert, but we don't have self.nodes until .prime() has been
+        // called. unfortunately, at that time, we don't have .join in the original format, and so
+        // the debug doesn't makes sense. it's probably not worth carrying along the original join
+        // map just to verify this, but maybe...
+        // assert!(self.nodes.iter().all(|(ni, n)| self.join[ni].len() == n.args().len()));
+
         // the format of `join` is convenient for users, but not particulary convenient for lookups
         // the particular use-case we want to be efficient is:
         //
@@ -181,7 +187,6 @@ impl From<Joiner> for NodeType {
 impl NodeOp for Joiner {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         self.nodes.extend(self.join.keys().filter_map(|&ni| g[ni].as_ref().map(move |n| (ni, n.clone()))));
-        assert!(self.nodes.iter().all(|(ni, n)| self.join[ni].len() == n.args().len()));
         self.join.keys().cloned().collect()
     }
 
