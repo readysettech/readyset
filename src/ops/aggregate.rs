@@ -95,6 +95,7 @@ impl NodeOp for Aggregator {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         self.srcn = g[self.src].as_ref().map(|n| n.clone());
         self.cols = self.srcn.as_ref().unwrap().args().len();
+        assert!(self.over < self.cols, "cannot aggregate over non-existing column");
         vec![self.src]
     }
 

@@ -136,18 +136,17 @@ impl<T> Ord for Delayed<T> {
 /// could probably be simplified while maintaining enough flexibility for testing, but oh well. The
 /// type arguments are:
 ///
-///  - `Q`: The type used for queries that are assigned to the edges of the graph.
+///  - `Q`: The type used for queries that are issued across the edges of the graph.
 ///  - `U`: The type used for updates that propagate through the graph.
 ///  - `D`: The type used for records (`D`ata), i.e., what is returned by view queries, and what is
 ///         inserted by users of `FlowGraph` using the channels returned by `run()`.
-///  - `P`: The type used for parameters given to views to query them. This could probably be
-///         merged with `Q` in some sensible fashion by giving `Q` an associated type.
 ///
 /// When a new `FlowGraph` has been constructed, it will first be used to construct a graph using
-/// `incorporate()`. This method takes a `View` and a set of ancestor nodes (with associated
-/// queries). In general, any `NodeType` can be used to make a view by passing it to `new` along
-/// with its field names and a boolean marking whether that node should be materialized. To
-/// construct a simple two-node graph that logs votes and keeps vote counts up to date:
+/// `incorporate()`. This method takes a `View`, and asks the operator for its set of ancestor
+/// nodes to hook it into the graph. In general, any `NodeType` can be used to make a view by
+/// passing it to `new` along with its field names and a boolean marking whether that node should
+/// be materialized. To construct a simple two-node graph that logs votes and keeps vote counts up
+/// to date:
 ///
 /// ```
 /// use distributary::*;
@@ -155,10 +154,9 @@ impl<T> Ord for Delayed<T> {
 /// let mut g = FlowGraph::new();
 ///
 /// // set up a base node and a view
-/// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
+/// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// let votecount = g.incorporate(
-///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
-///     vec![(Query::new(&[true, true], Vec::new()), vote)]
+///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0))
 /// );
 /// # drop(vote);
 /// # drop(votecount);
@@ -174,13 +172,11 @@ impl<T> Ord for Delayed<T> {
 /// # fn main() {
 /// # use std::time::Duration;
 /// # use std::thread::sleep;
-/// # use shortcut;
 /// # use distributary::*;
 /// # let mut g = FlowGraph::new();
-/// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}), vec![]);
+/// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// # let votecount = g.incorporate(
-/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, 2)),
-/// #     vec![(Query::new(&[true, true], Vec::new()), vote)]
+/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0))
 /// # );
 /// // start the data flow graph
 /// let (put, get) = g.run(10);
