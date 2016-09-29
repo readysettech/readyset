@@ -139,9 +139,9 @@ pub trait NodeOp: Debug {
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     fn suggest_indexes(&self, flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>>;
 
-    /// Resolve where the given field originates from. If this view is materialized, None should be
-    /// returned.
-    fn resolve(&self, usize) -> Vec<(flow::NodeIndex, usize)>;
+    /// Resolve where the given field originates from. If the view is materialized, or the value is
+    /// otherwise created by this view, None should be returned.
+    fn resolve(&self, usize) -> Option<Vec<(flow::NodeIndex, usize)>>;
 
     /// Returns true for base node types.
     fn is_base(&self) -> bool {
@@ -220,7 +220,7 @@ impl NodeOp for NodeType {
         }
     }
 
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         match *self {
             NodeType::BaseNode(ref n) => n.resolve(col),
             NodeType::AggregateNode(ref n) => n.resolve(col),
@@ -345,7 +345,7 @@ impl flow::View<query::Query> for Node {
         if self.data.is_some() {
             None
         } else {
-            Some(self.inner.resolve(col))
+            self.inner.resolve(col)
         }
     }
 
@@ -477,8 +477,8 @@ mod tests {
             HashMap::new()
         }
 
-        fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
-            vec![]
+        fn resolve(&self, _: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+            None
         }
     }
     fn e2e_test(mat: bool) {

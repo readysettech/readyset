@@ -247,8 +247,8 @@ impl NodeOp for Latest {
         Some((this, self.key.clone())).into_iter().collect()
     }
 
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        vec![(self.src, col)]
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        Some(vec![(self.src, col)])
     }
 }
 
@@ -553,22 +553,26 @@ mod tests {
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
     }
 
-    #[cfg(all(unix, windows))]
     #[test]
     fn it_suggests_indices() {
-        let c = Latest::new(1.into(), vec![0, 1]);
-        let mut idx = c.suggest_indexes(0.into());
-        assert!(idx.contains_key(&0.into()));
-        let idx = idx.remove(&0.into()).unwrap();
-        assert!(idx.iter().any(|&i| i == 0));
-        assert!(idx.iter().any(|&i| i == 1));
+        let c = setup(vec![0, 1], false);
+        let idx = c.suggest_indexes(1.into());
+
+        // should only add index on own columns
+        assert_eq!(idx.len(), 1);
+        assert!(idx.contains_key(&1.into()));
+
+        // should only index on group-by columns
+        assert_eq!(idx[&1.into()].len(), 2);
+        assert!(idx[&1.into()].iter().any(|&i| i == 0));
+        assert!(idx[&1.into()].iter().any(|&i| i == 1));
     }
 
-    #[cfg(all(unix, windows))]
     #[test]
     fn it_resolves() {
-        let c = Latest::new(1.into(), vec![0, 1]);
-        assert_eq!(c.resolve(0), vec![(1.into(), 0)]);
-        assert_eq!(c.resolve(1), vec![(1.into(), 1)]);
+        let c = setup(vec![0, 1], false);
+        assert_eq!(c.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(c.resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(c.resolve(2), Some(vec![(0.into(), 2)]));
     }
 }

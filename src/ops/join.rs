@@ -303,6 +303,8 @@ impl NodeOp for Joiner {
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        use std::collections::HashSet;
+
         // index all join fields
         self.join
             .iter()
@@ -318,19 +320,21 @@ impl NodeOp for Joiner {
             })
             // we now have (NodeIndex, usize) for every join column.
             .fold(HashMap::new(), |mut hm, (node, col)| {
-                hm.entry(*node).or_insert_with(Vec::new).push(col);
+                hm.entry(*node).or_insert_with(HashSet::new).insert(col);
 
                 // if this join column is emitted, we also want an index on that output column, as
                 // it's likely the user will do lookups on it.
                 if let Some(outi) = self.emit.iter().position(|&(ref n, c)| n == node && c == col) {
-                    hm.entry(this).or_insert_with(Vec::new).push(outi);
+                    hm.entry(this).or_insert_with(HashSet::new).insert(outi);
                 }
                 hm
             })
+            // convert HashSets into Vec
+            .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
     }
 
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        vec![self.emit[col].clone()]
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        Some(vec![self.emit[col].clone()])
     }
 }
 
@@ -501,25 +505,24 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_suggests_indices() {
-        let (_, j) = setup();
+        use std::collections::HashMap;
+        let (j, l, r) = setup();
         let hm: HashMap<_, _> = vec![
-            (0.into(), vec![0]), // join column for left
-            (1.into(), vec![0]), // join column for right
+            (l, vec![0]), // join column for left
+            (r, vec![0]), // join column for right
             (2.into(), vec![0]), // output column that is used as join column
         ]
             .into_iter()
             .collect();
-        assert_eq!(hm, j.suggest_indexes(2.into()));
+        assert_eq!(j.suggest_indexes(2.into()), hm);
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_resolves() {
-        let (_, j) = setup();
-        assert_eq!(j.resolve(0), vec![(0.into(), 0)]);
-        assert_eq!(j.resolve(1), vec![(0.into(), 1)]);
-        assert_eq!(j.resolve(2), vec![(1.into(), 1)]);
+        let (j, _, _) = setup();
+        assert_eq!(j.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(j.resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(j.resolve(2), Some(vec![(1.into(), 1)]));
     }
 }

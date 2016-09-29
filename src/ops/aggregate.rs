@@ -324,14 +324,14 @@ impl NodeOp for Aggregator {
             .collect()
     }
 
-    fn resolve(&self, mut col: usize) -> Vec<(flow::NodeIndex, usize)> {
+    fn resolve(&self, mut col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         if col == self.cols - 1 {
-            return vec![];
+            return None;
         }
         if col >= self.over {
             col += 1
         }
-        vec![(self.src, col)]
+        Some(vec![(self.src, col)])
     }
 }
 
@@ -348,12 +348,16 @@ mod tests {
     use flow::View;
     use ops::NodeOp;
 
-    fn setup(mat: bool) -> ops::Node {
+    fn setup(mat: bool, wide: bool) -> ops::Node {
         use std::sync;
         use flow::View;
 
         let mut g = petgraph::Graph::new();
-        let mut s = ops::new("source", &["x", "y"], true, ops::base::Base{});
+        let mut s = if wide {
+            ops::new("source", &["x", "y", "z"], true, ops::base::Base {})
+        } else {
+            ops::new("source", &["x", "y"], true, ops::base::Base {})
+        };
 
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
@@ -364,13 +368,17 @@ mod tests {
 
         let mut c = Aggregation::COUNT.new(s, 1);
         c.prime(&g);
-        ops::new("agg", &["x", "ys"], mat, c)
+        if wide {
+            ops::new("agg", &["x", "z", "ys"], mat, c)
+        } else {
+            ops::new("agg", &["x", "ys"], mat, c)
+        }
     }
 
     #[test]
     fn it_forwards() {
         let src = flow::NodeIndex::new(0);
-        let c = setup(true);
+        let c = setup(true, false);
 
         let u = (vec![1.into(), 1.into()], 1).into();
 
@@ -558,7 +566,7 @@ mod tests {
 
     #[test]
     fn it_queries() {
-        let c = setup(false);
+        let c = setup(false, false);
 
         let hits = c.find(None, None);
         assert_eq!(hits.len(), 2);
@@ -578,7 +586,7 @@ mod tests {
 
     #[test]
     fn it_queries_zeros() {
-        let c = setup(false);
+        let c = setup(false, false);
 
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
@@ -592,20 +600,25 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_suggests_indices() {
-        let c = Aggregation::COUNT.new(1.into(), 1, 3);
-        let hm: HashMap<_, _> = Some((0.into(), vec![0, 1]))
-            .into_iter()
-            .collect();
-        assert_eq!(hm, c.suggest_indexes(0.into()));
+        let c = setup(false, true);
+        let idx = c.suggest_indexes(1.into());
+
+        // should only add index on own columns
+        assert_eq!(idx.len(), 1);
+        assert!(idx.contains_key(&1.into()));
+
+        // should only index on group-by columns
+        assert_eq!(idx[&1.into()].len(), 2);
+        assert!(idx[&1.into()].iter().any(|&i| i == 0));
+        assert!(idx[&1.into()].iter().any(|&i| i == 1));
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_resolves() {
-        let c = Aggregation::COUNT.new(1.into(), 1, 3);
-        assert_eq!(c.resolve(0), vec![(1.into(), 0)]);
-        assert_eq!(c.resolve(1), vec![(1.into(), 2)]);
+        let c = setup(false, true);
+        assert_eq!(c.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(c.resolve(1), Some(vec![(0.into(), 2)]));
+        assert_eq!(c.resolve(2), None);
     }
 }

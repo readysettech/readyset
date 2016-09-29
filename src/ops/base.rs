@@ -55,7 +55,7 @@ impl NodeOp for Base {
         HashMap::new()
     }
 
-    fn resolve(&self, _: usize) -> Vec<(flow::NodeIndex, usize)> {
+    fn resolve(&self, _: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         // base tables are always materialized
         unreachable!();
     }

@@ -132,8 +132,8 @@ impl NodeOp for Union {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect()
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        Some(self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
     }
 }
 
@@ -259,21 +259,20 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_suggests_indices() {
-        let (_, u) = setup();
-        assert_eq!(HashMap::new(), u.suggest_indexes(1.into()));
+        use std::collections::HashMap;
+        let (u, _, _) = setup();
+        assert_eq!(u.suggest_indexes(1.into()), HashMap::new());
     }
 
     #[test]
-    #[cfg(all(unix, windows))]
     fn it_resolves() {
-        let (_, u) = setup();
+        let (u, l, r) = setup();
         let r0 = u.resolve(0);
-        assert!(r0.iter().any(|&(n, c)| n == 0.into() && c == 0));
-        assert!(r0.iter().any(|&(n, c)| n == 1.into() && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 0));
         let r1 = u.resolve(1);
-        assert!(r1.iter().any(|&(n, c)| n == 0.into() && c == 1));
-        assert!(r1.iter().any(|&(n, c)| n == 1.into() && c == 2));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 1));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 2));
     }
 }

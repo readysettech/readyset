@@ -48,8 +48,8 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     /// The passed node index is the index of the current node.
     fn suggest_indexes(&self, NodeIndex) -> HashMap<NodeIndex, Vec<usize>>;
 
-    /// Resolve where the given field originates from. If this view is materialized, None should be
-    /// returned.
+    /// Resolve where the given field originates from. If the view is materialized, or the value is
+    /// otherwise created by this view, None should be returned.
     fn resolve(&self, usize) -> Option<Vec<(NodeIndex, usize)>>;
 
     /// Add an index on the given field.
