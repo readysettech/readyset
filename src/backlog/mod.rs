@@ -229,15 +229,15 @@ impl BufferedStore {
     /// given query before results are returned. If not query is given, the returned records are
     /// cloned.
     pub fn find(&self,
-                q: Option<query::Query>,
+                q: Option<&query::Query>,
                 including: Option<i64>)
                 -> Vec<(Vec<query::DataType>, i64)> {
-        self.find_and(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]),
+        self.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]),
                       including,
                       |rs| {
             rs.into_iter()
                 .map(|(r, ts)| {
-                    if let Some(ref q) = q {
+                    if let Some(q) = q {
                         (q.project(r), ts)
                     } else {
                         (r.iter().cloned().collect(), ts)

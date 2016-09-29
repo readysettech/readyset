@@ -274,7 +274,8 @@ impl flow::View<query::Query> for Node {
     fn find(&self, q: Option<query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
         if let Some(ref data) = *self.data {
-            data.find(q, ts)
+            // data.find already applies the query
+            data.find(q.as_ref(), ts)
         } else {
             // we are not materialized --- query.
             // if no timestamp was given to find, we query using the latest timestamp.
@@ -282,10 +283,15 @@ impl flow::View<query::Query> for Node {
             // TODO: what timestamp do we use here? it's not clear. there's always a race in which
             // our ancestor ends up absorbing that timestamp by the time the query reaches them :/
             let ts = ts.unwrap_or(i64::max_value());
-            self.inner.query(q.as_ref(), ts)
-        }
+            let rs = self.inner.query(q.as_ref(), ts);
 
-        // TODO: apply query if there is one before returning.
+            // to avoid repeating the projection logic in every op, we do it here instead
+            if let Some(q) = q {
+                rs.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(move |r| (r, ts))).collect()
+            } else {
+                rs
+            }
+        }
     }
 
     fn init_at(&self, init_ts: i64) {
