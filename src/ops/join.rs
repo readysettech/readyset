@@ -40,7 +40,7 @@ impl Joiner {
     /// type. For each input view, we construct a list of the same length as the number of columns
     /// of that view, where each element is either 0 or a *group number*. Columns which share a
     /// group number are used to join nodes by equality. Thus, each group number can appear at most
-    /// once for each view. 
+    /// once for each view.
     ///
     /// In the above example, assuming `a` has two columns and `b` has three, the map would look
     /// like this:
@@ -70,48 +70,52 @@ impl Joiner {
         //  - we are given a record from `src`
         //  - for each other parent `p`, we want to know which columns of `p` to constrain, and
         //    which values in the `src` record those correspond to
-        // 
+        //
         // so, we construct a map of the form
         //
         //   src: NodeIndex => {
         //     p: NodeIndex => [(srci, pi), ...]
         //   }
         //
-        let join = join.iter().map(|(&src, srcg)| {
-            // which groups are bound to which columns?
-            let g2c = srcg.iter().enumerate().filter_map(|(c, &g)| {
-                if g == 0 {
-                    None
-                } else {
-                    Some((g, c))
-                }
-            }).collect::<HashMap<_, _>>();
+        let join = join.iter()
+            .map(|(&src, srcg)| {
+                // which groups are bound to which columns?
+                let g2c = srcg.iter()
+                    .enumerate()
+                    .filter_map(|(c, &g)| { if g == 0 { None } else { Some((g, c)) } })
+                    .collect::<HashMap<_, _>>();
 
-            // for every other view
-            let other = join.iter().filter_map(|(&p, pg)| {
-                // *other* view
-                if p == src {
-                    return None;
-                }
-                // look through the group assignments for that other view
-                let pg: Vec<_> = pg.iter().enumerate().filter_map(|(pi, g)| {
-                    // look for ones that share a group with us
-                    g2c.get(g).map(|srci| {
-                        // and emit that mapping
-                        (*srci, pi)
+                // for every other view
+                let other = join.iter()
+                    .filter_map(|(&p, pg)| {
+                        // *other* view
+                        if p == src {
+                            return None;
+                        }
+                        // look through the group assignments for that other view
+                        let pg: Vec<_> = pg.iter()
+                            .enumerate()
+                            .filter_map(|(pi, g)| {
+                                // look for ones that share a group with us
+                                g2c.get(g).map(|srci| {
+                                    // and emit that mapping
+                                    (*srci, pi)
+                                })
+                            })
+                            .collect();
+
+                        // if there are no shared columns, don't join against this view
+                        if pg.is_empty() {
+                            return None;
+                        }
+                        // but if there are, emit the mapping we found
+                        Some((p, pg))
                     })
-                }).collect();
+                    .collect();
 
-                // if there are no shared columns, don't join against this view
-                if pg.is_empty() {
-                    return None;
-                }
-                // but if there are, emit the mapping we found
-                Some((p, pg))
-            }).collect();
-
-            (src, other)
-        }).collect();
+                (src, other)
+            })
+            .collect();
 
         Joiner {
             emit: emit,
@@ -120,7 +124,9 @@ impl Joiner {
         }
     }
 
-    fn join<'a>(&'a self, left: (flow::NodeIndex, Vec<query::DataType>, i64), ts: i64)
+    fn join<'a>(&'a self,
+                left: (flow::NodeIndex, Vec<query::DataType>, i64),
+                ts: i64)
                 -> Box<Iterator<Item = (Vec<query::DataType>, i64)> + 'a> {
 
         // NOTE: this only works for two-way joins
@@ -130,7 +136,7 @@ impl Joiner {
         let params = self.join[&on][&left.0]
             .iter()
             .map(|&(lefti, righti)| {
-                shortcut::Condition{
+                shortcut::Condition {
                     column: righti,
                     cmp: shortcut::Comparison::Equal(shortcut::Value::Const(left.1[lefti].clone())),
                 }
@@ -138,7 +144,10 @@ impl Joiner {
             .collect();
 
         // TODO: technically, we only need the columns in .join and .emit
-        let q = query::Query::new(&iter::repeat(true).take(self.nodes[&on].args().len()).collect::<Vec<_>>(), params);
+        let q = query::Query::new(&iter::repeat(true)
+                                      .take(self.nodes[&on].args().len())
+                                      .collect::<Vec<_>>(),
+                                  params);
 
         // send the parameters to start the query.
         let rx = self.nodes[&on].find(Some(q), Some(ts));
@@ -186,7 +195,9 @@ impl From<Joiner> for NodeType {
 
 impl NodeOp for Joiner {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.nodes.extend(self.join.keys().filter_map(|&ni| g[ni].as_ref().map(move |n| (ni, n.clone()))));
+        self.nodes.extend(self.join
+            .keys()
+            .filter_map(|&ni| g[ni].as_ref().map(move |n| (ni, n.clone()))));
         self.join.keys().cloned().collect()
     }
 
@@ -245,17 +256,20 @@ impl NodeOp for Joiner {
         // Avoid scanning rows that wouldn't match the query anyway. We do this by finding all
         // conditions that filter over a field present in left, and use those as parameters.
         if let Some(q) = q {
-            lparams = Some(q.having.iter().filter_map(|c| {
-                let (srci, coli) = self.emit[c.column];
-                if srci != left {
-                    return None;
-                }
+            lparams = Some(q.having
+                .iter()
+                .filter_map(|c| {
+                    let (srci, coli) = self.emit[c.column];
+                    if srci != left {
+                        return None;
+                    }
 
-                Some(shortcut::Condition{
-                    column: coli,
-                    cmp: c.cmp.clone(),
+                    Some(shortcut::Condition {
+                        column: coli,
+                        cmp: c.cmp.clone(),
+                    })
                 })
-            }).collect::<Vec<_>>());
+                .collect::<Vec<_>>());
 
             if lparams.as_ref().unwrap().len() == 0 {
                 lparams = None;
@@ -264,9 +278,14 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         // TODO: we probably don't need to select all columns here
-        self.nodes[&left].find(lparams.map(|ps| {
-            query::Query::new(&iter::repeat(true).take(self.nodes[&left].args().len()).collect::<Vec<_>>(), ps)
-        }), Some(ts))
+        self.nodes[&left]
+            .find(lparams.map(|ps| {
+                      query::Query::new(&iter::repeat(true)
+                                            .take(self.nodes[&left].args().len())
+                                            .collect::<Vec<_>>(),
+                                        ps)
+                  }),
+                  Some(ts))
             .into_iter()
             .flat_map(move |(lrec, lts)| {
                 // TODO: also add constants from q to filter used to select from right
@@ -333,8 +352,8 @@ mod tests {
         use std::sync;
 
         let mut g = petgraph::Graph::new();
-        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base{});
-        let mut r = ops::new("right", &["r0", "r1"], true, ops::base::Base{});
+        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base {});
+        let mut r = ops::new("right", &["r0", "r1"], true, ops::base::Base {});
 
         l.prime(&g);
         r.prime(&g);

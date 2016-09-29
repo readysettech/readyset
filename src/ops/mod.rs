@@ -123,7 +123,12 @@ pub trait NodeOp: Debug {
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
     /// appropriately.
-    fn forward(&self, Update, flow::NodeIndex, i64, Option<&backlog::BufferedStore>) -> Option<Update>;
+    fn forward(&self,
+               Update,
+               flow::NodeIndex,
+               i64,
+               Option<&backlog::BufferedStore>)
+               -> Option<Update>;
 
     /// Called whenever this node is being queried for records, and it is not materialized. The
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
@@ -287,7 +292,9 @@ impl flow::View<query::Query> for Node {
 
             // to avoid repeating the projection logic in every op, we do it here instead
             if let Some(q) = q {
-                rs.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(move |r| (r, ts))).collect()
+                rs.into_iter()
+                    .filter_map(move |(r, ts)| q.feed(&r[..]).map(move |r| (r, ts)))
+                    .collect()
             } else {
                 rs
             }
@@ -308,11 +315,7 @@ impl flow::View<query::Query> for Node {
         }
     }
 
-    fn process(&self,
-               u: Self::Update,
-               src: flow::NodeIndex,
-               ts: i64)
-               -> Option<Self::Update> {
+    fn process(&self, u: Self::Update, src: flow::NodeIndex, ts: i64) -> Option<Self::Update> {
         use std::ops::Deref;
 
         // TODO: the incoming update has not been projected through the query, and so does not fit

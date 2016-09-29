@@ -95,7 +95,8 @@ impl NodeOp for Aggregator {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         self.srcn = g[self.src].as_ref().map(|n| n.clone());
         self.cols = self.srcn.as_ref().unwrap().args().len();
-        assert!(self.over < self.cols, "cannot aggregate over non-existing column");
+        assert!(self.over < self.cols,
+                "cannot aggregate over non-existing column");
         vec![self.src]
     }
 
@@ -257,8 +258,12 @@ impl NodeOp for Aggregator {
 
         // now, query our ancestor, and aggregate into groups.
         let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
-            query::Query::new(&iter::repeat(true).take(self.cols).collect::<Vec<_>>(), ps)
-        }), Some(ts));
+                                                      query::Query::new(&iter::repeat(true)
+                                                                            .take(self.cols)
+                                                                            .collect::<Vec<_>>(),
+                                                                        ps)
+                                                  }),
+                                                  Some(ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.

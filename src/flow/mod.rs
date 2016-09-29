@@ -30,7 +30,12 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     ///
     /// Note that this method may be called before the entire graph has been assembled. Only the
     /// ancestors (all the way to the root) are guaranteed to be present.
-    fn prime(&mut self, &petgraph::Graph<Option<sync::Arc<View<Q, Update=Self::Update, Data=Self::Data>>>, ()>) -> Vec<NodeIndex>;
+    fn prime(&mut self,
+             &petgraph::Graph<Option<sync::Arc<View<Q,
+                                                    Update = Self::Update,
+                                                    Data = Self::Data>>>,
+                              ()>)
+             -> Vec<NodeIndex>;
 
     /// Execute a single query, producing all matching records.
     fn find<'a>(&'a self, Option<Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
@@ -207,12 +212,12 @@ impl<T> Ord for Delayed<T> {
 /// )
 /// # }
 /// ```
-pub struct FlowGraph<Q, U, D> where
-    Q: Clone + Send + Sync,
-    U: Clone + Send,
-    D: Clone + Send
+pub struct FlowGraph<Q, U, D>
+    where Q: Clone + Send + Sync,
+          U: Clone + Send,
+          D: Clone + Send
 {
-    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D>>>,()>,
+    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>,
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
@@ -241,9 +246,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     }
 
     /// Return a reference to the internal graph, as well as the identifier for the root node.
-    pub fn graph(&self) -> (
-        &petgraph::Graph<Option<sync::Arc<View<Q, Update=U, Data=D>>>, ()>,
-        NodeIndex) {
+    pub fn graph
+        (&self)
+         -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>, NodeIndex) {
         (&self.graph, self.source)
     }
 
@@ -568,13 +573,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     fn inner(state: NodeState<Q, U, D>) {
         use std::collections::VecDeque;
 
-        let NodeState { name,
-                        inner,
-                        srcs,
-                        input,
-                        context,
-                        processed_ts,
-                        init_ts } = state;
+        let NodeState { name, inner, srcs, input, context, processed_ts, init_ts } = state;
 
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
@@ -657,9 +656,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             }
 
             if ts == min {
-                let u = u.and_then(|u| {
-                    inner.process(u, src, ts)
-                });
+                let u = u.and_then(|u| inner.process(u, src, ts));
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
                 for tx in context.lock().unwrap().txs.iter_mut() {
@@ -781,8 +778,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     // that query should be. for example, an aggregation expects to be able to query over all the
     // fields except its input field (self.over), latest expects the query to be on all key fields
     // (and only those fields), in order, etc.
-    pub fn incorporate<V: View<Q, Update = U, Data = D>>(&mut self, mut node: V)
-        -> petgraph::graph::NodeIndex {
+    pub fn incorporate<V: View<Q, Update = U, Data = D>>(&mut self,
+                                                         mut node: V)
+                                                         -> petgraph::graph::NodeIndex {
 
         let ancestors = node.prime(&self.graph);
         let idx = self.graph.add_node(Some(sync::Arc::new(node)));
@@ -842,7 +840,11 @@ mod tests {
 
     impl Counter {
         pub fn new(name: &str, parents: Vec<NodeIndex>) -> Counter {
-            Counter(parents.is_empty(), name.into(), Default::default(), parents, vec![])
+            Counter(parents.is_empty(),
+                    name.into(),
+                    Default::default(),
+                    parents,
+                    vec![])
         }
     }
 

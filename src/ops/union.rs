@@ -22,8 +22,7 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
-    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>)
-               -> Union {
+    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>) -> Union {
         for emit in emit.values() {
             let mut last = &emit[0];
             for i in emit {
@@ -92,12 +91,15 @@ impl NodeOp for Union {
             // conditions that filter over a field present in left, and use those as parameters.
             let emit = &self.emit[src];
             if let Some(q) = q {
-                let p: Vec<_> = q.having.iter().map(|c| {
-                    shortcut::Condition{
-                        column: emit[c.column],
-                        cmp: c.cmp.clone(),
-                    }
-                }).collect();
+                let p: Vec<_> = q.having
+                    .iter()
+                    .map(|c| {
+                        shortcut::Condition {
+                            column: emit[c.column],
+                            cmp: c.cmp.clone(),
+                        }
+                    })
+                    .collect();
 
                 if !p.is_empty() {
                     params.insert(*src, Some(p));
@@ -153,8 +155,8 @@ mod tests {
         use std::sync;
 
         let mut g = petgraph::Graph::new();
-        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base{});
-        let mut r = ops::new("right", &["r0", "r1", "r2"], true, ops::base::Base{});
+        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base {});
+        let mut r = ops::new("right", &["r0", "r1", "r2"], true, ops::base::Base {});
 
         l.prime(&g);
         r.prime(&g);
@@ -164,7 +166,9 @@ mod tests {
 
         g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
         g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
-        g[r].as_ref().unwrap().process((vec![1.into(), "skipped".into(), "x".into()], 2).into(), r, 2);
+        g[r].as_ref().unwrap().process((vec![1.into(), "skipped".into(), "x".into()], 2).into(),
+                                       r,
+                                       2);
 
         let mut emits = HashMap::new();
         emits.insert(l, vec![0, 1]);
@@ -191,7 +195,8 @@ mod tests {
         let right = vec![1.into(), "skipped".into(), "x".into()];
         match u.process(right.clone().into(), r, 0).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);
             }
         }
     }

@@ -167,18 +167,21 @@ impl NodeOp for Latest {
         // everything except conditions on self.over), we should use those as parameters to speed
         // things up.
         if let Some(q) = q {
-            params = Some(q.having.iter().filter_map(|c| {
-                // non-key conditionals need to be matched against per group after to match the
-                // semantics you'd get if the query was run against the materialized output
-                // directly.
-                self.key_m.get(&c.column).map(|&col| {
-                    shortcut::Condition{
-                        column: col,
-                        cmp: c.cmp.clone(),
-                    }
+            params = Some(q.having
+                .iter()
+                .filter_map(|c| {
+                    // non-key conditionals need to be matched against per group after to match the
+                    // semantics you'd get if the query was run against the materialized output
+                    // directly.
+                    self.key_m.get(&c.column).map(|&col| {
+                        shortcut::Condition {
+                            column: col,
+                            cmp: c.cmp.clone(),
+                        }
 
+                    })
                 })
-            }).collect::<Vec<_>>());
+                .collect::<Vec<_>>());
 
             if params.as_ref().unwrap().len() == 0 {
                 params = None;
@@ -187,8 +190,12 @@ impl NodeOp for Latest {
 
         // now, query our ancestor, and aggregate into groups.
         let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
-            query::Query::new(&iter::repeat(true).take(self.srcn.as_ref().unwrap().args().len()).collect::<Vec<_>>(), ps)
-        }), Some(ts));
+            query::Query::new(&iter::repeat(true)
+                                  .take(self.srcn.as_ref().unwrap().args().len())
+                                  .collect::<Vec<_>>(),
+                              ps)
+        }),
+                                                  Some(ts));
 
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
@@ -265,9 +272,9 @@ mod tests {
 
         let big = key.len() > 1;
         let mut s = if big {
-            ops::new("source", &["x", "y", "z"], true, ops::base::Base{})
+            ops::new("source", &["x", "y", "z"], true, ops::base::Base {})
         } else {
-            ops::new("source", &["x", "y"], true, ops::base::Base{})
+            ops::new("source", &["x", "y"], true, ops::base::Base {})
         };
 
         s.prime(&g);
@@ -419,7 +426,7 @@ mod tests {
     #[test]
     fn it_forwards_mkey() {
         let src = flow::NodeIndex::new(0);
-        let c = setup(vec![0,1], true);
+        let c = setup(vec![0, 1], true);
 
         let u = (vec![1.into(), 1.into(), 1.into()], 1).into();
         c.process(u, src, 1);

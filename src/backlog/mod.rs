@@ -232,9 +232,7 @@ impl BufferedStore {
                 q: Option<&query::Query>,
                 including: Option<i64>)
                 -> Vec<(Vec<query::DataType>, i64)> {
-        self.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]),
-                      including,
-                      |rs| {
+        self.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]), including, |rs| {
             rs.into_iter()
                 .map(|(r, ts)| {
                     if let Some(q) = q {
