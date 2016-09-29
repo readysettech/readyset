@@ -293,7 +293,7 @@ impl flow::View<query::Query> for Node {
             // to avoid repeating the projection logic in every op, we do it here instead
             if let Some(q) = q {
                 rs.into_iter()
-                    .filter_map(move |(r, ts)| q.feed(&r[..]).map(move |r| (r, ts)))
+                    .filter_map(move |(r, ts)| q.feed(r).map(move |r| (r, ts)))
                     .collect()
             } else {
                 rs

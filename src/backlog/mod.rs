@@ -235,10 +235,11 @@ impl BufferedStore {
         self.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]), including, |rs| {
             rs.into_iter()
                 .map(|(r, ts)| {
+                    let r = r.iter().cloned().collect();
                     if let Some(q) = q {
                         (q.project(r), ts)
                     } else {
-                        (r.iter().cloned().collect(), ts)
+                        (r, ts)
                     }
                 })
                 .collect()

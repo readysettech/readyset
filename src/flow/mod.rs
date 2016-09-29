@@ -713,13 +713,21 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                     let ts = d.ts;
                     let (src, u) = d.data;
 
-                    let u = inner.process(u, src, ts);
+                    let mut u = inner.process(u, src, ts);
                     processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
                     if u.is_some() {
                         forwarded = ts;
-                        for tx in context.lock().unwrap().txs.iter_mut() {
-                            tx.send((name, u.clone(), ts)).unwrap();
+                        let mut ctx = context.lock().unwrap();
+                        let mut txit = ctx.txs.iter_mut().peekable();
+                        while let Some(tx) = txit.next() {
+                            if txit.peek().is_some() {
+                                tx.send((name, u.clone(), ts)).unwrap();
+                            } else {
+                                // avoid cloning on the last send. this will avoid clone altogether
+                                // for nodes with only one child, which is a common case.
+                                tx.send((name, u.take(), ts)).unwrap();
+                            }
                         }
                     }
                     continue;
@@ -758,6 +766,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                     .enumerate()
                     .min_by_key(|&(_, m)| m);
 
+                // TODO: lazy absorbption will speed up things quite significantly
                 if let Some((_, m)) = desc_min {
                     if m > previous {
                         // min changed -- safe to absorb

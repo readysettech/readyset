@@ -51,6 +51,7 @@ impl Aggregation {
             srcn: None,
             over: over,
             cols: 0,
+            cond: Vec::new(),
         }
     }
 }
@@ -83,6 +84,7 @@ pub struct Aggregator {
     srcn: Option<ops::V>,
     over: usize,
     cols: usize,
+    cond: Vec<shortcut::Condition<query::DataType>>,
 }
 
 impl From<Aggregator> for NodeType {
@@ -97,6 +99,15 @@ impl NodeOp for Aggregator {
         self.cols = self.srcn.as_ref().unwrap().args().len();
         assert!(self.over < self.cols,
                 "cannot aggregate over non-existing column");
+        self.cond = (0..self.cols)
+            .filter(|&i| i != self.cols - 1)
+            .map(|col| {
+                shortcut::Condition {
+                    column: col,
+                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
+                }
+            })
+            .collect::<Vec<_>>();
         vec![self.src]
     }
 
@@ -110,15 +121,9 @@ impl NodeOp for Aggregator {
         assert_eq!(src, self.src);
 
         // Construct the query we'll need to query into ourselves
-        let mut q = (0..self.cols)
-            .filter(|&i| i != self.cols - 1)
-            .map(|col| {
-                shortcut::Condition {
-                    column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
-                }
-            })
-            .collect::<Vec<_>>();
+        let mut q = self.cond.clone();
+
+        let colfix = |col| { if col >= self.over { col + 1 } else { col } };
 
         match u {
             ops::Update::Records(rs) => {
@@ -138,27 +143,26 @@ impl NodeOp for Aggregator {
                     let val = r[self.over].clone().into();
                     let group = r.into_iter()
                         .enumerate()
-                        .filter(|&(i, _)| i != self.over)
+                        .map(|(i, v)| { if i == self.over { None } else { Some(v) } })
                         .collect::<Vec<_>>();
 
                     consolidate.entry(group).or_insert_with(Vec::new).push((val, pos, ts));
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (group, diffs) in consolidate.into_iter() {
-                    let mut group = group.into_iter().collect::<HashMap<_, _>>();
+                for (mut group, diffs) in consolidate.into_iter() {
+                    // note that each value in group is an Option so that we can take/swap without
+                    // having to .remove or .insert into the HashMap (which is much more expensive)
+                    // it should only be None for self.over
 
                     // build a query for this group
                     for s in q.iter_mut() {
                         // s.column is the *output* column
                         // the *input* column must be computed
-                        let mut col = s.column;
-                        if col >= self.over {
-                            col += 1;
-                        }
-                        s.cmp =
-                            shortcut::Comparison::Equal(shortcut::Value::Const(group.remove(&col)
-                                .expect("group by column is beyond number of columns in record")));
+                        let col = colfix(s.column);
+                        s.cmp = shortcut::Comparison::Equal(shortcut::Value::Const(group[col]
+                            .take()
+                            .expect("group by column is beyond number of columns in record")));
                     }
 
                     // find the current value for this group
@@ -186,15 +190,19 @@ impl NodeOp for Aggregator {
                                s.cmp {
                             use std::mem;
 
+                            // s.column is the *output* column
+                            // the *input* column must be computed
+                            let col = colfix(s.column);
+
                             let mut x = query::DataType::None;
                             mem::swap(&mut x, v);
-                            group.insert(s.column, x);
+                            group[col] = Some(x);
                         }
                     }
 
                     // construct prefix of output record
                     let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend((0..self.cols).into_iter().filter_map(|i| group.remove(&i)));
+                    rec.extend(group.into_iter().filter_map(|v| v));
 
                     // revoke old value
                     rec.push(current.into());

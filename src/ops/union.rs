@@ -120,7 +120,7 @@ impl NodeOp for Union {
                 self.srcs[&src].find(Some(query::Query::new(&select[..], cs)), Some(ts))
             })
             .filter_map(move |(r, ts)| if let Some(ref q) = q {
-                q.feed(&r[..]).map(move |r| (r, ts))
+                q.feed(r).map(move |r| (r, ts))
             } else {
                 Some((r, ts))
             })

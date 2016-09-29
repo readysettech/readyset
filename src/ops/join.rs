@@ -10,6 +10,18 @@ use std::collections::HashMap;
 
 use shortcut;
 
+#[derive(Debug)]
+struct JoinTarget {
+    fields: Vec<(usize, usize)>,
+    select: Vec<bool>,
+}
+
+#[derive(Debug)]
+struct Join {
+    against: HashMap<flow::NodeIndex, JoinTarget>,
+    node: Option<ops::V>,
+}
+
 /// Joiner provides a 2-way join between two views.
 ///
 /// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
@@ -18,8 +30,7 @@ use shortcut;
 #[derive(Debug)]
 pub struct Joiner {
     emit: Vec<(flow::NodeIndex, usize)>,
-    join: HashMap<flow::NodeIndex, HashMap<flow::NodeIndex, Vec<(usize, usize)>>>,
-    nodes: HashMap<flow::NodeIndex, ops::V>,
+    join: HashMap<flow::NodeIndex, Join>,
 }
 
 impl Joiner {
@@ -109,18 +120,25 @@ impl Joiner {
                             return None;
                         }
                         // but if there are, emit the mapping we found
-                        Some((p, pg))
+                        Some((p,
+                              JoinTarget {
+                            fields: pg,
+                            select: Vec::new(),
+                        }))
                     })
                     .collect();
 
-                (src, other)
+                (src,
+                 Join {
+                    against: other,
+                    node: None,
+                })
             })
             .collect();
 
         Joiner {
             emit: emit,
             join: join,
-            nodes: HashMap::new(),
         }
     }
 
@@ -130,10 +148,12 @@ impl Joiner {
                 -> Box<Iterator<Item = (Vec<query::DataType>, i64)> + 'a> {
 
         // NOTE: this only works for two-way joins
-        let on = *self.join.keys().find(|&other| other != &left.0).unwrap();
+        let other = *self.join.keys().find(|&other| other != &left.0).unwrap();
+        let this = &self.join[&left.0];
+        let target = &this.against[&other];
 
         // figure out the join values for this record
-        let params = self.join[&on][&left.0]
+        let params = target.fields
             .iter()
             .map(|&(lefti, righti)| {
                 shortcut::Condition {
@@ -144,13 +164,10 @@ impl Joiner {
             .collect();
 
         // TODO: technically, we only need the columns in .join and .emit
-        let q = query::Query::new(&iter::repeat(true)
-                                      .take(self.nodes[&on].args().len())
-                                      .collect::<Vec<_>>(),
-                                  params);
+        let q = query::Query::new(&target.select[..], params);
 
         // send the parameters to start the query.
-        let rx = self.nodes[&on].find(Some(q), Some(ts));
+        let rx = self.join[&other].node.as_ref().unwrap().find(Some(q), Some(ts));
 
         Box::new(rx.into_iter().map(move |(right, rts)| {
             use std::cmp;
@@ -159,7 +176,7 @@ impl Joiner {
             let r = self.emit
                 .iter()
                 .map(|&(source, column)| {
-                    if source == on {
+                    if source == other {
                         // FIXME: this clone is unnecessary.
                         // it's tricky to remove though, because it means we'd need to
                         // be removing things from right. what if a later column also needs
@@ -195,9 +212,15 @@ impl From<Joiner> for NodeType {
 
 impl NodeOp for Joiner {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.nodes.extend(self.join
-            .keys()
-            .filter_map(|&ni| g[ni].as_ref().map(move |n| (ni, n.clone()))));
+        for (ni, j) in self.join.iter_mut() {
+            j.node = g[*ni].as_ref().map(|n| n.clone());
+
+            for (t, jt) in j.against.iter_mut() {
+                jt.select = iter::repeat(true)
+                    .take(g[*t].as_ref().unwrap().args().len())
+                    .collect::<Vec<_>>();
+            }
+        }
         self.join.keys().cloned().collect()
     }
 
@@ -245,7 +268,8 @@ impl NodeOp for Joiner {
 
         // pick some view query order
         // TODO: figure out which join order is best
-        let left = *self.join.keys().min().unwrap();
+        let lefti = *self.join.keys().min().unwrap();
+        let left = &self.join[&lefti];
 
         // Set up parameters for querying all rows in left.
         //
@@ -260,7 +284,7 @@ impl NodeOp for Joiner {
                 .iter()
                 .filter_map(|c| {
                     let (srci, coli) = self.emit[c.column];
-                    if srci != left {
+                    if srci != lefti {
                         return None;
                     }
 
@@ -278,10 +302,12 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         // TODO: we probably don't need to select all columns here
-        self.nodes[&left]
+        left.node
+            .as_ref()
+            .unwrap()
             .find(lparams.map(|ps| {
                       query::Query::new(&iter::repeat(true)
-                                            .take(self.nodes[&left].args().len())
+                                            .take(left.node.as_ref().unwrap().args().len())
                                             .collect::<Vec<_>>(),
                                         ps)
                   }),
@@ -290,11 +316,11 @@ impl NodeOp for Joiner {
             .flat_map(move |(lrec, lts)| {
                 // TODO: also add constants from q to filter used to select from right
                 // TODO: respect q.select
-                self.join((left, lrec, lts), ts)
+                self.join((lefti, lrec, lts), ts)
             })
             .filter_map(move |(r, ts)| {
                 if let Some(ref q) = q {
-                    q.feed(&r[..]).map(|r| (r, ts))
+                    q.feed(r).map(|r| (r, ts))
                 } else {
                     Some((r, ts))
                 }
@@ -311,11 +337,11 @@ impl NodeOp for Joiner {
             // for every left
             .flat_map(|(left, rs)| {
                 // for every right
-                rs.iter().flat_map(move |(right, rs)| {
+                rs.against.iter().flat_map(move |(right, rs)| {
                     // emit both the left binding
-                    rs.iter().map(move |&(li, _)| (left, li))
+                    rs.fields.iter().map(move |&(li, _)| (left, li))
                     // and the right binding
-                    .chain(rs.iter().map(move |&(_, ri)| (right, ri)))
+                    .chain(rs.fields.iter().map(move |&(_, ri)| (right, ri)))
                 })
             })
             // we now have (NodeIndex, usize) for every join column.
