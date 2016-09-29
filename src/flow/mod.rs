@@ -141,7 +141,8 @@ impl<T> Ord for Delayed<T> {
 /// could probably be simplified while maintaining enough flexibility for testing, but oh well. The
 /// type arguments are:
 ///
-///  - `Q`: The type used for queries that are issued across the edges of the graph.
+///  - `Q`: The type used for queries that are issued across the edges of the graph in
+///         `View::find()`.
 ///  - `U`: The type used for updates that propagate through the graph.
 ///  - `D`: The type used for records (`D`ata), i.e., what is returned by view queries, and what is
 ///         inserted by users of `FlowGraph` using the channels returned by `run()`.
@@ -457,9 +458,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
 
     /// Execute any changes to the data flow graph since the last call to `run()`.
     ///
-    /// `run()` sets up ancestor query functions, finds indices, and builds the state each new node
-    /// needs to keep track of in order to function correctly. This includes telling any existing
-    /// ancestors of new nodes about their new children.
+    /// `run()` finds indices, and builds the state each new node needs to keep track of in order
+    /// to function correctly. This includes telling any existing ancestors of new nodes about
+    /// their new children.
     ///
     /// Once the necessary bookkeeping has been done, `run()` will spawn two different types of
     /// threads (ignoring `clocked_dispatch`):
