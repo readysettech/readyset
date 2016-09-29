@@ -330,9 +330,6 @@ impl NodeOp for Aggregator {
     }
 }
 
-// yes, this is never satisfied
-// tests disabled until we can do dependency injection
-#[cfg(all(unix, windows))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,23 +337,40 @@ mod tests {
     use ops;
     use flow;
     use query;
-    use backlog;
+    use petgraph;
     use shortcut;
 
+    use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
+
+    fn setup(mat: bool) -> ops::Node {
+        use std::sync;
+        use flow::View;
+
+        let mut g = petgraph::Graph::new();
+        let mut s = ops::new("source", &["x", "y"], true, ops::base::Base{});
+
+        s.prime(&g);
+        let s = g.add_node(Some(sync::Arc::new(s)));
+
+        g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
+        g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
+        g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+
+        let mut c = Aggregation::COUNT.new(s, 1);
+        c.prime(&g);
+        ops::new("agg", &["x", "ys"], mat, c)
+    }
 
     #[test]
     fn it_forwards() {
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
+        let c = setup(true);
 
         let u = (vec![1.into(), 1.into()], 1).into();
 
         // first row for a group should emit -0 and +1 for that group
-        let out = c.forward(u, src, 1, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 1);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -374,8 +388,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
-                    s.absorb(1);
+                    c.safe(1);
                 }
                 _ => unreachable!(),
             }
@@ -386,7 +399,7 @@ mod tests {
         let u = (vec![2.into(), 2.into()], 2).into();
 
         // first row for a second group should emit -0 and +1 for that new group
-        let out = c.forward(u, src, 2, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 2);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -404,8 +417,7 @@ mod tests {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 2);
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
-                    s.absorb(2);
+                    c.safe(2);
                 }
                 _ => unreachable!(),
             }
@@ -416,7 +428,7 @@ mod tests {
         let u = (vec![1.into(), 2.into()], 3).into();
 
         // second row for a group should emit -1 and +2
-        let out = c.forward(u, src, 3, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 3);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -434,6 +446,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 3);
+                    c.safe(3);
                 }
                 _ => unreachable!(),
             }
@@ -443,8 +456,8 @@ mod tests {
 
         let u = ops::Record::Negative(vec![1.into(), 1.into()], 4).into();
 
-        // negative row for a group should emit -1 and +0
-        let out = c.forward(u, src, 4, Some(&s), &HashMap::new());
+        // negative row for a group should emit -2 and +1
+        let out = c.process(u, src, 4);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -452,17 +465,17 @@ mod tests {
             match rs.next().unwrap() {
                 ops::Record::Negative(r, ts) => {
                     assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                    // NOTE: this is 1 because we didn't absorb 3
-                    assert_eq!(ts, 1);
+                    assert_eq!(r[1], 2.into());
+                    assert_eq!(ts, 3);
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
                 ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 0.into());
+                    assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 4);
+                    c.safe(4);
                 }
                 _ => unreachable!(),
             }
@@ -483,15 +496,13 @@ mod tests {
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         // TODO: check for correct output ts'es
-        let out = c.forward(u, src, 5, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 5);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {
                 if let ops::Record::Negative(ref r, ts) = *r {
-                    // previous result for group 1 was at ts 1
-                    // because we did not add 3 or 4
-                    r[0] == 1.into() && r[1] == 1.into() && ts == 1
+                    r[0] == 1.into() && r[1] == 1.into() && ts == 4
                 } else {
                     false
                 }
@@ -540,35 +551,11 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), 1.into()], 0),
-                (vec![2.into(), 1.into()], 1),
-                (vec![2.into(), 2.into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
     #[test]
     fn it_queries() {
-        use std::sync;
+        let c = setup(false);
 
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(source) as Box<_>);
-        let aqfs = sync::Arc::new(aqfs);
-
-        let hits = c.query(None, 0, &aqfs);
+        let hits = c.find(None, None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
@@ -579,20 +566,14 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = c.query(Some(&q), 0, &aqfs);
+        let hits = c.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
     fn it_queries_zeros() {
-        use std::sync;
-
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(source) as Box<_>);
-        let aqfs = sync::Arc::new(aqfs);
+        let c = setup(false);
 
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
@@ -600,12 +581,13 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
                          }]);
 
-        let hits = c.query(Some(&q), 0, &aqfs);
+        let hits = c.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 100.into() && r[1] == 0.into()));
     }
 
     #[test]
+    #[cfg(all(unix, windows))]
     fn it_suggests_indices() {
         let c = Aggregation::COUNT.new(1.into(), 1, 3);
         let hm: HashMap<_, _> = Some((0.into(), vec![0, 1]))
@@ -615,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(unix, windows))]
     fn it_resolves() {
         let c = Aggregation::COUNT.new(1.into(), 1, 3);
         assert_eq!(c.resolve(0), vec![(1.into(), 0)]);

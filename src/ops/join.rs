@@ -315,43 +315,57 @@ impl NodeOp for Joiner {
     }
 }
 
-// yes, this is never satisfied
-// tests disabled until we can do dependency injection
-#[cfg(all(unix, windows))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use ops;
+    use flow;
     use query;
+    use petgraph;
     use shortcut;
 
+    use flow::View;
     use ops::NodeOp;
     use std::collections::HashMap;
 
-    fn setup() -> (ops::AQ, Joiner) {
-        // 0 = left, 1 = right
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(left) as Box<_>);
-        aqfs.insert(1.into(), Box::new(right) as Box<_>);
+    fn setup() -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
+        use std::sync;
 
+        let mut g = petgraph::Graph::new();
+        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base{});
+        let mut r = ops::new("right", &["r0", "r1"], true, ops::base::Base{});
+
+        l.prime(&g);
+        r.prime(&g);
+
+        let l = g.add_node(Some(sync::Arc::new(l)));
+        let r = g.add_node(Some(sync::Arc::new(r)));
+
+        g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
+        g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
+        g[l].as_ref().unwrap().process((vec![3.into(), "c".into()], 2).into(), l, 2);
+        g[r].as_ref().unwrap().process((vec![1.into(), "x".into()], 0).into(), r, 0);
+        g[r].as_ref().unwrap().process((vec![1.into(), "y".into()], 1).into(), r, 1);
+        g[r].as_ref().unwrap().process((vec![2.into(), "z".into()], 2).into(), r, 2);
+
+        // join on first field
         let mut join = HashMap::new();
-        // if left joins against right, join on the first field
-        join.insert(0.into(), vec![(0.into(), vec![0]), (1.into(), vec![0])]);
-        // if right joins against left, also join on the first field (duh)
-        join.insert(1.into(), vec![(0.into(), vec![0]), (1.into(), vec![0])]);
+        join.insert(l, vec![1, 0]);
+        join.insert(r, vec![1, 0]);
 
         // emit first and second field from left
         // third field from right
         let emit = vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)];
 
-        let j = Joiner::new(emit, join);
-        (aqfs, j)
+        let mut c = Joiner::new(emit, join);
+        c.prime(&g);
+        (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
     }
 
     #[test]
     fn it_works() {
-        let (aqfs, j) = setup();
+        let (j, l, r) = setup();
 
         // these are the data items we have to work with
         // these are in left
@@ -364,7 +378,7 @@ mod tests {
         // let r_z2 = vec![2.into(), "z".into()];
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.forward(l_c3.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_c3.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
@@ -372,7 +386,7 @@ mod tests {
         }
 
         // forward b2 from left; should produce [b2*z2]
-        match j.forward(l_b2.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_b2.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
@@ -381,7 +395,7 @@ mod tests {
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.forward(l_a1.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_a1.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
@@ -401,14 +415,11 @@ mod tests {
 
     #[test]
     fn it_queries() {
-        use std::sync;
-
-        let (aqfs, j) = setup();
-        let aqfs = sync::Arc::new(aqfs);
+        let (j, _, _) = setup();
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz]
-        let hits = j.query(None, 0, &aqfs);
+        let hits = j.find(None, None);
         assert_eq!(hits.len(), 3);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -430,7 +441,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -444,7 +455,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -462,7 +473,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -470,43 +481,8 @@ mod tests {
             }));
     }
 
-    fn left(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), "a".into()], 0),
-                (vec![2.into(), "b".into()], 1),
-                (vec![3.into(), "c".into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
-    fn right(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), "x".into()], 0),
-                (vec![1.into(), "y".into()], 1),
-                (vec![2.into(), "z".into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
     #[test]
+    #[cfg(all(unix, windows))]
     fn it_suggests_indices() {
         let (_, j) = setup();
         let hm: HashMap<_, _> = vec![
@@ -520,6 +496,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(unix, windows))]
     fn it_resolves() {
         let (_, j) = setup();
         assert_eq!(j.resolve(0), vec![(0.into(), 0)]);

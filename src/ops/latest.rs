@@ -245,9 +245,6 @@ impl NodeOp for Latest {
     }
 }
 
-// yes, this is never satisfied
-// tests disabled until we can do dependency injection
-#[cfg(all(unix, windows))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,22 +252,56 @@ mod tests {
     use ops;
     use flow;
     use query;
-    use backlog;
+    use petgraph;
     use shortcut;
 
+    use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
+
+    fn setup(key: Vec<usize>, mat: bool) -> ops::Node {
+        use std::sync;
+
+        let mut g = petgraph::Graph::new();
+
+        let big = key.len() > 1;
+        let mut s = if big {
+            ops::new("source", &["x", "y", "z"], true, ops::base::Base{})
+        } else {
+            ops::new("source", &["x", "y"], true, ops::base::Base{})
+        };
+
+        s.prime(&g);
+        let s = g.add_node(Some(sync::Arc::new(s)));
+        if !big {
+            g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
+            g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+            // note that this isn't really allowed in graphs. flow ensures that updates are
+            // delivered in order. however it's safe to do this here because there's no forwarding,
+            // and base does no computation. we do it to test Latest's behavior when it receives a
+            // non-latest after a latest.
+            g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
+            g[s].as_ref().unwrap().process((vec![1.into(), 2.into()], 3).into(), s, 3);
+            g[s].as_ref().unwrap().process((vec![3.into(), 3.into()], 4).into(), s, 4);
+        }
+
+        let mut l = Latest::new(s, key);
+        l.prime(&g);
+        if big {
+            ops::new("latest", &["x", "y", "z"], mat, l)
+        } else {
+            ops::new("latest", &["x", "y"], mat, l)
+        }
+    }
 
     #[test]
     fn it_forwards() {
-        let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
+        let c = setup(vec![0], true);
 
-        let c = Latest::new(src, vec![0]);
         let u = (vec![1.into(), 1.into()], 1).into();
 
         // first record for a group should emit just a positive
-        let out = c.forward(u, src, 1, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 1);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
@@ -280,9 +311,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    // add back to store
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
-                    s.absorb(1);
+                    c.safe(1);
                 }
                 _ => unreachable!(),
             }
@@ -293,7 +322,7 @@ mod tests {
         let u = (vec![2.into(), 2.into()], 2).into();
 
         // first record for a second group should also emit just a positive
-        let out = c.forward(u, src, 2, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 2);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
@@ -303,9 +332,7 @@ mod tests {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 2);
-                    // add back to store
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
-                    s.absorb(2);
+                    c.safe(2);
                 }
                 _ => unreachable!(),
             }
@@ -316,7 +343,7 @@ mod tests {
         let u = (vec![1.into(), 2.into()], 3).into();
 
         // new record for existing group should revoke the old latest, and emit the new
-        let out = c.forward(u, src, 3, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 3);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -326,8 +353,6 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    // remove from store
-                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -336,9 +361,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 3);
-                    // add to store
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
-                    s.absorb(3);
+                    c.safe(3);
                 }
                 _ => unreachable!(),
             }
@@ -355,7 +378,7 @@ mod tests {
         ]);
 
         // negatives and positives should still result in only one new current for each group
-        let out = c.forward(u, src, 4, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 4);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
@@ -395,22 +418,17 @@ mod tests {
 
     #[test]
     fn it_forwards_mkey() {
-        let mut s = backlog::BufferedStore::new(3);
         let src = flow::NodeIndex::new(0);
-
-        let c = Latest::new(src, vec![0, 1]);
+        let c = setup(vec![0,1], true);
 
         let u = (vec![1.into(), 1.into(), 1.into()], 1).into();
-
-        if let Some(ops::Update::Records(rs)) = c.forward(u, src, 1, Some(&s), &HashMap::new()) {
-            s.safe_add(rs, 1);
-            s.absorb(1);
-        }
+        c.process(u, src, 1);
+        c.safe(1);
 
         // first record for a second group should also emit just a positive
         let u = (vec![1.into(), 2.into(), 2.into()], 2).into();
 
-        let out = c.forward(u, src, 2, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 2);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
@@ -421,9 +439,7 @@ mod tests {
                     assert_eq!(r[1], 2.into());
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 2);
-                    // add back to store
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
-                    s.absorb(2);
+                    c.safe(2);
                 }
                 _ => unreachable!(),
             }
@@ -434,7 +450,7 @@ mod tests {
         let u = (vec![1.into(), 1.into(), 2.into()], 3).into();
 
         // new record for existing group should revoke the old latest, and emit the new
-        let out = c.forward(u, src, 3, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 3);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -445,8 +461,6 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(r[2], 1.into());
                     assert_eq!(ts, 1);
-                    // remove from store
-                    s.safe_add(vec![ops::Record::Negative(r, ts)], 3);
                 }
                 _ => unreachable!(),
             }
@@ -456,9 +470,7 @@ mod tests {
                     assert_eq!(r[1], 1.into());
                     assert_eq!(r[2], 2.into());
                     assert_eq!(ts, 3);
-                    // add to store
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 3);
-                    s.absorb(3);
+                    c.safe(3);
                 }
                 _ => unreachable!(),
             }
@@ -475,7 +487,7 @@ mod tests {
         ]);
 
         // negatives and positives should still result in only one new current for each group
-        let out = c.forward(u, src, 4, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 4);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
@@ -513,37 +525,11 @@ mod tests {
         }
     }
 
-    fn source(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), 1.into()], 0),
-                (vec![2.into(), 2.into()], 2),
-                (vec![2.into(), 1.into()], 1),
-                (vec![1.into(), 2.into()], 3),
-                (vec![3.into(), 3.into()], 4),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
     #[test]
     fn it_queries() {
-        use std::sync;
+        let l = setup(vec![0], false);
 
-        let l = Latest::new(0.into(), vec![0]);
-
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(source) as Box<_>);
-        let aqfs = sync::Arc::new(aqfs);
-
-        let hits = l.query(None, 0, &aqfs);
+        let hits = l.find(None, None);
         assert_eq!(hits.len(), 3);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 3 && r[0] == 1.into() && r[1] == 2.into()));
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
@@ -555,11 +541,12 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = l.query(Some(&q), 0, &aqfs);
+        let hits = l.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
     }
 
+    #[cfg(all(unix, windows))]
     #[test]
     fn it_suggests_indices() {
         let c = Latest::new(1.into(), vec![0, 1]);
@@ -570,6 +557,7 @@ mod tests {
         assert!(idx.iter().any(|&i| i == 1));
     }
 
+    #[cfg(all(unix, windows))]
     #[test]
     fn it_resolves() {
         let c = Latest::new(1.into(), vec![0, 1]);
