@@ -48,9 +48,11 @@
 //!  - `DataType` in `query/`, which encapsulates the data types provided by Soup to end-users.
 //!  - `Update` and `Record` in `ops/mod.rs`, which are used pervasively in the code to move
 //!    records between views.
-//!  - `Query` in `query/`, which is used to filter and project records as they flow along the
-//!    edges of the data flow graph as a result of feed-forward propagation or view-to-view
-//!    queries.
+//!  - `Query` in `query/`, which is used to filter and project records when sent from one view to
+//!    another. `Query` objects are currently view-local -- that is, each node knows what queries
+//!    to use when querying their ancestors, but this information is not available to other nodes.
+//!    Thus, queries are not applied to records that are fed forward unless a view decides to do
+//!    so.
 //!  - `BufferedStore` in `backlog/`, which provides a thin layer atop `shortcut` giving access to
 //!    short-term time-travel queries.
 //!
@@ -116,14 +118,11 @@
 //! // vote count is pretty straightforward
 //! let vc = g.incorporate(&["id", "votes"], Aggregation::COUNT.new(v, 0));
 //!
-//! // joins are tricky because you need to specify what to join on
-//! // the api for this will probably improve over time
-//!
-//! // if article joins against vote count, query and join using article's first field
-//! // if vote count joins against article, also query and join on the first field
+//! // joins are tricky because you need to specify what to join on. we use the following structure
+//! // where columns with the same non-zero values across ancestors are joined by equality.
 //! let join = hashmap!{
-//!     article => vec![(vc, 0)],
-//!     vc => vec![(article, 0)],
+//!   article => vec![1, 0],
+//!   vc => vec![1, 0],
 //! };
 //!
 //! // emit first and second field from article (id + title)
@@ -138,8 +137,7 @@
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
-//! above. Of particular interest is how the join has to be constructed, but we'll get back to that
-//! later.
+//! above.
 //!
 //! When you `run` the `FlowGraph`, it will set up a bunch of data structures used for bookkeping,
 //! set up channels for the different views to talk to each other, and then spin up a thread for
@@ -337,10 +335,9 @@
 //!
 //! The second property is maintained by two independent pieces, one to ensure that the target
 //! view's node is *sufficiently* up to date, the other to ensure that it's not *too* up to date.
-//! The first part is relatively simple to enforce. When a node queries another view at some time
-//! `ts`, the query function will simply *wait* until that view's node has advanced its "latest
-//! update processed" tracker beyond `ts` (see the `while` loop added to each ancestor query
-//! function in `FlowGraph::make_aqfs`).
+//! The first part is trivial to enforce. Since we process an update at time `ts` only after we
+//! have seen `ts' > ts` from all ancestors, we already know that all ancestors are at least as up
+//! to date as they need to be.
 //!
 //! The second part is a bit more involved, because it requires being able to query "back in time".
 //! We *could* have all nodes move in lock-step to ensure that they are never too up-to-date, but

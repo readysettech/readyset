@@ -44,12 +44,14 @@ impl Aggregation {
     /// from the `src` node in the graph), and use all other received columns as the group
     /// identifier. `cols` should be set to the number of columns in this view (that is, the number
     /// of group identifier columns + 1).
-    pub fn new(self, src: flow::NodeIndex, over: usize, cols: usize) -> Aggregator {
+    pub fn new(self, src: flow::NodeIndex, over: usize) -> Aggregator {
         Aggregator {
             op: self,
             src: src,
+            srcn: None,
             over: over,
-            cols: cols,
+            cols: 0,
+            cond: Vec::new(),
         }
     }
 }
@@ -79,8 +81,10 @@ impl Aggregation {
 pub struct Aggregator {
     op: Aggregation,
     src: flow::NodeIndex,
+    srcn: Option<ops::V>,
     over: usize,
     cols: usize,
+    cond: Vec<shortcut::Condition<query::DataType>>,
 }
 
 impl From<Aggregator> for NodeType {
@@ -90,18 +94,12 @@ impl From<Aggregator> for NodeType {
 }
 
 impl NodeOp for Aggregator {
-    fn forward(&self,
-               u: ops::Update,
-               src: flow::NodeIndex,
-               _: i64,
-               db: Option<&backlog::BufferedStore>,
-               _: &ops::AQ)
-               -> Option<ops::Update> {
-
-        assert_eq!(src, self.src);
-
-        // Construct the query we'll need to query into ourselves
-        let mut q = (0..self.cols)
+    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
+        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        self.cols = self.srcn.as_ref().unwrap().args().len();
+        assert!(self.over < self.cols,
+                "cannot aggregate over non-existing column");
+        self.cond = (0..self.cols)
             .filter(|&i| i != self.cols - 1)
             .map(|col| {
                 shortcut::Condition {
@@ -110,6 +108,22 @@ impl NodeOp for Aggregator {
                 }
             })
             .collect::<Vec<_>>();
+        vec![self.src]
+    }
+
+    fn forward(&self,
+               u: ops::Update,
+               src: flow::NodeIndex,
+               _: i64,
+               db: Option<&backlog::BufferedStore>)
+               -> Option<ops::Update> {
+
+        assert_eq!(src, self.src);
+
+        // Construct the query we'll need to query into ourselves
+        let mut q = self.cond.clone();
+
+        let colfix = |col| { if col >= self.over { col + 1 } else { col } };
 
         match u {
             ops::Update::Records(rs) => {
@@ -129,27 +143,26 @@ impl NodeOp for Aggregator {
                     let val = r[self.over].clone().into();
                     let group = r.into_iter()
                         .enumerate()
-                        .filter(|&(i, _)| i != self.over)
+                        .map(|(i, v)| { if i == self.over { None } else { Some(v) } })
                         .collect::<Vec<_>>();
 
                     consolidate.entry(group).or_insert_with(Vec::new).push((val, pos, ts));
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (group, diffs) in consolidate.into_iter() {
-                    let mut group = group.into_iter().collect::<HashMap<_, _>>();
+                for (mut group, diffs) in consolidate.into_iter() {
+                    // note that each value in group is an Option so that we can take/swap without
+                    // having to .remove or .insert into the HashMap (which is much more expensive)
+                    // it should only be None for self.over
 
                     // build a query for this group
                     for s in q.iter_mut() {
                         // s.column is the *output* column
                         // the *input* column must be computed
-                        let mut col = s.column;
-                        if col >= self.over {
-                            col += 1;
-                        }
-                        s.cmp =
-                            shortcut::Comparison::Equal(shortcut::Value::Const(group.remove(&col)
-                                .expect("group by column is beyond number of columns in record")));
+                        let col = colfix(s.column);
+                        s.cmp = shortcut::Comparison::Equal(shortcut::Value::Const(group[col]
+                            .take()
+                            .expect("group by column is beyond number of columns in record")));
                     }
 
                     // find the current value for this group
@@ -177,15 +190,19 @@ impl NodeOp for Aggregator {
                                s.cmp {
                             use std::mem;
 
+                            // s.column is the *output* column
+                            // the *input* column must be computed
+                            let col = colfix(s.column);
+
                             let mut x = query::DataType::None;
                             mem::swap(&mut x, v);
-                            group.insert(s.column, x);
+                            group[col] = Some(x);
                         }
                     }
 
                     // construct prefix of output record
                     let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend((0..self.cols).into_iter().filter_map(|i| group.remove(&i)));
+                    rec.extend(group.into_iter().filter_map(|v| v));
 
                     // revoke old value
                     rec.push(current.into());
@@ -208,20 +225,17 @@ impl NodeOp for Aggregator {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
         use std::iter;
 
-        assert_eq!(aqfs.len(), 1);
+        // we're fetching everything from our parent
+        let mut params = None;
 
-        // we need to figure out what parameters to pass to our source to get only the rows
-        // relevant to our query.
-        let mut params: Vec<shortcut::Value<query::DataType>> =
-            iter::repeat(shortcut::Value::Const(query::DataType::None)).take(self.cols).collect();
-
-        // we find all conditions that filter over a field present in the input (so everything
-        // except conditions on self.over), and use those as parameters.
+        // however, if there are some conditions that filter over a field present in the input (so
+        // everything except conditions on self.over), we should use those as parameters to speed
+        // things up.
         if let Some(q) = q {
-            for c in q.having.iter() {
+            params = Some(q.having.iter().map(|c| {
                 // FIXME: we could technically support querying over the output of the aggregation,
                 // but a) it would be inefficient, and b) we'd have to restructure this function a
                 // fair bit so that we keep that part of the query around for after we've got the
@@ -239,17 +253,25 @@ impl NodeOp for Aggregator {
                     col += 1;
                 }
 
-                match c.cmp {
-                    shortcut::Comparison::Equal(ref v) => {
-                        *params.get_mut(col).unwrap() = v.clone();
-                    }
+                shortcut::Condition{
+                    column: col,
+                    cmp: c.cmp.clone(),
                 }
+            }).collect::<Vec<_>>());
+
+            if params.as_ref().unwrap().len() == 0 {
+                params = None;
             }
         }
-        params.remove(self.over);
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = (*aqfs.iter().next().unwrap().1)(params, ts);
+        let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
+                                                      query::Query::new(&iter::repeat(true)
+                                                                            .take(self.cols)
+                                                                            .collect::<Vec<_>>(),
+                                                                        ps)
+                                                  }),
+                                                  Some(ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
@@ -310,14 +332,14 @@ impl NodeOp for Aggregator {
             .collect()
     }
 
-    fn resolve(&self, mut col: usize) -> Vec<(flow::NodeIndex, usize)> {
+    fn resolve(&self, mut col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         if col == self.cols - 1 {
-            return vec![];
+            return None;
         }
         if col >= self.over {
             col += 1
         }
-        vec![(self.src, col)]
+        Some(vec![(self.src, col)])
     }
 }
 
@@ -328,23 +350,48 @@ mod tests {
     use ops;
     use flow;
     use query;
-    use backlog;
+    use petgraph;
     use shortcut;
 
+    use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
+
+    fn setup(mat: bool, wide: bool) -> ops::Node {
+        use std::sync;
+        use flow::View;
+
+        let mut g = petgraph::Graph::new();
+        let mut s = if wide {
+            ops::new("source", &["x", "y", "z"], true, ops::base::Base {})
+        } else {
+            ops::new("source", &["x", "y"], true, ops::base::Base {})
+        };
+
+        s.prime(&g);
+        let s = g.add_node(Some(sync::Arc::new(s)));
+
+        g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
+        g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
+        g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+
+        let mut c = Aggregation::COUNT.new(s, 1);
+        c.prime(&g);
+        if wide {
+            ops::new("agg", &["x", "z", "ys"], mat, c)
+        } else {
+            ops::new("agg", &["x", "ys"], mat, c)
+        }
+    }
 
     #[test]
     fn it_forwards() {
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut s = backlog::BufferedStore::new(2);
         let src = flow::NodeIndex::new(0);
+        let c = setup(true, false);
 
         let u = (vec![1.into(), 1.into()], 1).into();
 
         // first row for a group should emit -0 and +1 for that group
-        let out = c.forward(u, src, 1, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 1);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -362,8 +409,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 1);
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 1);
-                    s.absorb(1);
+                    c.safe(1);
                 }
                 _ => unreachable!(),
             }
@@ -374,7 +420,7 @@ mod tests {
         let u = (vec![2.into(), 2.into()], 2).into();
 
         // first row for a second group should emit -0 and +1 for that new group
-        let out = c.forward(u, src, 2, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 2);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -392,8 +438,7 @@ mod tests {
                     assert_eq!(r[0], 2.into());
                     assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 2);
-                    s.safe_add(vec![ops::Record::Positive(r, ts)], 2);
-                    s.absorb(2);
+                    c.safe(2);
                 }
                 _ => unreachable!(),
             }
@@ -404,7 +449,7 @@ mod tests {
         let u = (vec![1.into(), 2.into()], 3).into();
 
         // second row for a group should emit -1 and +2
-        let out = c.forward(u, src, 3, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 3);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -422,6 +467,7 @@ mod tests {
                     assert_eq!(r[0], 1.into());
                     assert_eq!(r[1], 2.into());
                     assert_eq!(ts, 3);
+                    c.safe(3);
                 }
                 _ => unreachable!(),
             }
@@ -431,8 +477,8 @@ mod tests {
 
         let u = ops::Record::Negative(vec![1.into(), 1.into()], 4).into();
 
-        // negative row for a group should emit -1 and +0
-        let out = c.forward(u, src, 4, Some(&s), &HashMap::new());
+        // negative row for a group should emit -2 and +1
+        let out = c.process(u, src, 4);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
@@ -440,17 +486,17 @@ mod tests {
             match rs.next().unwrap() {
                 ops::Record::Negative(r, ts) => {
                     assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                    // NOTE: this is 1 because we didn't absorb 3
-                    assert_eq!(ts, 1);
+                    assert_eq!(r[1], 2.into());
+                    assert_eq!(ts, 3);
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
                 ops::Record::Positive(r, ts) => {
                     assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 0.into());
+                    assert_eq!(r[1], 1.into());
                     assert_eq!(ts, 4);
+                    c.safe(4);
                 }
                 _ => unreachable!(),
             }
@@ -471,15 +517,13 @@ mod tests {
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         // TODO: check for correct output ts'es
-        let out = c.forward(u, src, 5, Some(&s), &HashMap::new());
+        let out = c.process(u, src, 5);
         if let Some(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {
                 if let ops::Record::Negative(ref r, ts) = *r {
-                    // previous result for group 1 was at ts 1
-                    // because we did not add 3 or 4
-                    r[0] == 1.into() && r[1] == 1.into() && ts == 1
+                    r[0] == 1.into() && r[1] == 1.into() && ts == 4
                 } else {
                     false
                 }
@@ -528,35 +572,11 @@ mod tests {
 
     // TODO: also test SUM
 
-    fn source(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), 1.into()], 0),
-                (vec![2.into(), 1.into()], 1),
-                (vec![2.into(), 2.into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
     #[test]
     fn it_queries() {
-        use std::sync;
+        let c = setup(false, false);
 
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(source) as Box<_>);
-        let aqfs = sync::Arc::new(aqfs);
-
-        let hits = c.query(None, 0, &aqfs);
+        let hits = c.find(None, None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
@@ -567,20 +587,14 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = c.query(Some(&q), 0, &aqfs);
+        let hits = c.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
     fn it_queries_zeros() {
-        use std::sync;
-
-        let c = Aggregation::COUNT.new(0.into(), 1, 2);
-
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(source) as Box<_>);
-        let aqfs = sync::Arc::new(aqfs);
+        let c = setup(false, false);
 
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
@@ -588,24 +602,31 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
                          }]);
 
-        let hits = c.query(Some(&q), 0, &aqfs);
+        let hits = c.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 100.into() && r[1] == 0.into()));
     }
 
     #[test]
     fn it_suggests_indices() {
-        let c = Aggregation::COUNT.new(1.into(), 1, 3);
-        let hm: HashMap<_, _> = Some((0.into(), vec![0, 1]))
-            .into_iter()
-            .collect();
-        assert_eq!(hm, c.suggest_indexes(0.into()));
+        let c = setup(false, true);
+        let idx = c.suggest_indexes(1.into());
+
+        // should only add index on own columns
+        assert_eq!(idx.len(), 1);
+        assert!(idx.contains_key(&1.into()));
+
+        // should only index on group-by columns
+        assert_eq!(idx[&1.into()].len(), 2);
+        assert!(idx[&1.into()].iter().any(|&i| i == 0));
+        assert!(idx[&1.into()].iter().any(|&i| i == 1));
     }
 
     #[test]
     fn it_resolves() {
-        let c = Aggregation::COUNT.new(1.into(), 1, 3);
-        assert_eq!(c.resolve(0), vec![(1.into(), 0)]);
-        assert_eq!(c.resolve(1), vec![(1.into(), 2)]);
+        let c = setup(false, true);
+        assert_eq!(c.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(c.resolve(1), Some(vec![(0.into(), 2)]));
+        assert_eq!(c.resolve(2), None);
     }
 }

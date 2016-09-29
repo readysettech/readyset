@@ -5,9 +5,22 @@ use backlog;
 use ops::NodeOp;
 use ops::NodeType;
 
+use std::iter;
 use std::collections::HashMap;
 
 use shortcut;
+
+#[derive(Debug)]
+struct JoinTarget {
+    fields: Vec<(usize, usize)>,
+    select: Vec<bool>,
+}
+
+#[derive(Debug)]
+struct Join {
+    against: HashMap<flow::NodeIndex, JoinTarget>,
+    node: Option<ops::V>,
+}
 
 /// Joiner provides a 2-way join between two views.
 ///
@@ -17,11 +30,7 @@ use shortcut;
 #[derive(Debug)]
 pub struct Joiner {
     emit: Vec<(flow::NodeIndex, usize)>,
-    /// For a given node index `n`, this gives the set of nodes that should be joined against in
-    /// `.0`, and which fields of an `n` record should be used as parameters for that query. For
-    /// every `n`, the set also contains an entry `(n, _)` which indicates which fields of `n` can
-    /// be used as parameters to query `n` itself.
-    join: HashMap<flow::NodeIndex, Vec<(flow::NodeIndex, Vec<usize>)>>,
+    join: HashMap<flow::NodeIndex, Join>,
 }
 
 impl Joiner {
@@ -39,50 +48,126 @@ impl Joiner {
     /// column should be used. `vec![(a, 0), (b, 1)]` in this case.
     ///
     /// Next, we have to tell the `Joiner` how to construct an output row given an input row of any
-    /// type. We do this with a map from each source node to a list join fields. In the above
-    /// example, the map would look like this:
+    /// type. For each input view, we construct a list of the same length as the number of columns
+    /// of that view, where each element is either 0 or a *group number*. Columns which share a
+    /// group number are used to join nodes by equality. Thus, each group number can appear at most
+    /// once for each view.
+    ///
+    /// In the above example, assuming `a` has two columns and `b` has three, the map would look
+    /// like this:
     ///
     /// ```rust,ignore
-    /// // if we get an `a`, query `b` and join using `a`'s 0th field
-    /// map.insert(a, vec![(b, vec![0])]);
-    /// // if we get a `b`, query `a` and join using `b`'s 1st field
-    /// map.insert(b, vec![(a, vec![1])]);
+    /// map.insert(a, vec![1, 0]);
+    /// map.insert(b, vec![0, 1, 0]);
     /// ```
-    ///
-    /// Also, that's a lie. Because of stupid code, the first entry in the vector for each node `n`
-    /// must be a list of the fields of `n` used in the join. This is so that we can more easily
-    /// support non-materialized join nodes. Plz fix this if you have some spare time.
     pub fn new(emit: Vec<(flow::NodeIndex, usize)>,
-               join: HashMap<flow::NodeIndex, Vec<(flow::NodeIndex, Vec<usize>)>>)
+               join: HashMap<flow::NodeIndex, Vec<usize>>)
                -> Joiner {
+
+        if join.len() != 2 {
+            // only two-way joins are currently supported
+            unimplemented!();
+        }
+
+        // we technically want this assert, but we don't have self.nodes until .prime() has been
+        // called. unfortunately, at that time, we don't have .join in the original format, and so
+        // the debug doesn't makes sense. it's probably not worth carrying along the original join
+        // map just to verify this, but maybe...
+        // assert!(self.nodes.iter().all(|(ni, n)| self.join[ni].len() == n.args().len()));
+
+        // the format of `join` is convenient for users, but not particulary convenient for lookups
+        // the particular use-case we want to be efficient is:
+        //
+        //  - we are given a record from `src`
+        //  - for each other parent `p`, we want to know which columns of `p` to constrain, and
+        //    which values in the `src` record those correspond to
+        //
+        // so, we construct a map of the form
+        //
+        //   src: NodeIndex => {
+        //     p: NodeIndex => [(srci, pi), ...]
+        //   }
+        //
+        let join = join.iter()
+            .map(|(&src, srcg)| {
+                // which groups are bound to which columns?
+                let g2c = srcg.iter()
+                    .enumerate()
+                    .filter_map(|(c, &g)| { if g == 0 { None } else { Some((g, c)) } })
+                    .collect::<HashMap<_, _>>();
+
+                // for every other view
+                let other = join.iter()
+                    .filter_map(|(&p, pg)| {
+                        // *other* view
+                        if p == src {
+                            return None;
+                        }
+                        // look through the group assignments for that other view
+                        let pg: Vec<_> = pg.iter()
+                            .enumerate()
+                            .filter_map(|(pi, g)| {
+                                // look for ones that share a group with us
+                                g2c.get(g).map(|srci| {
+                                    // and emit that mapping
+                                    (*srci, pi)
+                                })
+                            })
+                            .collect();
+
+                        // if there are no shared columns, don't join against this view
+                        if pg.is_empty() {
+                            return None;
+                        }
+                        // but if there are, emit the mapping we found
+                        Some((p,
+                              JoinTarget {
+                            fields: pg,
+                            select: Vec::new(),
+                        }))
+                    })
+                    .collect();
+
+                (src,
+                 Join {
+                    against: other,
+                    node: None,
+                })
+            })
+            .collect();
+
         Joiner {
             emit: emit,
             join: join,
         }
     }
 
-    fn other<'a>(&'a self, this: &flow::NodeIndex) -> &'a (flow::NodeIndex, Vec<usize>) {
-        self.join[this].iter().find(|&&(ref other, _)| other != this).unwrap()
-    }
-
-    fn this<'a>(&'a self, this: &flow::NodeIndex) -> &'a (flow::NodeIndex, Vec<usize>) {
-        self.join[this].iter().find(|&&(ref other, _)| other == this).unwrap()
-    }
-
     fn join<'a>(&'a self,
-                left: (Vec<query::DataType>, i64),
-                on: &'a (flow::NodeIndex, Vec<usize>),
-                ts: i64,
-                aqfs: &ops::AQ)
+                left: (flow::NodeIndex, Vec<query::DataType>, i64),
+                ts: i64)
                 -> Box<Iterator<Item = (Vec<query::DataType>, i64)> + 'a> {
+
+        // NOTE: this only works for two-way joins
+        let other = *self.join.keys().find(|&other| other != &left.0).unwrap();
+        let this = &self.join[&left.0];
+        let target = &this.against[&other];
+
         // figure out the join values for this record
-        let params = on.1
+        let params = target.fields
             .iter()
-            .map(|col| shortcut::Value::Const(left.0[*col].clone()))
+            .map(|&(lefti, righti)| {
+                shortcut::Condition {
+                    column: righti,
+                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(left.1[lefti].clone())),
+                }
+            })
             .collect();
 
+        // TODO: technically, we only need the columns in .join and .emit
+        let q = query::Query::new(&target.select[..], params);
+
         // send the parameters to start the query.
-        let rx = (*aqfs[&on.0])(params, ts);
+        let rx = self.join[&other].node.as_ref().unwrap().find(Some(q), Some(ts));
 
         Box::new(rx.into_iter().map(move |(right, rts)| {
             use std::cmp;
@@ -91,7 +176,7 @@ impl Joiner {
             let r = self.emit
                 .iter()
                 .map(|&(source, column)| {
-                    if source == on.0 {
+                    if source == other {
                         // FIXME: this clone is unnecessary.
                         // it's tricky to remove though, because it means we'd need to
                         // be removing things from right. what if a later column also needs
@@ -100,7 +185,7 @@ impl Joiner {
                         // later column. ugh.
                         right[column].clone()
                     } else {
-                        left.0[column].clone()
+                        left.1[column].clone()
                     }
                 })
                 .collect();
@@ -114,7 +199,7 @@ impl Joiner {
             // we solve this by making the output timestamp always be the max of the left and
             // right, as this must be the timestamp that resulted in the join output in the first
             // place.
-            (r, cmp::max(left.1, rts))
+            (r, cmp::max(left.2, rts))
         }))
     }
 }
@@ -126,16 +211,25 @@ impl From<Joiner> for NodeType {
 }
 
 impl NodeOp for Joiner {
+    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
+        for (ni, j) in self.join.iter_mut() {
+            j.node = g[*ni].as_ref().map(|n| n.clone());
+
+            for (t, jt) in j.against.iter_mut() {
+                jt.select = iter::repeat(true)
+                    .take(g[*t].as_ref().unwrap().args().len())
+                    .collect::<Vec<_>>();
+            }
+        }
+        self.join.keys().cloned().collect()
+    }
+
     fn forward(&self,
                u: ops::Update,
                from: flow::NodeIndex,
                ts: i64,
-               _: Option<&backlog::BufferedStore>,
-               aqfs: &ops::AQ)
+               _: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
-        if aqfs.len() != 2 {
-            unimplemented!(); // only two-way joins are supported at the moment
-        }
 
         match u {
             ops::Update::Records(rs) => {
@@ -143,9 +237,6 @@ impl NodeOp for Joiner {
                 // the record(s) we receive are all from one side of the join. we need to query the
                 // other side(s) for records matching the incoming records on that side's join
                 // fields.
-                //
-                // first, let's find out what we should be joining with
-                let join = self.other(&from);
 
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
@@ -153,7 +244,7 @@ impl NodeOp for Joiner {
                     .flat_map(|rec| {
                         let (r, pos, lts) = rec.extract();
 
-                        self.join((r, lts), join, ts, aqfs).map(move |(res, ts)| {
+                        self.join((from, r, lts), ts).map(move |(res, ts)| {
                             // return new row with appropriate sign
                             if pos {
                                 ops::Record::Positive(res, ts)
@@ -167,72 +258,69 @@ impl NodeOp for Joiner {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
         use std::iter;
-
-        if aqfs.len() != 2 {
-            unimplemented!(); // only two-way joins are supported at the moment
-        }
 
         // We're essentially doing nested for loops, where each loop yields rows from one "table".
         // For the case of a two-way join (which is all that's supported for now), we call the two
         // tables `left` and `right`. We're going to iterate over results from `left` in the outer
         // loop, and query `right` inside the loop for each `left`.
 
-        // Identify left and right
+        // pick some view query order
         // TODO: figure out which join order is best
-        let left = self.join.keys().min().unwrap();
-        let on = self.other(left);
-        let left = self.this(left);
+        let lefti = *self.join.keys().min().unwrap();
+        let left = &self.join[&lefti];
 
-        // Set up parameters for querying all rows in left. We find the number of parameters by
-        // looking at how many parameters the other side of the join would have used if it tried to
-        // query us.
-        let mut lparams: Vec<shortcut::Value<query::DataType>> =
-            iter::repeat(shortcut::Value::Const(query::DataType::None))
-                .take(left.1.len())
-                .collect();
+        // Set up parameters for querying all rows in left.
+        //
+        // We find the number of parameters by looking at how many parameters the other side of the
+        // join would have used if it tried to query us.
+        let mut lparams = None;
 
         // Avoid scanning rows that wouldn't match the query anyway. We do this by finding all
         // conditions that filter over a field present in left, and use those as parameters.
         if let Some(q) = q {
-            for c in q.having.iter() {
-                // TODO: note that we assume here that the query to the left node is implemented as
-                // an equality constraint. This is probably not necessarily true.
-                let (srci, coli) = self.emit[c.column];
-                if srci == left.0 {
-                    // this is contraint on one of our columns!
-                    // let's see if we can push it down into the query:
-                    // first, is it available as a query parameter upstream?
-                    if let Some(parami) = left.1.iter().position(|&col| col == coli) {
-                        // and second, is it an equality comparison?
-                        match c.cmp {
-                            shortcut::Comparison::Equal(ref v) => {
-                                // yay!
-                                *lparams.get_mut(parami).unwrap() = v.clone();
-                            }
-                        }
+            lparams = Some(q.having
+                .iter()
+                .filter_map(|c| {
+                    let (srci, coli) = self.emit[c.column];
+                    if srci != lefti {
+                        return None;
                     }
-                }
 
+                    Some(shortcut::Condition {
+                        column: coli,
+                        cmp: c.cmp.clone(),
+                    })
+                })
+                .collect::<Vec<_>>());
+
+            if lparams.as_ref().unwrap().len() == 0 {
+                lparams = None;
             }
         }
 
-        // we need an owned copy of the query
-        let q = q.and_then(|q| Some(q.to_owned()));
-
         // produce a left * right given a left (basically the same as forward())
-        let aqfs2 = aqfs.clone(); // XXX: figure out why this is needed?
-        (aqfs[&left.0])(lparams, ts)
+        // TODO: we probably don't need to select all columns here
+        left.node
+            .as_ref()
+            .unwrap()
+            .find(lparams.map(|ps| {
+                      query::Query::new(&iter::repeat(true)
+                                            .take(left.node.as_ref().unwrap().args().len())
+                                            .collect::<Vec<_>>(),
+                                        ps)
+                  }),
+                  Some(ts))
             .into_iter()
-            .flat_map(move |left| {
+            .flat_map(move |(lrec, lts)| {
                 // TODO: also add constants from q to filter used to select from right
                 // TODO: respect q.select
-                self.join(left, on, ts, &*aqfs2)
+                self.join((lefti, lrec, lts), ts)
             })
             .filter_map(move |(r, ts)| {
                 if let Some(ref q) = q {
-                    q.feed(&r[..]).map(|r| (r, ts))
+                    q.feed(r).map(|r| (r, ts))
                 } else {
                     Some((r, ts))
                 }
@@ -241,36 +329,38 @@ impl NodeOp for Joiner {
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+        use std::collections::HashSet;
+
         // index all join fields
         self.join
             .iter()
-            .flat_map(|(left, rights)| {
-                rights.iter()
-                    .filter(move |&&(right, _)| *left != right)
-                    .flat_map(|&(_, ref lcols)| lcols.iter())
-                    .map(move |lcol| (*left, *lcol))
-            })
-            .chain(self.emit
-                .iter()
-                .enumerate()
-                .filter(|&(_, &(src, col))| {
-                    // also index output fields that are used as join columns.
-                    // the question we want to answer here is: if a record of `src` type came in,
-                    // will column `col` ever be used to join it with another view?
-                    self.join[&src]
-                        .iter()
-                        .filter(|&&(other, _)| other != src)
-                        .any(|&(_, ref cols)| cols.contains(&col))
+            // for every left
+            .flat_map(|(left, rs)| {
+                // for every right
+                rs.against.iter().flat_map(move |(right, rs)| {
+                    // emit both the left binding
+                    rs.fields.iter().map(move |&(li, _)| (left, li))
+                    // and the right binding
+                    .chain(rs.fields.iter().map(move |&(_, ri)| (right, ri)))
                 })
-                .map(|(i, _)| (this, i)))
+            })
+            // we now have (NodeIndex, usize) for every join column.
             .fold(HashMap::new(), |mut hm, (node, col)| {
-                hm.entry(node).or_insert_with(Vec::new).push(col);
+                hm.entry(*node).or_insert_with(HashSet::new).insert(col);
+
+                // if this join column is emitted, we also want an index on that output column, as
+                // it's likely the user will do lookups on it.
+                if let Some(outi) = self.emit.iter().position(|&(ref n, c)| n == node && c == col) {
+                    hm.entry(this).or_insert_with(HashSet::new).insert(outi);
+                }
                 hm
             })
+            // convert HashSets into Vec
+            .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
     }
 
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        vec![self.emit[col].clone()]
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        Some(vec![self.emit[col].clone()])
     }
 }
 
@@ -279,35 +369,52 @@ mod tests {
     use super::*;
 
     use ops;
+    use flow;
     use query;
+    use petgraph;
     use shortcut;
 
+    use flow::View;
     use ops::NodeOp;
     use std::collections::HashMap;
 
-    fn setup() -> (ops::AQ, Joiner) {
-        // 0 = left, 1 = right
-        let mut aqfs = HashMap::new();
-        aqfs.insert(0.into(), Box::new(left) as Box<_>);
-        aqfs.insert(1.into(), Box::new(right) as Box<_>);
+    fn setup() -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
+        use std::sync;
 
+        let mut g = petgraph::Graph::new();
+        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base {});
+        let mut r = ops::new("right", &["r0", "r1"], true, ops::base::Base {});
+
+        l.prime(&g);
+        r.prime(&g);
+
+        let l = g.add_node(Some(sync::Arc::new(l)));
+        let r = g.add_node(Some(sync::Arc::new(r)));
+
+        g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
+        g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
+        g[l].as_ref().unwrap().process((vec![3.into(), "c".into()], 2).into(), l, 2);
+        g[r].as_ref().unwrap().process((vec![1.into(), "x".into()], 0).into(), r, 0);
+        g[r].as_ref().unwrap().process((vec![1.into(), "y".into()], 1).into(), r, 1);
+        g[r].as_ref().unwrap().process((vec![2.into(), "z".into()], 2).into(), r, 2);
+
+        // join on first field
         let mut join = HashMap::new();
-        // if left joins against right, join on the first field
-        join.insert(0.into(), vec![(0.into(), vec![0]), (1.into(), vec![0])]);
-        // if right joins against left, also join on the first field (duh)
-        join.insert(1.into(), vec![(0.into(), vec![0]), (1.into(), vec![0])]);
+        join.insert(l, vec![1, 0]);
+        join.insert(r, vec![1, 0]);
 
         // emit first and second field from left
         // third field from right
         let emit = vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)];
 
-        let j = Joiner::new(emit, join);
-        (aqfs, j)
+        let mut c = Joiner::new(emit, join);
+        c.prime(&g);
+        (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
     }
 
     #[test]
     fn it_works() {
-        let (aqfs, j) = setup();
+        let (j, l, r) = setup();
 
         // these are the data items we have to work with
         // these are in left
@@ -320,7 +427,7 @@ mod tests {
         // let r_z2 = vec![2.into(), "z".into()];
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.forward(l_c3.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_c3.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
@@ -328,7 +435,7 @@ mod tests {
         }
 
         // forward b2 from left; should produce [b2*z2]
-        match j.forward(l_b2.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_b2.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
@@ -337,7 +444,7 @@ mod tests {
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.forward(l_a1.clone().into(), 0.into(), 0, None, &aqfs).unwrap() {
+        match j.process(l_a1.clone().into(), l, 100).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
@@ -357,14 +464,11 @@ mod tests {
 
     #[test]
     fn it_queries() {
-        use std::sync;
-
-        let (aqfs, j) = setup();
-        let aqfs = sync::Arc::new(aqfs);
+        let (j, _, _) = setup();
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz]
-        let hits = j.query(None, 0, &aqfs);
+        let hits = j.find(None, None);
         assert_eq!(hits.len(), 3);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -386,7 +490,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -400,7 +504,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -418,7 +522,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
                          }]);
 
-        let hits = j.query(Some(&q), 0, &aqfs);
+        let hits = j.find(Some(q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -426,60 +530,25 @@ mod tests {
             }));
     }
 
-    fn left(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), "a".into()], 0),
-                (vec![2.into(), "b".into()], 1),
-                (vec![3.into(), "c".into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
-    fn right(p: ops::Params, _: i64) -> Vec<(Vec<query::DataType>, i64)> {
-        let data = vec![
-                (vec![1.into(), "x".into()], 0),
-                (vec![1.into(), "y".into()], 1),
-                (vec![2.into(), "z".into()], 2),
-            ];
-
-        assert_eq!(p.len(), 1);
-        let p = p.into_iter().last().unwrap();
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: shortcut::Comparison::Equal(p),
-                                       }]);
-
-        data.into_iter().filter_map(move |(r, ts)| q.feed(&r[..]).map(|r| (r, ts))).collect()
-    }
-
     #[test]
     fn it_suggests_indices() {
-        let (_, j) = setup();
+        use std::collections::HashMap;
+        let (j, l, r) = setup();
         let hm: HashMap<_, _> = vec![
-            (0.into(), vec![0]), // join column for left
-            (1.into(), vec![0]), // join column for right
+            (l, vec![0]), // join column for left
+            (r, vec![0]), // join column for right
             (2.into(), vec![0]), // output column that is used as join column
         ]
             .into_iter()
             .collect();
-        assert_eq!(hm, j.suggest_indexes(2.into()));
+        assert_eq!(j.suggest_indexes(2.into()), hm);
     }
 
     #[test]
     fn it_resolves() {
-        let (_, j) = setup();
-        assert_eq!(j.resolve(0), vec![(0.into(), 0)]);
-        assert_eq!(j.resolve(1), vec![(0.into(), 1)]);
-        assert_eq!(j.resolve(2), vec![(1.into(), 1)]);
+        let (j, _, _) = setup();
+        assert_eq!(j.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(j.resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(j.resolve(2), Some(vec![(1.into(), 1)]));
     }
 }

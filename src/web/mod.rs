@@ -1,6 +1,6 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
-use flow::{FlowGraph, NodeIndex, FillableQuery};
+use flow::{FlowGraph, NodeIndex};
 use query::{DataType, Query};
 use std::collections::HashMap;
 use shortcut;
@@ -21,10 +21,8 @@ struct Endpoint {
 /// parameters such as `?id=1`. A JSON array with all matching records is returned. Each record is
 /// represented as a JSON object with field names as dictated by those passed to `new()` for the
 /// view being queried.
-pub fn run<U, P>(mut soup: FlowGraph<Query, U, Vec<DataType>, P>) -> HttpResult<Listening>
-    where U: 'static + Clone + Send + From<Vec<DataType>>,
-          P: 'static + Send,
-          Query: FillableQuery<Params = P>
+pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listening>
+    where U: 'static + Clone + Send + From<Vec<DataType>>
 {
     let mut router = TreeRouter::new();
 

@@ -1,5 +1,4 @@
 use shortcut;
-use flow;
 
 #[cfg(feature="web")]
 use rustc_serialize::json::{ToJson, Json};
@@ -108,8 +107,8 @@ pub struct Query {
 
 impl Query {
     /// Filter and project the given record `r` through this query.
-    pub fn feed(&self, r: &[DataType]) -> Option<Vec<DataType>> {
-        if self.having.iter().all(|c| c.matches(r)) {
+    pub fn feed(&self, r: Vec<DataType>) -> Option<Vec<DataType>> {
+        if self.having.iter().all(|c| c.matches(&r[..])) {
             // Data matches -- project and return
             Some(self.project(r))
         } else {
@@ -119,15 +118,14 @@ impl Query {
     }
 
     /// Project the given record `r` through the selection of this query.
-    pub fn project(&self, r: &[DataType]) -> Vec<DataType> {
+    pub fn project(&self, mut r: Vec<DataType>) -> Vec<DataType> {
         assert_eq!(r.len(), self.select.len());
-        let mut into = Vec::with_capacity(self.selects);
-        for (i, f) in r.iter().enumerate() {
-            if self.select[i] {
-                into.push(f.clone())
-            }
-        }
-        into
+        let mut i = 0;
+        r.retain(|_| {
+            i += 1;
+            self.select[i - 1]
+        });
+        r
     }
 
     /// Construct a new `Query` that selects the fields marked `true` in `s` for all rows that
@@ -137,23 +135,6 @@ impl Query {
             select: s.iter().cloned().collect(),
             selects: s.len(),
             having: h,
-        }
-    }
-}
-
-impl flow::FillableQuery for Query {
-    type Params = Vec<shortcut::Value<DataType>>;
-
-    fn fill(&mut self, mut p: Self::Params) {
-        // insert all the query arguments
-        p.reverse(); // so we can pop below
-        for c in self.having.iter_mut() {
-            match c.cmp {
-                shortcut::Comparison::Equal(ref mut v @ shortcut::Value::Const(DataType::None)) => {
-                    *v = p.pop().expect("not enough query parameters were given");
-                }
-                _ => (),
-            }
         }
     }
 }
@@ -180,9 +161,9 @@ mod tests {
         let q_good = Query::new(&[true, false, true], vec![c_good.clone()]);
         let q_bad = Query::new(&[true, false, true], vec![c_bad.clone()]);
         let q_both = Query::new(&[true, false, true], vec![c_good, c_bad]);
-        assert_eq!(q_good.feed(&d), Some(vec!["a".into(), "c".into()]));
-        assert_eq!(q_bad.feed(&d), None);
-        assert_eq!(q_both.feed(&d), None);
+        assert_eq!(q_good.feed(d.clone()), Some(vec!["a".into(), "c".into()]));
+        assert_eq!(q_bad.feed(d.clone()), None);
+        assert_eq!(q_both.feed(d), None);
     }
 
     // fn it_works() {

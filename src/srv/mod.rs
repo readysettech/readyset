@@ -35,7 +35,7 @@ use self::ext::*;
 
 type Put = clocked_dispatch::ClockedSender<Vec<DataType>>;
 type Get = Box<Fn(Option<Query>) -> Vec<Vec<DataType>> + Send + Sync>;
-type FG = FlowGraph<Query, Update, Vec<DataType>, Vec<shortcut::Value<DataType>>>;
+type FG = FlowGraph<Query, Update, Vec<DataType>>;
 
 struct Server {
     put: HashMap<NodeIndex, (String, Vec<String>, Mutex<Put>)>,
