@@ -92,7 +92,7 @@ struct Context<T: Clone + Send> {
     // add additional descendants).
     min_check: Vec<sync::Arc<sync::atomic::AtomicIsize>>,
 }
-type SharedContext<T: Clone + Send> = sync::Arc<sync::Mutex<Context<T>>>;
+type SharedContext<T> = sync::Arc<sync::Mutex<Context<T>>>;
 
 struct NodeState<Q: Clone + Send + Sync, U: Clone + Send, D: Clone + Send> {
     name: NodeIndex,
