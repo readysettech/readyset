@@ -12,6 +12,7 @@ t$opss <- t$opss/1000.0
 
 library(ggplot2)
 p <- ggplot(data=t, aes(x=t, y=opss, color=variant))
+p <- p + ylim(c(0,NA))
 p <- p + facet_grid(op ~ buffer, scales="free_y")
 p <- p + geom_point(size = 0.3, alpha = 0.5) + geom_smooth()
 p <- p + xlab("time") + ylab("kops/s") + ggtitle("Soup rwlock benchmark")

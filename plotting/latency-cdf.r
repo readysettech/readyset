@@ -11,9 +11,7 @@ t$us[t$us == 0] <- 0.1
 
 library(ggplot2)
 p <- ggplot(data=t, aes(x=us, y=perc, color=variant))
-p <- p + xlim(c(0,NA))
 p <- p + ylim(c(0,100))
-#p <- p + expand_limits(x=1)
 p <- p + facet_grid(buffer ~ op)
 p <- p + geom_line()
 p <- p + scale_x_log10()
