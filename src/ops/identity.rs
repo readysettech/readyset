@@ -43,6 +43,8 @@ impl NodeOp for Identity {
 
     fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
         assert_eq!(aqfs.len(), 1);
+        //assert!(aqfs.contains_key(self.parent));
+        
         let args = q.unwrap().clone().having.into_iter().map(|c| {
             if let shortcut::Comparison::Equal(shortcut::Value::Const(v)) = c.cmp{
                 shortcut::Value::Const(v)
@@ -60,6 +62,41 @@ impl NodeOp for Identity {
 
     #[allow(unused_variables)]
     fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        vec![]
+        vec![(self.parent, col)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ops;
+    use flow;
+    
+    use ops::NodeOp;
+    use std::collections::HashMap;
+
+    #[test]
+    fn it_forwards() {
+        let src = flow::NodeIndex::new(0);
+        let i = Identity::new(src);
+
+        let aqfs = HashMap::new();
+
+        let left = vec![1.into(), "a".into()];
+        match i.forward(left.clone().into(), src, 0, None, &aqfs).unwrap() {
+            ops::Update::Records(rs) => {
+                assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
+            }
+        }
+    }
+
+    #[test]
+    fn it_queries() {
+        let src = flow::NodeIndex::new(0);
+        let i = Identity::new(src);
+
+        let aqfs = HashMap::new();
+        
     }
 }
