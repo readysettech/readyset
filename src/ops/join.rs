@@ -167,7 +167,7 @@ impl Joiner {
         let q = query::Query::new(&target.select[..], params);
 
         // send the parameters to start the query.
-        let rx = self.join[&other].node.as_ref().unwrap().find(Some(q), Some(ts));
+        let rx = self.join[&other].node.as_ref().unwrap().find(Some(&q), Some(ts));
 
         Box::new(rx.into_iter().map(move |(right, rts)| {
             use std::cmp;
@@ -302,16 +302,17 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         // TODO: we probably don't need to select all columns here
+        let lq = lparams.map(|ps| {
+            query::Query::new(&iter::repeat(true)
+                                  .take(left.node.as_ref().unwrap().args().len())
+                                  .collect::<Vec<_>>(),
+                              ps)
+        });
+
         left.node
             .as_ref()
             .unwrap()
-            .find(lparams.map(|ps| {
-                      query::Query::new(&iter::repeat(true)
-                                            .take(left.node.as_ref().unwrap().args().len())
-                                            .collect::<Vec<_>>(),
-                                        ps)
-                  }),
-                  Some(ts))
+            .find(lq.as_ref(), Some(ts))
             .into_iter()
             .flat_map(move |(lrec, lts)| {
                 // TODO: also add constants from q to filter used to select from right
@@ -490,7 +491,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = j.find(Some(q), None);
+        let hits = j.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -504,7 +505,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
                          }]);
 
-        let hits = j.find(Some(q), None);
+        let hits = j.find(Some(&q), None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {
@@ -522,7 +523,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
                          }]);
 
-        let hits = j.find(Some(q), None);
+        let hits = j.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
             .any(|&(ref r, ts)| {

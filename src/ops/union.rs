@@ -117,7 +117,7 @@ impl NodeOp for Union {
                 }
                 let cs = params.unwrap_or_else(Vec::new);
                 // TODO: if we're selecting all and have no conditions, we could pass q = None...
-                self.srcs[&src].find(Some(query::Query::new(&select[..], cs)), Some(ts))
+                self.srcs[&src].find(Some(&query::Query::new(&select[..], cs)), Some(ts))
             })
             .filter_map(move |(r, ts)| if let Some(ref q) = q {
                 q.feed(r).map(move |r| (r, ts))
@@ -220,7 +220,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
                          }]);
 
-        let hits = u.find(Some(q), None);
+        let hits = u.find(Some(&q), None);
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
@@ -232,7 +232,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = u.find(Some(q), None);
+        let hits = u.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
 
@@ -243,7 +243,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("x".into())),
                          }]);
 
-        let hits = u.find(Some(q), None);
+        let hits = u.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
 
@@ -254,7 +254,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(3.into())),
                          }]);
 
-        let hits = u.find(Some(q), None);
+        let hits = u.find(Some(&q), None);
         assert_eq!(hits.len(), 0);
     }
 

@@ -38,7 +38,7 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
              -> Vec<NodeIndex>;
 
     /// Execute a single query, producing all matching records.
-    fn find<'a>(&'a self, Option<Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
+    fn find<'a>(&'a self, Option<&Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -201,7 +201,7 @@ impl<T> Ord for Delayed<T> {
 /// assert_eq!(
 ///     {
 ///         use shortcut::{Condition,Comparison,Value};
-///         get[&votecount](Some(Query::new(
+///         get[&votecount](Some(&Query::new(
 ///             &[true, true], // select both fields
 ///             vec![Condition {
 ///                 column: 0, // filter on id
@@ -489,7 +489,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     pub fn run(&mut self,
                buf: usize)
                -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<D>>,
-                   HashMap<NodeIndex, Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>>) {
+                   HashMap<NodeIndex, Box<Fn(Option<&Q>) -> Vec<D> + 'static + Send + Sync>>) {
 
         // which nodes are new?
         let new = petgraph::BfsIter::new(&self.graph, self.source)
@@ -536,9 +536,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         let mut qs = HashMap::with_capacity(init_at.len());
         for node in new.iter() {
             let n = self.graph[*node].as_ref().unwrap().clone();
-            let func = Box::new(move |q: Option<Q>| -> Vec<D> {
+            let func = Box::new(move |q: Option<&Q>| -> Vec<D> {
                 n.find(q, None).into_iter().map(|(r, _)| r).collect()
-            }) as Box<Fn(Option<Q>) -> Vec<D> + 'static + Send + Sync>;
+            }) as Box<Fn(Option<&Q>) -> Vec<D> + 'static + Send + Sync>;
 
             qs.insert(*node, func);
         }
@@ -867,7 +867,7 @@ mod tests {
             self.3.clone()
         }
 
-        fn find<'a>(&'a self, _: Option<()>, _: Option<i64>) -> Vec<(Self::Data, i64)> {
+        fn find<'a>(&'a self, _: Option<&()>, _: Option<i64>) -> Vec<(Self::Data, i64)> {
             if self.0 {
                 vec![(*self.2.lock().unwrap(), 0)]
             } else {

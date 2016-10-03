@@ -34,7 +34,7 @@ pub mod ext {
 use self::ext::*;
 
 type Put = clocked_dispatch::ClockedSender<Vec<DataType>>;
-type Get = Box<Fn(Option<Query>) -> Vec<Vec<DataType>> + Send + Sync>;
+type Get = Box<Fn(Option<&Query>) -> Vec<Vec<DataType>> + Send + Sync>;
 type FG = FlowGraph<Query, Update, Vec<DataType>>;
 
 struct Server {
@@ -66,7 +66,7 @@ impl ext::Service for Server {
                        conds)
         });
 
-        get.2(arg)
+        get.2(arg.as_ref())
     }
 
     fn insert(&self, view: usize, args: Vec<DataType>) -> () {

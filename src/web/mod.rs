@@ -107,7 +107,7 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
                                 ));
                     };
 
-                    let data = get(arg).into_iter().map(|row| {
+                    let data = get(arg.as_ref()).into_iter().map(|row| {
                         ep
                             .arguments
                             .clone()
