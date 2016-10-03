@@ -17,7 +17,10 @@ pub struct Identity {
 impl Identity {
     /// Construct a new identity operator.
     pub fn new(src: flow::NodeIndex) -> Identity {
-        Identity { src: src, srcn: None }
+        Identity {
+            src: src,
+            srcn: None,
+        }
     }
 }
 
@@ -30,10 +33,10 @@ impl From<Identity> for NodeType {
 impl NodeOp for Identity {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         self.srcn = g[self.src].as_ref().map(|n| n.clone());
-        
+
         vec![self.src]
     }
-    
+
     #[allow(unused_variables)]
     fn forward(&self,
                update: ops::Update,
@@ -45,10 +48,6 @@ impl NodeOp for Identity {
     }
 
     fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
-        let q = match q {
-            Some(query) => Some(query.clone()),
-            None => None,
-        };
         self.srcn.as_ref().unwrap().find(q, Some(ts))
     }
 
@@ -67,7 +66,6 @@ mod tests {
 
     use ops;
     use flow;
-    use query;
     use petgraph;
 
     use flow::View;
@@ -78,8 +76,7 @@ mod tests {
         use std::sync;
 
         let mut g = petgraph::Graph::new();
-        let mut s = ops::new("source", &["x", "y", "z"], true,
-                             ops::base::Base {});
+        let mut s = ops::new("source", &["x", "y", "z"], true, ops::base::Base {});
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
 
@@ -93,8 +90,8 @@ mod tests {
         i.prime(&g);
 
         ops::new("latest", &["x", "y", "z"], materialized, i)
-    }        
-    
+    }
+
     #[test]
     fn it_forwards() {
         let src = flow::NodeIndex::new(0);
