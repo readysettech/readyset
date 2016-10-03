@@ -188,14 +188,15 @@ impl NodeOp for Latest {
             }
         }
 
-        // now, query our ancestor, and aggregate into groups.
-        let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
+        let q = params.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(self.srcn.as_ref().unwrap().args().len())
-                                  .collect::<Vec<_>>(),
-                              ps)
-        }),
-                                                  Some(ts));
+                              .take(self.srcn.as_ref().unwrap().args().len())
+                              .collect::<Vec<_>>(),
+                              ps)});
+        let qr = match q { Some(ref q) => Some(q), None => None};
+            
+        // now, query our ancestor, and aggregate into groups.
+        let rx = self.srcn.as_ref().unwrap().find(qr, Some(ts));
 
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
@@ -548,7 +549,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = l.find(Some(q), None);
+        let hits = l.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 2.into() && r[1] == 2.into()));
     }

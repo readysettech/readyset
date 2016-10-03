@@ -265,13 +265,14 @@ impl NodeOp for Aggregator {
         }
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = self.srcn.as_ref().unwrap().find(params.map(|ps| {
-                                                      query::Query::new(&iter::repeat(true)
-                                                                            .take(self.cols)
-                                                                            .collect::<Vec<_>>(),
-                                                                        ps)
-                                                  }),
-                                                  Some(ts));
+        let q = params.map(|ps| {
+            query::Query::new(&iter::repeat(true)
+                               .take(self.cols)
+                               .collect::<Vec<_>>(),
+                               ps)});
+        let qr = match q { Some(ref q) => Some(q), None => None};
+
+        let rx = self.srcn.as_ref().unwrap().find(qr, Some(ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
@@ -587,7 +588,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = c.find(Some(q), None);
+        let hits = c.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
     }
@@ -602,7 +603,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
                          }]);
 
-        let hits = c.find(Some(q), None);
+        let hits = c.find(Some(&q), None);
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|&(ref r, _)| r[0] == 100.into() && r[1] == 0.into()));
     }
