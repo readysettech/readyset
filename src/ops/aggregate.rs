@@ -267,12 +267,12 @@ impl NodeOp for Aggregator {
         // now, query our ancestor, and aggregate into groups.
         let q = params.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                               .take(self.cols)
-                               .collect::<Vec<_>>(),
-                               ps)});
-        let qr = match q { Some(ref q) => Some(q), None => None};
+                                  .take(self.cols)
+                                  .collect::<Vec<_>>(),
+                              ps)
+        });
 
-        let rx = self.srcn.as_ref().unwrap().find(qr, Some(ts));
+        let rx = self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts));
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.

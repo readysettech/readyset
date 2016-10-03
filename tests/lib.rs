@@ -202,7 +202,10 @@ fn votes() {
     let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 
     // add vote count
-    let vc = g.incorporate(new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0)));
+    let vc = g.incorporate(new("vc",
+                               &["id", "votes"],
+                               true,
+                               Aggregation::COUNT.new(vote, 0)));
 
     // add final join using first field from article and first from vc
     let mut join = HashMap::new();
@@ -288,7 +291,7 @@ fn votes() {
                      column: 0,
                      cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
                  }];
-    let res = get[&end](Some(Query::new(&[true, true, true], q)));
+    let res = get[&end](Some(&Query::new(&[true, true, true], q)));
     assert_eq!(res.len(), 1);
     assert!(res.iter()
         .any(|r| r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())));
@@ -300,7 +303,7 @@ fn votes() {
                          column: 0,
                          cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                      }];
-        let res = get[&end](Some(Query::new(&[true, true, true], q)));
+        let res = get[&end](Some(&Query::new(&[true, true, true], q)));
         assert_eq!(res.len(), 1);
         assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
     }

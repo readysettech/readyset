@@ -302,17 +302,17 @@ impl NodeOp for Joiner {
 
         // produce a left * right given a left (basically the same as forward())
         // TODO: we probably don't need to select all columns here
-        let qq = lparams.map(|ps| {
+        let lq = lparams.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                               .take(left.node.as_ref().unwrap().args().len())
-                               .collect::<Vec<_>>(),
-                               ps)});
-        let qr = match qq { Some(ref q) => Some(q), None => None};
-        
+                                  .take(left.node.as_ref().unwrap().args().len())
+                                  .collect::<Vec<_>>(),
+                              ps)
+        });
+
         left.node
             .as_ref()
             .unwrap()
-            .find(qr, Some(ts))
+            .find(lq.as_ref(), Some(ts))
             .into_iter()
             .flat_map(move |(lrec, lts)| {
                 // TODO: also add constants from q to filter used to select from right
