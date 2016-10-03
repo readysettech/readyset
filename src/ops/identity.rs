@@ -6,20 +6,18 @@ use ops::NodeOp;
 use ops::NodeType;
 
 use std::collections::HashMap;
-
-use shortcut;
-
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug)]
 pub struct Identity {
-    parent: flow::NodeIndex,
+    src: flow::NodeIndex,
+    srcn: Option<ops::V>,
 }
 
 impl Identity {
     /// Construct a new identity operator.
-    pub fn new(parent: flow::NodeIndex) -> Identity {
-        Identity { parent: parent }
+    pub fn new(src: flow::NodeIndex) -> Identity {
+        Identity { src: src, srcn: None }
     }
 }
 
@@ -30,39 +28,36 @@ impl From<Identity> for NodeType {
 }
 
 impl NodeOp for Identity {
+    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
+        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        
+        vec![self.src]
+    }
+    
     #[allow(unused_variables)]
     fn forward(&self,
                update: ops::Update,
                src: flow::NodeIndex,
                timestamp: i64,
-               materialized_view: Option<&backlog::BufferedStore>,
-               aqfs: &ops::AQ)
+               materialized_view: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
         Some(update)
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64, aqfs: &ops::AQ) -> ops::Datas {
-        assert_eq!(aqfs.len(), 1);
-        //assert!(aqfs.contains_key(self.parent));
-        
-        let args = q.unwrap().clone().having.into_iter().map(|c| {
-            if let shortcut::Comparison::Equal(shortcut::Value::Const(v)) = c.cmp{
-                shortcut::Value::Const(v)
-            } else {
-                unreachable!();
-            }
-        }).collect();
-        aqfs[&self.parent](args, ts)
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+        let q = match q {
+            Some(query) => Some(query.clone()),
+            None => None,
+        };
+        self.srcn.as_ref().unwrap().find(q, Some(ts))
     }
 
     fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        // index nothing
-        HashMap::new()
+        self.srcn.as_ref().unwrap().suggest_indexes(self.src)
     }
 
-    #[allow(unused_variables)]
-    fn resolve(&self, col: usize) -> Vec<(flow::NodeIndex, usize)> {
-        vec![(self.parent, col)]
+    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+        Some(vec![(self.src, col)])
     }
 }
 
@@ -72,19 +67,41 @@ mod tests {
 
     use ops;
     use flow;
-    
+    use query;
+    use petgraph;
+
+    use flow::View;
     use ops::NodeOp;
     use std::collections::HashMap;
 
+    fn setup(materialized: bool) -> ops::Node {
+        use std::sync;
+
+        let mut g = petgraph::Graph::new();
+        let mut s = ops::new("source", &["x", "y", "z"], true,
+                             ops::base::Base {});
+        s.prime(&g);
+        let s = g.add_node(Some(sync::Arc::new(s)));
+
+        g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
+        g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
+        g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+        g[s].as_ref().unwrap().process((vec![1.into(), 2.into()], 3).into(), s, 3);
+        g[s].as_ref().unwrap().process((vec![3.into(), 3.into()], 4).into(), s, 4);
+
+        let mut i = Identity::new(s);
+        i.prime(&g);
+
+        ops::new("latest", &["x", "y", "z"], materialized, i)
+    }        
+    
     #[test]
     fn it_forwards() {
         let src = flow::NodeIndex::new(0);
         let i = Identity::new(src);
 
-        let aqfs = HashMap::new();
-
         let left = vec![1.into(), "a".into()];
-        match i.forward(left.clone().into(), src, 0, None, &aqfs).unwrap() {
+        match i.forward(left.clone().into(), src, 0, None).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
             }
@@ -93,10 +110,24 @@ mod tests {
 
     #[test]
     fn it_queries() {
-        let src = flow::NodeIndex::new(0);
-        let i = Identity::new(src);
+        let i = setup(false);
+        let hits = i.find(None, None);
+        println!("{:?}", hits);
+        assert_eq!(hits.len(), 5);
+    }
 
-        let aqfs = HashMap::new();
-        
+    #[test]
+    fn it_suggests_indices() {
+        let i = setup(false);
+        let idx = i.suggest_indexes(1.into());
+        assert_eq!(idx.len(), 0);
+    }
+
+    #[test]
+    fn it_resolves() {
+        let i = setup(false);
+        assert_eq!(i.resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(i.resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(i.resolve(2), Some(vec![(0.into(), 2)]));
     }
 }

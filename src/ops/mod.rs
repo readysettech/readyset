@@ -177,6 +177,7 @@ impl NodeOp for NodeType {
             NodeType::JoinNode(ref mut n) => n.prime(g),
             NodeType::LatestNode(ref mut n) => n.prime(g),
             NodeType::UnionNode(ref mut n) => n.prime(g),
+            NodeType::IdentityNode(ref mut n) => n.prime(g),
             #[cfg(test)]
             NodeType::TestNode(ref mut n) => n.prime(g),
         }
