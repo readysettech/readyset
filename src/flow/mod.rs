@@ -571,6 +571,21 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         (incoming, qs)
     }
 
+    /// Return a lower bound on the freshness of any subsequent reads to the indicated node.
+    pub fn freshness(&self, node: NodeIndex) -> i64 {
+        use std::cmp;
+
+        match self.mins.get(&node) {
+            Some(m) => m.load(sync::atomic::Ordering::Relaxed) as i64,
+            None => {
+                self.graph
+                    .edges_directed(node, petgraph::EdgeDirection::Incoming)
+                    .map(|(ni, _)| self.freshness(ni))
+                    .fold(i64::max_value(), cmp::min)
+            }
+        };
+    }
+
     fn inner(state: NodeState<Q, U, D>) {
         use std::collections::VecDeque;
 
