@@ -1,12 +1,19 @@
-use nom::{IResult, alphanumeric, line_ending, space};
+use nom::{IResult, alphanumeric, eof, line_ending, space};
 use std::str;
-use std::error::Error;
 
 #[derive(Debug, PartialEq)]
 pub struct SqlQuery {
     fields: Vec<String>,
     table: String,
+    cond: Option<ConditionTree>,
 }
+
+#[derive(Debug, PartialEq)]
+pub struct ConditionTree {
+    field: String,
+    expr: String,
+}
+
 
 /// Parse rule for a comma-separated list.
 named!(csvlist<&[u8], Vec<&str> >,
@@ -21,26 +28,59 @@ named!(csvlist<&[u8], Vec<&str> >,
                            ||{}
                        )
                    ),
-                   ||{ fieldname }),
-               str::from_utf8)
+                   ||{ fieldname }
+               ),
+               str::from_utf8
            )
-       );
+       )
+);
+
+/// Parse list of columns/fields.
+/// XXX(malte): add support for named table notation
+named!(fieldlist<&[u8], Vec<&str> >,
+       alt!(
+           tag!("*") => { |_| vec!["ALL".into()] }
+         | csvlist
+       )
+);
+
+named!(where_clause<&[u8], ConditionTree>,
+    chain!(
+        tag!("where") ~
+        space ~
+        field: map_res!(alphanumeric, str::from_utf8) ~
+        space? ~
+        tag!("=") ~
+        space? ~
+        expr: map_res!(tag_s!(b"?"), str::from_utf8),
+        || {
+            ConditionTree {
+                field: String::from(field),
+                expr: String::from(expr),
+            }
+        }
+    )
+);
 
 /// Parse rule for a SQL selection query.
 named!(selection<&[u8], SqlQuery>,
     chain!(
         tag!("select") ~
         space ~
-        fields: csvlist ~  // XXX(malte): cover * case
+        fields: fieldlist ~
         space ~
         tag!("from") ~
         space ~
         table: map_res!(alphanumeric, str::from_utf8) ~
-        alt!(tag!(";") | line_ending),
+        space? ~
+        cond: opt!(where_clause) ~
+        space? ~
+        alt!(eof | tag!(";") | line_ending),  // N.B.: eof must come FIRST
         || {
             SqlQuery {
                 table: String::from(table),
-                fields: fields.iter().map(|s| String::from(*s)).collect()
+                fields: fields.iter().map(|s| String::from(*s)).collect(),
+                cond: cond
             }
         }
     )
@@ -60,7 +100,6 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
 }
 
 mod tests {
-    use nom::IResult;
     use super::*;
 
     #[test]
@@ -69,15 +108,18 @@ mod tests {
 
         assert_eq!(parse_query(qstring).unwrap(),
                    SqlQuery { fields: vec!["id".into(), "name".into()],
-                              table: String::from("users") } );
+                              table: String::from("users"),
+                              cond: None } );
     }
 
+    #[test]
     fn select_all() {
         let qstring = "SELECT * FROM users;";
 
         assert_eq!(parse_query(qstring).unwrap(),
                    SqlQuery { fields: vec!["ALL".into()],
-                              table: String::from("users") } );
+                              table: String::from("users"),
+                              cond: None } );
     }
 
     #[test]
@@ -86,7 +128,8 @@ mod tests {
 
         assert_eq!(parse_query(qstring).unwrap(),
                    SqlQuery { fields: vec!["id".into(), "name".into()],
-                              table: String::from("users") } );
+                              table: String::from("users"),
+                              cond: None } );
     }
 
     #[test]
@@ -95,7 +138,8 @@ mod tests {
 
         assert_eq!(parse_query(qstring).unwrap(),
                    SqlQuery { fields: vec!["id".into(), "name".into()],
-                              table: String::from("users") } );
+                              table: String::from("users"),
+                              cond: None } );
     }
 
     #[test]
@@ -105,5 +149,19 @@ mod tests {
 
         assert_eq!(parse_query(qstring_sem).unwrap(),
                    parse_query(qstring_linebreak).unwrap());
+    }
+
+    #[test]
+    fn where_clause() {
+        let qstring = "select * from ContactInfo where email=?";
+
+        assert_eq!(parse_query(qstring).unwrap(),
+                   SqlQuery { fields: vec!["ALL".into(),],
+                              table: String::from("ContactInfo").to_lowercase(),
+                              cond: Some(ConditionTree {
+                                  field: String::from("email"),
+                                  expr: String::from("?") })
+                            }
+                   );
     }
 }
