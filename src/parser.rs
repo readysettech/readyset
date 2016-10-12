@@ -63,6 +63,7 @@ named!(where_clause<&[u8], ConditionTree>,
 );
 
 /// Parse rule for a SQL selection query.
+/// TODO(malte): support nested queries as selection targets
 named!(selection<&[u8], SqlQuery>,
     chain!(
         tag!("select") ~
