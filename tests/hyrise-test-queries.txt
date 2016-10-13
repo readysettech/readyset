@@ -1,3 +1,6 @@
+# Hyrise SQL parser test queries,
+# from https://github.com/hyrise/sql-parser/blob/master/test/lib/valid_queries.sql
+#
 # SELECT statement
 SELECT * FROM orders;
 SELECT a FROM foo WHERE a > 12 OR b > 3 AND NOT c LIMIT 10
