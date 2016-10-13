@@ -30,7 +30,7 @@ fn hotcrp_queries() {
 
     // Load HotCRP queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.split("\n").collect();
+    let lines: Vec<&str> = s.lines().filter(|l| !l.starts_with("#")).collect();
     println!("Loaded {} HotCRP queries", lines.len());
 
     // Try parsing them all
@@ -44,7 +44,7 @@ fn hyrise_test_queries() {
 
     // Load HyRise queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.split("\n").collect();
+    let lines: Vec<&str> = s.lines().filter(|l| !l.starts_with("#")).collect();
     println!("Loaded {} Hyrise queries", lines.len());
 
     // Try parsing them all
