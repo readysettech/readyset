@@ -4,6 +4,8 @@ pub mod latest;
 pub mod join;
 pub mod union;
 pub mod identity;
+#[cfg(test)]
+pub mod gatedid;
 
 use flow;
 use flow::NodeIndex;
@@ -167,6 +169,9 @@ pub enum NodeType {
     #[cfg(test)]
     /// A test operator for testing purposes.
     TestNode(tests::Tester),
+    #[cfg(test)]
+    /// A test operator to control the propogation of updates.
+    GatedIdentityNode(gatedid::GatedIdentity),
 }
 
 impl NodeOp for NodeType {
@@ -180,6 +185,8 @@ impl NodeOp for NodeType {
             NodeType::IdentityNode(ref mut n) => n.prime(g),
             #[cfg(test)]
             NodeType::TestNode(ref mut n) => n.prime(g),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref mut n) => n.prime(g),
         }
     }
 
@@ -198,6 +205,8 @@ impl NodeOp for NodeType {
             NodeType::IdentityNode(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.forward(u, src, ts, db),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref n) => n.forward(u, src, ts, db),
         }
     }
 
@@ -211,6 +220,8 @@ impl NodeOp for NodeType {
             NodeType::IdentityNode(ref n) => n.query(q, ts),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.query(q, ts),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref n) => n.query(q, ts),
         }
     }
 
@@ -224,6 +235,8 @@ impl NodeOp for NodeType {
             NodeType::IdentityNode(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.suggest_indexes(this),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref n) => n.suggest_indexes(this),
         }
     }
 
@@ -237,6 +250,8 @@ impl NodeOp for NodeType {
             NodeType::IdentityNode(ref n) => n.resolve(col),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.resolve(col),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref n) => n.resolve(col),
         }
     }
 
@@ -260,6 +275,8 @@ impl Debug for NodeType {
             NodeType::IdentityNode(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]
             NodeType::TestNode(ref n) => write!(f, "{:?}", n),
+            #[cfg(test)]
+            NodeType::GatedIdentityNode(ref n) => write!(f, "{:?}", n),
         }
     }
 }

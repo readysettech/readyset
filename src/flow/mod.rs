@@ -1168,4 +1168,62 @@ mod tests {
         // check that value was updated again
         assert_eq!(get[&d](None), vec![2]);
     }
+
+    #[test]
+    fn freshness() {
+        use ops::union::Union;
+        use ops::aggregate::Aggregation;
+        use ops::base::Base;
+        use ops::gatedid::GatedIdentity;
+
+        let mut g = FlowGraph::new();
+        let cns = &["x", "y"];
+
+        let a = g.incorporate(ops::new("a", cns, true, Base {}));
+        let (ag, atx) = GatedIdentity::new(a);
+        let ag = g.incorporate(ops::new("ag", cns, false, ag));
+
+        let b = g.incorporate(ops::new("a", cns, true, Base {}));
+        let (bg, btx) = GatedIdentity::new(b);
+        let bg = g.incorporate(ops::new("bg", cns, false, bg));
+
+        let c = g.incorporate(ops::new("c", &["y", "count"], true, Aggregation::COUNT.new(ag, 0)));
+        let (cg, ctx) = GatedIdentity::new(c);
+        let cg = g.incorporate(ops::new("cg", &["y", "count"], false, cg));
+
+        let mut emits = HashMap::new();
+        emits.insert(cg, vec![0, 1]);
+        emits.insert(bg, vec![0, 1]);
+        let u = Union::new(emits);
+        let d = g.incorporate(ops::new("d", &["a", "b"], false, u));
+        let (put, _) = g.run(10);
+
+        // Wait until node ni reaches time stamp ts.
+        let wait = |ref g: &FlowGraph<_, _, _>, ni: NodeIndex, ts: i64| {
+            let mut f: i64 = 0;
+            while f < ts {
+                f = g.freshness(ni);
+                assert!(f <= ts);
+            }
+        };
+
+        // Send update to a.
+        put[&a].send(vec![1.into(), 2.into()]);
+        wait(&g, a, 1);
+        assert_eq!(g.freshness(c), 0);
+        atx.send(()).unwrap();
+        wait(&g, c, 1);
+        wait(&g, b, 1);
+        assert_eq!(g.freshness(d), 0);
+        ctx.send(()).unwrap();
+        wait(&g, d, 1);
+
+        // Send update to b.
+        put[&b].send(vec![1.into(), 2.into()]);
+        wait(&g, b, 2);
+        wait(&g, c, 2);
+        assert_eq!(g.freshness(a), 2);
+        btx.send(()).unwrap();
+        wait(&g, d, 2);
+    }
 }
