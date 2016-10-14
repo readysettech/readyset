@@ -23,7 +23,7 @@ named!(pub csvlist<&[u8], Vec<&str> >,
                    opt!(
                        chain!(
                            tag!(",") ~
-                           opt!(space),
+                           space?,
                            ||{}
                        )
                    ),
