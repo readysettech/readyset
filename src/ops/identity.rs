@@ -70,7 +70,6 @@ mod tests {
 
     use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
 
     fn setup(materialized: bool) -> ops::Node {
         use std::sync;

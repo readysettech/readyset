@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let (j, l, r) = setup();
+        let (j, l, _) = setup();
 
         // these are the data items we have to work with
         // these are in left
