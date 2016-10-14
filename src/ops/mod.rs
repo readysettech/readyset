@@ -4,6 +4,7 @@ pub mod latest;
 pub mod join;
 pub mod union;
 pub mod identity;
+pub mod group_concat;
 
 use flow;
 use flow::NodeIndex;
@@ -162,6 +163,8 @@ pub enum NodeType {
     LatestNode(latest::Latest),
     /// A union. See `Union`.
     UnionNode(union::Union),
+    /// A group concat aggregation. See `GroupConcat`.
+    GroupConcatNode(group_concat::GroupConcat),
     /// A identity operation. See `Identity`.
     IdentityNode(identity::Identity),
     #[cfg(test)]
@@ -178,6 +181,7 @@ impl NodeOp for NodeType {
             NodeType::LatestNode(ref mut n) => n.prime(g),
             NodeType::UnionNode(ref mut n) => n.prime(g),
             NodeType::IdentityNode(ref mut n) => n.prime(g),
+            NodeType::GroupConcatNode(ref mut n) => n.prime(g),
             #[cfg(test)]
             NodeType::TestNode(ref mut n) => n.prime(g),
         }
@@ -196,6 +200,7 @@ impl NodeOp for NodeType {
             NodeType::LatestNode(ref n) => n.forward(u, src, ts, db),
             NodeType::UnionNode(ref n) => n.forward(u, src, ts, db),
             NodeType::IdentityNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::GroupConcatNode(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.forward(u, src, ts, db),
         }
@@ -209,6 +214,7 @@ impl NodeOp for NodeType {
             NodeType::LatestNode(ref n) => n.query(q, ts),
             NodeType::UnionNode(ref n) => n.query(q, ts),
             NodeType::IdentityNode(ref n) => n.query(q, ts),
+            NodeType::GroupConcatNode(ref n) => n.query(q, ts),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.query(q, ts),
         }
@@ -222,6 +228,7 @@ impl NodeOp for NodeType {
             NodeType::LatestNode(ref n) => n.suggest_indexes(this),
             NodeType::UnionNode(ref n) => n.suggest_indexes(this),
             NodeType::IdentityNode(ref n) => n.suggest_indexes(this),
+            NodeType::GroupConcatNode(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.suggest_indexes(this),
         }
@@ -235,6 +242,7 @@ impl NodeOp for NodeType {
             NodeType::LatestNode(ref n) => n.resolve(col),
             NodeType::UnionNode(ref n) => n.resolve(col),
             NodeType::IdentityNode(ref n) => n.resolve(col),
+            NodeType::GroupConcatNode(ref n) => n.resolve(col),
             #[cfg(test)]
             NodeType::TestNode(ref n) => n.resolve(col),
         }
@@ -258,6 +266,7 @@ impl Debug for NodeType {
             NodeType::LatestNode(ref n) => write!(f, "{:?}", n),
             NodeType::UnionNode(ref n) => write!(f, "{:?}", n),
             NodeType::IdentityNode(ref n) => write!(f, "{:?}", n),
+            NodeType::GroupConcatNode(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]
             NodeType::TestNode(ref n) => write!(f, "{:?}", n),
         }
