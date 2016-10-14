@@ -4,3 +4,4 @@ extern crate nom;
 pub use self::parser::*;
 
 pub mod parser;
+mod select;
