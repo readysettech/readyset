@@ -386,6 +386,7 @@ pub use ops::aggregate::*;
 pub use ops::join::Joiner;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
+pub use ops::group_concat::*;
 pub use query::Query;
 pub use query::DataType;
 
