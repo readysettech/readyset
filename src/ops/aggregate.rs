@@ -291,32 +291,6 @@ impl NodeOp for Aggregator {
             cur.1 = cmp::max(ts, cur.1);
         }
 
-        if consolidate.is_empty() {
-            if let Some(q) = q {
-                let mut group: Vec<_> = iter::repeat(query::DataType::None)
-                    .take(self.cols - 1)
-                    .collect();
-
-                for c in q.having.iter() {
-                    if c.column == self.cols - 1 {
-                        continue;
-                    }
-
-                    if let shortcut::Comparison::Equal(shortcut::Value::Const(ref v)) = c.cmp {
-                        *group.get_mut(c.column).unwrap() = v.clone();
-                    } else {
-                        continue;
-                    }
-                }
-
-                if group.iter().all(|g| !g.is_none()) {
-                    // we didn't match any groups, but all the group-by parameters are given.
-                    // we can add a zero row!
-                    consolidate.insert(group, (self.op.zero(), 0));
-                }
-            }
-        }
-
         consolidate.into_iter()
             .map(|(mut group, (over, ts)): (Vec<query::DataType>, (i64, i64))| {
                 group.push(over.into());
@@ -594,6 +568,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn it_queries_zeros() {
         let c = setup(false, false);
 
