@@ -28,6 +28,7 @@ pub struct GroupConcat {
     src: flow::NodeIndex,
 
     srcn: Option<ops::V>,
+    cols: usize,
     group: HashSet<usize>,
     slen: usize,
     cond: Vec<shortcut::Condition<query::DataType>>,
@@ -53,6 +54,7 @@ impl GroupConcat {
             src: src,
 
             srcn: None,
+            cols: 0,
             group: HashSet::new(),
             slen: 0,
             cond: Vec::new(),
@@ -60,9 +62,8 @@ impl GroupConcat {
         }
     }
 
-    fn build(&self, r: &ops::Record) -> Modify {
+    fn build(&self, rec: &[query::DataType]) -> String {
         let mut s = String::with_capacity(self.slen);
-        let rec = r.rec();
         for tc in self.components.iter() {
             match *tc {
                 TextComponent::Literal(l) => {
@@ -80,11 +81,7 @@ impl GroupConcat {
             }
         }
 
-        if r.is_positive() {
-            Modify::Add(s)
-        } else {
-            Modify::Remove(s)
-        }
+        s
     }
 }
 
@@ -94,12 +91,13 @@ impl NodeOp for GroupConcat {
         self.srcn = g[self.src].as_ref().map(|n| n.clone());
 
         // group by all columns
-        let cols = self.srcn.as_ref().unwrap().args().len();
-        self.group.extend(0..cols);
+        self.cols = self.srcn.as_ref().unwrap().args().len();
+        self.group.extend(0..self.cols);
         // except the ones that are used in output
         for tc in self.components.iter() {
             if let TextComponent::Column(col) = *tc {
-                assert!(col < cols, "group concat emits fields parent doesn't have");
+                assert!(col < self.cols,
+                        "group concat emits fields parent doesn't have");
                 self.group.remove(&col);
             }
         }
@@ -113,7 +111,7 @@ impl NodeOp for GroupConcat {
             }
         }
         // plus some fixed size per value
-        self.slen += 10 * (cols - self.group.len());
+        self.slen += 10 * (self.cols - self.group.len());
 
         // construct condition for querying into ourselves
         self.cond = (0..self.group.len())
@@ -129,7 +127,7 @@ impl NodeOp for GroupConcat {
         // the query into our own output (above) uses *output* column indices
         // but when we try to fill it, we have *input* column indices
         // build a translation mechanism for going from the former to the latter
-        let colfix: Vec<_> = (0..cols)
+        let colfix: Vec<_> = (0..self.cols)
             .into_iter()
             .filter_map(|col| {
                 if self.group.contains(&col) {
@@ -169,8 +167,14 @@ impl NodeOp for GroupConcat {
                 // execute two queries.
                 let mut consolidate = HashMap::new();
                 for rec in rs.into_iter() {
-                    let val = Some(self.build(&rec));
-                    let (r, _, ts) = rec.extract();
+                    let (r, pos, ts) = rec.extract();
+                    let val = self.build(&r[..]);
+                    let val = if pos {
+                        Modify::Add(val)
+                    } else {
+                        Modify::Remove(val)
+                    };
+                    let val = Some(val);
                     let group = r.into_iter()
                         .enumerate()
                         .map(|(i, v)| {
@@ -303,8 +307,84 @@ impl NodeOp for GroupConcat {
         }
     }
 
-    fn query(&self, _: Option<&query::Query>, _: i64) -> ops::Datas {
-        unimplemented!();
+    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+        use std::iter;
+
+        // we're fetching everything from our parent
+        let mut params = None;
+
+        // however, if there are some conditions that filters over one of our group-bys, we should
+        // use those as parameters to speed things up.
+        if let Some(q) = q {
+            params = Some(q.having.iter().map(|c| {
+                // FIXME: we could technically support querying over the output of the group by,
+                // but we'd have to restructure this function a fair bit so that we keep that part
+                // of the query around for after we've got the results back. We'd then need to do
+                // another filtering pass over the results of query. Unclear if that's worth it.
+                assert!(c.column < self.colfix.len(),
+                        "filtering on group concatenation output is not supported");
+
+                shortcut::Condition{
+                    column: self.colfix[c.column],
+                    cmp: c.cmp.clone(),
+                }
+            }).collect::<Vec<_>>());
+
+            if params.as_ref().unwrap().len() == 0 {
+                params = None;
+            }
+        }
+
+        // now, query our ancestor, and aggregate into groups.
+        let q = params.map(|ps| {
+            query::Query::new(&iter::repeat(true)
+                                  .take(self.cols)
+                                  .collect::<Vec<_>>(),
+                              ps)
+        });
+
+        let rx = self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts));
+
+        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
+        // aggregated state in memory until we've seen all rows.
+        let mut consolidate = HashMap::new();
+        for (rec, ts) in rx.into_iter() {
+            use std::collections::BTreeSet;
+            use std::cmp;
+
+            let val = self.build(&rec[..]);
+            let group = rec.into_iter()
+                .enumerate()
+                .filter_map(|(i, v)| {
+                    if self.group.contains(&i) {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let mut cur = consolidate.entry(group).or_insert_with(|| (BTreeSet::new(), ts));
+            cur.0.insert(val);
+            cur.1 = cmp::max(ts, cur.1);
+        }
+
+        consolidate.into_iter()
+            .map(|(mut group, (vals, ts))| {
+                let mut val = vals.into_iter()
+                    .fold(String::with_capacity(self.slen), |mut acc, s| {
+                        acc.push_str(&s);
+                        acc.push_str(self.separator);
+                        acc
+                    });
+                // we pushed one separator too many above
+                let real_len = val.len() - self.separator.len();
+                val.truncate(real_len);
+                group.push(val.into());
+                // TODO: respect q.select
+                (group, ts)
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
@@ -328,7 +408,9 @@ mod tests {
 
     use ops;
     use flow;
+    use query;
     use petgraph;
+    use shortcut;
 
     use flow::View;
     use ops::NodeOp;
@@ -587,6 +669,26 @@ mod tests {
         } else {
             unreachable!();
         }
+    }
+
+    #[test]
+    fn it_queries() {
+        let c = setup(false, false);
+
+        let hits = c.find(None, None);
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == ".1;".into()));
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == ".1;#.2;".into()));
+
+        let q = query::Query::new(&[true, true],
+                                  vec![shortcut::Condition {
+                             column: 0,
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
+                         }]);
+
+        let hits = c.find(Some(&q), None);
+        assert_eq!(hits.len(), 1);
+        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == ".1;#.2;".into()));
     }
 
     #[test]
