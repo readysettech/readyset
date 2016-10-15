@@ -10,9 +10,12 @@ use std::collections::HashSet;
 
 use shortcut;
 
+/// Designator for what a given position in a group concat output should contain.
 #[derive(Debug)]
 pub enum TextComponent {
+    /// Emit a literal string.
     Literal(&'static str),
+    /// Emit the string representation of the given column in the current record.
     Column(usize),
 }
 
@@ -21,6 +24,25 @@ enum Modify {
     Remove(String),
 }
 
+/// GroupConcat joins multiple records into one using string concatenation.
+///
+/// It is conceptually similar to the group_concat function available in most SQL databases. The
+/// records are first grouped by a set of fields. Within each group, a string representation is
+/// then constructed, and the strings of all the records in a group are concatenated by joining
+/// them with a literal separator.
+///
+/// The current implementation *requires* the separator to be non-empty, and relatively distinct,
+/// as it is used as a sentinel for reconstructing the individual records' string representations.
+/// This is necessary to incrementally maintain the group concatenation efficiently. This
+/// requirement may be relaxed in the future. \u001E may be a good candidate.
+///
+/// If a group has only one record, the separator is not used.
+///
+/// For convenience, `GroupConcat` also orders the string representations of the records within a
+/// group before joining them. This allows easy equality comparison of `GroupConcat` outputs. This
+/// is the primary reason for the "separator as sentinel" behavior mentioned above, and may be made
+/// optional in the future such that more efficient incremental updating and relaxed separator
+/// semantics can be implemented.
 #[derive(Debug)]
 pub struct GroupConcat {
     components: Vec<TextComponent>,
@@ -42,6 +64,18 @@ impl From<GroupConcat> for NodeType {
 }
 
 impl GroupConcat {
+    /// Construct a new `GroupConcat` operator.
+    ///
+    /// All columns of the input to this node that are not mentioned in `components` will be used
+    /// as group by parameters. For each record in a group, `components` dictates the construction
+    /// of the record's string representation. `Literal`s are used, well, literally, and `Column`s
+    /// are replaced with the string representation of corresponding value from the record under
+    /// consideration. The string representations of all records within each group are joined using
+    /// the given `separator`.
+    ///
+    /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
+    /// the individual record strings from a group string. It should therefore not appear in the
+    /// record data.
     pub fn new(src: flow::NodeIndex,
                components: Vec<TextComponent>,
                separator: &'static str)
