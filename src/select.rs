@@ -1,7 +1,7 @@
 use nom::{alphanumeric, eof, line_ending, space};
 use std::str;
 
-use parser::{ConditionTree, fieldlist};
+use parser::{ConditionTree, fieldlist, unsigned_number};
 
 #[derive(Debug, PartialEq)]
 pub struct GroupByClause {
@@ -11,8 +11,8 @@ pub struct GroupByClause {
 
 #[derive(Debug, PartialEq)]
 pub struct LimitClause {
-    limit: i64,
-    offset: i64,
+    limit: u64,
+    offset: u64,
 }
 
 #[derive(Debug, PartialEq)]
@@ -37,6 +37,31 @@ pub struct SelectStatement {
     order: Option<OrderClause>,
     limit: Option<LimitClause>,
 }
+
+/// Parse LIMIT clause
+named!(limit_clause<&[u8], LimitClause>,
+    chain!(
+        tag!("limit") ~
+        space ~
+        limit_val: unsigned_number ~
+        space? ~
+        offset_val: opt!(chain!(
+                tag!("offset") ~
+                space ~
+                val: unsigned_number,
+                || { val }
+            )
+        ),
+    || {
+        LimitClause {
+            limit: limit_val,
+            offset: match offset_val {
+                None => 0,
+                Some(v) => v,
+            },
+        }
+    })
+);
 
 /// Parse WHERE clause of a selection
 named!(where_clause<&[u8], ConditionTree>,
@@ -71,7 +96,9 @@ named!(pub selection<&[u8], SelectStatement>,
         space? ~
         cond: opt!(where_clause) ~
         space? ~
-        alt!(eof | tag!(";") | line_ending),  // N.B.: eof must come FIRST
+        limit: opt!(limit_clause) ~
+        space? ~
+        alt!(eof | tag!(";") | line_ending),
         || {
             SelectStatement {
                 table: String::from(table),
@@ -80,7 +107,7 @@ named!(pub selection<&[u8], SelectStatement>,
                 where_clause: cond,
                 group_by: None,
                 order: None,
-                limit: None,
+                limit: limit,
             }
         }
     )
@@ -166,5 +193,25 @@ mod tests {
                            expr: String::from("?") }),
                        ..Default::default()
                    });
+    }
+
+    #[test]
+    fn limit_clause() {
+        let qstring1 = "select * from users limit 10\n".to_lowercase();
+        let qstring2 = "select * from users limit 10 offset 10\n".to_lowercase();
+
+        let expected_lim1 = LimitClause {
+            limit: 10,
+            offset: 0,
+        };
+        let expected_lim2 = LimitClause {
+            limit: 10,
+            offset: 10,
+        };
+
+        let res1 = selection(qstring1.as_bytes());
+        let res2 = selection(qstring2.as_bytes());
+        assert_eq!(res1.unwrap().1.limit, Some(expected_lim1));
+        assert_eq!(res2.unwrap().1.limit, Some(expected_lim2));
     }
 }

@@ -1,5 +1,6 @@
-use nom::{IResult, alphanumeric, space};
+use nom::{IResult, alphanumeric, digit, space};
 use std::str;
+use std::str::FromStr;
 
 use select::*;
 
@@ -13,6 +14,14 @@ pub struct ConditionTree {
     pub field: String,
     pub expr: String,
 }
+
+/// Parse an unsigned integer.
+named!(pub unsigned_number<&[u8], u64>,
+    map_res!(
+        map_res!(digit, str::from_utf8),
+        FromStr::from_str
+    )
+);
 
 /// Parse rule for a comma-separated list.
 named!(pub csvlist<&[u8], Vec<&str> >,
