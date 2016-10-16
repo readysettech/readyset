@@ -170,18 +170,14 @@ mod tests {
     fn termination() {
         let qstring_sem = "select id, name from users;".to_lowercase();
         let qstring_linebreak = "select id, name from users\n".to_lowercase();
-        // TODO(malte): unclear why this doesn't work!
-        // let qstring_eof = "select id, name from users".to_lowercase();
 
         assert_eq!(selection(qstring_sem.as_bytes()).unwrap(),
                    selection(qstring_linebreak.as_bytes()).unwrap());
-        // assert_eq!(selection(qstring_sem.as_bytes()).unwrap(),
-        //           selection(qstring_eof.as_bytes()).unwrap());
     }
 
     #[test]
     fn where_clause() {
-        let qstring = "select * from ContactInfo where email=?".to_lowercase();
+        let qstring = "select * from ContactInfo where email=?\n".to_lowercase();
 
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,

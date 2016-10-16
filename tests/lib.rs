@@ -3,13 +3,13 @@ extern crate nom_sqlp;
 use std::fs::File;
 use std::io::Read;
 
-fn parse_queryset(queries: Vec<&str>) {
+fn parse_queryset(queries: Vec<String>) {
     let mut parsed_ok = Vec::new();
     let mut parsed_err = 0;
     for query in queries.iter() {
-        match nom_sqlp::parser::parse_query(query) {
+        match nom_sqlp::parser::parse_query(&query) {
             Ok(q) => {
-                parsed_ok.push(q);
+                parsed_ok.push(query);
             }
             Err(_) => parsed_err += 1,
         }
@@ -30,7 +30,16 @@ fn hotcrp_queries() {
 
     // Load HotCRP queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines().filter(|l| !l.starts_with("#")).collect();
+    let lines: Vec<String> = s.lines()
+        .filter(|l| !l.starts_with("#"))
+        .map(|l| {
+            if !(l.ends_with("\n") || l.ends_with(";")) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            }
+        })
+        .collect();
     println!("Loaded {} HotCRP queries", lines.len());
 
     // Try parsing them all
@@ -44,7 +53,16 @@ fn hyrise_test_queries() {
 
     // Load HyRise queries
     f.read_to_string(&mut s).unwrap();
-    let lines: Vec<&str> = s.lines().filter(|l| !l.starts_with("#")).collect();
+    let lines: Vec<String> = s.lines()
+        .filter(|l| !l.starts_with("#"))
+        .map(|l| {
+            if !(l.ends_with("\n") || l.ends_with(";")) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            }
+        })
+        .collect();
     println!("Loaded {} Hyrise queries", lines.len());
 
     // Try parsing them all
