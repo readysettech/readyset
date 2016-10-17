@@ -90,6 +90,8 @@ named!(pub selection<&[u8], SelectStatement>,
     chain!(
         caseless_tag!("select") ~
         space ~
+        distinct: opt!(caseless_tag!("distinct")) ~
+        space? ~
         fields: fieldlist ~
         space ~
         caseless_tag!("from") ~
@@ -104,7 +106,7 @@ named!(pub selection<&[u8], SelectStatement>,
         || {
             SelectStatement {
                 table: String::from(table),
-                distinct: false,
+                distinct: distinct.is_some(),
                 fields: fields.iter().map(|s| String::from(*s)).collect(),
                 where_clause: cond,
                 group_by: None,
