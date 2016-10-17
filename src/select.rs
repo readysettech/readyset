@@ -1,7 +1,9 @@
 use nom::{alphanumeric, eof, line_ending, space};
+use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 use parser::{ConditionTree, fieldlist, unsigned_number};
+use caseless_tag::*;
 
 #[derive(Debug, PartialEq)]
 pub struct GroupByClause {
@@ -41,12 +43,12 @@ pub struct SelectStatement {
 /// Parse LIMIT clause
 named!(limit_clause<&[u8], LimitClause>,
     chain!(
-        tag!("limit") ~
+        caseless_tag!("limit") ~
         space ~
         limit_val: unsigned_number ~
         space? ~
         offset_val: opt!(chain!(
-                tag!("offset") ~
+                caseless_tag!("offset") ~
                 space ~
                 val: unsigned_number,
                 || { val }
@@ -86,11 +88,11 @@ named!(where_clause<&[u8], ConditionTree>,
 /// TODO(malte): support nested queries as selection targets
 named!(pub selection<&[u8], SelectStatement>,
     chain!(
-        tag!("select") ~
+        caseless_tag!("select") ~
         space ~
         fields: fieldlist ~
         space ~
-        tag!("from") ~
+        caseless_tag!("from") ~
         space ~
         table: map_res!(alphanumeric, str::from_utf8) ~
         space? ~
@@ -119,7 +121,7 @@ mod tests {
 
     #[test]
     fn simple_select() {
-        let qstring = "SELECT id, name FROM users;".to_lowercase();
+        let qstring = "SELECT id, name FROM users;";
 
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
@@ -132,7 +134,7 @@ mod tests {
 
     #[test]
     fn select_all() {
-        let qstring = "SELECT * FROM users;".to_lowercase();
+        let qstring = "SELECT * FROM users;";
 
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
@@ -145,7 +147,7 @@ mod tests {
 
     #[test]
     fn spaces_optional() {
-        let qstring = "SELECT id,name FROM users;".to_lowercase();
+        let qstring = "SELECT id,name FROM users;";
 
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
@@ -157,10 +159,9 @@ mod tests {
     }
 
     #[test]
-    // XXX(malte): this test is broken, as we force the qstring to lowercase anyway!
     fn case_sensitivity() {
-        let qstring_lc = "select id, name from users;".to_lowercase();
-        let qstring_uc = "SELECT id, name FROM users;".to_lowercase();
+        let qstring_lc = "select id, name from users;";
+        let qstring_uc = "SELECT id, name FROM users;";
 
         assert_eq!(selection(qstring_lc.as_bytes()).unwrap(),
                    selection(qstring_uc.as_bytes()).unwrap());
@@ -168,8 +169,8 @@ mod tests {
 
     #[test]
     fn termination() {
-        let qstring_sem = "select id, name from users;".to_lowercase();
-        let qstring_linebreak = "select id, name from users\n".to_lowercase();
+        let qstring_sem = "select id, name from users;";
+        let qstring_linebreak = "select id, name from users\n";
 
         assert_eq!(selection(qstring_sem.as_bytes()).unwrap(),
                    selection(qstring_linebreak.as_bytes()).unwrap());
@@ -177,12 +178,12 @@ mod tests {
 
     #[test]
     fn where_clause() {
-        let qstring = "select * from ContactInfo where email=?\n".to_lowercase();
+        let qstring = "select * from ContactInfo where email=?\n";
 
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("ContactInfo").to_lowercase(),
+                       table: String::from("ContactInfo"),
                        fields: vec!["ALL".into()],
                        where_clause: Some(ConditionTree {
                            field: String::from("email"),
@@ -193,8 +194,8 @@ mod tests {
 
     #[test]
     fn limit_clause() {
-        let qstring1 = "select * from users limit 10\n".to_lowercase();
-        let qstring2 = "select * from users limit 10 offset 10\n".to_lowercase();
+        let qstring1 = "select * from users limit 10\n";
+        let qstring2 = "select * from users limit 10 offset 10\n";
 
         let expected_lim1 = LimitClause {
             limit: 10,
