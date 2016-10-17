@@ -1202,19 +1202,30 @@ mod tests {
         let wait = |ref g: &FlowGraph<_, _, _>, ni: NodeIndex, ts: i64| {
             let mut f: i64 = 0;
             while f < ts {
-                f = g.freshness(ni);
-                assert!(f <= ts);
+                let nf = g.freshness(ni);
+                assert!(nf <= ts);
+                assert!(f <= nf);
+                f = nf;
             }
         };
 
         // Send update to a.
+        assert_eq!(g.freshness(a), 0);
+        assert_eq!(g.freshness(b), 0);
+        assert_eq!(g.freshness(c), 0);
+        assert_eq!(g.freshness(d), 0);
         put[&a].send(vec![1.into(), 2.into()]);
         wait(&g, a, 1);
+        wait(&g, b, 1);
+        thread::sleep(time::Duration::from_millis(50));
         assert_eq!(g.freshness(c), 0);
+        assert_eq!(g.freshness(d), 0);
+
         atx.send(()).unwrap();
         wait(&g, c, 1);
-        wait(&g, b, 1);
+        thread::sleep(time::Duration::from_millis(50));
         assert_eq!(g.freshness(d), 0);
+
         ctx.send(()).unwrap();
         wait(&g, d, 1);
 
@@ -1223,6 +1234,8 @@ mod tests {
         wait(&g, b, 2);
         wait(&g, c, 2);
         assert_eq!(g.freshness(a), 2);
+        thread::sleep(time::Duration::from_millis(50));
+        assert_eq!(g.freshness(d), 1);
         btx.send(()).unwrap();
         wait(&g, d, 2);
     }

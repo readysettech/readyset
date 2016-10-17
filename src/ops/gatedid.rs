@@ -48,14 +48,13 @@ impl NodeOp for GatedIdentity {
         vec![self.src]
     }
 
-    #[allow(unused_variables)]
     fn forward(&self,
                update: ops::Update,
-               src: flow::NodeIndex,
-               timestamp: i64,
-               materialized_view: Option<&backlog::BufferedStore>)
+               _: flow::NodeIndex,
+               _: i64,
+               _: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
-        let _ = self.rx.lock().unwrap().recv();
+        self.rx.lock().unwrap().recv();
         Some(update)
     }
 
