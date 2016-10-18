@@ -1,10 +1,9 @@
 pub mod base;
-pub mod aggregate;
-pub mod latest;
+pub mod grouped;
 pub mod join;
+pub mod latest;
 pub mod union;
 pub mod identity;
-pub mod group_concat;
 #[cfg(test)]
 pub mod gatedid;
 
@@ -158,15 +157,15 @@ pub enum NodeType {
     /// A base node. See `Base`.
     BaseNode(base::Base),
     /// An aggregation. See `Aggregator`.
-    AggregateNode(aggregate::Aggregator),
+    AggregateNode(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     /// A join. See `Joiner`.
     JoinNode(join::Joiner),
     /// A latest. See `Latest`.
     LatestNode(latest::Latest),
     /// A union. See `Union`.
     UnionNode(union::Union),
-    /// A group concat aggregation. See `GroupConcat`.
-    GroupConcatNode(group_concat::GroupConcat),
+    /// A grouped operator. See `GroupConcat`.
+    GroupConcatNode(grouped::GroupedOperator<grouped::concat::GroupConcat>),
     /// A identity operation. See `Identity`.
     IdentityNode(identity::Identity),
     #[cfg(test)]

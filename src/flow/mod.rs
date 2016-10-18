@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn freshness() {
         use ops::union::Union;
-        use ops::aggregate::Aggregation;
+        use ops::grouped::aggregate::Aggregation;
         use ops::base::Base;
         use ops::gatedid::GatedIdentity;
 

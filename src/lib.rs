@@ -382,11 +382,11 @@ pub use flow::NodeIndex;
 pub use ops::new;
 pub use ops::NodeType;
 pub use ops::base::Base;
-pub use ops::aggregate::*;
+pub use ops::grouped::aggregate::{Aggregator, Aggregation};
+pub use ops::grouped::concat::{GroupConcat, TextComponent};
 pub use ops::join::Joiner;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
-pub use ops::group_concat::*;
 pub use query::Query;
 pub use query::DataType;
 
