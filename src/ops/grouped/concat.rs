@@ -1,14 +1,11 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
+use flow::NodeIndex;
 
-use std::collections::HashMap;
+use ops::grouped::GroupedOperation;
+use ops::grouped::GroupedOperator;
+
 use std::collections::HashSet;
-
-use shortcut;
 
 /// Designator for what a given position in a group concat output should contain.
 #[derive(Debug)]
@@ -19,7 +16,7 @@ pub enum TextComponent {
     Column(usize),
 }
 
-enum Modify {
+pub enum Modify {
     Add(String),
     Remove(String),
 }
@@ -47,20 +44,8 @@ enum Modify {
 pub struct GroupConcat {
     components: Vec<TextComponent>,
     separator: &'static str,
-    src: flow::NodeIndex,
-
-    srcn: Option<ops::V>,
-    cols: usize,
-    group: HashSet<usize>,
+    group: Vec<usize>,
     slen: usize,
-    cond: Vec<shortcut::Condition<query::DataType>>,
-    colfix: Vec<usize>,
-}
-
-impl From<GroupConcat> for NodeType {
-    fn from(b: GroupConcat) -> NodeType {
-        NodeType::GroupConcatNode(b)
-    }
 }
 
 impl GroupConcat {
@@ -76,24 +61,20 @@ impl GroupConcat {
     /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
     /// the individual record strings from a group string. It should therefore not appear in the
     /// record data.
-    pub fn new(src: flow::NodeIndex,
+    pub fn new(src: NodeIndex,
                components: Vec<TextComponent>,
                separator: &'static str)
-               -> GroupConcat {
+               -> GroupedOperator<GroupConcat> {
         assert!(!separator.is_empty(),
                 "group concat separator cannot be empty");
-        GroupConcat {
-            components: components,
-            separator: separator,
-            src: src,
 
-            srcn: None,
-            cols: 0,
-            group: HashSet::new(),
-            slen: 0,
-            cond: Vec::new(),
-            colfix: Vec::new(),
-        }
+        GroupedOperator::new(src,
+                             GroupConcat {
+                                 components: components,
+                                 separator: separator,
+                                 group: Vec::new(),
+                                 slen: 0,
+                             })
     }
 
     fn build(&self, rec: &[query::DataType]) -> String {
@@ -119,22 +100,22 @@ impl GroupConcat {
     }
 }
 
-impl NodeOp for GroupConcat {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        // who's our parent?
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+impl GroupedOperation for GroupConcat {
+    type Diff = Modify;
 
+    fn setup(&mut self, parent: &ops::V) {
         // group by all columns
-        self.cols = self.srcn.as_ref().unwrap().args().len();
-        self.group.extend(0..self.cols);
+        let cols = parent.args().len();
+        let mut group = HashSet::new();
+        group.extend(0..cols);
         // except the ones that are used in output
         for tc in self.components.iter() {
             if let TextComponent::Column(col) = *tc {
-                assert!(col < self.cols,
-                        "group concat emits fields parent doesn't have");
-                self.group.remove(&col);
+                assert!(col < cols, "group concat emits fields parent doesn't have");
+                group.remove(&col);
             }
         }
+        self.group = group.into_iter().collect();
 
         // how long are we expecting strings to be?
         self.slen = 0;
@@ -145,294 +126,67 @@ impl NodeOp for GroupConcat {
             }
         }
         // plus some fixed size per value
-        self.slen += 10 * (self.cols - self.group.len());
-
-        // construct condition for querying into ourselves
-        self.cond = (0..self.group.len())
-            .into_iter()
-            .map(|col| {
-                shortcut::Condition {
-                    column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        // the query into our own output (above) uses *output* column indices
-        // but when we try to fill it, we have *input* column indices
-        // build a translation mechanism for going from the former to the latter
-        let colfix: Vec<_> = (0..self.cols)
-            .into_iter()
-            .filter_map(|col| {
-                if self.group.contains(&col) {
-                    // the next output column is this column
-                    Some(col)
-                } else {
-                    // this column does not appear in output
-                    None
-                }
-            })
-            .collect();
-        self.colfix.extend(colfix.into_iter());
-
-        vec![self.src]
+        self.slen += 10 * (cols - self.group.len());
     }
 
-    fn forward(&self,
-               u: ops::Update,
-               src: flow::NodeIndex,
-               _: i64,
-               db: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+    fn group_by(&self) -> &[usize] {
+        &self.group[..]
+    }
 
-        assert_eq!(src, self.src);
+    fn zero(&self) -> query::DataType {
+        query::DataType::from("")
+    }
 
-        // Construct the query we'll need to query into ourselves
-        let mut q = self.cond.clone();
-
-        match u {
-            ops::Update::Records(rs) => {
-                if rs.is_empty() {
-                    return None;
-                }
-
-                // First, we want to be smart about multiple added/removed rows with same group.
-                // For example, if we get a -, then a +, for the same group, we don't want to
-                // execute two queries.
-                let mut consolidate = HashMap::new();
-                for rec in rs.into_iter() {
-                    let (r, pos, ts) = rec.extract();
-                    let val = self.build(&r[..]);
-                    let val = if pos {
-                        Modify::Add(val)
-                    } else {
-                        Modify::Remove(val)
-                    };
-                    let val = Some(val);
-                    let group = r.into_iter()
-                        .enumerate()
-                        .map(|(i, v)| {
-                            if self.group.contains(&i) {
-                                Some(v)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    consolidate.entry(group).or_insert_with(Vec::new).push((val, ts));
-                }
-
-                let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (mut group, diffs) in consolidate.into_iter() {
-                    // note that each value in group is an Option so that we can take/swap without
-                    // having to .remove or .insert into the HashMap (which is much more expensive)
-                    // it should only be None for self.over
-
-                    // build a query for this group
-                    for s in q.iter_mut() {
-                        s.cmp = shortcut::Comparison::Equal(
-                            shortcut::Value::Const(
-                                group[self.colfix[s.column]]
-                                .take()
-                                .unwrap()
-                            )
-                        );
-                    }
-
-                    // find the current value for this group
-                    let (current, old_ts) = match db {
-                        Some(db) => {
-                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
-                                assert!(rs.len() <= 1,
-                                        "current group concat had more than 1 result");
-                                // current value is in the last output column
-                                // or "" if there is no current group
-                                rs.into_iter()
-                                    .next()
-                                    .map(|(r, ts)| (r[r.len() - 1].clone().into(), ts))
-                                    .unwrap_or((query::DataType::from(""), 0))
-                            })
-                        }
-                        None => {
-                            // TODO
-                            // query ancestor (self.query?) based on self.group columns
-                            unimplemented!()
-                        }
-                    };
-
-                    // get back values from query (to avoid cloning)
-                    for s in q.iter_mut() {
-                        if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
-                               s.cmp {
-                            use std::mem;
-
-                            let mut x = query::DataType::None;
-                            mem::swap(&mut x, v);
-                            group[self.colfix[s.column]] = Some(x);
-                        }
-                    }
-
-                    // construct prefix of output record
-                    let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend(group.into_iter().filter_map(|v| v));
-
-                    // revoke old value
-                    rec.push(current.clone().into());
-                    out.push(ops::Record::Negative(rec.clone(), old_ts));
-
-                    // new ts is the max change timestamp
-                    let new_ts = diffs.iter().map(|&(_, ts)| ts).max().unwrap();
-
-                    // updating the value is a bit tricky because we want to retain ordering of the
-                    // elements. we therefore need to first split the value, add the new ones,
-                    // remove revoked ones, sort, and then join again. ugh. we try to make it more
-                    // efficient by splitting into a BTree, which maintains sorting while
-                    // supporting efficient add/remove.
-                    let new = {
-                        use std::collections::BTreeSet;
-                        use std::iter::FromIterator;
-
-                        let current = if let query::DataType::Text(ref s) = current {
-                            s
-                        } else {
-                            unreachable!();
-                        };
-                        let clen = current.len();
-
-                        // TODO this is not particularly robust, and requires a non-empty separator
-                        let mut current =
-                            BTreeSet::from_iter(current.split_terminator(self.separator));
-                        for &(ref diff, _) in diffs.iter() {
-                            match *diff {
-                                Some(Modify::Add(ref s)) => {
-                                    current.insert(s);
-                                }
-                                Some(Modify::Remove(ref s)) => {
-                                    current.remove(&**s);
-                                }
-                                None => unreachable!(),
-                            }
-                        }
-
-                        // WHY doesn't rust have an iterator joiner?
-                        let mut new = current.into_iter()
-                            .fold(String::with_capacity(2 * clen), |mut acc, s| {
-                                acc.push_str(&s);
-                                acc.push_str(self.separator);
-                                acc
-                            });
-                        // we pushed one separator too many above
-                        let real_len = new.len() - self.separator.len();
-                        new.truncate(real_len);
-                        new
-                    };
-
-                    // remove the old value from the end of the record
-                    rec.pop();
-
-                    // emit new value
-                    rec.push(new.into());
-                    out.push(ops::Record::Positive(rec, new_ts));
-                }
-
-                Some(ops::Update::Records(out))
-            }
+    fn one(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
+        let v = self.build(r);
+        if pos {
+            Modify::Add(v)
+        } else {
+            Modify::Remove(v)
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
-        use std::iter;
+    fn succ(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType {
+        use std::collections::BTreeSet;
+        use std::iter::FromIterator;
 
-        // we're fetching everything from our parent
-        let mut params = None;
+        // updating the value is a bit tricky because we want to retain ordering of the
+        // elements. we therefore need to first split the value, add the new ones,
+        // remove revoked ones, sort, and then join again. ugh. we try to make it more
+        // efficient by splitting into a BTree, which maintains sorting while
+        // supporting efficient add/remove.
 
-        // however, if there are some conditions that filters over one of our group-bys, we should
-        // use those as parameters to speed things up.
-        if let Some(q) = q {
-            params = Some(q.having.iter().map(|c| {
-                // FIXME: we could technically support querying over the output of the group by,
-                // but we'd have to restructure this function a fair bit so that we keep that part
-                // of the query around for after we've got the results back. We'd then need to do
-                // another filtering pass over the results of query. Unclear if that's worth it.
-                assert!(c.column < self.colfix.len(),
-                        "filtering on group concatenation output is not supported");
+        let current = if let query::DataType::Text(ref s) = *current {
+            s
+        } else {
+            unreachable!();
+        };
+        let clen = current.len();
 
-                shortcut::Condition{
-                    column: self.colfix[c.column],
-                    cmp: c.cmp.clone(),
+        // TODO this is not particularly robust, and requires a non-empty separator
+        let mut current = BTreeSet::from_iter(current.split_terminator(self.separator));
+        for &(ref diff, _) in diffs.iter() {
+            match *diff {
+                Modify::Add(ref s) => {
+                    current.insert(s);
                 }
-            }).collect::<Vec<_>>());
-
-            if params.as_ref().unwrap().len() == 0 {
-                params = None;
+                Modify::Remove(ref s) => {
+                    current.remove(&**s);
+                }
             }
         }
 
-        // now, query our ancestor, and aggregate into groups.
-        let q = params.map(|ps| {
-            query::Query::new(&iter::repeat(true)
-                                  .take(self.cols)
-                                  .collect::<Vec<_>>(),
-                              ps)
-        });
-
-        let rx = self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts));
-
-        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
-        // aggregated state in memory until we've seen all rows.
-        let mut consolidate = HashMap::new();
-        for (rec, ts) in rx.into_iter() {
-            use std::collections::BTreeSet;
-            use std::cmp;
-
-            let val = self.build(&rec[..]);
-            let group = rec.into_iter()
-                .enumerate()
-                .filter_map(|(i, v)| {
-                    if self.group.contains(&i) {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let mut cur = consolidate.entry(group).or_insert_with(|| (BTreeSet::new(), ts));
-            cur.0.insert(val);
-            cur.1 = cmp::max(ts, cur.1);
-        }
-
-        consolidate.into_iter()
-            .map(|(mut group, (vals, ts))| {
-                let mut val = vals.into_iter()
-                    .fold(String::with_capacity(self.slen), |mut acc, s| {
-                        acc.push_str(&s);
-                        acc.push_str(self.separator);
-                        acc
-                    });
-                // we pushed one separator too many above
-                let real_len = val.len() - self.separator.len();
-                val.truncate(real_len);
-                group.push(val.into());
-                // TODO: respect q.select
-                (group, ts)
-            })
-            .collect()
-    }
-
-    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        // index all group by columns
-        Some((this, self.group.iter().cloned().collect()))
-            .into_iter()
-            .collect()
-    }
-
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
-        if col == self.srcn.as_ref().unwrap().args().len() - 1 {
-            return None;
-        }
-        Some(vec![(self.src, self.colfix[col])])
+        // WHY doesn't rust have an iterator joiner?
+        let mut new = current.into_iter()
+            .fold(String::with_capacity(2 * clen), |mut acc, s| {
+                acc.push_str(&s);
+                acc.push_str(self.separator);
+                acc
+            });
+        // we pushed one separator too many above
+        let real_len = new.len() - self.separator.len();
+        new.truncate(real_len);
+        new.into()
     }
 }
 
