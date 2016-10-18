@@ -571,6 +571,20 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         (incoming, qs)
     }
 
+    /// Return a lower bound on the freshness of any subsequent reads to the indicated node.
+    pub fn freshness(&self, node: NodeIndex) -> i64 {
+        match self.mins.get(&node) {
+            Some(m) => m.load(sync::atomic::Ordering::Relaxed) as i64,
+            None => {
+                self.graph
+                    .edges_directed(node, petgraph::EdgeDirection::Incoming)
+                    .map(|(ni, _)| self.freshness(ni))
+                    .min()
+                    .unwrap()
+            }
+        }
+    }
+
     fn inner(state: NodeState<Q, U, D>) {
         use std::collections::VecDeque;
 
@@ -1153,5 +1167,76 @@ mod tests {
 
         // check that value was updated again
         assert_eq!(get[&d](None), vec![2]);
+    }
+
+    #[test]
+    fn freshness() {
+        use ops::union::Union;
+        use ops::aggregate::Aggregation;
+        use ops::base::Base;
+        use ops::gatedid::GatedIdentity;
+
+        let mut g = FlowGraph::new();
+        let cns = &["x", "y"];
+
+        let a = g.incorporate(ops::new("a", cns, true, Base {}));
+        let (ag, atx) = GatedIdentity::new(a);
+        let ag = g.incorporate(ops::new("ag", cns, false, ag));
+
+        let b = g.incorporate(ops::new("a", cns, true, Base {}));
+        let (bg, btx) = GatedIdentity::new(b);
+        let bg = g.incorporate(ops::new("bg", cns, false, bg));
+
+        let c = g.incorporate(ops::new("c", &["y", "count"], true, Aggregation::COUNT.new(ag, 0)));
+        let (cg, ctx) = GatedIdentity::new(c);
+        let cg = g.incorporate(ops::new("cg", &["y", "count"], false, cg));
+
+        let mut emits = HashMap::new();
+        emits.insert(cg, vec![0, 1]);
+        emits.insert(bg, vec![0, 1]);
+        let u = Union::new(emits);
+        let d = g.incorporate(ops::new("d", &["a", "b"], false, u));
+        let (put, _) = g.run(10);
+
+        // Wait until node ni reaches time stamp ts.
+        let wait = |ref g: &FlowGraph<_, _, _>, ni: NodeIndex, ts: i64| {
+            let mut f: i64 = 0;
+            while f < ts {
+                let nf = g.freshness(ni);
+                assert!(nf <= ts);
+                assert!(f <= nf);
+                f = nf;
+            }
+        };
+
+        // Send update to a.
+        assert_eq!(g.freshness(a), 0);
+        assert_eq!(g.freshness(b), 0);
+        assert_eq!(g.freshness(c), 0);
+        assert_eq!(g.freshness(d), 0);
+        put[&a].send(vec![1.into(), 2.into()]);
+        wait(&g, a, 1);
+        wait(&g, b, 1);
+        thread::sleep(time::Duration::from_millis(50));
+        assert_eq!(g.freshness(c), 0);
+        assert_eq!(g.freshness(d), 0);
+
+        atx.send(()).unwrap();
+        wait(&g, c, 1);
+        thread::sleep(time::Duration::from_millis(50));
+        assert_eq!(g.freshness(d), 0);
+
+        ctx.send(()).unwrap();
+        wait(&g, d, 1);
+
+        // Send update to b.
+        put[&b].send(vec![1.into(), 2.into()]);
+        wait(&g, b, 2);
+        wait(&g, c, 2);
+        assert_eq!(g.freshness(a), 2);
+        thread::sleep(time::Duration::from_millis(50));
+        assert_eq!(g.freshness(d), 1);
+        btx.send(()).unwrap();
+        wait(&g, d, 2);
     }
 }
