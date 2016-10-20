@@ -18,15 +18,18 @@ impl Aggregation {
     /// Construct a new `Aggregator` that performs this operation.
     ///
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
-    /// from the `src` node in the graph), and use all other received columns as the group
-    /// identifier. `cols` should be set to the number of columns in this view (that is, the number
-    /// of group identifier columns + 1).
-    pub fn new(self, src: NodeIndex, over: usize) -> GroupedOperator<Aggregator> {
+    /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
+    /// identifier. The `over` column should not be in the `group_by` array.
+    pub fn new(self,
+               src: NodeIndex,
+               over: usize,
+               group_by: &[usize])
+               -> GroupedOperator<Aggregator> {
         GroupedOperator::new(src,
                              Aggregator {
                                  op: self,
                                  over: over,
-                                 group: Vec::new(),
+                                 group: group_by.into(),
                              })
     }
 }
@@ -59,10 +62,10 @@ impl GroupedOperation for Aggregator {
     type Diff = i64;
 
     fn setup(&mut self, parent: &ops::V) {
-        let cols = parent.args().len();
-        assert!(self.over < cols,
+        assert!(self.over < parent.args().len(),
                 "cannot aggregate over non-existing column");
-        self.group = (0..cols).filter(|&i| i != self.over).collect();
+        assert!(!self.group.iter().any(|&i| i == self.over),
+                "cannot group by aggregation column");
     }
 
     fn group_by(&self) -> &[usize] {
@@ -128,7 +131,11 @@ mod tests {
         g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
         g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
 
-        let mut c = Aggregation::COUNT.new(s, 1);
+        let mut c = if wide {
+            Aggregation::COUNT.new(s, 1, &[0, 2])
+        } else {
+            Aggregation::COUNT.new(s, 1, &[0])
+        };
         c.prime(&g);
         if wide {
             ops::new("agg", &["x", "z", "ys"], mat, c)

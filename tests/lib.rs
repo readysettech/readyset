@@ -205,7 +205,7 @@ fn votes() {
     let vc = g.incorporate(new("vc",
                                &["id", "votes"],
                                true,
-                               Aggregation::COUNT.new(vote, 0)));
+                               Aggregation::COUNT.new(vote, 0, &[1])));
 
     // add final join using first field from article and first from vc
     let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])

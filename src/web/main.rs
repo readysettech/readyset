@@ -16,13 +16,14 @@ fn main() {
     // add vote base table
     let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 
+    // add a user account base table
     g.incorporate(new("user", &["id", "username", "hash"], true, Base {}));
 
     // add vote count
     let vc = g.incorporate(new("votecount",
                                &["id", "votes"],
                                true,
-                               Aggregation::COUNT.new(vote, 0)));
+                               Aggregation::COUNT.new(vote, 0, &[1])));
 
     // add final join -- joins on first field of each input
     let j = JoinBuilder::new(vec![(article, 0), (article, 1), (article, 2), (article, 3), (vc, 1)])
@@ -33,7 +34,7 @@ fn main() {
     g.incorporate(new("karma",
                       &["user", "votes"],
                       true,
-                      Aggregation::SUM.new(awvc, 1)));
+                      Aggregation::SUM.new(awvc, 4, &[1])));
     web::run(g).unwrap();
 }
 

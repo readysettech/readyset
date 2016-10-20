@@ -162,7 +162,7 @@ impl<T> Ord for Delayed<T> {
 /// // set up a base node and a view
 /// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// let votecount = g.incorporate(
-///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0))
+///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, &[1]))
 /// );
 /// # drop(vote);
 /// # drop(votecount);
@@ -182,7 +182,7 @@ impl<T> Ord for Delayed<T> {
 /// # let mut g = FlowGraph::new();
 /// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// # let votecount = g.incorporate(
-/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0))
+/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, &[1]))
 /// # );
 /// // start the data flow graph
 /// let (put, get) = g.run(10);
@@ -1187,7 +1187,10 @@ mod tests {
         let (bg, btx) = GatedIdentity::new(b);
         let bg = g.incorporate(ops::new("bg", cns, false, bg));
 
-        let c = g.incorporate(ops::new("c", &["y", "count"], true, Aggregation::COUNT.new(ag, 0)));
+        let c = g.incorporate(ops::new("c",
+                                       &["y", "count"],
+                                       true,
+                                       Aggregation::COUNT.new(ag, 0, &[1])));
         let (cg, ctx) = GatedIdentity::new(c);
         let cg = g.incorporate(ops::new("cg", &["y", "count"], false, cg));
 
