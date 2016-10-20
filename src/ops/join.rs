@@ -14,6 +14,7 @@ use shortcut;
 struct JoinTarget {
     fields: Vec<(usize, usize)>,
     select: Vec<bool>,
+    outer: bool,
 }
 
 #[derive(Debug)]
@@ -22,21 +23,39 @@ struct Join {
     node: Option<ops::V>,
 }
 
-/// Joiner provides a 2-way join between two views.
-///
-/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
-/// `.join` such that it can express "query this view first, then use one of its columns to query
-/// this other view".
-#[derive(Debug)]
-pub struct Joiner {
+/// Convenience struct for building join nodes.
+pub struct Builder {
     emit: Vec<(flow::NodeIndex, usize)>,
-    join: HashMap<flow::NodeIndex, Join>,
+    join: HashMap<flow::NodeIndex, (bool, Vec<usize>)>,
 }
 
-impl Joiner {
-    /// Construct a new join operator.
+impl Builder {
+    /// Build a new join operator.
     ///
-    /// Joins are currently somewhat verbose to construct, though the process isn't too complex.
+    /// `emit` dictates, for each output column, which source and column should be used.
+    pub fn new(emit: Vec<(flow::NodeIndex, usize)>) -> Self {
+        Builder {
+            emit: emit,
+            join: HashMap::new(),
+        }
+    }
+
+    /// Set the source view for this join.
+    ///
+    /// This is semantically identical to `join`, except that it also asserts that this is the
+    /// first view being added. The first view is of particular importance as it dictates the
+    /// behavior of later *left* joins (when they are added).
+    pub fn from(self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+        assert!(self.join.is_empty());
+        self.join(node, groups)
+    }
+
+    /// Also join with the given `node`.
+    ///
+    /// `groups` gives the group assignments for each output column of `node`. Columns across join
+    /// sources that share a group are used to join rows from those sources by equality. Thus, each
+    /// group number can appear at most once for each view.
+    ///
     /// Let us look at a SQL join such as
     ///
     /// ```sql
@@ -44,27 +63,31 @@ impl Joiner {
     /// FROM a JOIN b USING (a.0 == b.1)
     /// ```
     ///
-    /// First, we construct the `emit` argument by indicating, for each output, which source and
-    /// column should be used. `vec![(a, 0), (b, 1)]` in this case.
-    ///
-    /// Next, we have to tell the `Joiner` how to construct an output row given an input row of any
-    /// type. For each input view, we construct a list of the same length as the number of columns
-    /// of that view, where each element is either 0 or a *group number*. Columns which share a
-    /// group number are used to join nodes by equality. Thus, each group number can appear at most
-    /// once for each view.
-    ///
-    /// In the above example, assuming `a` has two columns and `b` has three, the map would look
-    /// like this:
+    /// Assuming `a` has two columns and `b` has three, the map would look like this:
     ///
     /// ```rust,ignore
-    /// map.insert(a, vec![1, 0]);
-    /// map.insert(b, vec![0, 1, 0]);
+    /// Builder::new(vec![(a, 0), (b, 0)]).from(a, vec![1, 0]).join(b, vec![0, 1, 0]);
     /// ```
-    pub fn new(emit: Vec<(flow::NodeIndex, usize)>,
-               join: HashMap<flow::NodeIndex, Vec<usize>>)
-               -> Joiner {
+    pub fn join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+        assert!(self.join.insert(node, (false, groups)).is_none());
+        self
+    }
 
-        if join.len() != 2 {
+    /// Also perform a left join against the given `node`.
+    ///
+    /// The semantics of this is similar to the SQL notion of a `LEFT JOIN`, namely that records
+    /// from other tables that join against this table will always be present in the output,
+    /// regardless of whether matching records exist in `node`. For such *zero rows*, all columns
+    /// emitted from this node will be set to `DataType::None`.
+    pub fn left_join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+        assert!(self.join.insert(node, (true, groups)).is_none());
+        self
+    }
+}
+
+impl From<Builder> for Joiner {
+    fn from(b: Builder) -> Joiner {
+        if b.join.len() != 2 {
             // only two-way joins are currently supported
             unimplemented!();
         }
@@ -88,8 +111,9 @@ impl Joiner {
         //     p: NodeIndex => [(srci, pi), ...]
         //   }
         //
-        let join = join.iter()
-            .map(|(&src, srcg)| {
+        let join = b.join
+            .iter()
+            .map(|(&src, &(_, ref srcg))| {
                 // which groups are bound to which columns?
                 let g2c = srcg.iter()
                     .enumerate()
@@ -97,8 +121,9 @@ impl Joiner {
                     .collect::<HashMap<_, _>>();
 
                 // for every other view
-                let other = join.iter()
-                    .filter_map(|(&p, pg)| {
+                let other = b.join
+                    .iter()
+                    .filter_map(|(&p, &(outer, ref pg))| {
                         // *other* view
                         if p == src {
                             return None;
@@ -123,6 +148,7 @@ impl Joiner {
                         Some((p,
                               JoinTarget {
                             fields: pg,
+                            outer: outer,
                             select: Vec::new(),
                         }))
                     })
@@ -137,11 +163,36 @@ impl Joiner {
             .collect();
 
         Joiner {
-            emit: emit,
+            emit: b.emit,
             join: join,
         }
     }
+}
 
+impl From<Joiner> for NodeType {
+    fn from(b: Joiner) -> NodeType {
+        NodeType::JoinNode(b)
+    }
+}
+
+impl From<Builder> for NodeType {
+    fn from(b: Builder) -> NodeType {
+        NodeType::JoinNode(b.into())
+    }
+}
+
+/// Joiner provides a 2-way join between two views.
+///
+/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
+/// `.join` such that it can express "query this view first, then use one of its columns to query
+/// this other view".
+#[derive(Debug)]
+pub struct Joiner {
+    emit: Vec<(flow::NodeIndex, usize)>,
+    join: HashMap<flow::NodeIndex, Join>,
+}
+
+impl Joiner {
     fn join<'a>(&'a self,
                 left: (flow::NodeIndex, Vec<query::DataType>, i64),
                 ts: i64)
@@ -168,6 +219,22 @@ impl Joiner {
 
         // send the parameters to start the query.
         let rx = self.join[&other].node.as_ref().unwrap().find(Some(&q), Some(ts));
+
+        if rx.is_empty() && target.outer {
+            return Box::new(Some((self.emit
+                    .iter()
+                    .map(|&(source, column)| {
+                        if source == other {
+                            query::DataType::None
+                        } else {
+                            // this clone is unnecessary
+                            left.1[column].clone()
+                        }
+                    })
+                    .collect(),
+                                  left.2))
+                .into_iter());
+        }
 
         Box::new(rx.into_iter().map(move |(right, rts)| {
             use std::cmp;
@@ -201,12 +268,6 @@ impl Joiner {
             // place.
             (r, cmp::max(left.2, rts))
         }))
-    }
-}
-
-impl From<Joiner> for NodeType {
-    fn from(b: Joiner) -> NodeType {
-        NodeType::JoinNode(b)
     }
 }
 
@@ -377,9 +438,8 @@ mod tests {
 
     use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
 
-    fn setup() -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
+    fn setup(left: bool) -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
         use std::sync;
 
         let mut g = petgraph::Graph::new();
@@ -400,40 +460,31 @@ mod tests {
         g[r].as_ref().unwrap().process((vec![2.into(), "z".into()], 2).into(), r, 2);
 
         // join on first field
-        let mut join = HashMap::new();
-        join.insert(l, vec![1, 0]);
-        join.insert(r, vec![1, 0]);
-
-        // emit first and second field from left
-        // third field from right
-        let emit = vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)];
-
-        let mut c = Joiner::new(emit, join);
+        let b = Builder::new(vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)]).from(l, vec![1, 0]);
+        let b = if left {
+            b.left_join(r, vec![1, 0])
+        } else {
+            b.join(r, vec![1, 0])
+        };
+        let mut c: Joiner = b.into();
         c.prime(&g);
         (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
     }
 
-    #[test]
-    fn it_works() {
-        let (j, l, _) = setup();
-
+    fn forward_non_weird(j: ops::Node, l: flow::NodeIndex, r: flow::NodeIndex) {
         // these are the data items we have to work with
         // these are in left
         let l_a1 = vec![1.into(), "a".into()];
         let l_b2 = vec![2.into(), "b".into()];
-        let l_c3 = vec![3.into(), "c".into()];
+        // let l_c3 = vec![3.into(), "c".into()]; // considered weird
         // these are in right
-        // let r_x1 = vec![1.into(), "x".into()];
-        // let r_y1 = vec![1.into(), "y".into()];
-        // let r_z2 = vec![2.into(), "z".into()];
+        let r_x1 = vec![1.into(), "x".into()];
+        let r_y1 = vec![1.into(), "y".into()];
+        let r_z2 = vec![2.into(), "z".into()];
 
-        // forward c3 from left; should produce [] since no records in right are 3
-        match j.process(l_c3.clone().into(), l, 100).unwrap() {
-            ops::Update::Records(rs) => {
-                // right has no records with value 3
-                assert_eq!(rs.len(), 0);
-            }
-        }
+        // *************************************
+        // forward from the left
+        // *************************************
 
         // forward b2 from left; should produce [b2*z2]
         match j.process(l_b2.clone().into(), l, 100).unwrap() {
@@ -460,12 +511,84 @@ mod tests {
             }
         }
 
-        // TODO: write tests that forward from right
+        // *************************************
+        // forward from the right
+        // *************************************
+
+        // forward x1 from right; should produce [a1*x1]
+        match j.process(r_x1.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()], 0)]);
+            }
+        }
+
+        // forward y1 from right; should produce [a1*y1]
+        match j.process(r_y1.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "y".into()], 0)]);
+            }
+        }
+
+        // forward z2 from right; should produce [b2*z2]
+        match j.process(r_z2.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
+                // right's (b2's) timestamp will be used.
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 1)]);
+            }
+        }
+    }
+
+    #[test]
+    fn it_works() {
+        let (j, l, r) = setup(false);
+        let l_c3 = vec![3.into(), "c".into()];
+
+        // forward c3 from left; should produce [] since no records in right are 3
+        match j.process(l_c3.clone().into(), l, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // right has no records with value 3
+                assert_eq!(rs.len(), 0);
+            }
+        }
+
+        forward_non_weird(j, l, r);
+    }
+
+    #[test]
+    fn it_works_left() {
+        let (j, l, r) = setup(true);
+
+        let l_c3 = vec![3.into(), "c".into()];
+
+        // forward c3 from left; should produce [c3 + None] since no records in right are 3
+        match j.process(l_c3.clone().into(), l, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // right has no records with value 3, so we're expecting a single record with None
+                // for all columns output from the (non-existing) right record
+                assert_eq!(rs.len(), 1);
+                // that row should be positive
+                assert!(rs.iter().all(|r| r.is_positive()));
+                // and should have the correct values from the provided left
+                assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
+                // and None for the remaining column
+                assert!(rs.iter().any(|r| r.rec()[2] == query::DataType::None));
+                // and finally, the timestamp of the output should be the timestamp of the left
+                // (which is 0 given that we use the Vec -> ops::Update conversion)
+                assert!(rs.iter().any(|r| r.ts() == 0));
+            }
+        }
+
+        forward_non_weird(j, l, r);
     }
 
     #[test]
     fn it_queries() {
-        let (j, _, _) = setup();
+        let (j, _, _) = setup(false);
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz]
@@ -532,9 +655,35 @@ mod tests {
     }
 
     #[test]
+    fn it_queries_left() {
+        let (j, _, _) = setup(true);
+
+        // do a full query, which should return product of left + right:
+        // [ax, ay, bz, c+None]
+        let hits = j.find(None, None);
+        assert_eq!(hits.len(), 4);
+        assert!(hits.iter()
+            .any(|&(ref r, ts)| {
+                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
+            }));
+        assert!(hits.iter()
+            .any(|&(ref r, ts)| {
+                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
+            }));
+        assert!(hits.iter()
+            .any(|&(ref r, ts)| {
+                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
+            }));
+        assert!(hits.iter()
+            .any(|&(ref r, ts)| {
+                ts == 2 && r[0] == 3.into() && r[1] == "c".into() && r[2] == query::DataType::None
+            }));
+    }
+
+    #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
-        let (j, l, r) = setup();
+        let (j, l, r) = setup(false);
         let hm: HashMap<_, _> = vec![
             (l, vec![0]), // join column for left
             (r, vec![0]), // join column for right
@@ -547,7 +696,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let (j, _, _) = setup();
+        let (j, _, _) = setup(false);
         assert_eq!(j.resolve(0), Some(vec![(0.into(), 0)]));
         assert_eq!(j.resolve(1), Some(vec![(0.into(), 1)]));
         assert_eq!(j.resolve(2), Some(vec![(1.into(), 1)]));
