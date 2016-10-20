@@ -465,27 +465,20 @@ mod tests {
         (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
     }
 
-    #[test]
-    fn it_works() {
-        let (j, l, _) = setup(false);
-
+    fn forward_non_weird(j: ops::Node, l: flow::NodeIndex, r: flow::NodeIndex) {
         // these are the data items we have to work with
         // these are in left
         let l_a1 = vec![1.into(), "a".into()];
         let l_b2 = vec![2.into(), "b".into()];
-        let l_c3 = vec![3.into(), "c".into()];
+        // let l_c3 = vec![3.into(), "c".into()]; // considered weird
         // these are in right
-        // let r_x1 = vec![1.into(), "x".into()];
-        // let r_y1 = vec![1.into(), "y".into()];
-        // let r_z2 = vec![2.into(), "z".into()];
+        let r_x1 = vec![1.into(), "x".into()];
+        let r_y1 = vec![1.into(), "y".into()];
+        let r_z2 = vec![2.into(), "z".into()];
 
-        // forward c3 from left; should produce [] since no records in right are 3
-        match j.process(l_c3.clone().into(), l, 100).unwrap() {
-            ops::Update::Records(rs) => {
-                // right has no records with value 3
-                assert_eq!(rs.len(), 0);
-            }
-        }
+        // *************************************
+        // forward from the left
+        // *************************************
 
         // forward b2 from left; should produce [b2*z2]
         match j.process(l_b2.clone().into(), l, 100).unwrap() {
@@ -512,22 +505,59 @@ mod tests {
             }
         }
 
-        // TODO: write tests that forward from right
+        // *************************************
+        // forward from the right
+        // *************************************
+
+        // forward x1 from right; should produce [a1*x1]
+        match j.process(r_x1.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()], 0)]);
+            }
+        }
+
+        // forward y1 from right; should produce [a1*y1]
+        match j.process(r_y1.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "y".into()], 0)]);
+            }
+        }
+
+        // forward z2 from right; should produce [b2*z2]
+        match j.process(r_z2.clone().into(), r, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
+                // right's (b2's) timestamp will be used.
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 1)]);
+            }
+        }
+    }
+
+    #[test]
+    fn it_works() {
+        let (j, l, r) = setup(false);
+        let l_c3 = vec![3.into(), "c".into()];
+
+        // forward c3 from left; should produce [] since no records in right are 3
+        match j.process(l_c3.clone().into(), l, 100).unwrap() {
+            ops::Update::Records(rs) => {
+                // right has no records with value 3
+                assert_eq!(rs.len(), 0);
+            }
+        }
+
+        forward_non_weird(j, l, r);
     }
 
     #[test]
     fn it_works_left() {
-        let (j, l, _) = setup(true);
+        let (j, l, r) = setup(true);
 
-        // these are the data items we have to work with
-        // these are in left
-        let l_a1 = vec![1.into(), "a".into()];
-        let l_b2 = vec![2.into(), "b".into()];
         let l_c3 = vec![3.into(), "c".into()];
-        // these are in right
-        // let r_x1 = vec![1.into(), "x".into()];
-        // let r_y1 = vec![1.into(), "y".into()];
-        // let r_z2 = vec![2.into(), "z".into()];
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
         match j.process(l_c3.clone().into(), l, 100).unwrap() {
@@ -547,33 +577,7 @@ mod tests {
             }
         }
 
-        // forward b2 from left; should produce [b2*z2] as with regular join
-        match j.process(l_b2.clone().into(), l, 100).unwrap() {
-            ops::Update::Records(rs) => {
-                // we're expecting to only match z2
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 2)]);
-            }
-        }
-
-        // forward a1 from left; should produce [a1*x1, a1*y1] as with regular join
-        match j.process(l_a1.clone().into(), l, 100).unwrap() {
-            ops::Update::Records(rs) => {
-                // we're expecting two results: x1 and y1
-                assert_eq!(rs.len(), 2);
-                // they should all be positive since input was positive
-                assert!(rs.iter().all(|r| r.is_positive()));
-                // they should all have the correct values from the provided left
-                assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
-                // and both join results should be present
-                // with ts set to be the max of left and right
-                assert!(rs.iter().any(|r| r.rec()[2] == "x".into() && r.ts() == 0));
-                assert!(rs.iter().any(|r| r.rec()[2] == "y".into() && r.ts() == 1));
-            }
-        }
-
-        // FIXME: write tests that forward from right
-        // this is *much* more important for this test than the it_works test
+        forward_non_weird(j, l, r);
     }
 
     #[test]
