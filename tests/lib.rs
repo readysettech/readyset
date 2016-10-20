@@ -182,7 +182,7 @@ fn it_migrates_w_mat() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Query, Aggregation, Joiner, new};
+    use distributary::{Base, Union, Query, Aggregation, JoinBuilder, new};
 
     // set up graph
     let mut g = distributary::FlowGraph::new();
@@ -208,13 +208,9 @@ fn votes() {
                                Aggregation::COUNT.new(vote, 0)));
 
     // add final join using first field from article and first from vc
-    let mut join = HashMap::new();
-    join.insert(article, vec![1, 0]);
-    join.insert(vc, vec![1, 0]);
-    // emit first and second field from article (id + title)
-    // and second field from right (votes)
-    let emit = vec![(article, 0), (article, 1), (vc, 1)];
-    let j = Joiner::new(emit, join);
+    let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
+        .from(article, vec![1, 0])
+        .join(vc, vec![1, 0]);
     let end = g.incorporate(new("end", &["id", "title", "votes"], true, j));
 
     // start processing

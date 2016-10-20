@@ -384,7 +384,7 @@ pub use ops::NodeType;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
-pub use ops::join::Joiner;
+pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use query::Query;

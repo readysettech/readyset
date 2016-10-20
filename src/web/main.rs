@@ -6,7 +6,6 @@ extern crate shortcut;
 #[cfg(feature="web")]
 fn main() {
     use distributary::*;
-    use std::collections::HashMap;
 
     // set up graph
     let mut g = distributary::FlowGraph::new();
@@ -26,16 +25,10 @@ fn main() {
                                Aggregation::COUNT.new(vote, 0)));
 
     // add final join -- joins on first field of each input
-    let mut join = HashMap::new();
-    join.insert(article, vec![1, 0]);
-    join.insert(vc, vec![1, 0]);
-    // emit first, second, and third field from article (id + user + title + url)
-    // and second field from right (votes)
-    let emit = vec![(article, 0), (article, 1), (article, 2), (article, 3), (vc, 1)];
-    let awvc = g.incorporate(new("awvc",
-                                 &["id", "user", "title", "url", "votes"],
-                                 true,
-                                 Joiner::new(emit, join)));
+    let j = JoinBuilder::new(vec![(article, 0), (article, 1), (article, 2), (article, 3), (vc, 1)])
+        .from(article, vec![1, 0])
+        .join(vc, vec![1, 0]);
+    let awvc = g.incorporate(new("awvc", &["id", "user", "title", "url", "votes"], true, j));
 
     g.incorporate(new("karma",
                       &["user", "votes"],

@@ -14,7 +14,6 @@ use backlog;
 use petgraph;
 use shortcut;
 
-use std::convert;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync;
@@ -416,11 +415,10 @@ impl flow::View<query::Query> for Node {
 /// used as a node in a `FlowGraph`. By setting `materialied` to true, the operator's outputs will
 /// be materialized and transparently used for queries when they arrive. `name` and `fields` are
 /// used to give human-friendly values for the node and its record columns respectively.
-pub fn new<'a, NS, S: ?Sized, NO>(name: NS, fields: &[&'a S], materialized: bool, inner: NO) -> Node
+pub fn new<'a, NS, S: ?Sized, N>(name: NS, fields: &[&'a S], materialized: bool, inner: N) -> Node
     where &'a S: Into<String>,
           NS: Into<String>,
-          NO: NodeOp,
-          NodeType: convert::From<NO>
+          NodeType: From<N>
 {
     let mut data = None;
     if materialized {

@@ -22,21 +22,39 @@ struct Join {
     node: Option<ops::V>,
 }
 
-/// Joiner provides a 2-way join between two views.
-///
-/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
-/// `.join` such that it can express "query this view first, then use one of its columns to query
-/// this other view".
-#[derive(Debug)]
-pub struct Joiner {
+/// Convenience struct for building join nodes.
+pub struct Builder {
     emit: Vec<(flow::NodeIndex, usize)>,
-    join: HashMap<flow::NodeIndex, Join>,
+    join: HashMap<flow::NodeIndex, Vec<usize>>,
 }
 
-impl Joiner {
-    /// Construct a new join operator.
+impl Builder {
+    /// Build a new join operator.
     ///
-    /// Joins are currently somewhat verbose to construct, though the process isn't too complex.
+    /// `emit` dictates, for each output column, which source and column should be used.
+    pub fn new(emit: Vec<(flow::NodeIndex, usize)>) -> Self {
+        Builder {
+            emit: emit,
+            join: HashMap::new(),
+        }
+    }
+
+    /// Set the source view for this join.
+    ///
+    /// This is semantically identical to `join`, except that it also asserts that this is the
+    /// first view being added. The first view is of particular importance as it dictates the
+    /// behavior of later *left* joins (when they are added).
+    pub fn from(self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+        assert!(self.join.is_empty());
+        self.join(node, groups)
+    }
+
+    /// Also join with the given `node`.
+    ///
+    /// `groups` gives the group assignments for each output column of `node`. Columns across join
+    /// sources that share a group are used to join rows from those sources by equality. Thus, each
+    /// group number can appear at most once for each view.
+    ///
     /// Let us look at a SQL join such as
     ///
     /// ```sql
@@ -44,27 +62,20 @@ impl Joiner {
     /// FROM a JOIN b USING (a.0 == b.1)
     /// ```
     ///
-    /// First, we construct the `emit` argument by indicating, for each output, which source and
-    /// column should be used. `vec![(a, 0), (b, 1)]` in this case.
-    ///
-    /// Next, we have to tell the `Joiner` how to construct an output row given an input row of any
-    /// type. For each input view, we construct a list of the same length as the number of columns
-    /// of that view, where each element is either 0 or a *group number*. Columns which share a
-    /// group number are used to join nodes by equality. Thus, each group number can appear at most
-    /// once for each view.
-    ///
-    /// In the above example, assuming `a` has two columns and `b` has three, the map would look
-    /// like this:
+    /// Assuming `a` has two columns and `b` has three, the map would look like this:
     ///
     /// ```rust,ignore
-    /// map.insert(a, vec![1, 0]);
-    /// map.insert(b, vec![0, 1, 0]);
+    /// Builder::new(vec![(a, 0), (b, 0)]).from(a, vec![1, 0]).join(b, vec![0, 1, 0]);
     /// ```
-    pub fn new(emit: Vec<(flow::NodeIndex, usize)>,
-               join: HashMap<flow::NodeIndex, Vec<usize>>)
-               -> Joiner {
+    pub fn join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+        assert!(self.join.insert(node, groups).is_none());
+        self
+    }
+}
 
-        if join.len() != 2 {
+impl From<Builder> for Joiner {
+    fn from(b: Builder) -> Joiner {
+        if b.join.len() != 2 {
             // only two-way joins are currently supported
             unimplemented!();
         }
@@ -88,7 +99,8 @@ impl Joiner {
         //     p: NodeIndex => [(srci, pi), ...]
         //   }
         //
-        let join = join.iter()
+        let join = b.join
+            .iter()
             .map(|(&src, srcg)| {
                 // which groups are bound to which columns?
                 let g2c = srcg.iter()
@@ -97,7 +109,8 @@ impl Joiner {
                     .collect::<HashMap<_, _>>();
 
                 // for every other view
-                let other = join.iter()
+                let other = b.join
+                    .iter()
                     .filter_map(|(&p, pg)| {
                         // *other* view
                         if p == src {
@@ -137,11 +150,36 @@ impl Joiner {
             .collect();
 
         Joiner {
-            emit: emit,
+            emit: b.emit,
             join: join,
         }
     }
+}
 
+impl From<Joiner> for NodeType {
+    fn from(b: Joiner) -> NodeType {
+        NodeType::JoinNode(b)
+    }
+}
+
+impl From<Builder> for NodeType {
+    fn from(b: Builder) -> NodeType {
+        NodeType::JoinNode(b.into())
+    }
+}
+
+/// Joiner provides a 2-way join between two views.
+///
+/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
+/// `.join` such that it can express "query this view first, then use one of its columns to query
+/// this other view".
+#[derive(Debug)]
+pub struct Joiner {
+    emit: Vec<(flow::NodeIndex, usize)>,
+    join: HashMap<flow::NodeIndex, Join>,
+}
+
+impl Joiner {
     fn join<'a>(&'a self,
                 left: (flow::NodeIndex, Vec<query::DataType>, i64),
                 ts: i64)
@@ -201,12 +239,6 @@ impl Joiner {
             // place.
             (r, cmp::max(left.2, rts))
         }))
-    }
-}
-
-impl From<Joiner> for NodeType {
-    fn from(b: Joiner) -> NodeType {
-        NodeType::JoinNode(b)
     }
 }
 
@@ -377,7 +409,6 @@ mod tests {
 
     use flow::View;
     use ops::NodeOp;
-    use std::collections::HashMap;
 
     fn setup() -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
         use std::sync;
@@ -400,15 +431,10 @@ mod tests {
         g[r].as_ref().unwrap().process((vec![2.into(), "z".into()], 2).into(), r, 2);
 
         // join on first field
-        let mut join = HashMap::new();
-        join.insert(l, vec![1, 0]);
-        join.insert(r, vec![1, 0]);
-
-        // emit first and second field from left
-        // third field from right
-        let emit = vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)];
-
-        let mut c = Joiner::new(emit, join);
+        let mut c: Joiner = Builder::new(vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)])
+            .from(l, vec![1, 0])
+            .join(r, vec![1, 0])
+            .into();
         c.prime(&g);
         (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
     }
