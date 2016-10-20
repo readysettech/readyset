@@ -73,6 +73,12 @@ impl Builder {
         self
     }
 
+    /// Also perform a left join against the given `node`.
+    ///
+    /// The semantics of this is similar to the SQL notion of a `LEFT JOIN`, namely that records
+    /// from other tables that join against this table will always be present in the output,
+    /// regardless of whether matching records exist in `node`. For such *zero rows*, all columns
+    /// emitted from this node will be set to `DataType::None`.
     pub fn left_join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
         assert!(self.join.insert(node, (true, groups)).is_none());
         self
