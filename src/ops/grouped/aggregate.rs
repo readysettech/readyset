@@ -25,6 +25,8 @@ impl Aggregation {
                over: usize,
                group_by: &[usize])
                -> GroupedOperator<Aggregator> {
+        assert!(!group_by.iter().any(|&i| i == over),
+                "cannot group by aggregation column");
         GroupedOperator::new(src,
                              Aggregator {
                                  op: self,
@@ -64,8 +66,6 @@ impl GroupedOperation for Aggregator {
     fn setup(&mut self, parent: &ops::V) {
         assert!(self.over < parent.args().len(),
                 "cannot aggregate over non-existing column");
-        assert!(!self.group.iter().any(|&i| i == self.over),
-                "cannot group by aggregation column");
     }
 
     fn group_by(&self) -> &[usize] {
