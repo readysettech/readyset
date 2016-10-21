@@ -106,9 +106,14 @@ pub struct Query {
 }
 
 impl Query {
+    /// Filter the given record `r` through this query's conditions.
+    pub fn filter(&self, r: &[DataType]) -> bool {
+        self.having.iter().all(|c| c.matches(r))
+    }
+
     /// Filter and project the given record `r` through this query.
     pub fn feed(&self, r: Vec<DataType>) -> Option<Vec<DataType>> {
-        if self.having.iter().all(|c| c.matches(&r[..])) {
+        if self.filter(&r[..]) {
             // Data matches -- project and return
             Some(self.project(r))
         } else {

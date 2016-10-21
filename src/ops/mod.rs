@@ -293,6 +293,14 @@ pub struct Node {
     fields: Vec<String>,
     data: sync::Arc<Option<backlog::BufferedStore>>,
     inner: sync::Arc<NodeType>,
+    having: Option<query::Query>,
+}
+
+impl Node {
+    pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
+        self.having = Some(query::Query::new(&[], cond));
+        self
+    }
 }
 
 impl Debug for Node {
@@ -313,6 +321,7 @@ impl flow::View<query::Query> for Node {
         // find and return matching rows
         if let Some(ref data) = *self.data {
             // data.find already applies the query
+            // NOTE: self.having has already been applied
             data.find(q, ts)
         } else {
             // we are not materialized --- query.
@@ -321,7 +330,11 @@ impl flow::View<query::Query> for Node {
             // TODO: what timestamp do we use here? it's not clear. there's always a race in which
             // our ancestor ends up absorbing that timestamp by the time the query reaches them :/
             let ts = ts.unwrap_or(i64::max_value());
-            let rs = self.inner.query(q, ts);
+            let mut rs = self.inner.query(q, ts);
+
+            if let Some(ref hq) = self.having {
+                rs.retain(|&(ref r, _)| hq.filter(r));
+            }
 
             // to avoid repeating the projection logic in every op, we do it here instead
             if let Some(q) = q {
@@ -354,10 +367,14 @@ impl flow::View<query::Query> for Node {
         // TODO: the incoming update has not been projected through the query, and so does not fit
         // the expected input format. let's fix that.
 
-        let new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
-        if let Some(ref new_u) = new_u {
+        let mut new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
+        if let Some(ref mut new_u) = new_u {
             match *new_u {
-                Update::Records(ref rs) => {
+                Update::Records(ref mut rs) => {
+                    if let Some(ref hq) = self.having {
+                        rs.retain(|r| hq.filter(r.rec()));
+                    }
+
                     if let Some(data) = self.data.deref().as_ref() {
                         // NOTE: data.add requires that we guarantee that there are not concurrent
                         // writers. since each node only processes one update at the time, this is
@@ -430,6 +447,7 @@ pub fn new<'a, NS, S: ?Sized, N>(name: NS, fields: &[&'a S], materialized: bool,
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(NodeType::from(inner)),
+        having: None,
     }
 }
 
