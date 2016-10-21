@@ -293,6 +293,22 @@ pub struct Node {
     fields: Vec<String>,
     data: sync::Arc<Option<backlog::BufferedStore>>,
     inner: sync::Arc<NodeType>,
+    having: Option<query::Query>,
+}
+
+impl Node {
+    /// Add an output filter to this node.
+    ///
+    /// Only records matching the given conditions will be output from this node. This filtering
+    /// applies both to feed-forward and to queries. Note that adding conditions in this way does
+    /// *not* modify a node's input, and so the node may end up performing computation whose result
+    /// will simply be discarded.
+    ///
+    /// Adding a HAVING condition will not reduce the size of the node's materialized state.
+    pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
+        self.having = Some(query::Query::new(&[], cond));
+        self
+    }
 }
 
 impl Debug for Node {
@@ -311,8 +327,9 @@ impl flow::View<query::Query> for Node {
 
     fn find(&self, q: Option<&query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
-        if let Some(ref data) = *self.data {
+        let mut res = if let Some(ref data) = *self.data {
             // data.find already applies the query
+            // NOTE: self.having has already been applied
             data.find(q, ts)
         } else {
             // we are not materialized --- query.
@@ -331,7 +348,16 @@ impl flow::View<query::Query> for Node {
             } else {
                 rs
             }
+        };
+
+        // NOTE: in theory, we could mark records as 'internal' in Store, and have the materialized
+        // find above only return non-internal records. That would get rid of this second-pass, and
+        // might speed up common-case operation. However, it's not clear that this is something we
+        // really need.
+        if let Some(ref hq) = self.having {
+            res.retain(|&(ref r, _)| hq.filter(r));
         }
+        res
     }
 
     fn init_at(&self, init_ts: i64) {
@@ -354,16 +380,32 @@ impl flow::View<query::Query> for Node {
         // TODO: the incoming update has not been projected through the query, and so does not fit
         // the expected input format. let's fix that.
 
-        let new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
-        if let Some(ref new_u) = new_u {
+        let mut new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
+        if let Some(ref mut new_u) = new_u {
             match *new_u {
-                Update::Records(ref rs) => {
+                Update::Records(ref mut rs) => {
                     if let Some(data) = self.data.deref().as_ref() {
                         // NOTE: data.add requires that we guarantee that there are not concurrent
                         // writers. since each node only processes one update at the time, this is
                         // the case.
                         unsafe { data.add(rs.clone(), ts) };
                     }
+
+                    // notice that we always store forwarded updates in the materialized state,
+                    // *even those that do not match the HAVING filter*. this is so that the node
+                    // can still query into its own state to see those updates. to see why this is
+                    // necessary, consider a materialized COUNT aggregation whose HAVING condition
+                    // evaluates to true only when the COUNT is 1. when the first record for a
+                    // group comes in, a +1 is emitted and materialized. when the second record
+                    // comes in, [-1,+2] is emitted, but the +2 is removed by the HAVING. if the +2
+                    // is not persisted in the materialized state, then the next record that comes
+                    // along for the group will see that there is no current count, and so assume
+                    // taht it is 0. the aggregation will then produce [-0,+1], which is obviously
+                    // incorrect.
+                    if let Some(ref hq) = self.having {
+                        rs.retain(|r| hq.filter(r.rec()));
+                    }
+
                 }
             }
         }
@@ -430,6 +472,7 @@ pub fn new<'a, NS, S: ?Sized, N>(name: NS, fields: &[&'a S], materialized: bool,
         fields: fields.iter().map(|&s| s.into()).collect(),
         data: sync::Arc::new(data),
         inner: sync::Arc::new(NodeType::from(inner)),
+        having: None,
     }
 }
 
@@ -644,5 +687,168 @@ mod tests {
     #[test]
     fn not_materialized() {
         e2e_test(false);
+    }
+    #[test]
+    fn having() {
+        use shortcut;
+        use petgraph;
+        use flow::View;
+
+        use std::sync;
+
+        // need a graph to prime
+        let mut g = petgraph::Graph::new();
+
+        // we have to set up a base node so that s knows how many columns to expect
+        let mut a = new("a", &["g", "so"], true, base::Base {});
+        a.prime(&g);
+        let a = g.add_node(Some(sync::Arc::new(a)));
+
+        // sum incoming records
+        let s = new("s",
+                    &["g", "s"],
+                    true,
+                    grouped::aggregate::Aggregation::SUM.new(a, 1, &[0]));
+
+        // condition over aggregation output
+        let mut s = s.having(vec![shortcut::Condition {
+                                  column: 1,
+                                  cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::Number(1))),
+                              }]);
+
+        // prepare s
+        s.prime(&g);
+
+        // forward an update that changes counter from 0 to 1
+        let u = s.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        // we should get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -0 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 0.into()));
+                // but the +1 should be visible
+                assert!(rs.iter().any(|r| r.is_positive() && r.rec()[1] == 1.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // querying should give value
+        s.safe(0);
+        assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
+
+        // forward another update that changes counter from 1 to 2
+        let u = s.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        // we should get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -1 should be visible
+                assert!(rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 1.into()));
+                // but the +2 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| r.is_positive() && r.rec()[1] == 2.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // querying should give nothing
+        s.safe(1);
+        assert_eq!(s.find(None, None), vec![]);
+
+        // forward a third update that changes the counter from 2 to 3
+        let u = s.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        // we should still get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // neither the -2 or the +3 should be visible
+                assert!(rs.is_empty());
+            }
+        }
+
+        // querying should give nothing
+        s.safe(2);
+        assert_eq!(s.find(None, None), vec![]);
+
+        // forward a final update that changes the counter back to 1
+        let u = s.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        // we should still get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -3 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 3.into()));
+                // but the +1 should be visible
+                assert!(rs.iter().any(|r| r.is_positive() && r.rec()[1] == 1.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // querying should give again value
+        s.safe(3);
+        assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 3)]);
+    }
+
+    #[test]
+    fn having_find_unmat() {
+        use shortcut;
+        use petgraph;
+        use flow::View;
+
+        use std::sync;
+
+        // need a graph to prime
+        let mut g = petgraph::Graph::new();
+
+        // we have to set up a base node so that s knows how many columns to expect
+        let mut a = new("a", &["g", "so"], true, base::Base {});
+        a.prime(&g);
+        let ga = sync::Arc::new(a);
+        let a = g.add_node(Some(ga.clone()));
+
+        // sum incoming records
+        let s = new("s",
+                    &["g", "s"],
+                    false, // only difference from above test
+                    grouped::aggregate::Aggregation::SUM.new(a, 1, &[0]));
+
+        // condition over aggregation output
+        let mut s = s.having(vec![shortcut::Condition {
+                                  column: 1,
+                                  cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::Number(1))),
+                              }]);
+
+        // prepare s
+        s.prime(&g);
+
+        // initially, we should get no results
+        assert_eq!(s.find(None, None), vec![]);
+
+        // make the count 1
+        ga.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+
+        // querying should now give value (1 matches HAVING)
+        assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
+
+        // make the count 2
+        ga.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+
+        // querying should now give nothing
+        assert_eq!(s.find(None, None), vec![]);
+
+        // make the count 3
+        ga.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+
+        // querying should still give nothing
+        assert_eq!(s.find(None, None), vec![]);
+
+        // forward a final update that changes the counter back to 1
+        ga.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+
+        // querying should give again value
+        assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 3)]);
     }
 }
