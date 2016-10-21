@@ -303,6 +303,8 @@ impl Node {
     /// applies both to feed-forward and to queries. Note that adding conditions in this way does
     /// *not* modify a node's input, and so the node may end up performing computation whose result
     /// will simply be discarded.
+    ///
+    /// Adding a HAVING condition will not reduce the size of the node's materialized state.
     pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
         self.having = Some(query::Query::new(&[], cond));
         self
@@ -325,7 +327,7 @@ impl flow::View<query::Query> for Node {
 
     fn find(&self, q: Option<&query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
         // find and return matching rows
-        if let Some(ref data) = *self.data {
+        let mut res = if let Some(ref data) = *self.data {
             // data.find already applies the query
             // NOTE: self.having has already been applied
             data.find(q, ts)
@@ -336,11 +338,7 @@ impl flow::View<query::Query> for Node {
             // TODO: what timestamp do we use here? it's not clear. there's always a race in which
             // our ancestor ends up absorbing that timestamp by the time the query reaches them :/
             let ts = ts.unwrap_or(i64::max_value());
-            let mut rs = self.inner.query(q, ts);
-
-            if let Some(ref hq) = self.having {
-                rs.retain(|&(ref r, _)| hq.filter(r));
-            }
+            let rs = self.inner.query(q, ts);
 
             // to avoid repeating the projection logic in every op, we do it here instead
             if let Some(q) = q {
@@ -350,7 +348,16 @@ impl flow::View<query::Query> for Node {
             } else {
                 rs
             }
+        };
+
+        // NOTE: in theory, we could mark records as 'internal' in Store, and have the materialized
+        // find above only return non-internal records. That would get rid of this second-pass, and
+        // might speed up common-case operation. However, it's not clear that this is something we
+        // really need.
+        if let Some(ref hq) = self.having {
+            res.retain(|&(ref r, _)| hq.filter(r));
         }
+        res
     }
 
     fn init_at(&self, init_ts: i64) {
@@ -377,16 +384,28 @@ impl flow::View<query::Query> for Node {
         if let Some(ref mut new_u) = new_u {
             match *new_u {
                 Update::Records(ref mut rs) => {
-                    if let Some(ref hq) = self.having {
-                        rs.retain(|r| hq.filter(r.rec()));
-                    }
-
                     if let Some(data) = self.data.deref().as_ref() {
                         // NOTE: data.add requires that we guarantee that there are not concurrent
                         // writers. since each node only processes one update at the time, this is
                         // the case.
                         unsafe { data.add(rs.clone(), ts) };
                     }
+
+                    // notice that we always store forwarded updates in the materialized state,
+                    // *even those that do not match the HAVING filter*. this is so that the node
+                    // can still query into its own state to see those updates. to see why this is
+                    // necessary, consider a materialized COUNT aggregation whose HAVING condition
+                    // evaluates to true only when the COUNT is 1. when the first record for a
+                    // group comes in, a +1 is emitted and materialized. when the second record
+                    // comes in, [-1,+2] is emitted, but the +2 is removed by the HAVING. if the +2
+                    // is not persisted in the materialized state, then the next record that comes
+                    // along for the group will see that there is no current count, and so assume
+                    // taht it is 0. the aggregation will then produce [-0,+1], which is obviously
+                    // incorrect.
+                    if let Some(ref hq) = self.having {
+                        rs.retain(|r| hq.filter(r.rec()));
+                    }
+
                 }
             }
         }
@@ -736,7 +755,6 @@ mod tests {
         assert!(u.is_some());
         match u.unwrap() {
             Update::Records(rs) => {
-                println!("{:#?}", rs);
                 // neither the -2 or the +3 should be visible
                 assert!(rs.is_empty());
             }
