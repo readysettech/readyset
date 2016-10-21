@@ -669,4 +669,95 @@ mod tests {
     fn not_materialized() {
         e2e_test(false);
     }
+    #[test]
+    fn having() {
+        use shortcut;
+        use petgraph;
+        use flow::View;
+
+        use std::sync;
+
+        // need a graph to prime
+        let mut g = petgraph::Graph::new();
+
+        // we have to set up a base node so that s knows how many columns to expect
+        let mut a = new("a", &["g", "so"], true, base::Base {});
+        a.prime(&g);
+        let a = g.add_node(Some(sync::Arc::new(a)));
+
+        // sum incoming records
+        let s = new("s",
+                    &["g", "s"],
+                    true,
+                    grouped::aggregate::Aggregation::SUM.new(a, 1, &[0]));
+
+        // condition over aggregation output
+        let mut s = s.having(vec![shortcut::Condition {
+                                  column: 1,
+                                  cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::Number(1))),
+                              }]);
+
+        // prepare s
+        s.prime(&g);
+
+        // forward an update that changes counter from 0 to 1
+        let u = s.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        // we should get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -0 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 0.into()));
+                // but the +1 should be visible
+                assert!(rs.iter().any(|r| r.is_positive() && r.rec()[1] == 1.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // forward another update that changes counter from 1 to 2
+        let u = s.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        // we should get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -1 should be visible
+                assert!(rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 1.into()));
+                // but the +2 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| r.is_positive() && r.rec()[1] == 2.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // forward a third update that changes the counter from 2 to 3
+        let u = s.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        // we should still get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                println!("{:#?}", rs);
+                // neither the -2 or the +3 should be visible
+                assert!(rs.is_empty());
+            }
+        }
+
+        // forward a final update that changes the counter back to 1
+        let u = s.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        // we should still get an update
+        assert!(u.is_some());
+        match u.unwrap() {
+            Update::Records(rs) => {
+                // the -3 should be masked by the HAVING
+                assert!(!rs.iter().any(|r| !r.is_positive() && r.rec()[1] == 3.into()));
+                // but the +1 should be visible
+                assert!(rs.iter().any(|r| r.is_positive() && r.rec()[1] == 1.into()));
+                // and there should be no other updates
+                assert_eq!(rs.len(), 1);
+            }
+        }
+
+        // TODO: test find
+        // fn find(&self, q: Option<&query::Query>, ts: Option<i64>) -> Vec<(Self::Data, i64)> {
+    }
 }
