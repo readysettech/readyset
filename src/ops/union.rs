@@ -42,7 +42,7 @@ impl Union {
 
 impl From<Union> for NodeType {
     fn from(b: Union) -> NodeType {
-        NodeType::UnionNode(b)
+        NodeType::Union(b)
     }
 }
 
@@ -119,7 +119,7 @@ impl NodeOp for Union {
                 // TODO: if we're selecting all and have no conditions, we could pass q = None...
                 self.srcs[&src].find(Some(&query::Query::new(&select[..], cs)), Some(ts))
             })
-            .filter_map(move |(r, ts)| if let Some(ref q) = q {
+            .filter_map(move |(r, ts)| if let Some(q) = q {
                 q.feed(r).map(move |r| (r, ts))
             } else {
                 Some((r, ts))

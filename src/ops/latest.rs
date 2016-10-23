@@ -44,13 +44,13 @@ impl Latest {
 
 impl From<Latest> for NodeType {
     fn from(b: Latest) -> NodeType {
-        NodeType::LatestNode(b)
+        NodeType::Latest(b)
     }
 }
 
 impl NodeOp for Latest {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        self.srcn = g[self.src].as_ref().cloned();
         vec![self.src]
     }
 
@@ -91,12 +91,12 @@ impl NodeOp for Latest {
 
                 // buffer emitted records
                 let mut out = Vec::with_capacity(pos.len());
-                for r in pos.into_iter() {
+                for r in pos {
                     {
                         let r = r.rec();
 
                         // set up the query for the current record for this record's key
-                        for s in q.iter_mut() {
+                        for s in &mut q {
                             s.cmp =
                                 shortcut::Comparison::Equal(shortcut::Value::Const(r[s.column]
                                     .clone()));
@@ -123,7 +123,7 @@ impl NodeOp for Latest {
 
                     // get back values from query (to avoid cloning again)
                     let mut group = Vec::with_capacity(self.key.len());
-                    for s in q.iter_mut() {
+                    for s in &mut q {
                         if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
                                s.cmp {
                             use std::mem;
@@ -145,7 +145,7 @@ impl NodeOp for Latest {
                 // check that there aren't any standalone negatives
                 // XXX: this check actually incurs a decent performance hit -- both tracking
                 // handled groups above, and this loop here. maybe just kill it?
-                for r in neg.into_iter() {
+                for r in neg {
                     // we can swap_remove here because we know self.keys is in reverse sorted order
                     let (mut r, _, _) = r.extract();
                     let group: Vec<_> = self.key.iter().map(|&i| r.swap_remove(i)).collect();
@@ -183,7 +183,7 @@ impl NodeOp for Latest {
                 })
                 .collect::<Vec<_>>());
 
-            if params.as_ref().unwrap().len() == 0 {
+            if params.as_ref().unwrap().is_empty() {
                 params = None;
             }
         }
@@ -201,7 +201,7 @@ impl NodeOp for Latest {
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
         let mut consolidate = HashMap::<_, (Vec<_>, i64)>::new();
-        for (rec, ts) in rx.into_iter() {
+        for (rec, ts) in rx {
             use std::collections::hash_map::Entry;
 
             let (group, rest): (Vec<_>, _) =

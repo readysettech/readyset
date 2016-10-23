@@ -16,6 +16,8 @@ pub use petgraph::graph::NodeIndex;
 
 use ops;
 
+type Graph<Q, U, D> = petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>;
+
 pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     type Update: Clone + Send;
     type Data: Clone + Send;
@@ -30,15 +32,10 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     ///
     /// Note that this method may be called before the entire graph has been assembled. Only the
     /// ancestors (all the way to the root) are guaranteed to be present.
-    fn prime(&mut self,
-             &petgraph::Graph<Option<sync::Arc<View<Q,
-                                                    Update = Self::Update,
-                                                    Data = Self::Data>>>,
-                              ()>)
-             -> Vec<NodeIndex>;
+    fn prime(&mut self, &Graph<Q, Self::Update, Self::Data>) -> Vec<NodeIndex>;
 
     /// Execute a single query, producing all matching records.
-    fn find<'a>(&'a self, Option<&Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
+    fn find(&self, Option<&Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
 
     /// Process a new update. This may optionally produce a new update to propagate to child nodes
     /// in the data flow graph.
@@ -162,7 +159,7 @@ impl<T> Ord for Delayed<T> {
 /// // set up a base node and a view
 /// let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// let votecount = g.incorporate(
-///     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, &[1]))
+///     new("vc", &["id", "votes"], true, Aggregation::COUNT.over(vote, 0, &[1]))
 /// );
 /// # drop(vote);
 /// # drop(votecount);
@@ -182,7 +179,7 @@ impl<T> Ord for Delayed<T> {
 /// # let mut g = FlowGraph::new();
 /// # let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
 /// # let votecount = g.incorporate(
-/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.new(vote, 0, &[1]))
+/// #     new("vc", &["id", "votes"], true, Aggregation::COUNT.over(vote, 0, &[1]))
 /// # );
 /// // start the data flow graph
 /// let (put, get) = g.run(10);
@@ -218,7 +215,7 @@ pub struct FlowGraph<Q, U, D>
           U: Clone + Send,
           D: Clone + Send
 {
-    graph: petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>,
+    graph: Graph<Q, U, D>,
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
@@ -247,9 +244,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     }
 
     /// Return a reference to the internal graph, as well as the identifier for the root node.
-    pub fn graph
-        (&self)
-         -> (&petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>, NodeIndex) {
+    pub fn graph(&self) -> (&Graph<Q, U, D>, NodeIndex) {
         (&self.graph, self.source)
     }
 
@@ -280,12 +275,12 @@ impl<Q, U, D> FlowGraph<Q, U, D>
 
                     let node = self.graph[v].as_ref().unwrap();
 
-                    for col in cols.into_iter() {
+                    for col in cols {
                         let really = node.resolve(col);
                         if let Some(really) = really {
                             // this view is not materialized. the index should instead be placed on
                             // the corresponding columns of this view's inputs
-                            for (v, col) in really.into_iter() {
+                            for (v, col) in really {
                                 tmp.entry(v).or_insert_with(HashSet::new).insert(col);
                             }
                         } else {
@@ -299,7 +294,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         }
 
         // add the indices we found
-        for (v, cols) in indices.into_iter() {
+        for (v, cols) in indices {
             let node = self.graph[v].as_ref().unwrap();
             for col in cols {
                 println!("adding index on column {:?} of view {:?}", col, v);
@@ -442,7 +437,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                 .filter(|&n| n != self.source)
                 .map(|p| max_absorbed[&p])
                 .max()
-                .or(latest.clone()); // base nodes are fully up-to-date
+                .or(latest); // base nodes are fully up-to-date
 
             if let Some(ts) = may_find_at {
                 max_absorbed.insert(node, ts);
@@ -500,7 +495,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         // TODO: transform the graph to aid in view re-use
 
         // create an entry in the min map for each new node to track how up-to-date it is
-        for node in new.iter() {
+        for node in &new {
             self.mins.insert(*node, sync::Arc::new(sync::atomic::AtomicIsize::new(0)));
         }
 
@@ -520,7 +515,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             let (px_tx, px_rx) = mpsc::sync_channel(buf);
             let root = self.source;
             thread::spawn(move || {
-                for (r, ts) in rx.into_iter() {
+                for (r, ts) in rx {
                     px_tx.send((root, r.map(|r| r.into()), ts as i64)).unwrap();
                 }
             });
@@ -534,7 +529,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
 
         // expose queries in a friendly format to outsiders
         let mut qs = HashMap::with_capacity(init_at.len());
-        for node in new.iter() {
+        for node in &new {
             let n = self.graph[*node].as_ref().unwrap().clone();
             let func = Box::new(move |q: Option<&Q>| -> Vec<D> {
                 n.find(q, None).into_iter().map(|(r, _)| r).collect()
@@ -547,7 +542,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         self.add_indices();
 
         // spin up all the worker threads
-        for (node, init_ts) in init_at.into_iter() {
+        for (node, init_ts) in init_at {
             let srcs = self.graph
                 .edges_directed(node, petgraph::EdgeDirection::Incoming)
                 .map(|(ni, _)| ni)
@@ -648,7 +643,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             mig.join().unwrap();
         }
 
-        'rx: while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
+        while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
             assert!(ts >= min);
 
             // for every two updates we process, we want to receive once from our input, to avoid
@@ -674,7 +669,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                 let u = u.and_then(|u| inner.process(u, src, ts));
                 processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
-                for tx in context.lock().unwrap().txs.iter_mut() {
+                for tx in &mut context.lock().unwrap().txs {
                     tx.send((name, u.clone(), ts)).unwrap();
                 }
                 continue;
@@ -755,7 +750,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             // even if we didn't send a delayed message for the min
             if forwarded < min && min != i64::max_value() - 1 {
                 processed_ts.store(min as isize, sync::atomic::Ordering::Release);
-                for tx in context.lock().unwrap().txs.iter_mut() {
+                for tx in &mut context.lock().unwrap().txs {
                     tx.send((name, None, min)).unwrap();
                 }
             }
@@ -813,7 +808,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             self.graph.add_edge(self.source, idx, ());
         } else {
             // derived node -- add edges from all ancestor nodes to node
-            for ancestor in ancestors.into_iter() {
+            for ancestor in ancestors {
                 self.graph.add_edge(ancestor, idx, ());
             }
         }
@@ -1190,7 +1185,7 @@ mod tests {
         let c = g.incorporate(ops::new("c",
                                        &["y", "count"],
                                        true,
-                                       Aggregation::COUNT.new(ag, 0, &[1])));
+                                       Aggregation::COUNT.over(ag, 0, &[1])));
         let (cg, ctx) = GatedIdentity::new(c);
         let cg = g.incorporate(ops::new("cg", &["y", "count"], false, cg));
 

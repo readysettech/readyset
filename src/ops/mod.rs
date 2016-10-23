@@ -29,7 +29,7 @@ pub enum Record {
 impl Record {
     pub fn rec(&self) -> &[query::DataType] {
         match *self {
-            Record::Positive(ref v, _) => &v[..],
+            Record::Positive(ref v, _) |
             Record::Negative(ref v, _) => &v[..],
         }
     }
@@ -44,7 +44,7 @@ impl Record {
 
     pub fn ts(&self) -> i64 {
         match *self {
-            Record::Positive(_, ts) => ts,
+            Record::Positive(_, ts) |
             Record::Negative(_, ts) => ts,
         }
     }
@@ -111,9 +111,9 @@ pub type Graph = petgraph::Graph<Option<V>, ()>;
 /// `NodeOp` represents the internal operations performed by a node. This trait is very similar to
 /// `flow::View`, and for good reason. This is effectively the behavior of a node when there is no
 /// materialization, and no multithreading. Those features are both added on by Node to expose a
-/// `flow::View`. A NodeOp should not have, nor need, any mutable state (which is why all receivers
-/// are `&`, not `&mut`). Instead, `self` should hold the node's internal configuration (e.g., what
-/// fields to join on, how to aggregate).
+/// `flow::View`. A `NodeOp` should not have, nor need, any mutable state (which is why all
+/// receivers are `&`, not `&mut`). Instead, `self` should hold the node's internal configuration
+/// (e.g., what fields to join on, how to aggregate).
 ///
 /// It *might* be possible to merge forward and query (after all, they do very similar things), but
 /// I haven't found a nice interface for that yet.
@@ -154,41 +154,41 @@ pub trait NodeOp: Debug {
 /// The set of node types supported by distributary.
 pub enum NodeType {
     /// A base node. See `Base`.
-    BaseNode(base::Base),
+    Base(base::Base),
     /// An aggregation. See `Aggregator`.
-    AggregateNode(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
+    Aggregate(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
     /// A join. See `Joiner`.
-    JoinNode(join::Joiner),
+    Join(join::Joiner),
     /// A latest. See `Latest`.
-    LatestNode(latest::Latest),
+    Latest(latest::Latest),
     /// A union. See `Union`.
-    UnionNode(union::Union),
+    Union(union::Union),
     /// A grouped operator. See `GroupConcat`.
-    GroupConcatNode(grouped::GroupedOperator<grouped::concat::GroupConcat>),
+    GroupConcat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
     /// A identity operation. See `Identity`.
-    IdentityNode(identity::Identity),
+    Identity(identity::Identity),
     #[cfg(test)]
     /// A test operator for testing purposes.
-    TestNode(tests::Tester),
+    Test(tests::Tester),
     #[cfg(test)]
     /// A test operator to control the propogation of updates.
-    GatedIdentityNode(gatedid::GatedIdentity),
+    GatedIdentity(gatedid::GatedIdentity),
 }
 
 impl NodeOp for NodeType {
     fn prime(&mut self, g: &Graph) -> Vec<NodeIndex> {
         match *self {
-            NodeType::BaseNode(ref mut n) => n.prime(g),
-            NodeType::AggregateNode(ref mut n) => n.prime(g),
-            NodeType::JoinNode(ref mut n) => n.prime(g),
-            NodeType::LatestNode(ref mut n) => n.prime(g),
-            NodeType::UnionNode(ref mut n) => n.prime(g),
-            NodeType::IdentityNode(ref mut n) => n.prime(g),
-            NodeType::GroupConcatNode(ref mut n) => n.prime(g),
+            NodeType::Base(ref mut n) => n.prime(g),
+            NodeType::Aggregate(ref mut n) => n.prime(g),
+            NodeType::Join(ref mut n) => n.prime(g),
+            NodeType::Latest(ref mut n) => n.prime(g),
+            NodeType::Union(ref mut n) => n.prime(g),
+            NodeType::Identity(ref mut n) => n.prime(g),
+            NodeType::GroupConcat(ref mut n) => n.prime(g),
             #[cfg(test)]
-            NodeType::TestNode(ref mut n) => n.prime(g),
+            NodeType::Test(ref mut n) => n.prime(g),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref mut n) => n.prime(g),
+            NodeType::GatedIdentity(ref mut n) => n.prime(g),
         }
     }
 
@@ -199,70 +199,70 @@ impl NodeOp for NodeType {
                db: Option<&backlog::BufferedStore>)
                -> Option<Update> {
         match *self {
-            NodeType::BaseNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::AggregateNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::JoinNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::LatestNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::UnionNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::IdentityNode(ref n) => n.forward(u, src, ts, db),
-            NodeType::GroupConcatNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::Base(ref n) => n.forward(u, src, ts, db),
+            NodeType::Aggregate(ref n) => n.forward(u, src, ts, db),
+            NodeType::Join(ref n) => n.forward(u, src, ts, db),
+            NodeType::Latest(ref n) => n.forward(u, src, ts, db),
+            NodeType::Union(ref n) => n.forward(u, src, ts, db),
+            NodeType::Identity(ref n) => n.forward(u, src, ts, db),
+            NodeType::GroupConcat(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::Test(ref n) => n.forward(u, src, ts, db),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref n) => n.forward(u, src, ts, db),
+            NodeType::GatedIdentity(ref n) => n.forward(u, src, ts, db),
         }
     }
 
     fn query(&self, q: Option<&query::Query>, ts: i64) -> Datas {
         match *self {
-            NodeType::BaseNode(ref n) => n.query(q, ts),
-            NodeType::AggregateNode(ref n) => n.query(q, ts),
-            NodeType::JoinNode(ref n) => n.query(q, ts),
-            NodeType::LatestNode(ref n) => n.query(q, ts),
-            NodeType::UnionNode(ref n) => n.query(q, ts),
-            NodeType::IdentityNode(ref n) => n.query(q, ts),
-            NodeType::GroupConcatNode(ref n) => n.query(q, ts),
+            NodeType::Base(ref n) => n.query(q, ts),
+            NodeType::Aggregate(ref n) => n.query(q, ts),
+            NodeType::Join(ref n) => n.query(q, ts),
+            NodeType::Latest(ref n) => n.query(q, ts),
+            NodeType::Union(ref n) => n.query(q, ts),
+            NodeType::Identity(ref n) => n.query(q, ts),
+            NodeType::GroupConcat(ref n) => n.query(q, ts),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.query(q, ts),
+            NodeType::Test(ref n) => n.query(q, ts),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref n) => n.query(q, ts),
+            NodeType::GatedIdentity(ref n) => n.query(q, ts),
         }
     }
 
     fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
         match *self {
-            NodeType::BaseNode(ref n) => n.suggest_indexes(this),
-            NodeType::AggregateNode(ref n) => n.suggest_indexes(this),
-            NodeType::JoinNode(ref n) => n.suggest_indexes(this),
-            NodeType::LatestNode(ref n) => n.suggest_indexes(this),
-            NodeType::UnionNode(ref n) => n.suggest_indexes(this),
-            NodeType::IdentityNode(ref n) => n.suggest_indexes(this),
-            NodeType::GroupConcatNode(ref n) => n.suggest_indexes(this),
+            NodeType::Base(ref n) => n.suggest_indexes(this),
+            NodeType::Aggregate(ref n) => n.suggest_indexes(this),
+            NodeType::Join(ref n) => n.suggest_indexes(this),
+            NodeType::Latest(ref n) => n.suggest_indexes(this),
+            NodeType::Union(ref n) => n.suggest_indexes(this),
+            NodeType::Identity(ref n) => n.suggest_indexes(this),
+            NodeType::GroupConcat(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.suggest_indexes(this),
+            NodeType::Test(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref n) => n.suggest_indexes(this),
+            NodeType::GatedIdentity(ref n) => n.suggest_indexes(this),
         }
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         match *self {
-            NodeType::BaseNode(ref n) => n.resolve(col),
-            NodeType::AggregateNode(ref n) => n.resolve(col),
-            NodeType::JoinNode(ref n) => n.resolve(col),
-            NodeType::LatestNode(ref n) => n.resolve(col),
-            NodeType::UnionNode(ref n) => n.resolve(col),
-            NodeType::IdentityNode(ref n) => n.resolve(col),
-            NodeType::GroupConcatNode(ref n) => n.resolve(col),
+            NodeType::Base(ref n) => n.resolve(col),
+            NodeType::Aggregate(ref n) => n.resolve(col),
+            NodeType::Join(ref n) => n.resolve(col),
+            NodeType::Latest(ref n) => n.resolve(col),
+            NodeType::Union(ref n) => n.resolve(col),
+            NodeType::Identity(ref n) => n.resolve(col),
+            NodeType::GroupConcat(ref n) => n.resolve(col),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => n.resolve(col),
+            NodeType::Test(ref n) => n.resolve(col),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref n) => n.resolve(col),
+            NodeType::GatedIdentity(ref n) => n.resolve(col),
         }
     }
 
     fn is_base(&self) -> bool {
-        if let NodeType::BaseNode(..) = *self {
+        if let NodeType::Base(..) = *self {
             true
         } else {
             false
@@ -273,17 +273,17 @@ impl NodeOp for NodeType {
 impl Debug for NodeType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            NodeType::BaseNode(ref n) => write!(f, "{:?}", n),
-            NodeType::AggregateNode(ref n) => write!(f, "{:?}", n),
-            NodeType::JoinNode(ref n) => write!(f, "{:?}", n),
-            NodeType::LatestNode(ref n) => write!(f, "{:?}", n),
-            NodeType::UnionNode(ref n) => write!(f, "{:?}", n),
-            NodeType::IdentityNode(ref n) => write!(f, "{:?}", n),
-            NodeType::GroupConcatNode(ref n) => write!(f, "{:?}", n),
+            NodeType::Base(ref n) => write!(f, "{:?}", n),
+            NodeType::Aggregate(ref n) => write!(f, "{:?}", n),
+            NodeType::Join(ref n) => write!(f, "{:?}", n),
+            NodeType::Latest(ref n) => write!(f, "{:?}", n),
+            NodeType::Union(ref n) => write!(f, "{:?}", n),
+            NodeType::Identity(ref n) => write!(f, "{:?}", n),
+            NodeType::GroupConcat(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]
-            NodeType::TestNode(ref n) => write!(f, "{:?}", n),
+            NodeType::Test(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]
-            NodeType::GatedIdentityNode(ref n) => write!(f, "{:?}", n),
+            NodeType::GatedIdentity(ref n) => write!(f, "{:?}", n),
         }
     }
 }
@@ -462,10 +462,11 @@ pub fn new<'a, NS, S: ?Sized, N>(name: NS, fields: &[&'a S], materialized: bool,
           NS: Into<String>,
           NodeType: From<N>
 {
-    let mut data = None;
-    if materialized {
-        data = Some(backlog::BufferedStore::new(fields.len()));
-    }
+    let data = if materialized {
+        Some(backlog::BufferedStore::new(fields.len()))
+    } else {
+        None
+    };
 
     Node {
         name: name.into(),
@@ -501,7 +502,7 @@ mod tests {
 
     impl From<Tester> for NodeType {
         fn from(b: Tester) -> NodeType {
-            NodeType::TestNode(b)
+            NodeType::Test(b)
         }
     }
 
@@ -708,7 +709,7 @@ mod tests {
         let s = new("s",
                     &["g", "s"],
                     true,
-                    grouped::aggregate::Aggregation::SUM.new(a, 1, &[0]));
+                    grouped::aggregate::Aggregation::SUM.over(a, 1, &[0]));
 
         // condition over aggregation output
         let mut s = s.having(vec![shortcut::Condition {
@@ -813,7 +814,7 @@ mod tests {
         let s = new("s",
                     &["g", "s"],
                     false, // only difference from above test
-                    grouped::aggregate::Aggregation::SUM.new(a, 1, &[0]));
+                    grouped::aggregate::Aggregation::SUM.over(a, 1, &[0]));
 
         // condition over aggregation output
         let mut s = s.having(vec![shortcut::Condition {

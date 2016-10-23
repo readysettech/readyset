@@ -2,7 +2,6 @@ use ops;
 use query;
 use shortcut;
 
-use std::mem;
 use std::ptr;
 use std::sync;
 use std::sync::atomic;
@@ -32,6 +31,7 @@ struct LL {
 
 impl LL {
     fn new(e: Option<(i64, Vec<ops::Record>)>) -> LL {
+        use std::mem;
         LL {
             next: AtomicPtr::new(unsafe { mem::transmute::<*const LL, *mut LL>(ptr::null()) }),
             entry: e,
@@ -46,9 +46,9 @@ impl LL {
         self.last().next.store(Box::into_raw(next), atomic::Ordering::Release);
     }
 
-    fn last<'a>(&'a self) -> &'a LL {
+    fn last(&self) -> &LL {
         if let Some(n) = self.after() {
-            unsafe { mem::transmute::<_, &LL>(n) }.last()
+            unsafe { &*n }.last()
         } else {
             self
         }
@@ -56,12 +56,12 @@ impl LL {
 
     fn after(&self) -> Option<*mut LL> {
         let next = self.next.load(atomic::Ordering::Acquire);
-        if next as *const LL == ptr::null() {
+        if (next as *const LL).is_null() {
             // there's no next
             return None;
         }
 
-        return Some(next);
+        Some(next)
     }
 
     fn take(&mut self) -> Option<(i64, Vec<ops::Record>)> {
@@ -74,7 +74,7 @@ impl LL {
         })
     }
 
-    fn iter<'a>(&'a self) -> LLIter<'a> {
+    fn iter(&self) -> LLIter {
         LLIter(self)
     }
 }
@@ -83,8 +83,6 @@ struct LLIter<'a>(&'a LL);
 impl<'a> Iterator for LLIter<'a> {
     type Item = &'a (i64, Vec<ops::Record>);
     fn next(&mut self) -> Option<Self::Item> {
-        use std::mem;
-
         loop {
             // we assume that the current node has already been yielded
             // so, we first advance, and then check for a value
@@ -95,7 +93,7 @@ impl<'a> Iterator for LLIter<'a> {
                 return None;
             }
 
-            self.0 = unsafe { mem::transmute(next.unwrap()) };
+            self.0 = unsafe { &*next.unwrap() };
 
             // if we moved to a node that has a value, yield it
             if let Some(ref e) = self.0.entry {
@@ -135,7 +133,7 @@ impl BufferedStore {
                 Some(next) => {
                     // there's a next node to process
                     // check its timestamp
-                    let n = unsafe { mem::transmute::<*mut LL, &LL>(next) };
+                    let n = unsafe { &*next };
                     assert!(n.entry.is_some());
                     if n.entry.as_ref().unwrap().0 as isize > including {
                         // it's too new, we're done
@@ -148,8 +146,7 @@ impl BufferedStore {
             for r in store.1
                 .take()
                 .expect("no concurrent access, so if .after() is Some, so should .take()")
-                .1
-                .into_iter() {
+                .1 {
                 match r {
                     ops::Record::Positive(mut r, ts) => {
                         r.push(query::DataType::Number(ts));
@@ -206,9 +203,9 @@ impl BufferedStore {
     /// Important and absorb a set of records at the given timestamp.
     pub fn batch_import(&self, rs: Vec<(Vec<query::DataType>, i64)>, ts: i64) {
         let mut lock = self.store.write().unwrap();
-        assert!(lock.1.next.load(atomic::Ordering::Acquire) as *const LL == ptr::null());
+        assert!((lock.1.next.load(atomic::Ordering::Acquire) as *const LL).is_null());
         assert!(self.absorbed.load(atomic::Ordering::Acquire) < ts as isize);
-        for (mut row, ts) in rs.into_iter() {
+        for (mut row, ts) in rs {
             row.push(query::DataType::Number(ts));
             lock.0.insert(row);
         }

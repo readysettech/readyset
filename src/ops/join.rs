@@ -171,13 +171,13 @@ impl From<Builder> for Joiner {
 
 impl From<Joiner> for NodeType {
     fn from(b: Joiner) -> NodeType {
-        NodeType::JoinNode(b)
+        NodeType::Join(b)
     }
 }
 
 impl From<Builder> for NodeType {
     fn from(b: Builder) -> NodeType {
-        NodeType::JoinNode(b.into())
+        NodeType::Join(b.into())
     }
 }
 
@@ -273,10 +273,10 @@ impl Joiner {
 
 impl NodeOp for Joiner {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        for (ni, j) in self.join.iter_mut() {
-            j.node = g[*ni].as_ref().map(|n| n.clone());
+        for (ni, j) in &mut self.join {
+            j.node = g[*ni].as_ref().cloned();
 
-            for (t, jt) in j.against.iter_mut() {
+            for (t, jt) in &mut j.against {
                 jt.select = iter::repeat(true)
                     .take(g[*t].as_ref().unwrap().args().len())
                     .collect::<Vec<_>>();
@@ -356,7 +356,7 @@ impl NodeOp for Joiner {
                 })
                 .collect::<Vec<_>>());
 
-            if lparams.as_ref().unwrap().len() == 0 {
+            if lparams.as_ref().unwrap().is_empty() {
                 lparams = None;
             }
         }
@@ -381,7 +381,7 @@ impl NodeOp for Joiner {
                 self.join((lefti, lrec, lts), ts)
             })
             .filter_map(move |(r, ts)| {
-                if let Some(ref q) = q {
+                if let Some(q) = q {
                     q.feed(r).map(|r| (r, ts))
                 } else {
                     Some((r, ts))

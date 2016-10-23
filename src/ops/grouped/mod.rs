@@ -79,19 +79,19 @@ pub struct GroupedOperator<T: GroupedOperation> {
 
 impl From<GroupedOperator<concat::GroupConcat>> for NodeType {
     fn from(b: GroupedOperator<concat::GroupConcat>) -> NodeType {
-        NodeType::GroupConcatNode(b)
+        NodeType::GroupConcat(b)
     }
 }
 
 // impl From<GroupedOperator<latest::Latest>> for NodeType {
 //     fn from(b: GroupedOperator<latest::Latest>) -> NodeType {
-//         NodeType::LatestNode(b)
+//         NodeType::Latest(b)
 //     }
 // }
 
 impl From<GroupedOperator<aggregate::Aggregator>> for NodeType {
     fn from(b: GroupedOperator<aggregate::Aggregator>) -> NodeType {
-        NodeType::AggregateNode(b)
+        NodeType::Aggregate(b)
     }
 }
 
@@ -113,7 +113,7 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         // who's our parent?
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        self.srcn = g[self.src].as_ref().cloned();
 
         // give our inner operation a chance to initialize
         self.inner.setup(self.srcn.as_ref().unwrap());
@@ -175,7 +175,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 // For example, if we get a -, then a +, for the same group, we don't want to
                 // execute two queries.
                 let mut consolidate = HashMap::new();
-                for rec in rs.into_iter() {
+                for rec in rs {
                     let (r, pos, ts) = rec.extract();
                     let val = self.inner.one(&r[..], pos);
                     let group = r.into_iter()
@@ -193,13 +193,13 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (mut group, diffs) in consolidate.into_iter() {
+                for (mut group, diffs) in consolidate {
                     // note that each value in group is an Option so that we can take/swap without
                     // having to .remove or .insert into the HashMap (which is much more expensive)
                     // it should only be None for self.over
 
                     // build a query for this group
-                    for s in q.iter_mut() {
+                    for s in &mut q {
                         s.cmp = shortcut::Comparison::Equal(
                             shortcut::Value::Const(
                                 group[self.colfix[s.column]]
@@ -230,7 +230,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     };
 
                     // get back values from query (to avoid cloning)
-                    for s in q.iter_mut() {
+                    for s in &mut q {
                         if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
                                s.cmp {
                             use std::mem;
@@ -291,7 +291,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 }
             }).collect::<Vec<_>>());
 
-            if params.as_ref().unwrap().len() == 0 {
+            if params.as_ref().unwrap().is_empty() {
                 params = None;
             }
         }
@@ -309,7 +309,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
         let mut consolidate = HashMap::new();
-        for (rec, ts) in rx.into_iter() {
+        for (rec, ts) in rx {
             use std::cmp;
 
             let val = self.inner.one(&rec[..], true);

@@ -116,7 +116,7 @@
 //! let v = g.incorporate(&["user", "id"], Base {});
 //!
 //! // vote count is pretty straightforward
-//! let vc = g.incorporate(&["id", "votes"], Aggregation::COUNT.new(v, 0));
+//! let vc = g.incorporate(&["id", "votes"], Aggregation::COUNT.over(v, 0));
 //!
 //! // joins are tricky because you need to specify what to join on. we use the following structure
 //! // where columns with the same non-zero values across ancestors are joined by equality.

@@ -20,11 +20,11 @@ impl Aggregation {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn new(self,
-               src: NodeIndex,
-               over: usize,
-               group_by: &[usize])
-               -> GroupedOperator<Aggregator> {
+    pub fn over(self,
+                src: NodeIndex,
+                over: usize,
+                group_by: &[usize])
+                -> GroupedOperator<Aggregator> {
         assert!(!group_by.iter().any(|&i| i == over),
                 "cannot group by aggregation column");
         GroupedOperator::new(src,
@@ -132,9 +132,9 @@ mod tests {
         g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
 
         let mut c = if wide {
-            Aggregation::COUNT.new(s, 1, &[0, 2])
+            Aggregation::COUNT.over(s, 1, &[0, 2])
         } else {
-            Aggregation::COUNT.new(s, 1, &[0])
+            Aggregation::COUNT.over(s, 1, &[0])
         };
         c.prime(&g);
         if wide {

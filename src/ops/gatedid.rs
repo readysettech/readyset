@@ -37,7 +37,7 @@ impl GatedIdentity {
 
 impl From<GatedIdentity> for NodeType {
     fn from(b: GatedIdentity) -> NodeType {
-        NodeType::GatedIdentityNode(b)
+        NodeType::GatedIdentity(b)
     }
 }
 

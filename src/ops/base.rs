@@ -17,7 +17,7 @@ pub struct Base {}
 
 impl From<Base> for NodeType {
     fn from(b: Base) -> NodeType {
-        NodeType::BaseNode(b)
+        NodeType::Base(b)
     }
 }
 
@@ -38,7 +38,7 @@ impl NodeOp for Base {
             ops::Update::Records(ref mut rs) => {
                 for r in rs.iter_mut() {
                     match *r {
-                        ops::Record::Positive(_, ref mut rts) => *rts = ts,
+                        ops::Record::Positive(_, ref mut rts) |
                         ops::Record::Negative(_, ref mut rts) => *rts = ts,
                     }
                 }

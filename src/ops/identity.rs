@@ -26,13 +26,13 @@ impl Identity {
 
 impl From<Identity> for NodeType {
     fn from(b: Identity) -> NodeType {
-        NodeType::IdentityNode(b)
+        NodeType::Identity(b)
     }
 }
 
 impl NodeOp for Identity {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
+        self.srcn = g[self.src].as_ref().cloned();
 
         vec![self.src]
     }

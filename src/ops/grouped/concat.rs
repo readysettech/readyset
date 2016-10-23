@@ -21,9 +21,9 @@ pub enum Modify {
     Remove(String),
 }
 
-/// GroupConcat joins multiple records into one using string concatenation.
+/// `GroupConcat` joins multiple records into one using string concatenation.
 ///
-/// It is conceptually similar to the group_concat function available in most SQL databases. The
+/// It is conceptually similar to the `group_concat` function available in most SQL databases. The
 /// records are first grouped by a set of fields. Within each group, a string representation is
 /// then constructed, and the strings of all the records in a group are concatenated by joining
 /// them with a literal separator.
@@ -79,7 +79,7 @@ impl GroupConcat {
 
     fn build(&self, rec: &[query::DataType]) -> String {
         let mut s = String::with_capacity(self.slen);
-        for tc in self.components.iter() {
+        for tc in &self.components {
             match *tc {
                 TextComponent::Literal(l) => {
                     s.push_str(l);
@@ -109,7 +109,7 @@ impl GroupedOperation for GroupConcat {
         let mut group = HashSet::new();
         group.extend(0..cols);
         // except the ones that are used in output
-        for tc in self.components.iter() {
+        for tc in &self.components {
             if let TextComponent::Column(col) = *tc {
                 assert!(col < cols, "group concat emits fields parent doesn't have");
                 group.remove(&col);
@@ -120,7 +120,7 @@ impl GroupedOperation for GroupConcat {
         // how long are we expecting strings to be?
         self.slen = 0;
         // well, the length of all literal components
-        for tc in self.components.iter() {
+        for tc in &self.components {
             if let TextComponent::Literal(l) = *tc {
                 self.slen += l.len();
             }
@@ -165,7 +165,7 @@ impl GroupedOperation for GroupConcat {
 
         // TODO this is not particularly robust, and requires a non-empty separator
         let mut current = BTreeSet::from_iter(current.split_terminator(self.separator));
-        for &(ref diff, _) in diffs.iter() {
+        for &(ref diff, _) in &diffs {
             match *diff {
                 Modify::Add(ref s) => {
                     current.insert(s);
@@ -179,7 +179,7 @@ impl GroupedOperation for GroupConcat {
         // WHY doesn't rust have an iterator joiner?
         let mut new = current.into_iter()
             .fold(String::with_capacity(2 * clen), |mut acc, s| {
-                acc.push_str(&s);
+                acc.push_str(s);
                 acc.push_str(self.separator);
                 acc
             });
