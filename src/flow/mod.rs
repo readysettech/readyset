@@ -644,7 +644,12 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         }
 
         while let Some((src, u, ts)) = missed.pop_front().or_else(|| input.recv().ok()) {
-            assert!(ts >= min);
+            // we have already received an update from all our parents for min. this guarantees
+            // that we should never see any ts with a *lower* timestamp. since no single node
+            // should ever emit multiple updates with the same timestamp, we should also never see
+            // any ts with a *duplicate* timestamp. Hence any update we receive must be *later*
+            // than our min ts.
+            assert!(ts > min);
 
             // for every two updates we process, we want to receive once from our input, to avoid
             // blocking our upstream completely. we do this by alternating a flag, only reading
@@ -665,20 +670,10 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                 }
             }
 
-            if ts == min {
-                let u = u.and_then(|u| inner.process(u, src, ts));
-                processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
-
-                for tx in &mut context.lock().unwrap().txs {
-                    tx.send((name, u.clone(), ts)).unwrap();
-                }
-                continue;
-            }
-
             if let Some(u) = u {
                 // this *may* be taken out again immediately if the min is raised to the
                 // given ts, but meh, we accept that overhead for the simplicity of the
-                // code.
+                // code (for now).
                 delayed.push(Delayed {
                     data: (src, u),
                     ts: ts,
@@ -712,51 +707,62 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             // remember to forward a None for the latest time.
             let mut forwarded = 0;
 
+            // hold on to the context, as we're going to interact with our children for a while
+            let mut ctx = context.lock().unwrap();
+
             // keep looking for a candidate to send
+            let mut prev_ts = 0;
             loop {
                 // find the smallest in `delay`
-                let next = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
-                //  process it if it is early enough
-                if next <= min {
-                    let d = delayed.pop().unwrap();
-                    let ts = d.ts;
-                    let (src, u) = d.data;
+                let ts = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
 
-                    let mut u = inner.process(u, src, ts);
-                    processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
-
-                    if u.is_some() {
-                        forwarded = ts;
-                        let mut ctx = context.lock().unwrap();
-                        let mut txit = ctx.txs.iter_mut().peekable();
-                        while let Some(tx) = txit.next() {
-                            if txit.peek().is_some() {
-                                tx.send((name, u.clone(), ts)).unwrap();
-                            } else {
-                                // avoid cloning on the last send. this will avoid clone altogether
-                                // for nodes with only one child, which is a common case.
-                                tx.send((name, u.take(), ts)).unwrap();
-                            }
-                        }
-                    }
-                    continue;
+                // stop if no delayed message has a timestamp <= min
+                if ts > min {
+                    break;
                 }
 
-                // no delayed message has a timestamp <= min
-                break;
+                // otherwise, deal with the next delayed update
+                let d = delayed.pop().unwrap();
+
+                // we only ever need to process a single update per timestamp.
+                if ts == prev_ts {
+                    continue;
+                }
+                prev_ts = ts;
+
+                // do the processing dicated by our inner
+                let mut u = inner.process(d.data.1, d.data.0, ts);
+                processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
+
+                // we only forward Some() things for efficiency. sending None's is unnecessary as
+                // long as an update will be sent later with a later timestamp. we use `forwarded`
+                // below to figure out whether we need to also send a final None.
+                if u.is_some() {
+                    forwarded = ts;
+
+                    // avoid cloning on the last send. this will avoid clone altogether for
+                    // nodes with only one child, which is a common case.
+                    let mut txit = ctx.txs.iter_mut().peekable();
+                    while let Some(tx) = txit.next() {
+                        if txit.peek().is_some() {
+                            tx.send((name, u.clone(), ts)).unwrap();
+                        } else {
+                            tx.send((name, u.take(), ts)).unwrap();
+                        }
+                    }
+                }
             }
 
             // make sure all dependents know how up-to-date we are
             // even if we didn't send a delayed message for the min
             if forwarded < min && min != i64::max_value() - 1 {
                 processed_ts.store(min as isize, sync::atomic::Ordering::Release);
-                for tx in &mut context.lock().unwrap().txs {
+                for tx in &mut ctx.txs {
                     tx.send((name, None, min)).unwrap();
                 }
             }
 
             // check if descendant min has changed so we can absorb?
-            let mut ctx = context.lock().unwrap();
             let mc = &mut ctx.min_check;
             let mut previous = 0;
             if let Some((n, min)) = desc_min {
@@ -778,14 +784,16 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                 // TODO: lazy absorbption will speed up things quite significantly
                 if let Some((_, m)) = desc_min {
                     if m > previous {
-                        // min changed -- safe to absorb
-                        inner.safe(m - 1);
+                        // min changed. since every node only ever processes updates that are
+                        // *newer* than their stored min, it is safe for us to absorb up to our
+                        // current min.
+                        inner.safe(m);
                     }
                 } else {
                     // there are no materialized descendants
                     // TODO: what is the right thing to do here?
                     // for now, we simply always absorb in this case
-                    inner.safe(min - 1);
+                    inner.safe(min);
                 }
             }
         }

@@ -592,20 +592,13 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
 
-        // reads only see records whose timestamp is *smaller* than the global minimum.
-        // thus the 16 above won't be seen below. let's fix that.
-        // first, send a write to increment the global min beyond the 16.
+        // reads only see records whose timestamp is at the global minimum, but there might be a
+        // delay before a node realizes that its descendants' mins have changed. we therefore prod
+        // the nodes with another update. this update will not be visible to queries on
+        // materialized views.
         put[&a].send(vec![32.into()]);
-        // let it propagate and bump the mins
+        // let it propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
-        // then, send another to make the nodes realize that their descendants' mins have changed.
-        put[&a].send(vec![0.into()]);
-        // let that propagate too
-        thread::sleep(time::Duration::new(0, 10_000_000));
-
-        // note that the first of these two updates may or may not be visible at the different
-        // nodes, depending on whether the descendant's min has been updated following an update by
-        // the time the sender of that update is checking for an updated descendant min.
 
         // check state
         // a
@@ -615,9 +608,8 @@ mod tests {
             .collect::<HashSet<i64>>();
         // must see 1+1
         assert!(set.contains(&2), format!("2 not in {:?}", set));
-        // may see 32+1
-        assert!(set.len() == 1 || (set.len() == 2 && set.contains(&33)),
-                format!("32 not the extraneous entry in {:?}", set));
+        // must not see 32+1
+        assert_eq!(set.len(), 1);
 
         // b
         let set = get[&b](None)
@@ -639,20 +631,13 @@ mod tests {
         // must see 16+2+4
         assert!(set.contains(&22), format!("22 not in {:?}", set));
         if mat {
-            // may see 32+1+4
-            assert!(set.len() == 2 || (set.len() == 3 && set.contains(&37)),
-                    format!("37 not the extraneous entry in {:?}", set));
+            // must not see 32+1+4
+            assert_eq!(set.len(), 2);
         } else {
             // must see 32+1+4 (since it's past the ancestor min)
             assert!(set.contains(&37), format!("37 not in {:?}", set));
-            // but must *not* see 0+1+4 (since it's not beyond the ancestor min)
-            // TODO: test relaxed since queries on non-materialized nodes currently use i64::max
-            if false {
-                assert_eq!(set.len(), 3);
-            } else {
-                assert!(set.len() == 4 && set.contains(&5),
-                        format!("5 not extraneous entry in {:?}", set));
-            }
+            // and obviously nothing else
+            assert_eq!(set.len(), 3);
         }
 
         // d
@@ -666,18 +651,8 @@ mod tests {
         assert!(set.contains(&30), format!("30 not in {:?}", set));
         // must see 32+1+4+8, because leaf views always absorb
         assert!(set.contains(&45), format!("45 not in {:?}", set));
-        // won't see the 0 entry, because ancestor min hasn't increased
-        if mat {
-            assert_eq!(set.len(), 3);
-        } else {
-            // TODO: test relaxed since queries on non-materialized nodes currently use i64::max
-            if false {
-                assert_eq!(set.len(), 3);
-            } else {
-                assert!(set.len() == 4 && set.contains(&13),
-                        format!("13 not extraneous entry in {:?}", set));
-            }
-        }
+        // and should obviously not see anything else
+        assert_eq!(set.len(), 3);
     }
 
     #[test]

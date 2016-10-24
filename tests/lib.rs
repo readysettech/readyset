@@ -256,15 +256,11 @@ fn votes() {
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 
-    // this is stupid, but because the system is eventually consistent, we also need to inject two
-    // extra updates. one to advances the global min such that the vote above is visible, and
-    // another for all the nodes to realize that this has happened. unfortunately, this *also*
-    // means that the different nodes may *or may not* see the middle vote.
+    // this is stupid. as only absorb state is exposed to queries on materialized views, we need to
+    // inject an extra update to ensure that the nodes *see* that they can absorb the above update.
+    // this extra vote will not be seen by any queries on materialized views.
     put[&vote].send(vec![2.into(), 1.into()]);
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-    put[&vote].send(vec![0.into(), 1.into()]);
-    // give it too some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query vote count to see that the count was updated
