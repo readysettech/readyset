@@ -185,11 +185,11 @@ impl<T> Ord for Delayed<T> {
 /// let (put, get) = g.run(10);
 ///
 /// // put can now be used to insert votes
-/// put[&vote].send(vec![1.into(), 1.into()]);
-/// put[&vote].send(vec![2.into(), 1.into()]);
-/// put[&vote].send(vec![3.into(), 1.into()]);
-/// put[&vote].send(vec![1.into(), 2.into()]);
-/// put[&vote].send(vec![2.into(), 2.into()]);
+/// put[&vote](vec![1.into(), 1.into()]);
+/// put[&vote](vec![2.into(), 1.into()]);
+/// put[&vote](vec![3.into(), 1.into()]);
+/// put[&vote](vec![1.into(), 2.into()]);
+/// put[&vote](vec![2.into(), 2.into()]);
 ///
 /// // allow them to propagate before querying
 /// sleep(Duration::from_millis(100));
@@ -219,9 +219,10 @@ pub struct FlowGraph<Q, U, D>
     source: petgraph::graph::NodeIndex,
     mins: HashMap<petgraph::graph::NodeIndex, sync::Arc<sync::atomic::AtomicIsize>>,
     wait: Vec<thread::JoinHandle<()>>,
-    dispatch: clocked_dispatch::Dispatcher<D>,
+    dispatch: clocked_dispatch::Dispatcher<U>,
 
     contexts: HashMap<petgraph::graph::NodeIndex, SharedContext<U>>,
+    ts_src: sync::Arc<sync::atomic::AtomicUsize>,
 }
 
 impl<Q, U, D> FlowGraph<Q, U, D>
@@ -239,7 +240,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             mins: HashMap::default(),
             wait: Vec::default(),
             dispatch: clocked_dispatch::new(20),
+
             contexts: HashMap::default(),
+            ts_src: sync::Arc::new(sync::atomic::AtomicUsize::new(1)),
         }
     }
 
@@ -307,7 +310,8 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     /// Build and update the node state used by `FlowGraph::inner` to track information about its
     /// outgoing neighbors for the purposes of absorbption.
     fn build_contexts(&mut self,
-                      start: &mut HashMap<NodeIndex, mpsc::Receiver<(NodeIndex, Option<U>, i64)>>,
+                      start: &mut HashMap<NodeIndex,
+                                          sync::mpsc::Receiver<(NodeIndex, Option<U>, i64)>>,
                       new: &HashSet<NodeIndex>,
                       buf: usize)
                       -> HashMap<NodeIndex, i64> {
@@ -483,7 +487,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     /// function that will query that node when called.
     pub fn run(&mut self,
                buf: usize)
-               -> (HashMap<NodeIndex, clocked_dispatch::ClockedSender<D>>,
+               -> (HashMap<NodeIndex, Box<Fn(D) -> i64 + 'static + Send>>,
                    HashMap<NodeIndex, Box<Fn(Option<&Q>) -> Vec<D> + 'static + Send + Sync>>) {
 
         // which nodes are new?
@@ -510,16 +514,28 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             let (tx, rx) = self.dispatch.new(format!("{}-in", base.index()),
                                              format!("{}-out", base.index()));
 
-            // automatically add source node and timestamp to all incoming facts so users don't
-            // have to add this themselves.
-            let (px_tx, px_rx) = mpsc::sync_channel(buf);
             let root = self.source;
+            let ts_src = self.ts_src.clone();
+            incoming.insert(base,
+                            Box::new(move |data: D| {
+                // the user wants to do a put
+                // first, let's pick a timestamp
+                let ts = ts_src.fetch_add(1, sync::atomic::Ordering::AcqRel);
+                // next, let's make their data an update
+                let u: U = data.into();
+                // and send it into the dispatcher
+                tx.forward(Some(u), ts);
+                ts as i64
+            }) as Box<Fn(D) -> i64 + 'static + Send>);
+
+            // automatically add source node to all incoming facts
+            // TODO: get rid of this extra thread per base node
+            let (px_tx, px_rx) = mpsc::sync_channel(buf);
             thread::spawn(move || {
-                for (r, ts) in rx {
-                    px_tx.send((root, r.map(|r| r.into()), ts as i64)).unwrap();
+                for (u, ts) in rx {
+                    px_tx.send((root, u, ts as i64)).unwrap();
                 }
             });
-            incoming.insert(base, tx);
             start.insert(base, px_rx);
         }
 
@@ -944,7 +960,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(1);
+        put[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -953,7 +969,7 @@ mod tests {
         assert_eq!(get[&a](None), vec![1]);
 
         // update value again
-        put[&a].send(1);
+        put[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1019,7 +1035,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put[&a].send(1);
+        put[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1028,7 +1044,7 @@ mod tests {
         assert_eq!(get[&c](None), vec![1]);
 
         // update value again
-        put[&b].send(1);
+        put[&b](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1048,7 +1064,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put[&a].send(1);
+        put[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1057,7 +1073,7 @@ mod tests {
         assert_eq!(get[&d](None), vec![1]);
 
         // update value again
-        put[&b].send(1);
+        put[&b](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1080,7 +1096,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put[&a].send(1);
+        put[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1089,7 +1105,7 @@ mod tests {
         assert_eq!(get[&d](None), vec![1]);
 
         // update value again
-        put[&b].send(2);
+        put[&b](2);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1112,7 +1128,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value on a
-        put_1[&a].send(1);
+        put_1[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1124,7 +1140,7 @@ mod tests {
         assert_eq!(get_1[&x](None), vec![1]);
 
         // update value again
-        put[&b].send(1);
+        put[&b](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1142,7 +1158,7 @@ mod tests {
         let (put_1, get_1) = g.run(10);
 
         // send a value on a
-        put_1[&a].send(1);
+        put_1[&a](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1163,7 +1179,7 @@ mod tests {
         assert_eq!(get[&d](None), vec![1]);
 
         // update value again
-        put[&b].send(1);
+        put[&b](1);
 
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
@@ -1220,7 +1236,7 @@ mod tests {
         assert_eq!(g.freshness(b), 0);
         assert_eq!(g.freshness(c), 0);
         assert_eq!(g.freshness(d), 0);
-        put[&a].send(vec![1.into(), 2.into()]);
+        put[&a](vec![1.into(), 2.into()]);
         wait(&g, a, 1);
         wait(&g, b, 1);
         thread::sleep(time::Duration::from_millis(50));
@@ -1236,7 +1252,7 @@ mod tests {
         wait(&g, d, 1);
 
         // Send update to b.
-        put[&b].send(vec![1.into(), 2.into()]);
+        put[&b](vec![1.into(), 2.into()]);
         wait(&g, b, 2);
         wait(&g, c, 2);
         assert_eq!(g.freshness(a), 2);

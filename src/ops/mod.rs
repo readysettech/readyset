@@ -569,7 +569,7 @@ mod tests {
         let (put, get) = g.run(10);
 
         // send a value
-        put[&a].send(vec![1.into()]);
+        put[&a](vec![1.into()]);
 
         // state should now be:
         // a = [2]
@@ -581,7 +581,7 @@ mod tests {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // send another in
-        put[&b].send(vec![16.into()]);
+        put[&b](vec![16.into()]);
 
         // state should now be:
         // a = [2]
@@ -596,7 +596,7 @@ mod tests {
         // delay before a node realizes that its descendants' mins have changed. we therefore prod
         // the nodes with another update. this update will not be visible to queries on
         // materialized views.
-        put[&a].send(vec![32.into()]);
+        put[&a](vec![32.into()]);
         // let it propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
 

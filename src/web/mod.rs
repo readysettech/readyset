@@ -60,7 +60,7 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
                 path => Post: Box::new(move |mut ctx: Context, _: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    put.lock().unwrap().send(ep.arguments.iter().map(|arg| {
+                    put.lock().unwrap()(ep.arguments.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {

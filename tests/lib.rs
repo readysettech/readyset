@@ -21,7 +21,7 @@ fn it_works() {
     let (put, get) = g.run(10);
 
     // send a value on a
-    put[&a].send(vec![1.into(), 2.into()]);
+    put[&a](vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -30,7 +30,7 @@ fn it_works() {
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
 
     // update value again
-    put[&b].send(vec![2.into(), 4.into()]);
+    put[&b](vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -56,9 +56,9 @@ fn it_works_w_mat() {
     let (put, get) = g.run(10);
 
     // send a few values on a
-    put[&a].send(vec![1.into(), 1.into()]);
-    put[&a].send(vec![1.into(), 2.into()]);
-    put[&a].send(vec![1.into(), 3.into()]);
+    put[&a](vec![1.into(), 1.into()]);
+    put[&a](vec![1.into(), 2.into()]);
+    put[&a](vec![1.into(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -71,9 +71,9 @@ fn it_works_w_mat() {
     assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b].send(vec![2.into(), 4.into()]);
-    put[&b].send(vec![2.into(), 5.into()]);
-    put[&b].send(vec![2.into(), 6.into()]);
+    put[&b](vec![2.into(), 4.into()]);
+    put[&b](vec![2.into(), 5.into()]);
+    put[&b](vec![2.into(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -95,7 +95,7 @@ fn it_migrates_wo_mat() {
     let (put_1, _) = g.run(10);
 
     // send a value on a
-    put_1[&a].send(vec![1.into(), 2.into()]);
+    put_1[&a](vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -117,7 +117,7 @@ fn it_migrates_wo_mat() {
     assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
 
     // update value again
-    put[&b].send(vec![2.into(), 4.into()]);
+    put[&b](vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -136,9 +136,9 @@ fn it_migrates_w_mat() {
     let (put_1, _) = g.run(10);
 
     // send a few values on a
-    put_1[&a].send(vec![1.into(), 1.into()]);
-    put_1[&a].send(vec![1.into(), 2.into()]);
-    put_1[&a].send(vec![1.into(), 3.into()]);
+    put_1[&a](vec![1.into(), 1.into()]);
+    put_1[&a](vec![1.into(), 2.into()]);
+    put_1[&a](vec![1.into(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 100_000_000));
@@ -164,9 +164,9 @@ fn it_migrates_w_mat() {
     assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b].send(vec![2.into(), 4.into()]);
-    put[&b].send(vec![2.into(), 5.into()]);
-    put[&b].send(vec![2.into(), 6.into()]);
+    put[&b](vec![2.into(), 4.into()]);
+    put[&b](vec![2.into(), 5.into()]);
+    put[&b](vec![2.into(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 100_000_000));
@@ -217,7 +217,7 @@ fn votes() {
     let (put, get) = g.run(10);
 
     // make one article
-    put[&article1].send(vec![1.into(), 2.into()]);
+    put[&article1](vec![1.into(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -226,7 +226,7 @@ fn votes() {
     assert_eq!(get[&article](None), vec![vec![1.into(), 2.into()]]);
 
     // make another article
-    put[&article2].send(vec![2.into(), 4.into()]);
+    put[&article2](vec![2.into(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -251,7 +251,7 @@ fn votes() {
     }
 
     // create a vote (user 1 votes for article 1)
-    put[&vote].send(vec![1.into(), 1.into()]);
+    put[&vote](vec![1.into(), 1.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -259,7 +259,7 @@ fn votes() {
     // this is stupid. as only absorb state is exposed to queries on materialized views, we need to
     // inject an extra update to ensure that the nodes *see* that they can absorb the above update.
     // this extra vote will not be seen by any queries on materialized views.
-    put[&vote].send(vec![2.into(), 1.into()]);
+    put[&vote](vec![2.into(), 1.into()]);
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 
