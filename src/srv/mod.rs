@@ -23,7 +23,7 @@ pub mod ext {
         /// Insert a new record into the given view.
         ///
         /// `args` gives the column values for the new record.
-        rpc insert(view: usize, args: Vec<DataType>) -> ();
+        rpc insert(view: usize, args: Vec<DataType>) -> i64;
 
         /// List all available views, their names, and whether they are writeable.
         rpc list() -> HashMap<String, (usize, bool)>;
@@ -68,8 +68,8 @@ impl ext::Service for Server {
         get.2(arg.as_ref())
     }
 
-    fn insert(&self, view: usize, args: Vec<DataType>) -> () {
-        self.put[&NodeIndex::new(view)].2.lock().unwrap()(args);
+    fn insert(&self, view: usize, args: Vec<DataType>) -> i64 {
+        self.put[&NodeIndex::new(view)].2.lock().unwrap()(args)
     }
 
     fn list(&self) -> HashMap<String, (usize, bool)> {
