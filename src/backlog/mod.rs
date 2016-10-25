@@ -195,6 +195,7 @@ impl BufferedStore {
         self.store.read().unwrap().1.adopt(Box::new(LL::new(Some((ts, r)))));
     }
 
+    #[cfg(test)]
     /// Safe wrapper around `add` for when you have an exclusive reference
     pub fn safe_add(&mut self, r: Vec<ops::Record>, ts: i64) {
         unsafe { self.add(r, ts) };

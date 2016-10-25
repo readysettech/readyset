@@ -54,7 +54,7 @@ impl NodeOp for GatedIdentity {
                _: i64,
                _: Option<&backlog::BufferedStore>)
                -> Option<ops::Update> {
-        self.rx.lock().unwrap().recv();
+        self.rx.lock().unwrap().recv().unwrap();
         Some(update)
     }
 
