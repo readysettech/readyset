@@ -592,14 +592,6 @@ mod tests {
         // give it some time to propagate
         thread::sleep(time::Duration::new(0, 10_000_000));
 
-        // reads only see records whose timestamp is at the global minimum, but there might be a
-        // delay before a node realizes that its descendants' mins have changed. we therefore prod
-        // the nodes with another update. this update will not be visible to queries on
-        // materialized views.
-        put[&a](vec![32.into()]);
-        // let it propagate
-        thread::sleep(time::Duration::new(0, 10_000_000));
-
         // check state
         // a
         let set = get[&a](None)
@@ -630,15 +622,8 @@ mod tests {
         assert!(set.contains(&6), format!("6 not in {:?}", set));
         // must see 16+2+4
         assert!(set.contains(&22), format!("22 not in {:?}", set));
-        if mat {
-            // must not see 32+1+4
-            assert_eq!(set.len(), 2);
-        } else {
-            // must see 32+1+4 (since it's past the ancestor min)
-            assert!(set.contains(&37), format!("37 not in {:?}", set));
-            // and obviously nothing else
-            assert_eq!(set.len(), 3);
-        }
+        // and nothing else
+        assert_eq!(set.len(), 2);
 
         // d
         let set = get[&d](None)
@@ -649,10 +634,8 @@ mod tests {
         assert!(set.contains(&14), format!("14 not in {:?}", set));
         // must see 16+2+4+8
         assert!(set.contains(&30), format!("30 not in {:?}", set));
-        // must see 32+1+4+8, because leaf views always absorb
-        assert!(set.contains(&45), format!("45 not in {:?}", set));
-        // and should obviously not see anything else
-        assert_eq!(set.len(), 3);
+        // and nothing anything else
+        assert_eq!(set.len(), 2);
     }
 
     #[test]

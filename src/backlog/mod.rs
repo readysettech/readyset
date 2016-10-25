@@ -263,6 +263,18 @@ impl BufferedStore {
     {
         let store = self.store.read().unwrap();
 
+        // if we don't have a timestamp (i.e., end-user query), then we want to scan the entire
+        // backlog. this may be somewhat slow, but will give the reader as up-to-date results as we
+        // can, so that we minimize user-visible inconsistencies.
+        // TODO: we may want to expose this trade-off to the user in the future.
+        let including = including.unwrap_or_else(i64::max_value);
+
+        // if we are querying at the absorption timestamp, we need only look at the store
+        let absorbed = self.absorbed.load(atomic::Ordering::Acquire) as i64;
+        if including == absorbed {
+            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
+        }
+
         // okay, so we want to:
         //
         //  a) get the base results
@@ -275,16 +287,6 @@ impl BufferedStore {
         //  1) chain in all the positives in the backlog onto the base result iterator
         //  2) for each resulting row, check all backlogged negatives, and eliminate that result +
         //     the backlogged entry if there's a match.
-        if including.is_none() {
-            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
-        }
-
-        let including = including.unwrap();
-        let absorbed = self.absorbed.load(atomic::Ordering::Acquire) as i64;
-        if including == absorbed {
-            return then(store.0.find(conds).map(|r| self.extract_ts(r)).collect());
-        }
-
         assert!(including > absorbed);
         let mut relevant = store.1
             .iter()
@@ -413,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn no_ts_ignores_backlog() {
+    fn no_ts_scans_backlog() {
         let a1 = vec![1.into(), "a".into()];
         let b2 = vec![2.into(), "b".into()];
 
@@ -421,10 +423,12 @@ mod tests {
         b.safe_add(vec![ops::Record::Positive(a1.clone(), 0)], 0);
         b.safe_add(vec![ops::Record::Positive(b2.clone(), 1)], 1);
         b.absorb(0);
-        assert_eq!(b.find_and(&[], None, |rs| rs.len()), 1);
+        assert_eq!(b.find_and(&[], None, |rs| rs.len()), 2);
         assert!(b.find_and(&[], None, |rs| {
             rs.iter()
-                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into())
+                .any(|&(r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()) &&
+            rs.iter()
+                .any(|&(r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into())
         }));
     }
 
