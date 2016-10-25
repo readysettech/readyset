@@ -4,7 +4,6 @@ use ops::Update;
 
 use tarpc;
 use shortcut;
-use clocked_dispatch;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,7 +23,7 @@ pub mod ext {
         /// Insert a new record into the given view.
         ///
         /// `args` gives the column values for the new record.
-        rpc insert(view: usize, args: Vec<DataType>) -> ();
+        rpc insert(view: usize, args: Vec<DataType>) -> i64;
 
         /// List all available views, their names, and whether they are writeable.
         rpc list() -> HashMap<String, (usize, bool)>;
@@ -33,7 +32,7 @@ pub mod ext {
 
 use self::ext::*;
 
-type Put = clocked_dispatch::ClockedSender<Vec<DataType>>;
+type Put = Box<Fn(Vec<DataType>) -> i64 + Send + 'static>;
 type Get = Box<Fn(Option<&Query>) -> Vec<Vec<DataType>> + Send + Sync>;
 type FG = FlowGraph<Query, Update, Vec<DataType>>;
 
@@ -69,9 +68,8 @@ impl ext::Service for Server {
         get.2(arg.as_ref())
     }
 
-    fn insert(&self, view: usize, args: Vec<DataType>) -> () {
-        self.put[&NodeIndex::new(view)].2.lock().unwrap().send(args);
-
+    fn insert(&self, view: usize, args: Vec<DataType>) -> i64 {
+        self.put[&NodeIndex::new(view)].2.lock().unwrap()(args)
     }
 
     fn list(&self) -> HashMap<String, (usize, bool)> {

@@ -24,6 +24,9 @@ struct Endpoint {
 pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listening>
     where U: 'static + Clone + Send + From<Vec<DataType>>
 {
+    use rustc_serialize::json::ToJson;
+    use rustful::header::ContentType;
+
     let mut router = TreeRouter::new();
 
     let (ins, outs) = {
@@ -57,16 +60,18 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
         let put = Mutex::new(put.remove(&ep.node).unwrap());
         insert_routes! {
             &mut router => {
-                path => Post: Box::new(move |mut ctx: Context, _: Response| {
+                path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    put.lock().unwrap().send(ep.arguments.iter().map(|arg| {
+                    let ts = put.lock().unwrap()(ep.arguments.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {
                             json[&**arg].as_string().unwrap().into()
                         }
                     }).collect::<Vec<DataType>>());
+                    res.headers_mut().set(ContentType::json());
+                    res.send(format!("{}", ts.to_json()));
                 }) as Box<Handler>,
             }
         };
@@ -77,9 +82,6 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
         insert_routes! {
             &mut router => {
                 path => Get: Box::new(move |ctx: Context, mut res: Response| {
-                    use rustc_serialize::json::ToJson;
-                    use rustful::header::ContentType;
-
                     let mut arg = None;
                     if !ctx.query.is_empty() {
                         use std::iter;

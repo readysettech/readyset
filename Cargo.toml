@@ -12,7 +12,7 @@ b_netsoup = ["tarpc", "serde", "serde_macros"]
 [dependencies]
 petgraph = "0.2"
 shortcut = "3.3"
-clocked-dispatch = "3.0"
+clocked-dispatch = "4.0"
 
 # for benchmarks
 # cli
@@ -27,7 +27,7 @@ postgres = { version = "0.11", optional = true }
 r2d2 = { version = "0.7", optional = true }
 r2d2_postgres = { version = "0.10", optional = true }
 # memcached
-memcache = {git="https://github.com/aisk/rust-memcache.git", optional = true }
+memcache = {git="https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7dec2dfcd4cda76002d8c10b993263", optional = true }
 # netsoup
 tarpc = { version = "0.6", optional = true }
 serde = { version = "0.8", optional = true }
