@@ -76,7 +76,7 @@ impl GroupedOperation for Aggregator {
         0i64.into()
     }
 
-    fn one(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
         match self.op {
             Aggregation::COUNT if pos => 1,
             Aggregation::COUNT => -1,
@@ -91,7 +91,7 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn succ(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType {
+    fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType {
         if let query::DataType::Number(n) = *current {
             diffs.into_iter().fold(n, |n, (d, _)| n + d).into()
         } else {

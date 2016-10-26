@@ -58,11 +58,11 @@ pub trait GroupedOperation: fmt::Debug {
     fn zero(&self) -> query::DataType;
 
     /// Extract the aggregation value from a single record.
-    fn one(&self, record: &[query::DataType], is_positive: bool) -> Self::Diff;
+    fn to_diff(&self, record: &[query::DataType], is_positive: bool) -> Self::Diff;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
-    fn succ(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType;
+    fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType;
 }
 
 #[derive(Debug)]
@@ -177,7 +177,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 let mut consolidate = HashMap::new();
                 for rec in rs {
                     let (r, pos, ts) = rec.extract();
-                    let val = self.inner.one(&r[..], pos);
+                    let val = self.inner.to_diff(&r[..], pos);
                     let group = r.into_iter()
                         .enumerate()
                         .map(|(i, v)| {
@@ -245,7 +245,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     let new_ts = diffs.iter().map(|&(_, ts)| ts).max().unwrap();
 
                     // new is the result of applying all diffs for the group to the current value
-                    let new = self.inner.succ(&current, diffs);
+                    let new = self.inner.apply(&current, diffs);
 
                     // construct prefix of output record used for both - and +
                     let mut rec = Vec::with_capacity(group.len() + 1);
@@ -312,7 +312,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
         for (rec, ts) in rx {
             use std::cmp;
 
-            let val = self.inner.one(&rec[..], true);
+            let val = self.inner.to_diff(&rec[..], true);
             let group = rec.into_iter()
                 .enumerate()
                 .filter_map(|(i, v)| {
@@ -332,7 +332,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
             // that would mean much higher (and potentially unnecessary) memory usage. ideally, we
             // would allow the GroupOperation to define its own aggregation container for this kind
             // of use-case, but we leave that as future work for now.
-            let next = self.inner.succ(&cur.0, vec![(val, ts)]);
+            let next = self.inner.apply(&cur.0, vec![(val, ts)]);
             cur.0 = next;
 
             // timestamp should always reflect the latest influencing record
