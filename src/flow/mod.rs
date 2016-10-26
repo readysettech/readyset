@@ -74,6 +74,14 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     fn args(&self) -> &[String];
 }
 
+pub struct FreshnessProbe(sync::Arc<sync::atomic::AtomicIsize>);
+
+impl FreshnessProbe {
+    pub fn lower_bound(&self) -> i64 {
+        self.0.load(sync::atomic::Ordering::Acquire) as i64
+    }
+}
+
 /// Holds flow graph node state that may change as new nodes are added to the graph.
 struct Context<T: Clone + Send> {
     txs: Vec<mpsc::SyncSender<(NodeIndex, Option<T>, i64)>>,
@@ -582,18 +590,10 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         (incoming, qs)
     }
 
-    /// Return a lower bound on the freshness of any subsequent reads to the indicated node.
-    pub fn freshness(&self, node: NodeIndex) -> i64 {
-        match self.mins.get(&node) {
-            Some(m) => m.load(sync::atomic::Ordering::Relaxed) as i64,
-            None => {
-                self.graph
-                    .edges_directed(node, petgraph::EdgeDirection::Incoming)
-                    .map(|(ni, _)| self.freshness(ni))
-                    .min()
-                    .unwrap()
-            }
-        }
+    /// Return a probe that can be used to determine a bound on the freshness of subsequent reads
+    /// to the given node.
+    pub fn freshness(&self, node: NodeIndex) -> Option<FreshnessProbe> {
+        self.mins.get(&node).map(|m| FreshnessProbe(m.clone()))
     }
 
     fn inner(state: NodeState<Q, U, D>) {
@@ -1223,30 +1223,39 @@ mod tests {
         // Wait until node ni reaches time stamp ts.
         let wait = |ref g: &FlowGraph<_, _, _>, ni: NodeIndex, ts: i64| {
             let mut f: i64 = 0;
+            let nf = g.freshness(ni).unwrap();
             while f < ts {
-                let nf = g.freshness(ni);
+                let nf = nf.lower_bound();
                 assert!(nf <= ts);
                 assert!(f <= nf);
                 f = nf;
             }
         };
 
+        // prepare freshness probes
+        let af = g.freshness(a).unwrap();
+        let bf = g.freshness(b).unwrap();
+        let cf = g.freshness(c).unwrap();
+        let df = g.freshness(d).unwrap();
+
+        // check initial state
+        assert_eq!(af.lower_bound(), 0);
+        assert_eq!(bf.lower_bound(), 0);
+        assert_eq!(cf.lower_bound(), 0);
+        assert_eq!(df.lower_bound(), 0);
+
         // Send update to a.
-        assert_eq!(g.freshness(a), 0);
-        assert_eq!(g.freshness(b), 0);
-        assert_eq!(g.freshness(c), 0);
-        assert_eq!(g.freshness(d), 0);
         put[&a](vec![1.into(), 2.into()]);
         wait(&g, a, 1);
         wait(&g, b, 1);
         thread::sleep(time::Duration::from_millis(50));
-        assert_eq!(g.freshness(c), 0);
-        assert_eq!(g.freshness(d), 0);
+        assert_eq!(cf.lower_bound(), 0);
+        assert_eq!(df.lower_bound(), 0);
 
         atx.send(()).unwrap();
         wait(&g, c, 1);
         thread::sleep(time::Duration::from_millis(50));
-        assert_eq!(g.freshness(d), 0);
+        assert_eq!(df.lower_bound(), 0);
 
         ctx.send(()).unwrap();
         wait(&g, d, 1);
@@ -1255,9 +1264,9 @@ mod tests {
         put[&b](vec![1.into(), 2.into()]);
         wait(&g, b, 2);
         wait(&g, c, 2);
-        assert_eq!(g.freshness(a), 2);
+        assert_eq!(af.lower_bound(), 2);
         thread::sleep(time::Duration::from_millis(50));
-        assert_eq!(g.freshness(d), 1);
+        assert_eq!(df.lower_bound(), 1);
         btx.send(()).unwrap();
         wait(&g, d, 2);
     }
