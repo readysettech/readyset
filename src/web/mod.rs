@@ -1,6 +1,6 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
-use flow::{FlowGraph, NodeIndex};
+use flow::{FlowGraph, FreshnessProbe, NodeIndex};
 use query::{DataType, Query};
 use std::collections::HashMap;
 use shortcut;
@@ -8,6 +8,7 @@ use shortcut;
 struct Endpoint {
     node: NodeIndex,
     arguments: Vec<String>,
+    freshness_probe: Option<FreshnessProbe>,
 }
 
 /// Start exposing the given `FlowGraph` over HTTP.
@@ -37,6 +38,7 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
              Endpoint {
                 node: ni,
                 arguments: ns.args().iter().cloned().collect(),
+                freshness_probe: None,
             })
         };
 
@@ -77,8 +79,10 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
         };
     }
 
-    for (path, ep) in outs.into_iter() {
+    for (path, mut ep) in outs.into_iter() {
         let get = get.remove(&ep.node).unwrap();
+        // Must do this here as the freshness probes are initialized on `soup.run()`
+        ep.freshness_probe = soup.freshness(ep.node);
         insert_routes! {
             &mut router => {
                 path => Get: Box::new(move |ctx: Context, mut res: Response| {
@@ -118,7 +122,11 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
                             .collect::<HashMap<_, _>>()
                     }).collect::<Vec<_>>();
                     res.headers_mut().set(ContentType::json());
-                    res.send(format!("{}", data.to_json()));
+                    let freshness = match ep.freshness_probe {
+                        Some(ref fp) => fp.lower_bound(),
+                        _ => 0,
+                    };
+                    res.send(format!("{}", (data, freshness).to_json()));
                 }) as Box<Handler>,
             }
         };
