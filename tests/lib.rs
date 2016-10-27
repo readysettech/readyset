@@ -8,7 +8,7 @@ fn parse_queryset(queries: Vec<String>) {
     let mut parsed_err = 0;
     for query in queries.iter() {
         match nom_sqlp::parser::parse_query(&query) {
-            Ok(q) => {
+            Ok(_) => {
                 parsed_ok.push(query);
             }
             Err(_) => parsed_err += 1,
