@@ -377,8 +377,7 @@ mod query;
 mod ops;
 mod backlog;
 
-pub use flow::FlowGraph;
-pub use flow::NodeIndex;
+pub use flow::{FlowGraph, NodeIndex, FreshnessProbe};
 pub use ops::new;
 pub use ops::NodeType;
 pub use ops::base::Base;

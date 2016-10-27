@@ -74,9 +74,14 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     fn args(&self) -> &[String];
 }
 
+/// A `FreshnessProbe` allows external observers to query the freshness of a particular graph node.
 pub struct FreshnessProbe(sync::Arc<sync::atomic::AtomicIsize>);
 
 impl FreshnessProbe {
+    /// Gives a lower bound on the write timestamps processed by this node.
+    ///
+    /// Subsequent queries to this node are guaranteed to results that include *at least* any write
+    /// with a timestamp lower or equal to the returned value.
     pub fn lower_bound(&self) -> i64 {
         self.0.load(sync::atomic::Ordering::Acquire) as i64
     }
