@@ -6,6 +6,7 @@ use ops::NodeOp;
 use ops::NodeType;
 
 use std::collections::HashMap;
+use std::cell::RefCell;
 
 use shortcut;
 
@@ -15,7 +16,13 @@ pub struct Union {
     emit: HashMap<flow::NodeIndex, Vec<usize>>,
     srcs: HashMap<flow::NodeIndex, ops::V>,
     cols: HashMap<flow::NodeIndex, usize>,
+
+    gather: RefCell<HashMap<flow::NodeIndex, Vec<ops::Record>>>,
 }
+
+// gather isn't normally Sync, but we know that we're only
+// accessing it from one place at any given time, so it's fine..
+unsafe impl Sync for Union {}
 
 impl Union {
     /// Construct a new union operator.
@@ -36,6 +43,8 @@ impl Union {
             emit: emit,
             srcs: HashMap::new(),
             cols: HashMap::new(),
+
+            gather: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -61,21 +70,43 @@ impl NodeOp for Union {
                -> Option<ops::Update> {
         match u {
             ops::Update::Records(rs) => {
-                Some(ops::Update::Records(rs.into_iter()
-                    .map(|rec| {
-                        let (r, pos, ts) = rec.extract();
+                let mut g = self.gather.borrow_mut();
+                // if we haven't received updates from all our ancestors for this timestamp yet,
+                // just buffer this update and delay completing processing of this timestamp.
+                if g.len() != self.srcs.len() - 1 {
+                    g.insert(from, rs);
+                    // FIXME:
+                    // how do we do this?
+                    // returning None isn't sufficient, because Noen implies that we're now done
+                    // with this ts, which is *not* true. it's almost like forward() needs to
+                    // return Result<Option<ops::Update>, ()>, where Err is used to indicate that
+                    // the forward did *not* happen, and that time should *not* be advanced for
+                    // this node...
+                    return unimplemented!();
+                }
 
-                        // yield selected columns for this source
-                        let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+                // we've received all updates for this ts
+                // emit all of them in a single update
+                let rs = g.drain()
+                    .chain(Some((from, rs)).into_iter())
+                    .flat_map(|(from, rs)| {
+                        rs.into_iter().map(move |rec| {
+                            let (r, pos, ts) = rec.extract();
 
-                        // return new row with appropriate sign
-                        if pos {
-                            ops::Record::Positive(res, ts)
-                        } else {
-                            ops::Record::Negative(res, ts)
-                        }
+                            // yield selected columns for this source
+                            // TODO: avoid the .clone() here
+                            let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+
+                            // return new row with appropriate sign
+                            if pos {
+                                ops::Record::Positive(res, ts)
+                            } else {
+                                ops::Record::Negative(res, ts)
+                            }
+                        })
                     })
-                    .collect()))
+                    .collect();
+                Some(ops::Update::Records(rs))
             }
         }
     }
