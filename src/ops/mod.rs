@@ -691,9 +691,9 @@ mod tests {
         s.prime(&g);
 
         // forward an update that changes counter from 0 to 1
-        let u = s.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        let u = s.process(Some(vec![0.into(), 1.into()].into()), 0.into(), 0, true);
         // we should get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -0 should be masked by the HAVING
@@ -710,9 +710,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
 
         // forward another update that changes counter from 1 to 2
-        let u = s.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        let u = s.process(Some((vec![0.into(), 1.into()], 1).into()),
+                          0.into(),
+                          1,
+                          true);
         // we should get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -1 should be visible
@@ -729,9 +732,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a third update that changes the counter from 2 to 3
-        let u = s.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        let u = s.process(Some((vec![0.into(), 1.into()], 2).into()),
+                          0.into(),
+                          2,
+                          true);
         // we should still get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // neither the -2 or the +3 should be visible
@@ -744,9 +750,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a final update that changes the counter back to 1
-        let u = s.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        let u = s.process(Some((vec![0.into(), (-2).into()], 3).into()),
+                          0.into(),
+                          3,
+                          true);
         // we should still get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -3 should be masked by the HAVING
@@ -799,25 +808,34 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // make the count 1
-        ga.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        ga.process(Some(vec![0.into(), 1.into()].into()), 0.into(), 0, true);
 
         // querying should now give value (1 matches HAVING)
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
 
         // make the count 2
-        ga.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        ga.process(Some((vec![0.into(), 1.into()], 1).into()),
+                   0.into(),
+                   1,
+                   true);
 
         // querying should now give nothing
         assert_eq!(s.find(None, None), vec![]);
 
         // make the count 3
-        ga.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        ga.process(Some((vec![0.into(), 1.into()], 2).into()),
+                   0.into(),
+                   2,
+                   true);
 
         // querying should still give nothing
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a final update that changes the counter back to 1
-        ga.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        ga.process(Some((vec![0.into(), (-2).into()], 3).into()),
+                   0.into(),
+                   3,
+                   true);
 
         // querying should give again value
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 3)]);

@@ -205,11 +205,14 @@ mod tests {
         let l = g.add_node(Some(sync::Arc::new(l)));
         let r = g.add_node(Some(sync::Arc::new(r)));
 
-        g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
-        g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
-        g[r].as_ref().unwrap().process((vec![1.into(), "skipped".into(), "x".into()], 2).into(),
-                                       r,
-                                       2);
+        g[l].as_ref().unwrap().process(Some((vec![1.into(), "a".into()], 0).into()), l, 0, true);
+        g[l].as_ref().unwrap().process(Some((vec![2.into(), "b".into()], 1).into()), l, 1, true);
+        g[r].as_ref()
+            .unwrap()
+            .process(Some((vec![1.into(), "skipped".into(), "x".into()], 2).into()),
+                     r,
+                     2,
+                     true);
 
         let mut emits = HashMap::new();
         emits.insert(l, vec![0, 1]);
@@ -226,7 +229,7 @@ mod tests {
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.process(left.clone().into(), l, 0).unwrap() {
+        match u.process(Some(left.clone().into()), l, 0, true).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
             }
@@ -234,7 +237,7 @@ mod tests {
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.process(right.clone().into(), r, 0).unwrap() {
+        match u.process(Some(right.clone().into()), r, 0, true).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);
