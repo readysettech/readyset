@@ -55,13 +55,21 @@ impl NodeOp for Latest {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                src: flow::NodeIndex,
                _: i64,
+               last: bool,
                db: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
 
         assert_eq!(src, self.src);
+
+        if u.is_none() {
+            // we only have one ancestor, so this must be last, and our ancestor sent nothing
+            debug_assert!(last);
+            return u.into();
+        }
+        let u = u.unwrap();
 
         // Construct the query we'll need to query into ourselves to find current latest
         let mut q = self.key
@@ -152,7 +160,7 @@ impl NodeOp for Latest {
                     assert!(handled.contains(&group));
                 }
 
-                Some(ops::Update::Records(out))
+                flow::ProcessingResult::Done(ops::Update::Records(out))
             }
         }
     }

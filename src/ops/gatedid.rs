@@ -49,13 +49,17 @@ impl NodeOp for GatedIdentity {
     }
 
     fn forward(&self,
-               update: ops::Update,
+               update: Option<ops::Update>,
                _: flow::NodeIndex,
                _: i64,
+               _: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
-        self.rx.lock().unwrap().recv().unwrap();
-        Some(update)
+               -> flow::ProcessingResult<ops::Update> {
+
+        if update.is_some() {
+            self.rx.lock().unwrap().recv().unwrap();
+        }
+        update.into()
     }
 
     fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {

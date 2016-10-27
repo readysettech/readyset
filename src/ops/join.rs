@@ -286,11 +286,26 @@ impl NodeOp for Joiner {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                from: flow::NodeIndex,
                ts: i64,
+               last: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
+
+        if u.is_none() {
+            return if last {
+                // all our ancestors sent a None, so nothing relevant for us to do
+                flow::ProcessingResult::Skip
+            } else {
+                // we should only be called with None on the last ancestor
+                debug_assert!(false);
+                // technically, it's not a problem though, we *could* just ignore it
+                // we keep the unreachable!() in place above anyway, just to catch this
+                flow::ProcessingResult::Accepted
+            };
+        }
+        let u = u.unwrap();
 
         match u {
             ops::Update::Records(rs) => {
@@ -301,7 +316,7 @@ impl NodeOp for Joiner {
 
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
-                Some(ops::Update::Records(rs.into_iter()
+                flow::ProcessingResult::Done(ops::Update::Records(rs.into_iter()
                     .flat_map(|rec| {
                         let (r, pos, lts) = rec.extract();
 

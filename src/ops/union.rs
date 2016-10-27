@@ -55,6 +55,36 @@ impl From<Union> for NodeType {
     }
 }
 
+impl Union {
+    fn drain<I>(&self, it: I) -> flow::ProcessingResult<ops::Update>
+        where I: Iterator<Item = (flow::NodeIndex, Vec<ops::Record>)>
+    {
+        let rs: Vec<_> = it.flat_map(|(from, rs)| {
+                rs.into_iter().map(move |rec| {
+                    let (r, pos, ts) = rec.extract();
+
+                    // yield selected columns for this source
+                    // TODO: avoid the .clone() here
+                    let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+
+                    // return new row with appropriate sign
+                    if pos {
+                        ops::Record::Positive(res, ts)
+                    } else {
+                        ops::Record::Negative(res, ts)
+                    }
+                })
+            })
+            .collect();
+
+        if !rs.is_empty() {
+            flow::ProcessingResult::Done(ops::Update::Records(rs))
+        } else {
+            flow::ProcessingResult::Skip
+        }
+    }
+}
+
 impl NodeOp for Union {
     fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
         self.srcs.extend(self.emit.keys().map(|&n| (n, g[n].as_ref().unwrap().clone())));
@@ -63,51 +93,31 @@ impl NodeOp for Union {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                from: flow::NodeIndex,
                _: i64,
+               last: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
+
+        debug_assert!(u.is_some() || last);
+        let mut g = self.gather.borrow_mut();
+
         match u {
-            ops::Update::Records(rs) => {
-                let mut g = self.gather.borrow_mut();
+            Some(ops::Update::Records(rs)) => {
                 // if we haven't received updates from all our ancestors for this timestamp yet,
                 // just buffer this update and delay completing processing of this timestamp.
-                if g.len() != self.srcs.len() - 1 {
+                if !last {
                     g.insert(from, rs);
-                    // FIXME:
-                    // how do we do this?
-                    // returning None isn't sufficient, because Noen implies that we're now done
-                    // with this ts, which is *not* true. it's almost like forward() needs to
-                    // return Result<Option<ops::Update>, ()>, where Err is used to indicate that
-                    // the forward did *not* happen, and that time should *not* be advanced for
-                    // this node...
-                    return unimplemented!();
+                    return flow::ProcessingResult::Accepted;
                 }
 
                 // we've received all updates for this ts
                 // emit all of them in a single update
-                let rs = g.drain()
-                    .chain(Some((from, rs)).into_iter())
-                    .flat_map(|(from, rs)| {
-                        rs.into_iter().map(move |rec| {
-                            let (r, pos, ts) = rec.extract();
-
-                            // yield selected columns for this source
-                            // TODO: avoid the .clone() here
-                            let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
-
-                            // return new row with appropriate sign
-                            if pos {
-                                ops::Record::Positive(res, ts)
-                            } else {
-                                ops::Record::Negative(res, ts)
-                            }
-                        })
-                    })
-                    .collect();
-                Some(ops::Update::Records(rs))
+                self.drain(g.drain().chain(Some((from, rs)).into_iter()))
             }
+            None if last => self.drain(g.drain()),
+            _ => unreachable!(),
         }
     }
 

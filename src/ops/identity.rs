@@ -39,12 +39,13 @@ impl NodeOp for Identity {
 
     #[allow(unused_variables)]
     fn forward(&self,
-               update: ops::Update,
+               update: Option<ops::Update>,
                src: flow::NodeIndex,
                timestamp: i64,
+               last: bool,
                materialized_view: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
-        Some(update)
+               -> flow::ProcessingResult<ops::Update> {
+        update.into()
     }
 
     fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
