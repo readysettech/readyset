@@ -1,10 +1,9 @@
-use nom::{alphanumeric, eof, line_ending, multispace, space};
+use nom::{alphanumeric, multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 use caseless_tag::*;
-use parser::{ConditionBase, ConditionExpression, ConditionTree};
-use parser::{binary_comparison_operator, binary_logical_operator, unary_comparison_operator};
+use parser::ConditionExpression;
 use parser::{fieldlist, unsigned_number, statement_terminator};
 
 use condition::*;
@@ -23,8 +22,8 @@ pub struct LimitClause {
 
 #[derive(Clone, Debug, PartialEq)]
 enum OrderType {
-    OrderAscending,
-    OrderDescending,
+    //   OrderAscending,
+    //   OrderDescending,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,7 +83,7 @@ named!(where_clause<&[u8], ConditionExpression>,
 named!(table_reference<&[u8], &str>,
     chain!(
         table: map_res!(alphanumeric, str::from_utf8) ~
-        alias: opt!(
+        opt!(
             chain!(
                 space ~
                 caseless_tag!("as") ~

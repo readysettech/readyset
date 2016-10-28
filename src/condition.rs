@@ -1,10 +1,8 @@
-use nom::{alphanumeric, eof, line_ending, multispace, space};
-use nom::{IResult, Err, ErrorKind, Needed};
+use nom::{alphanumeric, multispace};
 use std::str;
 
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
 use parser::{binary_comparison_operator, binary_logical_operator, unary_negation_operator};
-use parser::{fieldlist, unsigned_number};
 
 fn fold_cond_exprs(initial: ConditionExpression,
                    remainder: Vec<(&str, ConditionExpression)>)
@@ -53,10 +51,10 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
             )
         ),
         || {
-            if let Some(ref no) = neg_op {
+            if let Some(no) = neg_op {
                 ConditionExpression::LogicalOp(
                     ConditionTree {
-                        operator: String::from(neg_op.unwrap()),
+                        operator: String::from(no),
                         left: Some(Box::new(fold_cond_exprs(initial, remainder))),
                         right: None,
                     }
