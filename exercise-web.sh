@@ -1,13 +1,13 @@
 #!/bin/sh
 echo "Build"
-cargo build --bin web
+cargo build --bin web --features=web
 res=$?
 if [ "$res" -ne 0 ]; then
 	exit "$res"
 fi
 
 echo "Start"
-cargo run --bin web >/dev/null &
+cargo run --bin web --features=web >/dev/null &
 sleep 1
 pid=$(pgrep -f target/debug/web)
 
