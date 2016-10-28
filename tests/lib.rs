@@ -1,4 +1,4 @@
-extern crate nom_sqlp;
+extern crate nom_sql;
 
 use std::fs::File;
 use std::io::Read;
