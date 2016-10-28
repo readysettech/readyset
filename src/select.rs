@@ -124,6 +124,7 @@ named!(pub selection<&[u8], SelectStatement>,
     ))
 );
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use parser::{ConditionBase, ConditionExpression, ConditionTree};
