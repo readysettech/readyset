@@ -126,7 +126,7 @@ named!(pub selection<&[u8], SelectStatement>,
     chain!(
         stmt: select_statement ~
         delimited!(opt!(multispace),
-                   tag!(";"),
+                   alt_complete!(tag!(";") | line_ending),
                    opt!(multispace)
         ),
     || { stmt }
