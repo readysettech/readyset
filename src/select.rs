@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn where_clause() {
-        let qstring = "select * from ContactInfo where email=?\n";
+        let qstring = "select * from ContactInfo where email=?;";
 
         let res = selection(qstring.as_bytes());
 
