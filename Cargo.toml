@@ -1,7 +1,7 @@
 [package]
-name = "nom_sqlp"
+name = "nom_sql"
 version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-nom = "1.2.4"
+nom = "^1.2.4"
