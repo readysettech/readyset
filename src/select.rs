@@ -5,7 +5,7 @@ use std::str;
 use caseless_tag::*;
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
 use parser::{binary_comparison_operator, binary_logical_operator, unary_comparison_operator};
-use parser::{fieldlist, unsigned_number};
+use parser::{fieldlist, unsigned_number, statement_terminator};
 
 use condition::*;
 
@@ -47,6 +47,7 @@ pub struct SelectStatement {
 /// Parse LIMIT clause
 named!(limit_clause<&[u8], LimitClause>,
     chain!(
+        space ~
         caseless_tag!("limit") ~
         space ~
         limit_val: unsigned_number ~
@@ -72,6 +73,7 @@ named!(limit_clause<&[u8], LimitClause>,
 /// Parse WHERE clause of a selection
 named!(where_clause<&[u8], ConditionExpression>,
     dbg_dmp!(chain!(
+        space ~
         caseless_tag!("where") ~
         space ~
         cond: condition_expr,
@@ -97,7 +99,7 @@ named!(table_reference<&[u8], &str>,
 
 /// Parse rule for a SQL selection query.
 /// TODO(malte): support nested queries as selection targets
-named!(pub select_statement<&[u8], SelectStatement>,
+named!(pub selection<&[u8], SelectStatement>,
     dbg_dmp!(chain!(
         caseless_tag!("select") ~
         space ~
@@ -106,8 +108,9 @@ named!(pub select_statement<&[u8], SelectStatement>,
         fields: fieldlist ~
         delimited!(multispace, caseless_tag!("from"), multispace) ~
         table: table_reference ~
-        cond: opt!(delimited!(multispace, where_clause, opt!(multispace))) ~
-        limit: opt!(delimited!(multispace, limit_clause, opt!(multispace))),
+        cond: opt!(where_clause) ~
+        limit: opt!(limit_clause) ~
+        statement_terminator,
         || {
             SelectStatement {
                 table: String::from(table),
@@ -120,17 +123,6 @@ named!(pub select_statement<&[u8], SelectStatement>,
             }
         }
     ))
-);
-
-named!(pub selection<&[u8], SelectStatement>,
-    chain!(
-        stmt: select_statement ~
-        delimited!(opt!(multispace),
-                   alt_complete!(tag!(";") | line_ending),
-                   opt!(multispace)
-        ),
-    || { stmt }
-    )
 );
 
 mod tests {
@@ -274,8 +266,7 @@ mod tests {
 
     #[test]
     fn simple_condition_expr() {
-        let qstring = "select infoJson from PaperStorage where paperId=? and paperStorageId=? \
-                       limit 10;";
+        let qstring = "select infoJson from PaperStorage where paperId=? and paperStorageId=?;";
 
         let res = selection(qstring.as_bytes());
 
@@ -296,7 +287,7 @@ mod tests {
             right: right_comp,
             operator: String::from("and"),
         }));
-        println!("{:?}", res);
+        println!("res: {:#?}", res);
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        table: String::from("PaperStorage"),

@@ -1,4 +1,4 @@
-use nom::{IResult, alphanumeric, digit, space};
+use nom::{IResult, alphanumeric, digit, eof, line_ending, multispace, space};
 use std::str;
 use std::str::FromStr;
 
@@ -35,6 +35,14 @@ named!(pub unsigned_number<&[u8], u64>,
     map_res!(
         map_res!(digit, str::from_utf8),
         FromStr::from_str
+    )
+);
+
+/// Parse a terminator that ends a SQL statement.
+named!(pub statement_terminator,
+    delimited!(opt!(multispace),
+               alt_complete!(tag!(";") | line_ending | eof),
+               opt!(multispace)
     )
 );
 
@@ -81,7 +89,7 @@ named!(pub unary_comparison_operator<&[u8], &str>,
 named!(pub unary_negation_operator<&[u8], &str>,
     map_res!(
         alt_complete!(
-              tag_s!(b"NOT")
+              tag_s!(b"not")
             | tag_s!(b"!")
         ),
         str::from_utf8
