@@ -124,13 +124,14 @@ pub trait NodeOp: Debug {
     /// When a new update comes in to a node, this function is called with that update. The
     /// resulting update (if any) is sent to all child nodes. If the node is materialized, and the
     /// resulting update contains positive or negative records, the materialized state is updated
-    /// appropriately.
+    /// appropriately. See `View::process` for more documentation.
     fn forward(&self,
-               Update,
-               flow::NodeIndex,
-               i64,
-               Option<&backlog::BufferedStore>)
-               -> Option<Update>;
+               u: Option<Update>,
+               src: flow::NodeIndex,
+               ts: i64,
+               last: bool,
+               mat: Option<&backlog::BufferedStore>)
+               -> flow::ProcessingResult<Update>;
 
     /// Called whenever this node is being queried for records, and it is not materialized. The
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
@@ -193,23 +194,24 @@ impl NodeOp for NodeType {
     }
 
     fn forward(&self,
-               u: Update,
+               u: Option<Update>,
                src: flow::NodeIndex,
                ts: i64,
+               last: bool,
                db: Option<&backlog::BufferedStore>)
-               -> Option<Update> {
+               -> flow::ProcessingResult<Update> {
         match *self {
-            NodeType::Base(ref n) => n.forward(u, src, ts, db),
-            NodeType::Aggregate(ref n) => n.forward(u, src, ts, db),
-            NodeType::Join(ref n) => n.forward(u, src, ts, db),
-            NodeType::Latest(ref n) => n.forward(u, src, ts, db),
-            NodeType::Union(ref n) => n.forward(u, src, ts, db),
-            NodeType::Identity(ref n) => n.forward(u, src, ts, db),
-            NodeType::GroupConcat(ref n) => n.forward(u, src, ts, db),
+            NodeType::Base(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Aggregate(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Join(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Latest(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Union(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Identity(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::GroupConcat(ref n) => n.forward(u, src, ts, last, db),
             #[cfg(test)]
-            NodeType::Test(ref n) => n.forward(u, src, ts, db),
+            NodeType::Test(ref n) => n.forward(u, src, ts, last, db),
             #[cfg(test)]
-            NodeType::GatedIdentity(ref n) => n.forward(u, src, ts, db),
+            NodeType::GatedIdentity(ref n) => n.forward(u, src, ts, last, db),
         }
     }
 
@@ -374,14 +376,19 @@ impl flow::View<query::Query> for Node {
         }
     }
 
-    fn process(&self, u: Self::Update, src: flow::NodeIndex, ts: i64) -> Option<Self::Update> {
+    fn process(&self,
+               u: Option<Self::Update>,
+               src: flow::NodeIndex,
+               ts: i64,
+               last: bool)
+               -> flow::ProcessingResult<Self::Update> {
         use std::ops::Deref;
 
         // TODO: the incoming update has not been projected through the query, and so does not fit
         // the expected input format. let's fix that.
 
-        let mut new_u = self.inner.forward(u, src, ts, self.data.deref().as_ref());
-        if let Some(ref mut new_u) = new_u {
+        let mut new_u = self.inner.forward(u, src, ts, last, self.data.deref().as_ref());
+        if let flow::ProcessingResult::Done(ref mut new_u) = new_u {
             match *new_u {
                 Update::Records(ref mut rs) => {
                     if let Some(data) = self.data.deref().as_ref() {
@@ -513,18 +520,22 @@ mod tests {
         }
 
         fn forward(&self,
-                   u: Update,
+                   u: Option<Update>,
                    _: flow::NodeIndex,
                    _: i64,
+                   _: bool,
                    _: Option<&backlog::BufferedStore>)
-                   -> Option<Update> {
+                   -> flow::ProcessingResult<Update> {
             // forward
             match u {
-                Update::Records(mut rs) => {
+                Some(Update::Records(mut rs)) => {
                     if let Some(Record::Positive(r, ts)) = rs.pop() {
                         if let query::DataType::Number(r) = r[0] {
-                            Some(Update::Records(vec![Record::Positive(vec![(r + self.0).into()],
-                                                                       ts)]))
+                            flow::ProcessingResult::Done(
+                                Update::Records(
+                                    vec![Record::Positive(vec![(r + self.0).into()], ts)]
+                                )
+                            )
                         } else {
                             unreachable!();
                         }
@@ -532,6 +543,7 @@ mod tests {
                         unreachable!();
                     }
                 }
+                None => flow::ProcessingResult::Skip,
             }
         }
 
@@ -679,9 +691,9 @@ mod tests {
         s.prime(&g);
 
         // forward an update that changes counter from 0 to 1
-        let u = s.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        let u = s.process(Some(vec![0.into(), 1.into()].into()), 0.into(), 0, true);
         // we should get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -0 should be masked by the HAVING
@@ -698,9 +710,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
 
         // forward another update that changes counter from 1 to 2
-        let u = s.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        let u = s.process(Some((vec![0.into(), 1.into()], 1).into()),
+                          0.into(),
+                          1,
+                          true);
         // we should get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -1 should be visible
@@ -717,9 +732,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a third update that changes the counter from 2 to 3
-        let u = s.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        let u = s.process(Some((vec![0.into(), 1.into()], 2).into()),
+                          0.into(),
+                          2,
+                          true);
         // we should still get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // neither the -2 or the +3 should be visible
@@ -732,9 +750,12 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a final update that changes the counter back to 1
-        let u = s.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        let u = s.process(Some((vec![0.into(), (-2).into()], 3).into()),
+                          0.into(),
+                          3,
+                          true);
         // we should still get an update
-        assert!(u.is_some());
+        assert!(u.is_done());
         match u.unwrap() {
             Update::Records(rs) => {
                 // the -3 should be masked by the HAVING
@@ -787,25 +808,34 @@ mod tests {
         assert_eq!(s.find(None, None), vec![]);
 
         // make the count 1
-        ga.process(vec![0.into(), 1.into()].into(), 0.into(), 0);
+        ga.process(Some(vec![0.into(), 1.into()].into()), 0.into(), 0, true);
 
         // querying should now give value (1 matches HAVING)
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 0)]);
 
         // make the count 2
-        ga.process((vec![0.into(), 1.into()], 1).into(), 0.into(), 1);
+        ga.process(Some((vec![0.into(), 1.into()], 1).into()),
+                   0.into(),
+                   1,
+                   true);
 
         // querying should now give nothing
         assert_eq!(s.find(None, None), vec![]);
 
         // make the count 3
-        ga.process((vec![0.into(), 1.into()], 2).into(), 0.into(), 2);
+        ga.process(Some((vec![0.into(), 1.into()], 2).into()),
+                   0.into(),
+                   2,
+                   true);
 
         // querying should still give nothing
         assert_eq!(s.find(None, None), vec![]);
 
         // forward a final update that changes the counter back to 1
-        ga.process((vec![0.into(), (-2).into()], 3).into(), 0.into(), 3);
+        ga.process(Some((vec![0.into(), (-2).into()], 3).into()),
+                   0.into(),
+                   3,
+                   true);
 
         // querying should give again value
         assert_eq!(s.find(None, None), vec![(vec![0.into(), 1.into()], 3)]);

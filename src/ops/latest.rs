@@ -55,13 +55,21 @@ impl NodeOp for Latest {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                src: flow::NodeIndex,
                _: i64,
+               last: bool,
                db: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
 
         assert_eq!(src, self.src);
+
+        if u.is_none() {
+            // we only have one ancestor, so this must be last, and our ancestor sent nothing
+            debug_assert!(last);
+            return u.into();
+        }
+        let u = u.unwrap();
 
         // Construct the query we'll need to query into ourselves to find current latest
         let mut q = self.key
@@ -152,7 +160,7 @@ impl NodeOp for Latest {
                     assert!(handled.contains(&group));
                 }
 
-                Some(ops::Update::Records(out))
+                flow::ProcessingResult::Done(ops::Update::Records(out))
             }
         }
     }
@@ -280,15 +288,15 @@ mod tests {
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
         if !big {
-            g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
-            g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+            g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
+            g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
             // note that this isn't really allowed in graphs. flow ensures that updates are
             // delivered in order. however it's safe to do this here because there's no forwarding,
             // and base does no computation. we do it to test Latest's behavior when it receives a
             // non-latest after a latest.
-            g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
-            g[s].as_ref().unwrap().process((vec![1.into(), 2.into()], 3).into(), s, 3);
-            g[s].as_ref().unwrap().process((vec![3.into(), 3.into()], 4).into(), s, 4);
+            g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
+            g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
+            g[s].as_ref().unwrap().process(Some((vec![3.into(), 3.into()], 4).into()), s, 4, true);
         }
 
         let mut l = Latest::new(s, key);
@@ -308,8 +316,8 @@ mod tests {
         let u = (vec![1.into(), 1.into()], 1).into();
 
         // first record for a group should emit just a positive
-        let out = c.process(u, src, 1);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 1, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
 
@@ -329,8 +337,8 @@ mod tests {
         let u = (vec![2.into(), 2.into()], 2).into();
 
         // first record for a second group should also emit just a positive
-        let out = c.process(u, src, 2);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 2, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
 
@@ -350,8 +358,8 @@ mod tests {
         let u = (vec![1.into(), 2.into()], 3).into();
 
         // new record for existing group should revoke the old latest, and emit the new
-        let out = c.process(u, src, 3);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 3, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -385,8 +393,8 @@ mod tests {
         ]);
 
         // negatives and positives should still result in only one new current for each group
-        let out = c.process(u, src, 4);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 4, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
             assert!(rs.iter().any(|r| {
@@ -429,14 +437,14 @@ mod tests {
         let c = setup(vec![0, 1], true);
 
         let u = (vec![1.into(), 1.into(), 1.into()], 1).into();
-        c.process(u, src, 1);
+        c.process(Some(u), src, 1, true);
         c.safe(1);
 
         // first record for a second group should also emit just a positive
         let u = (vec![1.into(), 2.into(), 2.into()], 2).into();
 
-        let out = c.process(u, src, 2);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 2, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 1);
             let mut rs = rs.into_iter();
 
@@ -457,8 +465,8 @@ mod tests {
         let u = (vec![1.into(), 1.into(), 2.into()], 3).into();
 
         // new record for existing group should revoke the old latest, and emit the new
-        let out = c.process(u, src, 3);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 3, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -494,8 +502,8 @@ mod tests {
         ]);
 
         // negatives and positives should still result in only one new current for each group
-        let out = c.process(u, src, 4);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 4, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
             assert!(rs.iter().any(|r| {

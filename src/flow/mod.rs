@@ -18,6 +18,51 @@ use ops;
 
 type Graph<Q, U, D> = petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>;
 
+/// A `ProcessingResult` is used to indicate the result of processing a single update at a node.
+pub enum ProcessingResult<U: Clone + Send> {
+    /// The update was accepted, and the node is done with the current timestamp. No more updates
+    /// should be sent to this node with the timestamp given, and the wrapped update should be
+    /// emitted to all children.
+    Done(U),
+
+    /// The update was accepted, but the node needs more updates for the current timestamp before
+    /// it is willing to produce an update.
+    Accepted,
+
+    /// The node does not wish to perform additional computation at this timestamp, and no update
+    /// should be sent to the node's children. This should translate into sending a single None to
+    /// every child to inform then that no update was emitted for this timestamp from this node.
+    Skip,
+}
+
+impl<U: Clone + Send> ProcessingResult<U> {
+    pub fn is_done(&self) -> bool {
+        match *self {
+            ProcessingResult::Done(_) |
+            ProcessingResult::Skip => true,
+            _ => false,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn unwrap(self) -> U {
+        match self {
+            ProcessingResult::Done(u) => u,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<U: Clone + Send> From<Option<U>> for ProcessingResult<U> {
+    fn from(o: Option<U>) -> Self {
+        if let Some(u) = o {
+            ProcessingResult::Done(u)
+        } else {
+            ProcessingResult::Skip
+        }
+    }
+}
+
 pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     type Update: Clone + Send;
     type Data: Clone + Send;
@@ -37,9 +82,26 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     /// Execute a single query, producing all matching records.
     fn find(&self, Option<&Q>, Option<i64>) -> Vec<(Self::Data, i64)>;
 
-    /// Process a new update. This may optionally produce a new update to propagate to child nodes
-    /// in the data flow graph.
-    fn process(&self, Self::Update, NodeIndex, i64) -> Option<Self::Update>;
+    /// Process a single update from an ancestor node.
+    ///
+    /// The update may be None if the ancestor did not send any update for this timestamp. In the
+    /// common case, `process` will not even be called in this instance. However, if `process`
+    /// returns `ProcessingResult::Accepted` for all previous updates, and the last ancestor sends
+    /// a `None`, `process` is called with a `None`.
+    ///
+    /// The node is passed the update, the update's source (i.e., which ancestor it arrived from),
+    /// the current timestamp, and a boolean indicating whether this is the last update for the
+    /// given timestamp.
+    ///
+    /// If a node does not return `ProcessingResult::Done` or `ProcessingResult::Skip` when the
+    /// boolean argument is true (i.e., when there are no more updates for this timestamp), the
+    /// node will panic, and terminate.
+    fn process(&self,
+               Option<Self::Update>,
+               NodeIndex,
+               i64,
+               bool)
+               -> ProcessingResult<Self::Update>;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     /// The passed node index is the index of the current node.
@@ -606,6 +668,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
 
         let NodeState { name, inner, srcs, input, context, processed_ts, init_ts } = state;
 
+        let nsrcs = srcs.len();
         let mut delayed = BinaryHeap::new();
         let mut freshness: HashMap<_, _> = srcs.into_iter().map(|ni| (ni, 0i64)).collect();
         let mut min = 0i64;
@@ -691,10 +754,10 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                 }
             }
 
+            // this *may* be taken out again immediately if the min is raised to the
+            // given ts, but meh, we accept that overhead for the simplicity of the
+            // code (for now).
             if let Some(u) = u {
-                // this *may* be taken out again immediately if the min is raised to the
-                // given ts, but meh, we accept that overhead for the simplicity of the
-                // code (for now).
                 delayed.push(Delayed {
                     data: (src, u),
                     ts: ts,
@@ -731,46 +794,91 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             // hold on to the context, as we're going to interact with our children for a while
             let mut ctx = context.lock().unwrap();
 
-            // keep looking for a candidate to send
-            let mut prev_ts = 0;
-            loop {
-                // find the smallest in `delay`
-                let ts = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
+            {
+                let mut term = |(src, u), last| -> bool {
+                    // do the processing dicated by our inner
+                    let u = inner.process(u, src, ts, last);
+                    if !u.is_done() {
+                        if last {
+                            unreachable!("last update for a given timestamp must end computation");
+                        }
+                        return false;
+                    }
 
-                // stop if no delayed message has a timestamp <= min
-                if ts > min {
-                    break;
-                }
+                    // we're done with this time -- let the world know!
+                    processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
 
-                // otherwise, deal with the next delayed update
-                let d = delayed.pop().unwrap();
+                    // we only forward Some() things for efficiency. sending None's is unnecessary
+                    // as long as an update will be sent later with a later timestamp. we use
+                    // `forwarded` below to figure out whether we need to also send a final None.
+                    if let ProcessingResult::Done(u) = u {
+                        let mut u = Some(u);
+                        forwarded = ts;
 
-                // we only ever need to process a single update per timestamp.
-                if ts == prev_ts {
-                    continue;
-                }
-                prev_ts = ts;
-
-                // do the processing dicated by our inner
-                let mut u = inner.process(d.data.1, d.data.0, ts);
-                processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
-
-                // we only forward Some() things for efficiency. sending None's is unnecessary as
-                // long as an update will be sent later with a later timestamp. we use `forwarded`
-                // below to figure out whether we need to also send a final None.
-                if u.is_some() {
-                    forwarded = ts;
-
-                    // avoid cloning on the last send. this will avoid clone altogether for
-                    // nodes with only one child, which is a common case.
-                    let mut txit = ctx.txs.iter_mut().peekable();
-                    while let Some(tx) = txit.next() {
-                        if txit.peek().is_some() {
-                            tx.send((name, u.clone(), ts)).unwrap();
-                        } else {
-                            tx.send((name, u.take(), ts)).unwrap();
+                        // avoid cloning on the last send. this will avoid clone altogether for
+                        // nodes with only one child, which is a common case.
+                        let mut txit = ctx.txs.iter_mut().peekable();
+                        while let Some(tx) = txit.next() {
+                            if txit.peek().is_some() {
+                                tx.send((name, u.clone(), ts)).unwrap();
+                            } else {
+                                tx.send((name, u.take(), ts)).unwrap();
+                            }
                         }
                     }
+
+                    return true;
+                };
+
+                // keep looking for a candidate to send
+                let mut prev_ts = -1;
+                let mut nrcv = nsrcs;
+                let mut done = true;
+                let mut lastsrc = *freshness.keys().next().unwrap();
+                loop {
+                    // find the smallest in `delay`
+                    let ts = delayed.peek().and_then(|d| Some(d.ts)).unwrap_or(min + 1);
+
+                    // stop if no delayed message has a timestamp <= min
+                    if ts > min {
+                        break;
+                    }
+
+                    // otherwise, deal with the next delayed update
+                    let d = delayed.pop().unwrap();
+
+                    // keep track of how many parents we've received from
+                    if ts == prev_ts {
+                        nrcv += 1;
+                    } else {
+                        // we've moved to the next timestamp. if we didn't finish the previous
+                        // timestamp, and didn't run it with last == true, then do so now.
+                        if !done {
+                            term((lastsrc, None), true);
+                        }
+                        // start the next timestamp
+                        done = false;
+                        nrcv = 1;
+                    }
+                    prev_ts = ts;
+
+                    // we're already done with this timestamp
+                    if done {
+                        continue;
+                    }
+
+                    // track the sender, in case we have to retroactively mark it as the last sender
+                    lastsrc = d.data.0;
+
+                    // process the update
+                    done = term((d.data.0, Some(d.data.1)), nrcv == nsrcs);
+                }
+
+                // we could have received only updates from a few ancestors for the last timestamp,
+                // and thus not have called term with last == true. if that were the case, call it
+                // one last time now.
+                if !done {
+                    term((lastsrc, None), true);
                 }
             }
 
@@ -913,11 +1021,20 @@ mod tests {
             }
         }
 
-        fn process(&self, u: Self::Update, _: NodeIndex, _: i64) -> Option<Self::Update> {
+        fn process(&self,
+                   u: Option<Self::Update>,
+                   _: NodeIndex,
+                   _: i64,
+                   _: bool)
+                   -> ProcessingResult<Self::Update> {
             use std::ops::AddAssign;
-            let mut x = self.2.lock().unwrap();
-            x.add_assign(u);
-            Some(u)
+            if let Some(u) = u {
+                let mut x = self.2.lock().unwrap();
+                x.add_assign(u);
+                ProcessingResult::Done(u)
+            } else {
+                ProcessingResult::Skip
+            }
         }
 
         fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {

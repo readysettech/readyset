@@ -127,9 +127,9 @@ mod tests {
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
 
-        g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
-        g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
-        g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
+        g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
 
         let mut c = if wide {
             Aggregation::COUNT.over(s, 1, &[0, 2])
@@ -152,8 +152,8 @@ mod tests {
         let u = (vec![1.into(), 1.into()], 1).into();
 
         // first row for a group should emit -0 and +1 for that group
-        let out = c.process(u, src, 1);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 1, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -181,8 +181,8 @@ mod tests {
         let u = (vec![2.into(), 2.into()], 2).into();
 
         // first row for a second group should emit -0 and +1 for that new group
-        let out = c.process(u, src, 2);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 2, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -210,8 +210,8 @@ mod tests {
         let u = (vec![1.into(), 2.into()], 3).into();
 
         // second row for a group should emit -1 and +2
-        let out = c.process(u, src, 3);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 3, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -239,8 +239,8 @@ mod tests {
         let u = ops::Record::Negative(vec![1.into(), 1.into()], 4).into();
 
         // negative row for a group should emit -2 and +1
-        let out = c.process(u, src, 4);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 4, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
@@ -278,8 +278,8 @@ mod tests {
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         // TODO: check for correct output ts'es
-        let out = c.process(u, src, 5);
-        if let Some(ops::Update::Records(rs)) = out {
+        let out = c.process(Some(u), src, 5, true);
+        if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
             assert!(rs.iter().any(|r| {

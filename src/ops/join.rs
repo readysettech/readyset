@@ -286,11 +286,26 @@ impl NodeOp for Joiner {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                from: flow::NodeIndex,
                ts: i64,
+               last: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
+
+        if u.is_none() {
+            return if last {
+                // all our ancestors sent a None, so nothing relevant for us to do
+                flow::ProcessingResult::Skip
+            } else {
+                // we should only be called with None on the last ancestor
+                debug_assert!(false);
+                // technically, it's not a problem though, we *could* just ignore it
+                // we keep the unreachable!() in place above anyway, just to catch this
+                flow::ProcessingResult::Accepted
+            };
+        }
+        let u = u.unwrap();
 
         match u {
             ops::Update::Records(rs) => {
@@ -301,7 +316,7 @@ impl NodeOp for Joiner {
 
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
-                Some(ops::Update::Records(rs.into_iter()
+                flow::ProcessingResult::Done(ops::Update::Records(rs.into_iter()
                     .flat_map(|rec| {
                         let (r, pos, lts) = rec.extract();
 
@@ -452,12 +467,12 @@ mod tests {
         let l = g.add_node(Some(sync::Arc::new(l)));
         let r = g.add_node(Some(sync::Arc::new(r)));
 
-        g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
-        g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
-        g[l].as_ref().unwrap().process((vec![3.into(), "c".into()], 2).into(), l, 2);
-        g[r].as_ref().unwrap().process((vec![1.into(), "x".into()], 0).into(), r, 0);
-        g[r].as_ref().unwrap().process((vec![1.into(), "y".into()], 1).into(), r, 1);
-        g[r].as_ref().unwrap().process((vec![2.into(), "z".into()], 2).into(), r, 2);
+        g[l].as_ref().unwrap().process(Some((vec![1.into(), "a".into()], 0).into()), l, 0, true);
+        g[l].as_ref().unwrap().process(Some((vec![2.into(), "b".into()], 1).into()), l, 1, true);
+        g[l].as_ref().unwrap().process(Some((vec![3.into(), "c".into()], 2).into()), l, 2, true);
+        g[r].as_ref().unwrap().process(Some((vec![1.into(), "x".into()], 0).into()), r, 0, true);
+        g[r].as_ref().unwrap().process(Some((vec![1.into(), "y".into()], 1).into()), r, 1, true);
+        g[r].as_ref().unwrap().process(Some((vec![2.into(), "z".into()], 2).into()), r, 2, true);
 
         // join on first field
         let b = Builder::new(vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)]).from(l, vec![1, 0]);
@@ -487,7 +502,7 @@ mod tests {
         // *************************************
 
         // forward b2 from left; should produce [b2*z2]
-        match j.process(l_b2.clone().into(), l, 100).unwrap() {
+        match j.process(Some(l_b2.clone().into()), l, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
@@ -496,7 +511,7 @@ mod tests {
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.process(l_a1.clone().into(), l, 100).unwrap() {
+        match j.process(Some(l_a1.clone().into()), l, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
@@ -516,7 +531,7 @@ mod tests {
         // *************************************
 
         // forward x1 from right; should produce [a1*x1]
-        match j.process(r_x1.clone().into(), r, 100).unwrap() {
+        match j.process(Some(r_x1.clone().into()), r, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()], 0)]);
@@ -524,7 +539,7 @@ mod tests {
         }
 
         // forward y1 from right; should produce [a1*y1]
-        match j.process(r_y1.clone().into(), r, 100).unwrap() {
+        match j.process(Some(r_y1.clone().into()), r, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
                 assert_eq!(rs,
@@ -533,7 +548,7 @@ mod tests {
         }
 
         // forward z2 from right; should produce [b2*z2]
-        match j.process(r_z2.clone().into(), r, 100).unwrap() {
+        match j.process(Some(r_z2.clone().into()), r, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
                 // right's (b2's) timestamp will be used.
@@ -549,7 +564,7 @@ mod tests {
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.process(l_c3.clone().into(), l, 100).unwrap() {
+        match j.process(Some(l_c3.clone().into()), l, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
@@ -566,7 +581,7 @@ mod tests {
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        match j.process(l_c3.clone().into(), l, 100).unwrap() {
+        match j.process(Some(l_c3.clone().into()), l, 100, true).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3, so we're expecting a single record with None
                 // for all columns output from the (non-existing) right record

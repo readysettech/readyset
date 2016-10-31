@@ -39,12 +39,13 @@ impl NodeOp for Identity {
 
     #[allow(unused_variables)]
     fn forward(&self,
-               update: ops::Update,
+               update: Option<ops::Update>,
                src: flow::NodeIndex,
                timestamp: i64,
+               last: bool,
                materialized_view: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
-        Some(update)
+               -> flow::ProcessingResult<ops::Update> {
+        update.into()
     }
 
     fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
@@ -79,11 +80,11 @@ mod tests {
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
 
-        g[s].as_ref().unwrap().process((vec![1.into(), 1.into()], 0).into(), s, 0);
-        g[s].as_ref().unwrap().process((vec![2.into(), 1.into()], 1).into(), s, 1);
-        g[s].as_ref().unwrap().process((vec![2.into(), 2.into()], 2).into(), s, 2);
-        g[s].as_ref().unwrap().process((vec![1.into(), 2.into()], 3).into(), s, 3);
-        g[s].as_ref().unwrap().process((vec![3.into(), 3.into()], 4).into(), s, 4);
+        g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
+        g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
+        g[s].as_ref().unwrap().process(Some((vec![3.into(), 3.into()], 4).into()), s, 4, true);
 
         let mut i = Identity::new(s);
         i.prime(&g);
@@ -97,7 +98,7 @@ mod tests {
         let i = Identity::new(src);
 
         let left = vec![1.into(), "a".into()];
-        match i.forward(left.clone().into(), src, 0, None).unwrap() {
+        match i.forward(Some(left.clone().into()), src, 0, true, None).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
             }

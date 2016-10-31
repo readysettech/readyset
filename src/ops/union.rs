@@ -6,6 +6,7 @@ use ops::NodeOp;
 use ops::NodeType;
 
 use std::collections::HashMap;
+use std::cell::RefCell;
 
 use shortcut;
 
@@ -15,7 +16,13 @@ pub struct Union {
     emit: HashMap<flow::NodeIndex, Vec<usize>>,
     srcs: HashMap<flow::NodeIndex, ops::V>,
     cols: HashMap<flow::NodeIndex, usize>,
+
+    gather: RefCell<HashMap<flow::NodeIndex, Vec<ops::Record>>>,
 }
+
+// gather isn't normally Sync, but we know that we're only
+// accessing it from one place at any given time, so it's fine..
+unsafe impl Sync for Union {}
 
 impl Union {
     /// Construct a new union operator.
@@ -36,6 +43,8 @@ impl Union {
             emit: emit,
             srcs: HashMap::new(),
             cols: HashMap::new(),
+
+            gather: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -43,6 +52,36 @@ impl Union {
 impl From<Union> for NodeType {
     fn from(b: Union) -> NodeType {
         NodeType::Union(b)
+    }
+}
+
+impl Union {
+    fn drain<I>(&self, it: I) -> flow::ProcessingResult<ops::Update>
+        where I: Iterator<Item = (flow::NodeIndex, Vec<ops::Record>)>
+    {
+        let rs: Vec<_> = it.flat_map(|(from, rs)| {
+                rs.into_iter().map(move |rec| {
+                    let (r, pos, ts) = rec.extract();
+
+                    // yield selected columns for this source
+                    // TODO: avoid the .clone() here
+                    let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+
+                    // return new row with appropriate sign
+                    if pos {
+                        ops::Record::Positive(res, ts)
+                    } else {
+                        ops::Record::Negative(res, ts)
+                    }
+                })
+            })
+            .collect();
+
+        if !rs.is_empty() {
+            flow::ProcessingResult::Done(ops::Update::Records(rs))
+        } else {
+            flow::ProcessingResult::Skip
+        }
     }
 }
 
@@ -54,29 +93,31 @@ impl NodeOp for Union {
     }
 
     fn forward(&self,
-               u: ops::Update,
+               u: Option<ops::Update>,
                from: flow::NodeIndex,
                _: i64,
+               last: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
+
+        debug_assert!(u.is_some() || last);
+        let mut g = self.gather.borrow_mut();
+
         match u {
-            ops::Update::Records(rs) => {
-                Some(ops::Update::Records(rs.into_iter()
-                    .map(|rec| {
-                        let (r, pos, ts) = rec.extract();
+            Some(ops::Update::Records(rs)) => {
+                // if we haven't received updates from all our ancestors for this timestamp yet,
+                // just buffer this update and delay completing processing of this timestamp.
+                if !last {
+                    g.insert(from, rs);
+                    return flow::ProcessingResult::Accepted;
+                }
 
-                        // yield selected columns for this source
-                        let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
-
-                        // return new row with appropriate sign
-                        if pos {
-                            ops::Record::Positive(res, ts)
-                        } else {
-                            ops::Record::Negative(res, ts)
-                        }
-                    })
-                    .collect()))
+                // we've received all updates for this ts
+                // emit all of them in a single update
+                self.drain(g.drain().chain(Some((from, rs)).into_iter()))
             }
+            None if last => self.drain(g.drain()),
+            _ => unreachable!(),
         }
     }
 
@@ -164,11 +205,14 @@ mod tests {
         let l = g.add_node(Some(sync::Arc::new(l)));
         let r = g.add_node(Some(sync::Arc::new(r)));
 
-        g[l].as_ref().unwrap().process((vec![1.into(), "a".into()], 0).into(), l, 0);
-        g[l].as_ref().unwrap().process((vec![2.into(), "b".into()], 1).into(), l, 1);
-        g[r].as_ref().unwrap().process((vec![1.into(), "skipped".into(), "x".into()], 2).into(),
-                                       r,
-                                       2);
+        g[l].as_ref().unwrap().process(Some((vec![1.into(), "a".into()], 0).into()), l, 0, true);
+        g[l].as_ref().unwrap().process(Some((vec![2.into(), "b".into()], 1).into()), l, 1, true);
+        g[r].as_ref()
+            .unwrap()
+            .process(Some((vec![1.into(), "skipped".into(), "x".into()], 2).into()),
+                     r,
+                     2,
+                     true);
 
         let mut emits = HashMap::new();
         emits.insert(l, vec![0, 1]);
@@ -185,7 +229,7 @@ mod tests {
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.process(left.clone().into(), l, 0).unwrap() {
+        match u.process(Some(left.clone().into()), l, 0, true).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
             }
@@ -193,7 +237,7 @@ mod tests {
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.process(right.clone().into(), r, 0).unwrap() {
+        match u.process(Some(right.clone().into()), r, 0, true).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);

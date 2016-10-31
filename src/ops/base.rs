@@ -27,24 +27,26 @@ impl NodeOp for Base {
     }
 
     fn forward(&self,
-               mut u: ops::Update,
+               mut u: Option<ops::Update>,
                _: flow::NodeIndex,
                ts: i64,
+               last: bool,
                _: Option<&backlog::BufferedStore>)
-               -> Option<ops::Update> {
+               -> flow::ProcessingResult<ops::Update> {
 
         // basically our only job is to record timestamps
-        match u {
-            ops::Update::Records(ref mut rs) => {
-                for r in rs.iter_mut() {
-                    match *r {
-                        ops::Record::Positive(_, ref mut rts) |
-                        ops::Record::Negative(_, ref mut rts) => *rts = ts,
-                    }
+        if let Some(ops::Update::Records(ref mut rs)) = u {
+            for r in rs.iter_mut() {
+                match *r {
+                    ops::Record::Positive(_, ref mut rts) |
+                    ops::Record::Negative(_, ref mut rts) => *rts = ts,
                 }
             }
         }
-        Some(u)
+
+        // we should only have one ancestor
+        debug_assert!(last);
+        u.into()
     }
 
     fn query(&self, _: Option<&query::Query>, _: i64) -> ops::Datas {
