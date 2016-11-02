@@ -2,6 +2,7 @@
 extern crate nom;
 
 pub use self::parser::*;
+pub use self::select::SelectStatement;
 
 pub mod parser;
 #[macro_use]
