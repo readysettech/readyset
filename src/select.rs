@@ -34,13 +34,13 @@ pub struct OrderClause {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SelectStatement {
-    table: String,
-    distinct: bool,
-    fields: Vec<String>,
-    where_clause: Option<ConditionExpression>,
-    group_by: Option<GroupByClause>,
-    order: Option<OrderClause>,
-    limit: Option<LimitClause>,
+    pub table: String,
+    pub distinct: bool,
+    pub fields: Vec<String>,
+    pub where_clause: Option<ConditionExpression>,
+    pub group_by: Option<GroupByClause>,
+    pub order: Option<OrderClause>,
+    pub limit: Option<LimitClause>,
 }
 
 /// Parse LIMIT clause
