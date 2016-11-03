@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use select::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SqlQuery {
     Select(SelectStatement),
 }
