@@ -2,6 +2,7 @@
 extern crate nom;
 
 pub use self::parser::*;
+pub use self::insert::InsertStatement;
 pub use self::select::SelectStatement;
 
 pub mod parser;
@@ -10,4 +11,5 @@ pub mod parser;
 mod caseless_tag;
 mod common;
 mod condition;
+mod insert;
 mod select;

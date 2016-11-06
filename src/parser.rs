@@ -2,9 +2,11 @@ use nom::IResult;
 use std::str;
 
 use select::*;
+use insert::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SqlQuery {
+    Insert(InsertStatement),
     Select(SelectStatement),
 }
 
@@ -37,12 +39,18 @@ pub enum ConditionExpression {
 pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     // we process all queries in lowercase to avoid having to deal with capitalization in the
     // parser.
-    let q_lower = input.to_lowercase();
+    let q_bytes = String::from(input).into_bytes();
 
     // TODO(malte): appropriately pass through errors from nom
-    match selection(&q_lower.into_bytes()) {
-        IResult::Done(_, o) => Ok(SqlQuery::Select(o)),
-        IResult::Error(_) => Err("parse error"),
-        IResult::Incomplete(_) => Err("incomplete query"),
-    }
+    match insertion(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::Insert(o)),
+        _ => (),
+    };
+
+    match selection(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::Select(o)),
+        _ => (),
+    };
+
+    Err("failed to parse query")
 }
