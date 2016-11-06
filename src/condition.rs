@@ -1,8 +1,8 @@
 use nom::{alphanumeric, multispace};
 use std::str;
 
+use common::{binary_comparison_operator, binary_logical_operator, unary_negation_operator};
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
-use parser::{binary_comparison_operator, binary_logical_operator, unary_negation_operator};
 
 fn fold_cond_exprs(initial: ConditionExpression,
                    remainder: Vec<(&str, ConditionExpression)>)

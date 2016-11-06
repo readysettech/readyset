@@ -1,10 +1,9 @@
-use nom::{alphanumeric, multispace, space};
+use nom::{multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
-use caseless_tag::*;
+use common::{fieldlist, unsigned_number, statement_terminator, table_reference};
 use parser::ConditionExpression;
-use parser::{fieldlist, unsigned_number, statement_terminator};
 
 use condition::*;
 
@@ -78,22 +77,6 @@ named!(where_clause<&[u8], ConditionExpression>,
         cond: condition_expr,
         || { cond }
     ))
-);
-
-named!(table_reference<&[u8], &str>,
-    chain!(
-        table: map_res!(alphanumeric, str::from_utf8) ~
-        opt!(
-            chain!(
-                space ~
-                caseless_tag!("as") ~
-                space ~
-                alias: map_res!(alphanumeric, str::from_utf8),
-                || { println!("got alias: {} -> {}", table, alias); alias }
-            )
-        ),
-        || { table }
-    )
 );
 
 /// Parse rule for a SQL selection query.
