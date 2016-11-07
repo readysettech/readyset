@@ -1,4 +1,4 @@
-use nom::{alphanumeric, multispace};
+use nom::{alphanumeric, digit, multispace};
 use std::str;
 
 use common::{binary_comparison_operator, binary_logical_operator, unary_negation_operator};
@@ -99,6 +99,24 @@ named!(predicate<&[u8], ConditionExpression>,
                 }
             )
         |   chain!(
+                field: delimited!(opt!(multispace), digit, opt!(multispace)),
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::Literal(String::from(str::from_utf8(field).unwrap()))
+                    )
+                }
+            )
+        |   chain!(
+                field: delimited!(opt!(multispace),
+                                  delimited!(tag!("\""), alphanumeric, tag!("\"")),
+                                  opt!(multispace)),
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::Literal(String::from(str::from_utf8(field).unwrap()))
+                    )
+                }
+            )
+        |   chain!(
                 field: delimited!(opt!(multispace), alphanumeric, opt!(multispace)),
                 || {
                     ConditionExpression::Base(
@@ -108,3 +126,51 @@ named!(predicate<&[u8], ConditionExpression>,
             )
     )
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parser::{ConditionBase, ConditionExpression, ConditionTree};
+
+    fn flat_condition_tree(op: String, l: ConditionBase, r: ConditionBase) -> ConditionExpression {
+        ConditionExpression::ComparisonOp(ConditionTree {
+            operator: op,
+            left: Some(Box::new(ConditionExpression::Base(l))),
+            right: Some(Box::new(ConditionExpression::Base(r))),
+        })
+    }
+
+    #[test]
+    fn equality_placeholder() {
+        let cond = "foo = ?";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   flat_condition_tree(String::from("="),
+                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Placeholder)
+                  );
+    }
+
+    #[test]
+    fn equality_literals() {
+        let cond1 = "foo = 42";
+        let cond2 = "foo = \"hello\"";
+
+        let res1 = condition_expr(cond1.as_bytes());
+        assert_eq!(res1.unwrap().1,
+                   flat_condition_tree(String::from("="),
+                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Literal(String::from("42"))
+                                      )
+                   );
+
+        let res2 = condition_expr(cond2.as_bytes());
+        assert_eq!(res2.unwrap().1,
+                   flat_condition_tree(String::from("="),
+                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Literal(String::from("hello"))
+                                      )
+                   );
+    }
+}
