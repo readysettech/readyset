@@ -93,7 +93,7 @@ named!(predicate<&[u8], ConditionExpression>,
             chain!(
                 delimited!(opt!(multispace), tag!("?"), opt!(multispace)),
                 || {
-                    ConditionExpression::Expr(
+                    ConditionExpression::Base(
                         ConditionBase::Placeholder
                     )
                 }
@@ -101,7 +101,7 @@ named!(predicate<&[u8], ConditionExpression>,
         |   chain!(
                 field: delimited!(opt!(multispace), alphanumeric, opt!(multispace)),
                 || {
-                    ConditionExpression::Expr(
+                    ConditionExpression::Base(
                         ConditionBase::Field(String::from(str::from_utf8(field).unwrap()))
                     )
                 }

@@ -177,8 +177,8 @@ mod tests {
 
         let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Expr(ConditionBase::Field(String::from("email"))))),
-            right: Some(Box::new(ConditionExpression::Expr(ConditionBase::Placeholder))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("email"))))),
+            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: String::from("="),
         }));
         assert_eq!(res.unwrap().1,
@@ -233,8 +233,8 @@ mod tests {
         let res = selection(qstring.as_bytes());
         let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Expr(ConditionBase::Field(String::from("paperId"))))),
-            right: Some(Box::new(ConditionExpression::Expr(ConditionBase::Placeholder))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
+            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: String::from("="),
         }));
         assert_eq!(res.unwrap().1,
@@ -255,14 +255,14 @@ mod tests {
 
         let left_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Expr(ConditionBase::Field(String::from("paperId"))))),
-            right: Some(Box::new(ConditionExpression::Expr(ConditionBase::Placeholder))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
+            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: String::from("="),
         })));
         let right_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Expr(ConditionBase::Field(String::from("paperStorageId"))))),
-            right: Some(Box::new(ConditionExpression::Expr(ConditionBase::Placeholder))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperStorageId"))))),
+            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: String::from("="),
         })));
         let expected_where_cond = Some(ConditionExpression::LogicalOp(ConditionTree {

@@ -28,7 +28,7 @@ pub struct ConditionTree {
 pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),
-    Expr(ConditionBase),
+    Base(ConditionBase),
 }
 
 /// Parse sequence of SQL statements, divided by semicolons or newlines
