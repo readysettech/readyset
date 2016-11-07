@@ -50,6 +50,9 @@ impl FromSql for FlowGraph<Query, ops::Update, Vec<DataType>> {
     }
 
     fn make_filter_node(&self, st: &SelectStatement) -> Node {
+        // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
+        // name is already used for the base node. Maybe this is where identifiers based on query
+        // prefixes come in.
         ops::new(st.table.clone(),
                  Vec::from_iter(st.fields.iter().map(String::as_str)).as_slice(),
                  true,
