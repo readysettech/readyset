@@ -80,9 +80,17 @@ mod tests {
 
         // Must have a base node for type inference to work, so make one manually
         let _ = g.incorporate(new("users", &["id", "username"], true, Base {}));
+        // Should have two nodes: source and "users" base table
+        assert_eq!(g.graph.node_count(), 2);
 
         assert!(g.incorporate_query("SELECT * from users;").is_ok());
+        // Should now have source, "users" and the new selection
+        assert_eq!(g.graph.node_count(), 3);
+
+        // Invalid query should fail parsing and add no nodes
         assert!(g.incorporate_query("foo bar from whatever;").is_err());
+        // Should still only have source, "users" and the new selection
+        assert_eq!(g.graph.node_count(), 3);
     }
 
     #[test]
@@ -92,6 +100,10 @@ mod tests {
 
         // Establish a base write type
         assert!(g.incorporate_query("INSERT INTO users VALUES (?, ?);").is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(g.graph.node_count(), 2);
+        assert_eq!((*g.graph[g.named["users"]].as_ref().unwrap()).name(),
+                   "users");
 
         // Try a simple query
         assert!(g.incorporate_query("SELECT * from users;").is_ok());
