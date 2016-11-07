@@ -2,7 +2,7 @@ use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
-use common::{fieldlist, statement_terminator, table_reference};
+use common::{statement_terminator, table_reference, valuelist};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStatement {
@@ -23,7 +23,7 @@ named!(pub insertion<&[u8], InsertStatement>,
         caseless_tag!("values") ~
         multispace ~
         tag!("(") ~
-        fields: fieldlist ~
+        fields: valuelist ~
         tag!(")") ~
         statement_terminator,
         || {
@@ -48,6 +48,19 @@ mod tests {
                    InsertStatement {
                        table: String::from("users"),
                        fields: vec!["42".into(), "test".into()],
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn placeholder_insert() {
+        let qstring = "INSERT INTO users VALUES (?, ?);";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   InsertStatement {
+                       table: String::from("users"),
+                       fields: vec!["?".into(), "?".into()],
                        ..Default::default()
                    });
     }

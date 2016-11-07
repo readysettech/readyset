@@ -78,7 +78,7 @@ named!(pub csvlist<&[u8], Vec<&str> >,
                    opt!(
                        chain!(
                            tag!(",") ~
-                           space?,
+                           multispace?,
                            ||{}
                        )
                    ),
@@ -95,6 +95,27 @@ named!(pub fieldlist<&[u8], Vec<&str> >,
        alt_complete!(
            tag!("*") => { |_| vec!["ALL".into()] }
          | csvlist
+       )
+);
+
+/// Parse a list of values (e.g., for INSERT syntax).
+/// XXX(malte): support non-placeholder values
+named!(pub valuelist<&[u8], Vec<&str> >,
+       many0!(
+           map_res!(
+               chain!(
+                   val: alt_complete!(tag_s!(b"?") | alphanumeric) ~
+                   opt!(
+                       chain!(
+                           tag!(",") ~
+                           multispace?,
+                           ||{}
+                       )
+                   ),
+                   || { val }
+               ),
+               str::from_utf8
+           )
        )
 );
 
