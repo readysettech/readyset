@@ -364,6 +364,7 @@ extern crate clocked_dispatch;
 extern crate petgraph;
 extern crate shortcut;
 extern crate regex;
+extern crate nom_sql;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;

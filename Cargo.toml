@@ -14,6 +14,7 @@ petgraph = "0.2"
 shortcut = "3.3"
 clocked-dispatch = "4.0"
 regex = "0.1"
+nom_sql = { git = "https://github.com/ms705/nom-sql.git" }
 
 # for benchmarks
 # cli

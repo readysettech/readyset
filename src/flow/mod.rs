@@ -1,3 +1,5 @@
+pub mod from_sql;
+
 use petgraph;
 use clocked_dispatch;
 use regex::Regex;
