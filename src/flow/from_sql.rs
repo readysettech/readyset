@@ -72,9 +72,23 @@ impl FromSql for FlowGraph<Query, ops::Update, Vec<DataType>> {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
+    use flow;
+    use ops;
     use ops::new;
     use ops::base::Base;
+    use query::{DataType, Query};
     use super::FromSql;
+
+    type Update = ops::Update;
+    type Data = Vec<DataType>;
+
+    // Helper to grab a reference to a named view.
+    // TODO(malte): maybe this should be available in FlowGraph?
+    fn get_view<'a>(g: &'a FlowGraph<Query, ops::Update, Vec<DataType>>,
+                    vn: &str)
+                    -> &'a flow::View<Query, Update = ops::Update, Data = Vec<DataType>> {
+        &**(g.graph[g.named[vn]].as_ref().unwrap())
+    }
 
     #[test]
     fn it_parses() {
@@ -85,6 +99,7 @@ mod tests {
         let _ = g.incorporate(new("users", &["id", "username"], true, Base {}));
         // Should have two nodes: source and "users" base table
         assert_eq!(g.graph.node_count(), 2);
+        assert_eq!(get_view(&g, "users").name(), "users");
 
         assert!(g.incorporate_query("SELECT * from users;").is_ok());
         // Should now have source, "users" and the new selection
@@ -105,8 +120,7 @@ mod tests {
         assert!(g.incorporate_query("INSERT INTO users VALUES (?, ?);").is_ok());
         // Should have source and "users" base table node
         assert_eq!(g.graph.node_count(), 2);
-        assert_eq!((*g.graph[g.named["users"]].as_ref().unwrap()).name(),
-                   "users");
+        assert_eq!(get_view(&g, "users").name(), "users");
 
         // Try a simple query
         assert!(g.incorporate_query("SELECT * from users;").is_ok());
