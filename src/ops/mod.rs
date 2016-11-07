@@ -315,7 +315,7 @@ impl Node {
 
 impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}({:?})", self.name, *self.inner)
+        write!(f, "{:?}", self.name)
     }
 }
 

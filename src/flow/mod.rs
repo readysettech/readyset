@@ -959,8 +959,10 @@ impl<Q, U, D> Debug for FlowGraph<Q, U, D>
           D: Clone + Send
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let dotgraph = petgraph::dot::Dot::new(&self.graph);
-        write!(f, "{:?}", dotgraph)
+        use petgraph::dot::{Dot, Config};
+        write!(f,
+               "{:?}",
+               Dot::with_config(&self.graph, &[Config::EdgeNoLabel]))
     }
 }
 
