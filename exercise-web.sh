@@ -15,13 +15,17 @@ pid=$(pgrep -f target/debug/web)
 sleep 1
 
 echo "Seed"
-curl --data-raw '{"id": 1, "title": "hello"}' -H "Content-Type: application/json" localhost:8080/article
-curl --data-raw '{"id": 2, "title": "world"}' -H "Content-Type: application/json" localhost:8080/article
-curl --data-raw '{"user": 1, "id": 1}' -H "Content-Type: application/json" localhost:8080/vote
-curl --data-raw '{"user": 1, "id": 2}' -H "Content-Type: application/json" localhost:8080/vote
-curl --data-raw '{"user": 2, "id": 2}' -H "Content-Type: application/json" localhost:8080/vote
-curl --data-raw '{"user": 3, "id": 1}' -H "Content-Type: application/json" localhost:8080/vote
-curl --data-raw '{"user": 3, "id": 2}' -H "Content-Type: application/json" localhost:8080/vote
+put() {
+  curl --data-raw "$2" -H "Content-Type: application/json" "localhost:8080/$1"
+}
+
+put article '{"id": 1, "title": "hello", "user": 1, "url": "http://example.com/1"}'
+put article '{"id": 2, "title": "world", "user": 2, "url": "http://example.com/2"}'
+put vote '{"user": 1, "id": 1}'
+put vote '{"user": 1, "id": 2}'
+put vote '{"user": 2, "id": 2}'
+put vote '{"user": 3, "id": 1}'
+put vote '{"user": 3, "id": 2}'
 
 json() {
 	if command -v jq >/dev/null 2>&1; then
