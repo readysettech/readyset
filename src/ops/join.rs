@@ -439,6 +439,31 @@ impl NodeOp for Joiner {
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         Some(vec![self.emit[col].clone()])
     }
+
+    fn description(&self) -> String {
+        let emit = self.emit
+            .iter()
+            .map(|&(src, col)| format!("{}:{}", src.index(), col))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let joins = self.join
+            .iter()
+            .flat_map(|(left, rs)| {
+                rs.against
+                    .iter()
+                    .filter(move |&(right, _)| left < right)
+                    .flat_map(move |(right, rs)| {
+                        let op = if rs.outer { "⋉" } else { "⋈" };
+                        rs.fields.iter().map(move |&(li, ri)| {
+                            format!("{}:{} {} {}:{}",
+                                left.index(), li, op, right.index(), ri)
+                    })
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{}] {}", emit, joins)
+    }
 }
 
 #[cfg(test)]
@@ -484,6 +509,19 @@ mod tests {
         let mut c: Joiner = b.into();
         c.prime(&g);
         (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
+    }
+
+
+    #[test]
+    fn it_describes() {
+        let (j, _, _) = setup(false);
+        assert_eq!(j.inner.description(), "[0:0, 0:1, 1:1] 0:0 ⋈ 1:0");
+    }
+
+    #[test]
+    fn it_describes_left() {
+        let (j, _, _) = setup(true);
+        assert_eq!(j.inner.description(), "[0:0, 0:1, 1:1] 0:0 ⋉ 1:0");
     }
 
     fn forward_non_weird(j: ops::Node, l: flow::NodeIndex, r: flow::NodeIndex) {

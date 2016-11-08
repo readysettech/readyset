@@ -73,6 +73,10 @@ impl NodeOp for GatedIdentity {
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
+
+    fn description(&self) -> String {
+        "GatedIdentity".into()
+    }
 }
 
 #[cfg(test)]

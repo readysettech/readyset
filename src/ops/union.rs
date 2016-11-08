@@ -176,6 +176,20 @@ impl NodeOp for Union {
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         Some(self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
     }
+
+    fn description(&self) -> String {
+        // Ensure we get a consistent output by sorting.
+        let mut emit = self.emit.iter().collect::<Vec<_>>();
+        emit.sort();
+        emit.iter()
+            .map(|&(src, emit)| {
+                let cols = emit.iter().map(|e| e.to_string())
+                    .collect::<Vec<_>>().join(", ");
+                format!("{}:[{}]", src.index(), cols)
+            })
+            .collect::<Vec<_>>()
+            .join(" ⋃ ")
+    }
 }
 
 #[cfg(test)]
@@ -221,6 +235,12 @@ mod tests {
         let mut c = Union::new(emits);
         c.prime(&g);
         (ops::new("union", &["u0", "u1"], false, c), l, r)
+    }
+
+    #[test]
+    fn it_describes() {
+        let (u, _, _) = setup();
+        assert_eq!(u.inner.description(), "0:[0, 1] ⋃ 1:[0, 2]");
     }
 
     #[test]

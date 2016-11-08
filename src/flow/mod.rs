@@ -2,7 +2,7 @@ use petgraph;
 use clocked_dispatch;
 
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::sync::mpsc;
 use std::sync;
 use std::thread;
@@ -950,6 +950,54 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             }
         }
         idx
+    }
+}
+
+impl<Q, U, D> Display for FlowGraph<Q, U, D>
+    where Q: 'static + Clone + Send + Sync,
+          U: 'static + Clone + Send,
+          D: 'static + Clone + Send
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ops::NodeOp;
+
+        let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
+        let escape = |s: &str| s.replace("|", "\\|");
+
+        // Output header.
+        writeln!(f, "digraph {{")?;
+
+        // Output global formatting.
+        indentln(f)?;
+        writeln!(f, "node [shape=record, fontsize=10]")?;
+
+        // Output node descriptions.
+        for index in self.graph.node_indices() {
+            indentln(f)?;
+            write!(f, "{}", index.index())?;
+            write!(f, " [label=\"")?;
+            match self.graph[index].as_ref() {
+                None => write!(f, "(source)")?,
+                Some(n) => {
+                    write!(f, "{{ {{ {} / {} | {} }} | {} }}",
+                        index.index(), escape(n.name()),
+                        escape(&n.operator().unwrap().description()),
+                        n.args().join(", "))?;
+                }
+            }
+            writeln!(f, "\"]")?;
+        }
+
+        // Output edges.
+        for (_, edge) in self.graph.raw_edges().iter().enumerate() {
+            indentln(f)?;
+            writeln!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
+        }
+
+        // Output footer.
+        write!(f, "}}")?;
+
+        Ok(())
     }
 }
 

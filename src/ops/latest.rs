@@ -258,6 +258,12 @@ impl NodeOp for Latest {
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
+
+    fn description(&self) -> String {
+        let key_cols = self.key.iter().map(|k| k.to_string())
+            .collect::<Vec<_>>().join(", ");
+        format!("⧖ γ[{}]", key_cols)
+    }
 }
 
 #[cfg(test)]
@@ -306,6 +312,12 @@ mod tests {
         } else {
             ops::new("latest", &["x", "y"], mat, l)
         }
+    }
+
+    #[test]
+    fn it_describes() {
+        let c = setup(vec![0, 2], false);
+        assert_eq!(c.inner.description(), "⧖ γ[2, 0]");
     }
 
     #[test]

@@ -59,6 +59,10 @@ impl NodeOp for Identity {
     fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
+
+    fn description(&self) -> String {
+        "≡".into()
+    }
 }
 
 #[cfg(test)]

@@ -188,6 +188,26 @@ impl GroupedOperation for GroupConcat {
         new.truncate(real_len);
         new.into()
     }
+
+    fn description(&self) -> String {
+        let fields = self.components.iter()
+            .map(|c| {
+                match *c {
+                    TextComponent::Literal(s) => format!("\"{}\"", s),
+                    TextComponent::Column(i) => i.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        // Sort group by columns for consistent output.
+        let mut group_cols = self.group.clone();
+        group_cols.sort();
+        let group_cols = group_cols.iter().map(|g| g.to_string())
+            .collect::<Vec<_>>().join(", ");
+
+        format!("||([{}], \"{}\") γ[{}]", fields, self.separator, group_cols)
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +252,12 @@ mod tests {
         } else {
             ops::new("concat", &["x", "ys"], mat, c)
         }
+    }
+
+    #[test]
+    fn it_describes() {
+        let c = setup(true, true);
+        assert_eq!(c.inner.description(), "||([\".\", 1, \";\"], \"#\") γ[0, 2]");
     }
 
     #[test]
