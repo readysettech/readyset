@@ -1,0 +1,10 @@
+[package]
+name = "taster"
+version = "0.0.1"
+authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
+
+[dependencies]
+afterparty = "0.1.0"
+hyper = "0.9"
+log = "0.3"
+env_logger = "0.3"
