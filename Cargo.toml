@@ -4,7 +4,7 @@ version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-afterparty = { git = "https://github.com/softprops/afterparty.git" }
-hyper = "0.9"
+afterparty = { git = "https://github.com/ms705/afterparty.git" }
+hyper = "0.7"
 log = "0.3"
 env_logger = "0.3"
