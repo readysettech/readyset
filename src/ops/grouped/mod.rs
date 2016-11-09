@@ -13,6 +13,7 @@ use std::collections::HashMap;
 // pub mod latest;
 pub mod aggregate;
 pub mod concat;
+pub mod extremum;
 
 /// Trait for implementing operations that collapse a group of records into a single record.
 ///
@@ -92,6 +93,12 @@ impl From<GroupedOperator<concat::GroupConcat>> for NodeType {
 impl From<GroupedOperator<aggregate::Aggregator>> for NodeType {
     fn from(b: GroupedOperator<aggregate::Aggregator>) -> NodeType {
         NodeType::Aggregate(b)
+    }
+}
+
+impl From<GroupedOperator<extremum::ExtremumOperator>> for NodeType {
+    fn from(b: GroupedOperator<extremum::ExtremumOperator>) -> NodeType {
+        NodeType::Extremum(b)
     }
 }
 
@@ -247,23 +254,29 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     // new is the result of applying all diffs for the group to the current value
                     let new = self.inner.apply(&current, diffs);
 
-                    // construct prefix of output record used for both - and +
-                    let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend(group.into_iter().filter_map(|v| v));
+                    if new != current {
+                        // construct prefix of output record used for both - and +
+                        let mut rec = Vec::with_capacity(group.len() + 1);
+                        rec.extend(group.into_iter().filter_map(|v| v));
 
-                    // revoke old value
-                    rec.push(current.into());
-                    out.push(ops::Record::Negative(rec.clone(), old_ts));
+                        // revoke old value
+                        rec.push(current.into());
+                        out.push(ops::Record::Negative(rec.clone(), old_ts));
 
-                    // remove the old value from the end of the record
-                    rec.pop();
+                        // remove the old value from the end of the record
+                        rec.pop();
 
-                    // emit new value
-                    rec.push(new.into());
-                    out.push(ops::Record::Positive(rec, new_ts));
+                        // emit new value
+                        rec.push(new.into());
+                        out.push(ops::Record::Positive(rec, new_ts));
+                    }
                 }
 
-                Some(ops::Update::Records(out))
+                if out.is_empty() {
+                    None
+                } else {
+                    Some(ops::Update::Records(out))
+                }
             }
         }
     }
