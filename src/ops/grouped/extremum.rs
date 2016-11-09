@@ -98,37 +98,41 @@ impl GroupedOperation for ExtremumOperator {
              current: &Option<query::DataType>,
              diffs: Vec<(Self::Diff, i64)>)
              -> query::DataType {
-        let n = match (current, &self.op) {
-            (&Some(query::DataType::Number(n)), _) => n,
-            (&Some(_), _) => unreachable!(),
-            (&None, &Extremum::MIN) => i64::max_value(),
-            (&None, &Extremum::MAX) => i64::min_value(),
+        // Extreme values are those that are at least as extreme as the current min/max (if any).
+        let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
+        let mut extreme_values:Vec<i64> = vec![];
+
+        if let &Some(query::DataType::Number(n)) = current {
+            extreme_values.push(n);
+            is_extreme_value = match self.op {
+                Extremum::MAX => Box::new(move |x| x >= n),
+                Extremum::MIN => Box::new(move |x| x <= n),
+            };
         };
 
-        // Compute which new elements will be added. A Vec is not the most efficient data
-        // structure to use here (a multiset would be ideal) but `diffs` should be relatively
-        // small so performance should not be an issue.
-        let mut vals = vec![n];
         for (d, _) in diffs {
             match d {
-                DiffType::Insert(v) => vals.push(v),
-                DiffType::Remove(v) => {
-                    if let Some(i) = vals.iter().position(|x: &i64| *x == v) {
-                        vals.swap_remove(i);
+                DiffType::Insert(v) if is_extreme_value(v) => extreme_values.push(v),
+                DiffType::Remove(v) if is_extreme_value(v) => {
+                    if let Some(i) = extreme_values.iter().position(|x: &i64| *x == v) {
+                        extreme_values.swap_remove(i);
                     }
                 }
-            }
+                _ => {}
+            };
         }
 
         let extreme = match self.op {
-            Extremum::MIN => vals.into_iter().min(),
-            Extremum::MAX => vals.into_iter().max(),
+            Extremum::MIN => extreme_values.into_iter().min(),
+            Extremum::MAX => extreme_values.into_iter().max(),
         };
 
-        // TODO: handle the case where `extreme` is None by querying into the parent.
-        let extreme = extreme.unwrap();
-
-        extreme.into()
+        if extreme.is_none() {
+            // TODO: handle this case by querying into the parent.
+            unimplemented!();
+        } else {
+            extreme.unwrap().into()
+        }
     }
 }
 

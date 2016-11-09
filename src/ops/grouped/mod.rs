@@ -258,29 +258,29 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     // new is the result of applying all diffs for the group to the current value
                     let new = self.inner.apply(&current, diffs);
 
-                    if current.is_none() {
-                        // construct prefix of output record
-                        let mut rec = Vec::with_capacity(group.len() + 1);
-                        rec.extend(group.into_iter().filter_map(|v| v));
+                    match current {
+                        None => {
+                            let rec = group.into_iter().filter_map(|v| v).chain(Some(new.into()).into_iter()).collect();
+                            out.push(ops::Record::Positive(rec, new_ts));
+                        },
+                        Some(current) => {
+                            if new != current {
+                                // construct prefix of output record used for both - and +
+                                let mut rec = Vec::with_capacity(group.len() + 1);
+                                rec.extend(group.into_iter().filter_map(|v| v));
 
-                        // emit new value
-                        rec.push(new.into());
-                        out.push(ops::Record::Positive(rec, new_ts));
-                    } else if new != *current.as_ref().unwrap() {
-                        // construct prefix of output record used for both - and +
-                        let mut rec = Vec::with_capacity(group.len() + 1);
-                        rec.extend(group.into_iter().filter_map(|v| v));
+                                // revoke old value
+                                rec.push(current.into());
+                                out.push(ops::Record::Negative(rec.clone(), old_ts));
 
-                        // revoke old value
-                        rec.push(current.unwrap().into());
-                        out.push(ops::Record::Negative(rec.clone(), old_ts));
+                                // remove the old value from the end of the record
+                                rec.pop();
 
-                        // remove the old value from the end of the record
-                        rec.pop();
-
-                        // emit new value
-                        rec.push(new.into());
-                        out.push(ops::Record::Positive(rec, new_ts));
+                                // emit new value
+                                rec.push(new.into());
+                                out.push(ops::Record::Positive(rec, new_ts));
+                            }
+                        }
                     }
                 }
 
@@ -348,7 +348,6 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     }
                 })
                 .collect::<Vec<_>>();
-
 
             let mut cur = consolidate.entry(group).or_insert_with(|| (self.inner.zero(), ts));
 
