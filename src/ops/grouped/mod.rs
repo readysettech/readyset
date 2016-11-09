@@ -52,18 +52,22 @@ pub trait GroupedOperation: fmt::Debug {
     /// All records with the same value for the returned columns are assigned to the same group.
     fn group_by(&self) -> &[usize];
 
-    /// The zero value for this operation.
+    /// The zero value for this operation, if there is one.
     ///
-    /// This is used to determine what zero-record to revoke when the first record for a group
-    /// arrives, as well as to initialize the fold value when a query is performed.
-    fn zero(&self) -> query::DataType;
+    /// If some, this is used to determine what zero-record to revoke when the first record for a
+    /// group arrives, as well as to initialize the fold value when a query is performed. Otherwise,
+    /// no record is revoked when the first record arrives for a group.
+    fn zero(&self) -> Option<query::DataType>;
 
     /// Extract the aggregation value from a single record.
     fn to_diff(&self, record: &[query::DataType], is_positive: bool) -> Self::Diff;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
-    /// updated group value.
-    fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType;
+    /// updated group value. When the group is empty, current is set to the zero value.
+    fn apply(&self,
+             current: &Option<query::DataType>,
+             diffs: Vec<(Self::Diff, i64)>)
+             -> query::DataType;
 }
 
 #[derive(Debug)]
@@ -254,13 +258,21 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     // new is the result of applying all diffs for the group to the current value
                     let new = self.inner.apply(&current, diffs);
 
-                    if new != current {
+                    if current.is_none() {
+                        // construct prefix of output record
+                        let mut rec = Vec::with_capacity(group.len() + 1);
+                        rec.extend(group.into_iter().filter_map(|v| v));
+
+                        // emit new value
+                        rec.push(new.into());
+                        out.push(ops::Record::Positive(rec, new_ts));
+                    } else if new != *current.as_ref().unwrap() {
                         // construct prefix of output record used for both - and +
                         let mut rec = Vec::with_capacity(group.len() + 1);
                         rec.extend(group.into_iter().filter_map(|v| v));
 
                         // revoke old value
-                        rec.push(current.into());
+                        rec.push(current.unwrap().into());
                         out.push(ops::Record::Negative(rec.clone(), old_ts));
 
                         // remove the old value from the end of the record
@@ -337,16 +349,17 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 })
                 .collect::<Vec<_>>();
 
+
             let mut cur = consolidate.entry(group).or_insert_with(|| (self.inner.zero(), ts));
 
-            // FIXME: this might turn out to be really expensive, since succ() is allowed to be an
+            // FIXME: this might turn out to be really expensive, since apply() is allowed to be an
             // expensive operation (like for group_concat). we *could* accumulate all records into
-            // a Vec first, and then call succ() only once after all records have been read, but
-            // that would mean much higher (and potentially unnecessary) memory usage. ideally, we
+            // a Vec first, and then call apply() only once after all records have been read, but
+            // that would mean much higher (and potentially unnecessary) memory usage. Ideally, we
             // would allow the GroupOperation to define its own aggregation container for this kind
             // of use-case, but we leave that as future work for now.
             let next = self.inner.apply(&cur.0, vec![(val, ts)]);
-            cur.0 = next;
+            cur.0 = Some(next);
 
             // timestamp should always reflect the latest influencing record
             cur.1 = cmp::max(ts, cur.1);
@@ -354,7 +367,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
 
         consolidate.into_iter()
             .map(|(mut group, (val, ts))| {
-                group.push(val);
+                group.push(val.unwrap());
                 // TODO: respect q.select
                 (group, ts)
             })

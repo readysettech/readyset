@@ -76,11 +76,8 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn zero(&self) -> query::DataType {
-        match self.op {
-            Extremum::MIN => i64::max_value().into(),
-            Extremum::MAX => i64::min_value().into(),
-        }
+    fn zero(&self) -> Option<query::DataType> {
+        None
     }
 
     fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
@@ -97,35 +94,41 @@ impl GroupedOperation for ExtremumOperator {
         }
     }
 
-    fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType {
-        if let query::DataType::Number(n) = *current {
-            // Compute which new elements will be added. A Vec is not the most efficient data
-            // structure to use here (a multiset would be ideal) but `diffs` should be relatively
-            // small so performance should not be an issue.
-            let mut vals = vec![n];
-            for (d, _) in diffs {
-                match d {
-                    DiffType::Insert(v) => vals.push(v),
-                    DiffType::Remove(v) => {
-                        if let Some(i) = vals.iter().position(|x: &i64| *x == v) {
-                            vals.swap_remove(i);
-                        }
+    fn apply(&self,
+             current: &Option<query::DataType>,
+             diffs: Vec<(Self::Diff, i64)>)
+             -> query::DataType {
+        let n = match (current, &self.op) {
+            (&Some(query::DataType::Number(n)), _) => n,
+            (&Some(_), _) => unreachable!(),
+            (&None, &Extremum::MIN) => i64::max_value(),
+            (&None, &Extremum::MAX) => i64::min_value(),
+        };
+
+        // Compute which new elements will be added. A Vec is not the most efficient data
+        // structure to use here (a multiset would be ideal) but `diffs` should be relatively
+        // small so performance should not be an issue.
+        let mut vals = vec![n];
+        for (d, _) in diffs {
+            match d {
+                DiffType::Insert(v) => vals.push(v),
+                DiffType::Remove(v) => {
+                    if let Some(i) = vals.iter().position(|x: &i64| *x == v) {
+                        vals.swap_remove(i);
                     }
                 }
             }
-
-            let extreme = match self.op {
-                Extremum::MIN => vals.into_iter().min(),
-                Extremum::MAX => vals.into_iter().max(),
-            };
-
-            // TODO: handle the case where `extreme` is None by querying into the parent.
-            let extreme = extreme.unwrap();
-
-            extreme.into()
-        } else {
-            unreachable!();
         }
+
+        let extreme = match self.op {
+            Extremum::MIN => vals.into_iter().min(),
+            Extremum::MAX => vals.into_iter().max(),
+        };
+
+        // TODO: handle the case where `extreme` is None by querying into the parent.
+        let extreme = extreme.unwrap();
+
+        extreme.into()
     }
 }
 
@@ -183,6 +186,19 @@ mod tests {
         let src = flow::NodeIndex::new(0);
         let c = setup(true, false);
 
+        let check_first_max = |group, val, out: Option<_>| {
+            let ops::Update::Records(rs) = out.unwrap();
+            assert_eq!(rs.len(), 1);
+
+            match rs.into_iter().next().unwrap() {
+                ops::Record::Positive(r, _) => {
+                    assert_eq!(r[0], group);
+                    assert_eq!(r[1], val);
+                }
+                _ => unreachable!(),
+            }
+        };
+
         let check_new_max = |group, old, new, out: Option<_>| {
             let ops::Update::Records(rs) = out.unwrap();
             assert_eq!(rs.len(), 2);
@@ -206,7 +222,7 @@ mod tests {
 
         // First insertion should trigger an update.
         let out = c.process((vec![1.into(), 4.into()], 0).into(), src, 0);
-        check_new_max(1.into(), i64::min_value().into(), 4.into(), out);
+        check_first_max(1.into(), 4.into(), out);
 
         // Larger value should also trigger an update.
         let out = c.process((vec![1.into(), 7.into()], 1).into(), src, 1);
@@ -218,7 +234,7 @@ mod tests {
 
         // Insertion into a different group should be independent.
         let out = c.process((vec![2.into(), 3.into()], 3).into(), src, 3);
-        assert!(!out.is_none());
+        check_first_max(2.into(), 3.into(), out);
 
         // Larger than last value, but not largest in group.
         let out = c.process((vec![1.into(), 5.into()], 4).into(), src, 4);
