@@ -4,7 +4,14 @@ use std::str;
 use std::process::{Command, ExitStatus};
 use std::sync::Mutex;
 
-fn benchmark(workdir: &str) {}
+fn benchmark(workdir: &str) {
+    Command::new("cargo")
+        .current_dir(workdir)
+        .arg("bench")
+        .arg("--release")
+        .status()
+        .expect("Failed to execute 'cargo bench'!")
+}
 
 fn build(workdir: &str) -> ExitStatus {
     Command::new("cargo")
