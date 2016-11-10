@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 pub struct TastingResult {
     pub commit_id: String,
+    pub commit_msg: String,
     pub build: bool,
     pub bench: bool,
 }
@@ -27,13 +28,14 @@ fn build(workdir: &str) -> ExitStatus {
         .expect("Failed to execute 'cargo build'!")
 }
 
-pub fn taste_commit(wsl: &Mutex<Workspace>, id: &String) -> TastingResult {
+pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResult {
     println!("Tasting commit {}", id);
     let ws = wsl.lock().unwrap();
     ws.checkout_commit(id);
 
     TastingResult {
-        commit_id: id.clone(),
+        commit_id: String::from(id),
+        commit_msg: String::from(msg),
         build: update(&ws.path).success() && build(&ws.path).success(),
         bench: benchmark(&ws.path).success(),
     }

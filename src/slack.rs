@@ -25,7 +25,7 @@ impl SlackNotifier {
                                                     self.github_repo,
                                                     res.commit_id),
                                            &res.commit_id)),
-                       Text("and liked it:".into())]
+                       Text(format!("-- `{}`", res.commit_msg.lines().next().unwrap()).into())]
                 .as_slice())
             .attachments(vec![result_to_attachment(&res)])
             .channel(self.channel.clone())

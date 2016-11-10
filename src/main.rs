@@ -92,7 +92,7 @@ pub fn main() {
                     ws.fetch().unwrap();
                 }
                 for c in commits.iter() {
-                    let res = taste::taste_commit(&wsl, &c.id);
+                    let res = taste::taste_commit(&wsl, &c.id, &c.message);
                     if sn.is_some() {
                         sn.as_ref().unwrap().notify(res).unwrap();
                     }
