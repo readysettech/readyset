@@ -1,5 +1,7 @@
-use slack_hook::{PayloadBuilder, Slack, SlackTextContent, SlackLink};
+use slack_hook::{Attachment, AttachmentBuilder, PayloadBuilder, Slack, SlackTextContent, SlackLink};
 use slack_hook::SlackTextContent::{Text, Link};
+
+use taste::TastingResult;
 
 pub struct SlackNotifier {
     conn: Slack,
@@ -16,15 +18,16 @@ impl SlackNotifier {
         }
     }
 
-    pub fn notify(&self, commit_id: &str) -> Result<(), String> {
+    pub fn notify(&self, res: TastingResult) -> Result<(), String> {
         let payload = PayloadBuilder::new()
-            .text(vec![Text("I tasted ".into()),
+            .text(vec![Text("I've tasted ".into()),
                        Link(SlackLink::new(&format!("{}/commit/{}",
                                                     self.github_repo,
-                                                    commit_id),
-                                           commit_id)),
-                       Text("!".into())]
+                                                    res.commit_id),
+                                           &res.commit_id)),
+                       Text("and liked it:".into())]
                 .as_slice())
+            .attachments(vec![result_to_attachment(&res)])
             .channel(self.channel.clone())
             .username("taster")
             .icon_emoji(":tea:")
@@ -36,4 +39,26 @@ impl SlackNotifier {
             Err(e) => Err(format!("{:?}", e)),
         }
     }
+}
+
+fn result_to_attachment(res: &TastingResult) -> Attachment {
+    let color = if !res.build || !res.bench {
+        "danger"
+    } else {
+        "good"
+    };
+
+    let title = if !res.build {
+        "Build failure!"
+    } else if !res.bench {
+        "Benchmark failure!"
+    } else {
+        "Performance results:"
+    };
+
+    AttachmentBuilder::new("It tasted nice.")
+        .color(color)
+        .title(title)
+        .build()
+        .unwrap()
 }
