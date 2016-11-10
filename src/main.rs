@@ -6,9 +6,11 @@ extern crate afterparty;
 extern crate clap;
 extern crate git2;
 extern crate hyper;
+extern crate slack_hook;
 
 mod taste;
 mod repo;
+mod slack;
 
 use afterparty::{Delivery, Event, Hub};
 use hyper::Server;
@@ -44,6 +46,17 @@ pub fn main() {
             .value_name("GH_REPO")
             .default_value("https://github.com/ms705/taster")
             .help("GitHub repository to taste"))
+        .arg(Arg::with_name("slack_hook_url")
+            .long("slack_hook_url")
+            .takes_value(true)
+            .required(false)
+            .help("Slack webhook URL to push notifications to"))
+        .arg(Arg::with_name("slack_channel")
+            .long("slack_channel")
+            .takes_value(true)
+            .required(false)
+            .default_value("#soup-test")
+            .help("Slack channel for notifications"))
         .arg(Arg::with_name("workdir")
             .short("w")
             .long("workdir")
@@ -56,9 +69,16 @@ pub fn main() {
 
     let addr = args.value_of("listen_addr").unwrap();
     let repo = args.value_of("github_repo").unwrap();
+    let slack_hook_url = args.value_of("slack_hook_url");
+    let slack_channel = args.value_of("slack_channel");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
     let ws = Mutex::new(repo::Workspace::new(repo, workdir));
+    let sn = if let Some(url) = slack_hook_url {
+        Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo))
+    } else {
+        None
+    };
 
     let mut hub = Hub::new();
     hub.handle("push", move |delivery: &Delivery| {
@@ -69,6 +89,9 @@ pub fn main() {
                          pusher.name);
                 for c in commits.iter() {
                     taste::taste_commit(&ws, &c.id);
+                    if sn.is_some() {
+                        sn.as_ref().unwrap().notify(&c.id).unwrap();
+                    }
                 }
             }
             _ => (),
