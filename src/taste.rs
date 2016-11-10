@@ -14,7 +14,6 @@ fn benchmark(workdir: &str) -> ExitStatus {
     Command::new("cargo")
         .current_dir(workdir)
         .arg("bench")
-        .arg("--release")
         .status()
         .expect("Failed to execute 'cargo bench'!")
 }
