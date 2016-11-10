@@ -1,10 +1,12 @@
-use git2::{ErrorCode, Oid, Repository, ResetType};
+use git2;
+use git2::{AutotagOption, ErrorCode, FetchOptions, Oid, RemoteCallbacks, Repository, ResetType};
 use std::fs;
 use std::path::Path;
 
 pub struct Workspace {
     pub path: String,
     pub repo: Repository,
+    pub remote_url: String,
 }
 
 impl Workspace {
@@ -36,7 +38,20 @@ impl Workspace {
         Workspace {
             path: String::from(local_path.to_str().unwrap()),
             repo: repo,
+            remote_url: String::from(github_repo),
         }
+    }
+
+    pub fn fetch(&self) -> Result<(), git2::Error> {
+        let refspec = "refs/heads/*:refs/heads/*";
+        let mut cb = RemoteCallbacks::new();
+        let mut remote = try!(self.repo.remote_anonymous(&self.remote_url));
+        let mut opts = FetchOptions::new();
+        opts.remote_callbacks(cb)
+            .download_tags(AutotagOption::All);
+
+        try!(remote.fetch(&[refspec], Some(&mut opts), None));
+        Ok(())
     }
 
     pub fn checkout_commit(&self, commit_id: &str) {

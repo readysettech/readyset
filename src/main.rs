@@ -73,7 +73,7 @@ pub fn main() {
     let slack_channel = args.value_of("slack_channel");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
-    let ws = Mutex::new(repo::Workspace::new(repo, workdir));
+    let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
     let sn = if let Some(url) = slack_hook_url {
         Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo))
     } else {
@@ -87,8 +87,12 @@ pub fn main() {
                 println!("Handling {} commits pushed by {}",
                          commits.len(),
                          pusher.name);
+                {
+                    let ws = wsl.lock().unwrap();
+                    ws.fetch();
+                }
                 for c in commits.iter() {
-                    taste::taste_commit(&ws, &c.id);
+                    taste::taste_commit(&wsl, &c.id);
                     if sn.is_some() {
                         sn.as_ref().unwrap().notify(&c.id).unwrap();
                     }
