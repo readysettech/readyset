@@ -4,7 +4,7 @@ use std::str;
 use std::process::{Command, ExitStatus};
 use std::sync::Mutex;
 
-fn benchmark(workdir: &str) {
+fn benchmark(workdir: &str) -> ExitStatus {
     Command::new("cargo")
         .current_dir(workdir)
         .arg("bench")
@@ -40,7 +40,10 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &String) {
     }
 
     // Run benchmarks and collect results
-    benchmark(&ws.path);
+    if !benchmark(&ws.path).success() {
+        println!("Failed to benchmark {}", id);
+        return;
+    }
 }
 
 fn update(workdir: &str) -> ExitStatus {
