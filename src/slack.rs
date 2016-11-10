@@ -1,4 +1,4 @@
-use slack_hook::{Attachment, AttachmentBuilder, PayloadBuilder, Slack, SlackTextContent, SlackLink};
+use slack_hook::{Attachment, AttachmentBuilder, PayloadBuilder, Slack, SlackLink};
 use slack_hook::SlackTextContent::{Text, Link};
 
 use taste::TastingResult;

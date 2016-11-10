@@ -44,7 +44,7 @@ impl Workspace {
 
     pub fn fetch(&self) -> Result<(), git2::Error> {
         let refspec = "refs/heads/*:refs/heads/*";
-        let mut cb = RemoteCallbacks::new();
+        let cb = RemoteCallbacks::new();
         let mut remote = try!(self.repo.remote_anonymous(&self.remote_url));
         let mut opts = FetchOptions::new();
         opts.remote_callbacks(cb)

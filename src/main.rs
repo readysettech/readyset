@@ -89,7 +89,7 @@ pub fn main() {
                          pusher.name);
                 {
                     let ws = wsl.lock().unwrap();
-                    ws.fetch();
+                    ws.fetch().unwrap();
                 }
                 for c in commits.iter() {
                     let res = taste::taste_commit(&wsl, &c.id);
