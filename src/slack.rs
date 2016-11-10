@@ -56,7 +56,13 @@ fn result_to_attachment(res: &TastingResult) -> Attachment {
         "Performance results:"
     };
 
-    AttachmentBuilder::new("It tasted nice.")
+    let taste = if !res.build || !res.bench {
+        "was inedible"
+    } else {
+        "tasted nice"
+    };
+
+    AttachmentBuilder::new(format!("It {}.", taste))
         .color(color)
         .title(title)
         .build()
