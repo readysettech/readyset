@@ -353,9 +353,12 @@
 //! the bottom of `FlowGraph::inner`.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(plugin, custom_derive)]
-#![cfg_attr(feature="b_netsoup", plugin(serde_macros))]
+#![feature(proc_macro)]
 #![deny(missing_docs)]
+
+#[cfg(feature="b_netsoup")]
+#[macro_use]
+extern crate serde_derive;
 
 extern crate clocked_dispatch;
 extern crate petgraph;

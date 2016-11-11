@@ -7,7 +7,7 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcache"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
-b_netsoup = ["tarpc", "serde", "serde_macros"]
+b_netsoup = ["tarpc", "serde", "serde_derive"]
 
 [dependencies]
 petgraph = "0.2"
@@ -31,7 +31,7 @@ memcache = {git="https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7d
 # netsoup
 tarpc = { version = "0.6", optional = true }
 serde = { version = "0.8", optional = true }
-serde_macros = { version = "0.8", optional = true }
+serde_derive = { version = "0.8", optional = true }
 
 # for web
 rustful = { version = "0.9", optional = true }
