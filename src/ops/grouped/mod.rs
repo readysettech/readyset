@@ -63,6 +63,8 @@ pub trait GroupedOperation: fmt::Debug {
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
     fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType;
+
+    fn description(&self) -> String;
 }
 
 #[derive(Debug)]
@@ -368,5 +370,9 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
             return None;
         }
         Some(vec![(self.src, self.colfix[col])])
+    }
+
+    fn description(&self) -> String {
+        self.inner.description()
     }
 }

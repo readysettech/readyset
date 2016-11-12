@@ -65,4 +65,8 @@ impl NodeOp for Base {
     fn is_base(&self) -> bool {
         true
     }
+
+    fn description(&self) -> String {
+        "B".into()
+    }
 }

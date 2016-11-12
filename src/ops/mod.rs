@@ -150,6 +150,21 @@ pub trait NodeOp: Debug {
     fn is_base(&self) -> bool {
         false
     }
+
+    /// Produce a compact, human-readable description of this node.
+    ///
+    ///  Symbol   Description
+    /// --------|-------------
+    ///    B    |  Base
+    ///    ||   |  Concat
+    ///    ⧖    |  Latest
+    ///    γ    |  Group by
+    ///   |*|   |  Count
+    ///    𝛴    |  Sum
+    ///    ⋈    |  Join
+    ///    ⋉    |  Left join
+    ///    ⋃    |  Union
+    fn description(&self) -> String;
 }
 
 /// The set of node types supported by distributary.
@@ -270,6 +285,22 @@ impl NodeOp for NodeType {
             false
         }
     }
+
+    fn description(&self) -> String {
+        match *self {
+            NodeType::Base(ref n) => n.description(),
+            NodeType::Aggregate(ref n) => n.description(),
+            NodeType::Join(ref n) => n.description(),
+            NodeType::Latest(ref n) => n.description(),
+            NodeType::Union(ref n) => n.description(),
+            NodeType::Identity(ref n) => n.description(),
+            NodeType::GroupConcat(ref n) => n.description(),
+            #[cfg(test)]
+            NodeType::Test(ref n) => n.description(),
+            #[cfg(test)]
+            NodeType::GatedIdentity(ref n) => n.description(),
+        }
+    }
 }
 
 impl Debug for NodeType {
@@ -315,7 +346,7 @@ impl Node {
 
 impl Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.name)
+        write!(f, "{:?}({:#?})", self.name, self.inner)
     }
 }
 
@@ -567,6 +598,10 @@ mod tests {
 
         fn resolve(&self, _: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
             None
+        }
+
+        fn description(&self) -> String {
+            "Tester".into()
         }
     }
     fn e2e_test(mat: bool) {

@@ -98,6 +98,16 @@ impl GroupedOperation for Aggregator {
             unreachable!();
         }
     }
+
+    fn description(&self) -> String {
+        let op_string = match self.op {
+            Aggregation::COUNT => "|*|".into(),
+            Aggregation::SUM => format!("𝛴({})", self.over),
+        };
+        let group_cols = self.group.iter().map(|g| g.to_string())
+            .collect::<Vec<_>>().join(", ");
+        format!("{} γ[{}]", op_string, group_cols)
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +152,19 @@ mod tests {
         } else {
             ops::new("agg", &["x", "ys"], mat, c)
         }
+    }
+
+    #[test]
+    fn it_describes() {
+        let s = 0.into();
+
+        let c = ops::new("count", &["x", "z", "ys"], true,
+                         Aggregation::COUNT.over(s, 1, &[0, 2]));
+        assert_eq!(c.inner.description(), "|*| γ[0, 2]");
+
+        let c = ops::new("sum", &["x", "z", "ys"], true,
+                         Aggregation::SUM.over(s, 1, &[2, 0]));
+        assert_eq!(c.inner.description(), "𝛴(1) γ[2, 0]");
     }
 
     #[test]
