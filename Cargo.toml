@@ -7,10 +7,9 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 afterparty = { git = "https://github.com/ms705/afterparty.git" }
 clap = "2.13"
 env_logger = "0.3"
-# afterparty doesn't work with hyper 0.9 until #14 is merged, so we use hyper v0.7
-# hyper v0.7 is only compatible with git2 <v0.6
+# openssl-sys version conflicts force us to use an old version of git2
 git2 = "0.5.2"
-hyper = "0.7"
+hyper = "0.9"
 lettre = "0.6.1"
 log = "0.3"
 slack-hook = "0.2"
