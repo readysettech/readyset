@@ -11,5 +11,6 @@ env_logger = "0.3"
 # hyper v0.7 is only compatible with git2 <v0.6
 git2 = "0.5.2"
 hyper = "0.7"
+lettre = "0.6.1"
 log = "0.3"
 slack-hook = "0.2"

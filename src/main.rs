@@ -4,14 +4,16 @@ extern crate env_logger;
 
 extern crate afterparty;
 extern crate clap;
+extern crate lettre;
 extern crate git2;
 extern crate hyper;
 extern crate slack_hook;
 
 mod auth;
-mod taste;
+mod email;
 mod repo;
 mod slack;
+mod taste;
 
 use afterparty::{Delivery, Event, Hub};
 use hyper::Server;
@@ -47,6 +49,11 @@ pub fn main() {
             .value_name("GH_REPO")
             .default_value("https://github.com/ms705/taster")
             .help("GitHub repository to taste"))
+        .arg(Arg::with_name("email_addr")
+            .long("email_addr")
+            .takes_value(true)
+            .required(false)
+            .help("Email address to send notifications to"))
         .arg(Arg::with_name("slack_hook_url")
             .long("slack_hook_url")
             .takes_value(true)
@@ -69,12 +76,18 @@ pub fn main() {
         .get_matches();
 
     let addr = args.value_of("listen_addr").unwrap();
+    let email_notification_addr = args.value_of("email_addr");
     let repo = args.value_of("github_repo").unwrap();
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
     let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
+    let en = if let Some(addr) = email_notification_addr {
+        Some(email::EmailNotifier::new(addr, repo))
+    } else {
+        None
+    };
     let sn = if let Some(url) = slack_hook_url {
         Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo))
     } else {
@@ -93,9 +106,16 @@ pub fn main() {
                     ws.fetch().unwrap();
                 }
                 for c in commits.iter() {
+                    // taste
                     let res = taste::taste_commit(&wsl, &c.id, &c.message);
+
+                    // email notification
+                    if en.is_some() {
+                        en.as_ref().unwrap().notify(&res).unwrap();
+                    }
+                    // slack notification
                     if sn.is_some() {
-                        sn.as_ref().unwrap().notify(res).unwrap();
+                        sn.as_ref().unwrap().notify(&res).unwrap();
                     }
                 }
             }
