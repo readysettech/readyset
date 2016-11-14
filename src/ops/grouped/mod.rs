@@ -271,7 +271,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                             rec.extend(group.into_iter().filter_map(|v| v));
 
                             // revoke old value
-                            rec.push((*current).clone().into());
+                            rec.push(current.into());
                             out.push(ops::Record::Negative(rec.clone(), old_ts));
 
                             // remove the old value from the end of the record
