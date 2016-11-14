@@ -264,23 +264,22 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                             let rec = group.into_iter().filter_map(|v| v).chain(Some(new.into()).into_iter()).collect();
                             out.push(ops::Record::Positive(rec, new_ts));
                         },
+                        Some(ref current) if &new == current => {/* no change */}
                         Some(current) => {
-                            if new != current {
-                                // construct prefix of output record used for both - and +
-                                let mut rec = Vec::with_capacity(group.len() + 1);
-                                rec.extend(group.into_iter().filter_map(|v| v));
+                            // construct prefix of output record used for both - and +
+                            let mut rec = Vec::with_capacity(group.len() + 1);
+                            rec.extend(group.into_iter().filter_map(|v| v));
 
-                                // revoke old value
-                                rec.push(current.into());
-                                out.push(ops::Record::Negative(rec.clone(), old_ts));
+                            // revoke old value
+                            rec.push((*current).clone().into());
+                            out.push(ops::Record::Negative(rec.clone(), old_ts));
 
-                                // remove the old value from the end of the record
-                                rec.pop();
+                            // remove the old value from the end of the record
+                            rec.pop();
 
-                                // emit new value
-                                rec.push(new.into());
-                                out.push(ops::Record::Positive(rec, new_ts));
-                            }
+                            // emit new value
+                            rec.push(new.into());
+                            out.push(ops::Record::Positive(rec, new_ts));
                         }
                     }
                 }
