@@ -8,6 +8,7 @@ extern crate git2;
 extern crate hyper;
 extern crate slack_hook;
 
+mod auth;
 mod taste;
 mod repo;
 mod slack;

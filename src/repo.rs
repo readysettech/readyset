@@ -1,3 +1,5 @@
+use auth::with_authentication;
+
 use git2;
 use git2::{AutotagOption, ErrorCode, FetchOptions, Oid, RemoteCallbacks, Repository, ResetType};
 use std::fs;
@@ -7,6 +9,20 @@ pub struct Workspace {
     pub path: String,
     pub repo: Repository,
     pub remote_url: String,
+}
+
+fn clone(url: &str, path: &Path) -> Result<Repository, git2::Error> {
+    let cfg = git2::Config::new().unwrap();
+
+    with_authentication(url, &cfg, |f| {
+        let mut cb = RemoteCallbacks::new();
+        cb.credentials(f);
+        let mut opts = FetchOptions::new();
+        opts.remote_callbacks(cb);
+        let mut rb = git2::build::RepoBuilder::new();
+        rb.fetch_options(opts);
+        rb.clone(url, path)
+    })
 }
 
 impl Workspace {
@@ -25,10 +41,7 @@ impl Workspace {
                     println!("Cloning '{}' into local workspace at '{}'...",
                              github_repo,
                              local_path.to_str().unwrap());
-                    match Repository::clone(github_repo, local_path.to_str().unwrap()) {
-                        Ok(r) => r,
-                        Err(e) => panic!(e),
-                    }
+                    clone(github_repo, local_path).unwrap()
                 } else {
                     panic!(e);
                 }
@@ -44,14 +57,18 @@ impl Workspace {
 
     pub fn fetch(&self) -> Result<(), git2::Error> {
         let refspec = "refs/heads/*:refs/heads/*";
-        let cb = RemoteCallbacks::new();
-        let mut remote = try!(self.repo.remote_anonymous(&self.remote_url));
-        let mut opts = FetchOptions::new();
-        opts.remote_callbacks(cb)
-            .download_tags(AutotagOption::All);
 
-        try!(remote.fetch(&[refspec], Some(&mut opts), None));
-        Ok(())
+        with_authentication(&self.remote_url, &try!(self.repo.config()), |f| {
+            let mut cb = RemoteCallbacks::new();
+            cb.credentials(f);
+            let mut remote = try!(self.repo.remote_anonymous(&self.remote_url));
+            let mut opts = FetchOptions::new();
+            opts.remote_callbacks(cb)
+                .download_tags(AutotagOption::All);
+
+            try!(remote.fetch(&[refspec], Some(&mut opts), None));
+            Ok(())
+        })
     }
 
     pub fn checkout_commit(&self, commit_id: &str) {
