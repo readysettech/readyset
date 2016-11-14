@@ -99,15 +99,21 @@ impl GroupedOperation for ExtremumOperator {
              diffs: Vec<(Self::Diff, i64)>)
              -> query::DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
-        let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
+        // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values:Vec<i64> = vec![];
-
         if let &Some(query::DataType::Number(n)) = current {
             extreme_values.push(n);
-            is_extreme_value = match self.op {
-                Extremum::MAX => Box::new(move |x| x >= n),
-                Extremum::MIN => Box::new(move |x| x <= n),
-            };
+        };
+
+        let is_extreme_value = |x:i64| {
+            if let &Some(query::DataType::Number(n)) = current {
+                match self.op {
+                    Extremum::MAX => x >= n,
+                    Extremum::MIN => x <= n,
+                }
+            } else {
+                true
+            }
         };
 
         for (d, _) in diffs {
@@ -127,12 +133,12 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::MAX => extreme_values.into_iter().max(),
         };
 
-        if extreme.is_none() {
-            // TODO: handle this case by querying into the parent.
-            unimplemented!();
-        } else {
-            extreme.unwrap().into()
+        if let Some(extreme) = extreme {
+            return extreme.into();
         }
+
+        // TODO: handle this case by querying into the parent.
+        unimplemented!();
     }
 }
 

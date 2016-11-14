@@ -260,6 +260,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
 
                     match current {
                         None => {
+                            // emit positive, which is group + new.
                             let rec = group.into_iter().filter_map(|v| v).chain(Some(new.into()).into_iter()).collect();
                             out.push(ops::Record::Positive(rec, new_ts));
                         },
