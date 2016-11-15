@@ -352,6 +352,10 @@ impl Node {
         self.having = Some(query::Query::new(&[], cond));
         self
     }
+
+    pub fn operator(&self) -> &NodeType {
+        &*self.inner
+    }
 }
 
 impl Debug for Node {
@@ -486,8 +490,8 @@ impl flow::View<query::Query> for Node {
         }
     }
 
-    fn operator(&self) -> Option<&NodeType> {
-        Some(&*self.inner)
+    fn node(&self) -> Option<&Node> {
+        Some(&self)
     }
 
     fn name(&self) -> &str {

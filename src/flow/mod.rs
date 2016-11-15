@@ -125,10 +125,10 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     /// subsequent updates at timestamps after the given initialization timestamp.
     fn init_at(&self, i64);
 
-    /// Returns the underlying operator for this view (if any).
+    /// Returns the underlying node for this view (if any).
     /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
     /// transformations.
-    fn operator(&self) -> Option<&ops::NodeType>;
+    fn node(&self) -> Option<&ops::Node>;
 
     /// Returns the name of this view.
     fn name(&self) -> &str;
@@ -982,7 +982,7 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
                 Some(n) => {
                     write!(f, "{{ {{ {} / {} | {} }} | {} }}",
                         index.index(), escape(n.name()),
-                        escape(&n.operator().unwrap().description()),
+                        escape(&n.node().unwrap().operator().description()),
                         n.args().join(", "))?;
                 }
             }
@@ -1112,7 +1112,7 @@ mod tests {
 
         fn safe(&self, _: i64) {}
 
-        fn operator(&self) -> Option<&ops::NodeType> {
+        fn node(&self) -> Option<&ops::Node> {
             None
         }
 
