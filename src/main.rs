@@ -26,8 +26,8 @@ use std::sync::Mutex;
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const TASTER_USAGE: &'static str = "\
 EXAMPLES:
-  taste -w /path/to/workdir
-  taste -l 0.0.0.0:1234 -w /path/to/workdir";
+  taste -w /path/to/workdir -s my_secret
+  taste -l 0.0.0.0:1234 -w /path/to/workdir -s my_secret";
 
 pub fn main() {
     use clap::{Arg, App};
@@ -57,6 +57,12 @@ pub fn main() {
             .takes_value(true)
             .required(false)
             .help("Email address to send notifications to"))
+        .arg(Arg::with_name("secret")
+            .short("s")
+            .long("secret")
+            .takes_value(true)
+            .required(true)
+            .help("GitHub webhook secret"))
         .arg(Arg::with_name("slack_hook_url")
             .long("slack_hook_url")
             .takes_value(true)
@@ -81,6 +87,7 @@ pub fn main() {
     let addr = args.value_of("listen_addr").unwrap();
     let email_notification_addr = args.value_of("email_addr");
     let repo = args.value_of("github_repo").unwrap();
+    let secret = args.value_of("secret").unwrap();
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
     let workdir = Path::new(args.value_of("workdir").unwrap());
@@ -97,8 +104,25 @@ pub fn main() {
         None
     };
 
+    if taste_head {
+        let head_id = {
+            let ws = wsl.lock().unwrap();
+            let cid = ws.repo.head().unwrap().target().unwrap().clone();
+            format!("{}", cid)
+        };
+        let res = taste::taste_commit(&wsl, &head_id, "HEAD");
+        // email notification
+        if en.is_some() {
+            en.as_ref().unwrap().notify(&res).unwrap();
+        }
+        // slack notification
+        if sn.is_some() {
+            sn.as_ref().unwrap().notify(&res).unwrap();
+        }
+    }
+
     let mut hub = Hub::new();
-    hub.handle("push", move |delivery: &Delivery| {
+    hub.handle_authenticated("push", secret, move |delivery: &Delivery| {
         match delivery.payload {
             Event::Push { ref commits, ref pusher, .. } => {
                 println!("Handling {} commits pushed by {}",
