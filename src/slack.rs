@@ -1,7 +1,7 @@
-use slack_hook::{Attachment, AttachmentBuilder, PayloadBuilder, Slack, SlackLink};
+use slack_hook::{Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackText, SlackLink};
 use slack_hook::SlackTextContent::{Text, Link};
 
-use taste::TastingResult;
+use taste::{BenchmarkResult, TastingResult};
 
 pub struct SlackNotifier {
     conn: Slack,
@@ -62,9 +62,29 @@ fn result_to_attachment(res: &TastingResult) -> Attachment {
         "tasted nice"
     };
 
+    let mut allfields = Vec::new();
+    for res in &res.results {
+        let mut nv = res.iter()
+            .map(|(k, v)| {
+                let val = match v {
+                    &BenchmarkResult::Neutral(ref s, _) => s,
+                    _ => unimplemented!(),
+                };
+                Field {
+                    title: k.clone(),
+                    value: SlackText::new(val.clone()),
+                    short: Some(true),
+                }
+            })
+            .collect::<Vec<_>>();
+        nv.sort_by(|a, b| b.title.cmp(&a.title));
+        allfields.extend(nv);
+    }
+
     AttachmentBuilder::new(format!("It {}.", taste))
         .color(color)
         .title(title)
+        .fields(allfields)
         .build()
         .unwrap()
 }

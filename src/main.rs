@@ -7,9 +7,12 @@ extern crate clap;
 extern crate lettre;
 extern crate git2;
 extern crate hyper;
+extern crate regex;
 extern crate slack_hook;
+extern crate toml;
 
 mod auth;
+mod config;
 mod email;
 mod repo;
 mod slack;
