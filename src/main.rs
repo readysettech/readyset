@@ -61,7 +61,7 @@ pub fn main() {
             .short("s")
             .long("secret")
             .takes_value(true)
-            .required(true)
+            .required(false)
             .help("GitHub webhook secret"))
         .arg(Arg::with_name("slack_hook_url")
             .long("slack_hook_url")
@@ -74,6 +74,12 @@ pub fn main() {
             .required(false)
             .default_value("#soup-test")
             .help("Slack channel for notifications"))
+        .arg(Arg::with_name("taste_commit")
+            .long("taste_commit")
+            .short("t")
+            .takes_value(true)
+            .required(false)
+            .help("Do a one-off taste of a specific commit"))
         .arg(Arg::with_name("workdir")
             .short("w")
             .long("workdir")
@@ -87,9 +93,10 @@ pub fn main() {
     let addr = args.value_of("listen_addr").unwrap();
     let email_notification_addr = args.value_of("email_addr");
     let repo = args.value_of("github_repo").unwrap();
-    let secret = args.value_of("secret").unwrap();
+    let secret = args.value_of("secret");
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
+    let taste_commit = args.value_of("taste_commit");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
     let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
@@ -104,13 +111,16 @@ pub fn main() {
         None
     };
 
-    if taste_head {
-        let head_id = {
+    if taste_commit.is_some() {
+        let cid = if let Some("HEAD") = taste_commit {
             let ws = wsl.lock().unwrap();
+            // yuck
             let cid = ws.repo.head().unwrap().target().unwrap().clone();
             format!("{}", cid)
+        } else {
+            String::from(taste_commit.unwrap())
         };
-        let res = taste::taste_commit(&wsl, &head_id, "HEAD");
+        let res = taste::taste_commit(&wsl, &cid, &cid);
         // email notification
         if en.is_some() {
             en.as_ref().unwrap().notify(&res).unwrap();
@@ -119,10 +129,15 @@ pub fn main() {
         if sn.is_some() {
             sn.as_ref().unwrap().notify(&res).unwrap();
         }
+        return;
+    }
+
+    if let None = secret {
+        panic!("--secret must be set when in continuous webhook handler mode");
     }
 
     let mut hub = Hub::new();
-    hub.handle_authenticated("push", secret, move |delivery: &Delivery| {
+    hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
         match delivery.payload {
             Event::Push { ref commits, ref pusher, .. } => {
                 println!("Handling {} commits pushed by {}",
