@@ -980,10 +980,26 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
             match self.graph[index].as_ref() {
                 None => write!(f, "(source)")?,
                 Some(n) => {
-                    write!(f, "{{ {{ {} / {} | {} }} | {} }}",
+                    write!(f, "{{")?;
+
+                    // Output node name and description. First row.
+                    write!(f, "{{ {} / {} | {} }}",
                         index.index(), escape(n.name()),
-                        escape(&n.node().unwrap().operator().description()),
-                        n.args().join(", "))?;
+                        escape(&n.node().unwrap().operator().description()))?;
+
+                    // Output node outputs. Second row.
+                    write!(f, " | {}", n.args().join(", "))?;
+
+                    // Maybe output node's HAVING conditions. Optional third row.
+                    if let Some(conds) = n.node().unwrap().having_conditions() {
+                        let conds = conds.iter()
+                            .map(|c| format!("{}", c))
+                            .collect::<Vec<_>>()
+                            .join(" ∧ ");
+                        write!(f, " | σ({})", escape(&conds))?;
+                    }
+
+                    write!(f, " }}")?;
                 }
             }
             writeln!(f, "\"]")?;

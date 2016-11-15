@@ -353,6 +353,11 @@ impl Node {
         self
     }
 
+    /// Retrieve a list of this node's output filters.
+    pub fn having_conditions(&self) -> Option<&[shortcut::Condition<query::DataType>]> {
+        self.having.as_ref().map(|q| &q.having[..])
+    }
+
     pub fn operator(&self) -> &NodeType {
         &*self.inner
     }
