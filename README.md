@@ -1,4 +1,4 @@
-# Taster: automatic performance regression tests for Rust code
+# Taster: automatic performance regression tests for Rust
 
 Still under development.
 
