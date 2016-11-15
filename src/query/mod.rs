@@ -2,6 +2,7 @@ use shortcut;
 
 #[cfg(feature="web")]
 use rustc_serialize::json::{ToJson, Json};
+use std::fmt;
 use std::sync;
 
 /// The main type used for user data throughout the codebase.
@@ -93,6 +94,16 @@ impl From<String> for DataType {
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
         DataType::Text(sync::Arc::new(s.to_owned()))
+    }
+}
+
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            DataType::None => write!(f, "*"),
+            DataType::Text(ref s) => write!(f, "\"{}\"", s),
+            DataType::Number(n) => write!(f, "{}", n),
+        }
     }
 }
 
