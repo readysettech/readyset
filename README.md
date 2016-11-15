@@ -27,11 +27,12 @@ events, and start taster:
 
 ```
 cargo run -- \
-    -w <WORKSPACE>
-    -l <LISTEN_IP:PORT> \
-    --github_repo="https://github.com/my/repo \
-    --slack_hook_url="<SLACK_HOOK>" \
-    --slack_channel="#chan"
+    --workdir /some/workspace/dir \
+    --listen_addr 127.0.0.1:4567 \
+    --github_repo "https://github.com/my/repo" \
+    --secret "my_secret" \
+    --slack_hook_url <SLACK_HOOK_URL> \
+    --slack_channel "#chan"
 ```
 
-Only `-w` and `--github_repo` are mandatory parameters.
+Only `--workdir`, `--github_repo`, and `--secret` are mandatory parameters.
