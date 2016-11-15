@@ -13,6 +13,7 @@ b_netsoup = ["tarpc", "serde", "serde_derive"]
 petgraph = "0.2"
 shortcut = "3.3"
 clocked-dispatch = "4.0"
+regex = "0.1"
 
 # for benchmarks
 # cli

@@ -1,5 +1,6 @@
 use petgraph;
 use clocked_dispatch;
+use regex::Regex;
 
 use std::fmt;
 use std::fmt::{Debug, Display};
@@ -962,7 +963,7 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
         use ops::NodeOp;
 
         let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
-        let escape = |s: &str| s.replace("|", "\\|");
+        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
 
         // Output header.
         writeln!(f, "digraph {{")?;
