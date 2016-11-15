@@ -352,6 +352,15 @@ impl Node {
         self.having = Some(query::Query::new(&[], cond));
         self
     }
+
+    /// Retrieve a list of this node's output filters.
+    pub fn having_conditions(&self) -> Option<&[shortcut::Condition<query::DataType>]> {
+        self.having.as_ref().map(|q| &q.having[..])
+    }
+
+    pub fn operator(&self) -> &NodeType {
+        &*self.inner
+    }
 }
 
 impl Debug for Node {
@@ -486,8 +495,8 @@ impl flow::View<query::Query> for Node {
         }
     }
 
-    fn operator(&self) -> Option<&NodeType> {
-        Some(&*self.inner)
+    fn node(&self) -> Option<&Node> {
+        Some(&self)
     }
 
     fn name(&self) -> &str {

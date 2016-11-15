@@ -1,5 +1,6 @@
 use petgraph;
 use clocked_dispatch;
+use regex::Regex;
 
 use std::fmt;
 use std::fmt::{Debug, Display};
@@ -124,10 +125,10 @@ pub trait View<Q: Clone + Send>: Debug + 'static + Send + Sync {
     /// subsequent updates at timestamps after the given initialization timestamp.
     fn init_at(&self, i64);
 
-    /// Returns the underlying operator for this view (if any).
+    /// Returns the underlying node for this view (if any).
     /// This is a bit of a hack, but the only way to introspect on views for the purpose of graph
     /// transformations.
-    fn operator(&self) -> Option<&ops::NodeType>;
+    fn node(&self) -> Option<&ops::Node>;
 
     /// Returns the name of this view.
     fn name(&self) -> &str;
@@ -962,7 +963,7 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
         use ops::NodeOp;
 
         let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
-        let escape = |s: &str| s.replace("|", "\\|");
+        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
 
         // Output header.
         writeln!(f, "digraph {{")?;
@@ -979,10 +980,26 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
             match self.graph[index].as_ref() {
                 None => write!(f, "(source)")?,
                 Some(n) => {
-                    write!(f, "{{ {{ {} / {} | {} }} | {} }}",
+                    write!(f, "{{")?;
+
+                    // Output node name and description. First row.
+                    write!(f, "{{ {} / {} | {} }}",
                         index.index(), escape(n.name()),
-                        escape(&n.operator().unwrap().description()),
-                        n.args().join(", "))?;
+                        escape(&n.node().unwrap().operator().description()))?;
+
+                    // Output node outputs. Second row.
+                    write!(f, " | {}", n.args().join(", "))?;
+
+                    // Maybe output node's HAVING conditions. Optional third row.
+                    if let Some(conds) = n.node().unwrap().having_conditions() {
+                        let conds = conds.iter()
+                            .map(|c| format!("{}", c))
+                            .collect::<Vec<_>>()
+                            .join(" ∧ ");
+                        write!(f, " | σ({})", escape(&conds))?;
+                    }
+
+                    write!(f, " }}")?;
                 }
             }
             writeln!(f, "\"]")?;
@@ -1111,7 +1128,7 @@ mod tests {
 
         fn safe(&self, _: i64) {}
 
-        fn operator(&self) -> Option<&ops::NodeType> {
+        fn node(&self) -> Option<&ops::Node> {
             None
         }
 

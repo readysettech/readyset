@@ -363,6 +363,7 @@ extern crate serde_derive;
 extern crate clocked_dispatch;
 extern crate petgraph;
 extern crate shortcut;
+extern crate regex;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;
