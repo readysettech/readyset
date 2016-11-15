@@ -28,7 +28,7 @@ impl SlackNotifier {
                                                     res.commit_id),
                                            &res.commit_id[0..6]))]
                 .as_slice())
-            .attachments(vec![result_to_attachment(&res)])
+            .attachments(result_to_attachments(&res))
             .channel(self.channel.clone())
             .username("taster")
             .icon_emoji(":tea:")
@@ -42,7 +42,7 @@ impl SlackNotifier {
     }
 }
 
-fn result_to_attachment(res: &TastingResult) -> Attachment {
+fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
     let color = if !res.build || !res.bench {
         "danger"
     } else {
@@ -63,7 +63,7 @@ fn result_to_attachment(res: &TastingResult) -> Attachment {
         "tasted nice"
     };
 
-    let mut allfields = Vec::new();
+    let mut attachments = Vec::new();
     for res in &res.results {
         let mut nv = res.iter()
             .map(|(k, v)| {
@@ -79,13 +79,13 @@ fn result_to_attachment(res: &TastingResult) -> Attachment {
             })
             .collect::<Vec<_>>();
         nv.sort_by(|a, b| b.title.cmp(&a.title));
-        allfields.extend(nv);
+        let att = AttachmentBuilder::new(format!("It {}.", taste))
+            .color(color)
+            .title(title)
+            .fields(nv)
+            .build()
+            .unwrap();
+        attachments.push(att);
     }
-
-    AttachmentBuilder::new(format!("It {}.", taste))
-        .color(color)
-        .title(title)
-        .fields(allfields)
-        .build()
-        .unwrap()
+    attachments
 }
