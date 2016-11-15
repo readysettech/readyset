@@ -40,7 +40,6 @@ fn benchmark(workdir: &str,
     for l in lines {
         for (i, regex) in cfg.result_expr.iter().enumerate() {
             for cap in regex.captures_iter(l) {
-                println!("{:#?}", cap);
                 for c in cap.iter() {
                     res.insert(format!("{}/{}", cfg.name, i),
                                BenchmarkResult::Neutral(String::from(c.unwrap()), 0));
@@ -48,7 +47,6 @@ fn benchmark(workdir: &str,
             }
         }
     }
-    println!("{:#?}", res);
     (output.status, res)
 }
 
