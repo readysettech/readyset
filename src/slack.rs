@@ -64,28 +64,50 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
     };
 
     let mut attachments = Vec::new();
-    for res in &res.results {
-        let mut nv = res.iter()
-            .map(|(k, v)| {
-                let val = match v {
-                    &BenchmarkResult::Neutral(ref s, _) => s,
-                    _ => unimplemented!(),
-                };
-                Field {
-                    title: k.clone(),
-                    value: SlackText::new(val.clone()),
-                    short: Some(true),
-                }
-            })
-            .collect::<Vec<_>>();
-        nv.sort_by(|a, b| b.title.cmp(&a.title));
-        let att = AttachmentBuilder::new(format!("It {}.", taste))
-            .color(color)
-            .title(title)
-            .fields(nv)
-            .build()
-            .unwrap();
-        attachments.push(att);
+    let build_att = AttachmentBuilder::new("")
+        .title(format!("It {}.", taste))
+        .fields(vec![Field {
+                         title: "Build".into(),
+                         value: SlackText::new(if res.build { "success" } else { "failed" }),
+                         short: Some(true),
+                     },
+                     Field {
+                         title: "Benchmark".into(),
+                         value: SlackText::new(if res.build { "success" } else { "failed" }),
+                         short: Some(true),
+                     }])
+        .color(color)
+        .build()
+        .unwrap();
+    attachments.push(build_att);
+
+    match res.results {
+        None => (),
+        Some(ref r) => {
+            for res in r {
+                let mut nv = res.iter()
+                    .map(|(k, v)| {
+                        let val = match v {
+                            &BenchmarkResult::Neutral(ref s, _) => s,
+                            _ => unimplemented!(),
+                        };
+                        Field {
+                            title: k.clone(),
+                            value: SlackText::new(val.clone()),
+                            short: Some(true),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                nv.sort_by(|a, b| b.title.cmp(&a.title));
+                let att = AttachmentBuilder::new(format!("It {}.", taste))
+                    .color(color)
+                    .title(title)
+                    .fields(nv)
+                    .build()
+                    .unwrap();
+                attachments.push(att);
+            }
+        }
     }
     attachments
 }

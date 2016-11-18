@@ -2,6 +2,7 @@ use config::{Benchmark, parse_config};
 use repo::Workspace;
 
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
 use std::str;
@@ -21,7 +22,7 @@ pub struct TastingResult {
     pub commit_msg: String,
     pub build: bool,
     pub bench: bool,
-    pub results: Vec<HashMap<String, BenchmarkResult<String>>>,
+    pub results: Option<Vec<HashMap<String, BenchmarkResult<String>>>>,
 }
 
 fn benchmark(workdir: &str,
@@ -29,6 +30,7 @@ fn benchmark(workdir: &str,
              -> (ExitStatus, HashMap<String, BenchmarkResult<String>>) {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(workdir)
+        .env("RUST_BACKTRACE", "1")
         .arg(&cfg.cmd)
         .args(cfg.args.as_slice());
 
@@ -55,6 +57,7 @@ fn build(workdir: &str) -> ExitStatus {
         .current_dir(workdir)
         .arg("build")
         .arg("--release")
+        .env("RUST_BACKTRACE", "1")
         .status()
         .expect("Failed to execute 'cargo build'!")
 }
@@ -64,11 +67,28 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResul
     let ws = wsl.lock().unwrap();
     ws.checkout_commit(id);
 
-    let cfg = parse_config(Path::new(&format!("{}/taster.toml", ws.path)));
-
     let build_success = update(&ws.path).success() && build(&ws.path).success();
-    let bench_out = cfg.unwrap()
-        .iter()
+
+    let cfg = match parse_config(Path::new(&format!("{}/taster.toml", ws.path))) {
+        Ok(c) => c,
+        Err(e) => {
+            match e.kind() {
+                io::ErrorKind::NotFound => {
+                    println!("Skipping commit {} which doesn't have a Taster config.", id);
+                    return TastingResult {
+                        commit_id: String::from(id),
+                        commit_msg: String::from(msg),
+                        build: build_success,
+                        bench: false,
+                        results: None,
+                    };
+                }
+                _ => unimplemented!(),
+            }
+        }
+    };
+
+    let bench_out = cfg.iter()
         .map(|b| benchmark(&ws.path, b))
         .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<String>>)>>();
     let bench_success = bench_out.iter().all(|x| x.0.success());
@@ -79,7 +99,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResul
         commit_msg: String::from(msg),
         build: build_success,
         bench: bench_success,
-        results: bench_results,
+        results: Some(bench_results),
     }
 }
 
