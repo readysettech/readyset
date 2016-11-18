@@ -186,6 +186,8 @@ pub enum NodeType {
     Identity(identity::Identity),
     /// A column permutation operator. See `Permute`.
     Permute(permute::Permute),
+    /// A max or min. See `ExtremumOperator`.
+    Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
     #[cfg(test)]
     /// A test operator for testing purposes.
     Test(tests::Tester),
@@ -205,6 +207,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref mut n) => n.prime(g),
             NodeType::Permute(ref mut n) => n.prime(g),
             NodeType::GroupConcat(ref mut n) => n.prime(g),
+            NodeType::Extremum(ref mut n) => n.prime(g),
             #[cfg(test)]
             NodeType::Test(ref mut n) => n.prime(g),
             #[cfg(test)]
@@ -228,6 +231,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref n) => n.forward(u, src, ts, last, db),
             NodeType::Permute(ref n) => n.forward(u, src, ts, last, db),
             NodeType::GroupConcat(ref n) => n.forward(u, src, ts, last, db),
+            NodeType::Extremum(ref n) => n.forward(u, src, ts, last, db),
             #[cfg(test)]
             NodeType::Test(ref n) => n.forward(u, src, ts, last, db),
             #[cfg(test)]
@@ -245,6 +249,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref n) => n.query(q, ts),
             NodeType::Permute(ref n) => n.query(q, ts),
             NodeType::GroupConcat(ref n) => n.query(q, ts),
+            NodeType::Extremum(ref n) => n.query(q, ts),
             #[cfg(test)]
             NodeType::Test(ref n) => n.query(q, ts),
             #[cfg(test)]
@@ -262,6 +267,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref n) => n.suggest_indexes(this),
             NodeType::Permute(ref n) => n.suggest_indexes(this),
             NodeType::GroupConcat(ref n) => n.suggest_indexes(this),
+            NodeType::Extremum(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
             NodeType::Test(ref n) => n.suggest_indexes(this),
             #[cfg(test)]
@@ -279,6 +285,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref n) => n.resolve(col),
             NodeType::Permute(ref n) => n.resolve(col),
             NodeType::GroupConcat(ref n) => n.resolve(col),
+            NodeType::Extremum(ref n) => n.resolve(col),
             #[cfg(test)]
             NodeType::Test(ref n) => n.resolve(col),
             #[cfg(test)]
@@ -304,6 +311,7 @@ impl NodeOp for NodeType {
             NodeType::Identity(ref n) => n.description(),
             NodeType::Permute(ref n) => n.description(),
             NodeType::GroupConcat(ref n) => n.description(),
+            NodeType::Extremum(ref n) => n.description(),
             #[cfg(test)]
             NodeType::Test(ref n) => n.description(),
             #[cfg(test)]
@@ -323,6 +331,7 @@ impl Debug for NodeType {
             NodeType::Identity(ref n) => write!(f, "{:?}", n),
             NodeType::Permute(ref n) => write!(f, "{:?}", n),
             NodeType::GroupConcat(ref n) => write!(f, "{:?}", n),
+            NodeType::Extremum(ref n) => write!(f, "{:?})", n),
             #[cfg(test)]
             NodeType::Test(ref n) => write!(f, "{:?}", n),
             #[cfg(test)]

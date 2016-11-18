@@ -133,8 +133,8 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn zero(&self) -> query::DataType {
-        query::DataType::from("")
+    fn zero(&self) -> Option<query::DataType> {
+        Some(query::DataType::from(""))
     }
 
     fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
@@ -146,7 +146,10 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self, current: &query::DataType, diffs: Vec<(Self::Diff, i64)>) -> query::DataType {
+    fn apply(&self,
+             current: &Option<query::DataType>,
+             diffs: Vec<(Self::Diff, i64)>)
+             -> query::DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -156,7 +159,7 @@ impl GroupedOperation for GroupConcat {
         // efficient by splitting into a BTree, which maintains sorting while
         // supporting efficient add/remove.
 
-        let current = if let query::DataType::Text(ref s) = *current {
+        let current = if let Some(query::DataType::Text(ref s)) = *current {
             s
         } else {
             unreachable!();
