@@ -120,7 +120,7 @@ pub fn main() {
         } else {
             String::from(taste_commit.unwrap())
         };
-        let res = taste::taste_commit(&wsl, &cid, &cid);
+        let res = taste::taste_commit(&wsl, &cid, &cid, "");
         // email notification
         if en.is_some() {
             en.as_ref().unwrap().notify(&res).unwrap();
@@ -149,7 +149,7 @@ pub fn main() {
                 }
                 for c in commits.iter() {
                     // taste
-                    let res = taste::taste_commit(&wsl, &c.id, &c.message);
+                    let res = taste::taste_commit(&wsl, &c.id, &c.message, &c.url);
 
                     // email notification
                     if en.is_some() {

@@ -20,6 +20,7 @@ pub enum BenchmarkResult<T> {
 pub struct TastingResult {
     pub commit_id: String,
     pub commit_msg: String,
+    pub commit_url: String,
     pub build: bool,
     pub bench: bool,
     pub results: Option<Vec<HashMap<String, BenchmarkResult<String>>>>,
@@ -62,7 +63,7 @@ fn build(workdir: &str) -> ExitStatus {
         .expect("Failed to execute 'cargo build'!")
 }
 
-pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResult {
+pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> TastingResult {
     println!("Tasting commit {}", id);
     let ws = wsl.lock().unwrap();
     ws.checkout_commit(id);
@@ -78,6 +79,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResul
                     return TastingResult {
                         commit_id: String::from(id),
                         commit_msg: String::from(msg),
+                        commit_url: String::from(url),
                         build: build_success,
                         bench: false,
                         results: None,
@@ -97,6 +99,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str) -> TastingResul
     TastingResult {
         commit_id: String::from(id),
         commit_msg: String::from(msg),
+        commit_url: String::from(url),
         build: build_success,
         bench: bench_success,
         results: Some(bench_results),

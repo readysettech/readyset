@@ -24,7 +24,7 @@ impl SlackNotifier {
                        Text(format!("\"{}\"_ -- ", res.commit_msg.lines().next().unwrap())
                            .into()),
                        Link(SlackLink::new(&format!("{}/commit/{}",
-                                                    self.github_repo,
+                                                    res.commit_url,
                                                     res.commit_id),
                                            &res.commit_id[0..6]))]
                 .as_slice())
