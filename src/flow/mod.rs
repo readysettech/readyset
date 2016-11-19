@@ -796,9 +796,9 @@ impl<Q, U, D> FlowGraph<Q, U, D>
             let mut ctx = context.lock().unwrap();
 
             {
-                let mut term = |(src, u), last| -> bool {
+                let mut term = |(src, u, uts), last| -> bool {
                     // do the processing dicated by our inner
-                    let u = inner.process(u, src, ts, last);
+                    let u = inner.process(u, src, uts, last);
                     if !u.is_done() {
                         if last {
                             unreachable!("last update for a given timestamp must end computation");
@@ -807,23 +807,23 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                     }
 
                     // we're done with this time -- let the world know!
-                    processed_ts.store(ts as isize, sync::atomic::Ordering::Release);
+                    processed_ts.store(uts as isize, sync::atomic::Ordering::Release);
 
                     // we only forward Some() things for efficiency. sending None's is unnecessary
                     // as long as an update will be sent later with a later timestamp. we use
                     // `forwarded` below to figure out whether we need to also send a final None.
                     if let ProcessingResult::Done(u) = u {
                         let mut u = Some(u);
-                        forwarded = ts;
+                        forwarded = uts;
 
                         // avoid cloning on the last send. this will avoid clone altogether for
                         // nodes with only one child, which is a common case.
                         let mut txit = ctx.txs.iter_mut().peekable();
                         while let Some(tx) = txit.next() {
                             if txit.peek().is_some() {
-                                tx.send((name, u.clone(), ts)).unwrap();
+                                tx.send((name, u.clone(), uts)).unwrap();
                             } else {
-                                tx.send((name, u.take(), ts)).unwrap();
+                                tx.send((name, u.take(), uts)).unwrap();
                             }
                         }
                     }
@@ -855,7 +855,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                         // we've moved to the next timestamp. if we didn't finish the previous
                         // timestamp, and didn't run it with last == true, then do so now.
                         if !done {
-                            term((lastsrc, None), true);
+                            term((lastsrc, None, ts), true);
                         }
                         // start the next timestamp
                         done = false;
@@ -872,14 +872,14 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                     lastsrc = d.data.0;
 
                     // process the update
-                    done = term((d.data.0, Some(d.data.1)), nrcv == nsrcs);
+                    done = term((d.data.0, Some(d.data.1), ts), nrcv == nsrcs);
                 }
 
                 // we could have received only updates from a few ancestors for the last timestamp,
                 // and thus not have called term with last == true. if that were the case, call it
                 // one last time now.
                 if !done {
-                    term((lastsrc, None), true);
+                    term((lastsrc, None, prev_ts), true);
                 }
             }
 
