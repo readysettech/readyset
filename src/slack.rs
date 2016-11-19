@@ -74,7 +74,7 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
                      },
                      Field {
                          title: "Benchmark".into(),
-                         value: SlackText::new(if res.benchmark { "success" } else { "failed" }),
+                         value: SlackText::new(if res.bench { "success" } else { "failed" }),
                          short: Some(true),
                      }])
         .color(color)
