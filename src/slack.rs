@@ -19,7 +19,6 @@ impl SlackNotifier {
     }
 
     pub fn notify(&self, res: &TastingResult) -> Result<(), String> {
-        println!("{:#?}", res);
         let payload = PayloadBuilder::new()
             .text(vec![Text("I've tasted commit _".into()),
                        Text(format!("\"{}\"_ -- ", res.commit_msg.lines().next().unwrap())
