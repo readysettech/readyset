@@ -68,12 +68,12 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
         .title(format!("It {}.", taste))
         .fields(vec![Field {
                          title: "Build".into(),
-                         value: SlackText::new(if res.build { "success" } else { "failed" }),
+                         value: SlackText::new(if res.build { ":white_check_mark:" } else { ":x:" }),
                          short: Some(true),
                      },
                      Field {
                          title: "Benchmark".into(),
-                         value: SlackText::new(if res.bench { "success" } else { "failed" }),
+                         value: SlackText::new(if res.bench { ":white_check_mark:" } else { ":x:" }),
                          short: Some(true),
                      }])
         .color(color)
@@ -99,9 +99,8 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
                     })
                     .collect::<Vec<_>>();
                 nv.sort_by(|a, b| b.title.cmp(&a.title));
-                let att = AttachmentBuilder::new(format!("It {}.", taste))
+                let att = AttachmentBuilder::new("")
                     .color(color)
-                    .title(title)
                     .fields(nv)
                     .build()
                     .unwrap();
