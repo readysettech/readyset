@@ -19,6 +19,7 @@ impl SlackNotifier {
     }
 
     pub fn notify(&self, res: &TastingResult) -> Result<(), String> {
+        println!("{:#?}", res);
         let payload = PayloadBuilder::new()
             .text(vec![Text("I've tasted commit _".into()),
                        Text(format!("\"{}\"_ -- ", res.commit_msg.lines().next().unwrap())
@@ -73,7 +74,7 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
                      },
                      Field {
                          title: "Benchmark".into(),
-                         value: SlackText::new(if res.build { "success" } else { "failed" }),
+                         value: SlackText::new(if res.benchmark { "success" } else { "failed" }),
                          short: Some(true),
                      }])
         .color(color)
