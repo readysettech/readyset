@@ -1,12 +1,15 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 use ops;
+use query;
+use shortcut;
 
 use std::sync::mpsc;
 use std::sync;
 
 use std::collections::VecDeque;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use std::ops::Deref;
 
@@ -38,13 +41,15 @@ macro_rules! broadcast {
 }
 
 
-type Edge = ();
+type Edge = bool; // should the edge be materialized?
 
 pub trait Ingredient
     where Self: Send
 {
     fn ancestors(&self) -> Vec<NodeIndex>;
     fn process(&mut self, m: Message) -> Option<U>;
+    fn should_materialize(&self) -> bool;
+    fn fields(&self) -> &[&str];
 }
 
 enum Node {
@@ -86,6 +91,7 @@ pub struct Blender {
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<Domain>>,
+    materialize: HashSet<(NodeIndex, NodeIndex)>,
 }
 
 impl Blender {
@@ -93,6 +99,7 @@ impl Blender {
         Migration {
             mainline: self,
             added: Default::default(),
+            materialize: Default::default(),
         }
     }
 }
@@ -111,14 +118,33 @@ impl<'a> Migration<'a> {
         self.added.insert(ni, None);
         // insert it into the graph
         if parents.is_empty() {
-            self.mainline.ingredients.add_edge(self.mainline.source, ni, ());
+            self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, ());
+                self.mainline.ingredients.add_edge(parent, ni, false);
             }
         }
         // and tell the caller its id
         ni
+    }
+
+    pub fn materialize(&mut self, src: NodeIndex, dst: NodeIndex) {
+        // TODO
+        // what about if a user tries to materialize a cross-domain edge that has already been
+        // converted to an egress/ingress pair?
+        let e = self.mainline
+            .ingredients
+            .find_edge(src, dst)
+            .expect("asked to materialize non-existing edge");
+
+        let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
+        if !*e {
+            *e = true;
+            // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
+            // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
+            // commit())
+            self.materialize.insert((src, dst));
+        }
     }
 
     pub fn assign_domain(&mut self, n: NodeIndex, d: Domain) {
@@ -162,61 +188,150 @@ impl<'a> Migration<'a> {
             })
             .collect();
 
+        let mut state = nodes.iter()
+            .filter_map(|&(ni, ref n, _)| {
+                // materialized state for any nodes that need it
+                // in particular, we keep state for any node that requires its own state to be
+                // materialized, or that has an outgoing edge marked as materialized (we know that
+                // that edge has to be internal, since ingress/egress nodes have already been
+                // added, and they make sure that there are no cross-domain materialized edges).
+                match n {
+                    &Node::Internal(_, ref i) => {
+                        if i.should_materialize() ||
+                           self.mainline
+                            .ingredients
+                            .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                            .any(|e| *e.weight()) {
+                            Some((ni, shortcut::Store::new(i.fields().len())))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
         thread::spawn(move || {
-            let mut handoffs: HashMap<NodeIndex, VecDeque<Message>> =
-                nodes.iter().map(|&(ni, _, _)| (ni, VecDeque::new())).collect();
+            let mut handoffs = nodes.iter().map(|&(ni, _, _)| (ni, VecDeque::new())).collect();
 
             loop {
                 // `nodes` is already in topological order, so we just walk over them in order and
                 // do the appropriate action for each one.
                 for &mut (ni, ref mut n, ref children) in &mut nodes {
-                    match n {
-                        &mut Node::Ingress(_, ref mut rx) => {
-                            // receive an update
-                            debug_assert!(handoffs[&ni].is_empty());
-                            broadcast!(handoffs, rx.recv().unwrap(), children);
-                        }
-                        &mut Node::Egress(_, ref txs) => {
-                            // send any queued updates to all external children
-                            let mut txs = txs.lock().unwrap();
-                            let txn = txs.len() - 1;
-                            while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
-                                let mut m = Some(m); // so we can use .take()
-                                for (txi, tx) in txs.iter_mut().enumerate() {
-                                    if txi == txn && children.is_empty() {
-                                        tx.send(m.take().unwrap()).unwrap();
-                                    } else {
-                                        tx.send(m.clone().unwrap()).unwrap();
-                                    }
-                                }
-
-                                if let Some(m) = m {
-                                    broadcast!(handoffs, m, children);
-                                } else {
-                                    debug_assert!(children.is_empty());
-                                }
-                            }
-                        }
-                        &mut Node::Internal(_, ref mut i) => {
-                            while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
-                                if let Some(u) = i.process(m) {
-                                    broadcast!(handoffs,
-                                               Message {
-                                                   from: ni,
-                                                   data: u,
-                                               },
-                                               children);
-                                }
-                            }
-                        }
-                        _ => unreachable!(),
-                    }
+                    Self::iterate(&mut handoffs, &mut state, ni, n, children);
                 }
             }
         });
     }
 
-    pub fn commit(mut self) {
+    fn iterate(handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
+               state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>,
+               ni: NodeIndex,
+               n: &mut Node,
+               children: &[NodeIndex]) {
+        match n {
+            &mut Node::Ingress(_, ref mut rx) => {
+                // receive an update
+                debug_assert!(handoffs[&ni].is_empty());
+                broadcast!(handoffs, rx.recv().unwrap(), children);
+            }
+            &mut Node::Egress(_, ref txs) => {
+                // send any queued updates to all external children
+                let mut txs = txs.lock().unwrap();
+                let txn = txs.len() - 1;
+                while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
+                    let mut m = Some(m); // so we can use .take()
+                    for (txi, tx) in txs.iter_mut().enumerate() {
+                        if txi == txn && children.is_empty() {
+                            tx.send(m.take().unwrap()).unwrap();
+                        } else {
+                            tx.send(m.clone().unwrap()).unwrap();
+                        }
+                    }
+
+                    if let Some(m) = m {
+                        broadcast!(handoffs, m, children);
+                    } else {
+                        debug_assert!(children.is_empty());
+                    }
+                }
+            }
+            &mut Node::Internal(_, ref mut i) => {
+                while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
+                    if let Some(u) = Self::process_one(ni, i, m, state) {
+                        broadcast!(handoffs,
+                                   Message {
+                                       from: ni,
+                                       data: u,
+                                   },
+                                   children);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn process_one(ni: NodeIndex,
+                   i: &mut Box<Ingredient>,
+                   m: Message,
+                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>)
+                   -> Option<U> {
+        // first, process the incoming message
+        let u = i.process(m);
+        if u.is_none() {
+            // our output didn't change -- nothing more to do
+            return u;
+        }
+
+        // our output changed -- do we need to modify materialized state?
+        let mut state = state.get_mut(&ni);
+        if state.is_none() {
+            // nope
+            return u;
+        }
+
+        // yes!
+        let mut state = state.unwrap();
+        if let Some(ops::Update::Records(ref rs)) = u {
+            for r in rs.iter().cloned() {
+                match r {
+                    ops::Record::Positive(r, _) => state.insert(r),
+                    ops::Record::Negative(r, _) => {
+                        // we need a cond that will match this row.
+                        let conds = r.into_iter()
+                            .enumerate()
+                            .map(|(coli, v)| {
+                                shortcut::Condition {
+                                    column: coli,
+                                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(v)),
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        // however, multiple rows may have the same values as this row for every
+                        // column. afaict, it is safe to delete any one of these rows. we do this
+                        // by returning true for the first invocation of the filter function, and
+                        // false for all subsequent invocations.
+                        let mut first = true;
+                        state.delete_filter(&conds[..], |_| {
+                            if first {
+                                first = false;
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        u
+    }
+
+    pub fn commit(mut self) -> HashMap<NodeIndex, mpsc::Sender<U>> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -268,9 +383,9 @@ impl<'a> Migration<'a> {
                     let ingress = ingress.unwrap();
                     // we need to hook the ingress node in between us and this parent
                     let old = self.mainline.ingredients.find_edge(parent, node).unwrap();
-                    self.mainline.ingredients.remove_edge(old);
-                    self.mainline.ingredients.add_edge(parent, ingress, ());
-                    self.mainline.ingredients.add_edge(ingress, node, ());
+                    let was_materialized = self.mainline.ingredients.remove_edge(old).unwrap();
+                    self.mainline.ingredients.add_edge(parent, ingress, false);
+                    self.mainline.ingredients.add_edge(ingress, node, was_materialized);
                 }
             }
 
@@ -300,10 +415,21 @@ impl<'a> Migration<'a> {
                         .ingredients
                         .add_node(Node::Egress(domain, Default::default()));
                     // we need to hook that node in between us and this child
+                    // note that we *know* that this is an edge to an ingress node, as we prepended
+                    // all nodes with a different-domain parent with an ingress node above.
+                    if cfg!(debug_assertions) {
+                        if let Node::Ingress(..) = self.mainline.ingredients[child] {
+                        } else {
+                            unreachable!("child of egress is not an ingress");
+                        }
+                    }
+
                     let old = self.mainline.ingredients.find_edge(node, child).unwrap();
                     self.mainline.ingredients.remove_edge(old);
-                    self.mainline.ingredients.add_edge(node, egress, ());
-                    self.mainline.ingredients.add_edge(egress, child, ());
+                    // because all our outgoing edges are to ingress nodes,
+                    // they should never be materialized
+                    self.mainline.ingredients.add_edge(node, egress, false);
+                    self.mainline.ingredients.add_edge(egress, child, false);
                     // that egress node also needs to run
                     domain_nodes.entry(domain).or_insert_with(Vec::new).push(egress);
                 }
@@ -335,7 +461,9 @@ impl<'a> Migration<'a> {
         for (domain, nodes) in domain_nodes {
             self.boot_domain(domain, nodes);
         }
+
         // then, hook up the channels to new ingress nodes
+        let mut sources = HashMap::new();
         for (ingress, tx) in targets {
             if let Node::Ingress(..) = self.mainline.ingredients[ingress] {
                 // any egress with an edge to this node needs to have a tx clone added to its tx
@@ -343,15 +471,49 @@ impl<'a> Migration<'a> {
                 for egress in self.mainline
                     .ingredients
                     .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming) {
-                    if let Node::Egress(_, ref txs) = self.mainline.ingredients[egress] {
-                        txs.lock().unwrap().push(tx.clone());
-                    } else {
-                        unreachable!("ingress parent is not egress");
+
+                    if egress == self.mainline.source {
+                        use std::thread;
+
+                        // input node
+                        debug_assert_eq!(self
+                            .mainline
+                            .ingredients
+                            .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming)
+                            .count()
+                            , 1);
+
+                        // we want to avoid forcing the end-user to cook up Messages
+                        // they should instead just make Us
+                        // start a thread that does that conversion
+                        let (tx2, rx2) = mpsc::channel();
+                        let src = self.mainline.source;
+                        thread::spawn(move || {
+                            for u in rx2 {
+                                tx.send(Message {
+                                        from: src,
+                                        data: u,
+                                    })
+                                    .unwrap();
+                            }
+                        });
+                        sources.insert(ingress, tx2);
+                        break;
                     }
+
+                    if let Node::Egress(_, ref txs) = self.mainline.ingredients[egress] {
+                        // connected to egress from other domain
+                        txs.lock().unwrap().push(tx.clone());
+                        continue;
+                    }
+
+                    unreachable!("ingress parent is not egress");
                 }
             } else {
                 unreachable!("ingress node not of ingress type");
             }
         }
+
+        sources
     }
 }
