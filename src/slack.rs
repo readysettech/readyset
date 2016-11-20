@@ -23,10 +23,7 @@ impl SlackNotifier {
             .text(vec![Text("I've tasted commit _".into()),
                        Text(format!("\"{}\"_ -- ", res.commit_msg.lines().next().unwrap())
                            .into()),
-                       Link(SlackLink::new(&format!("{}/commit/{}",
-                                                    res.commit_url,
-                                                    res.commit_id),
-                                           &res.commit_id[0..6]))]
+                       Link(SlackLink::new(&res.commit_url, &res.commit_id[0..6]))]
                 .as_slice())
             .attachments(result_to_attachments(&res))
             .channel(self.channel.clone())
