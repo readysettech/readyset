@@ -64,13 +64,21 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
     let build_att = AttachmentBuilder::new("")
         .title(format!("It {}.", taste))
         .fields(vec![Field {
-                         title: "Build".into(),
-                         value: SlackText::new(if res.build { ":white_check_mark:" } else { ":x:" }),
+                         title: "".into(),
+                         value: SlackText::new(if res.build {
+                             "Build: :white_check_mark:"
+                         } else {
+                             "Build: :x:"
+                         }),
                          short: Some(true),
                      },
                      Field {
-                         title: "Benchmark".into(),
-                         value: SlackText::new(if res.bench { ":white_check_mark:" } else { ":x:" }),
+                         title: "".into(),
+                         value: SlackText::new(if res.bench {
+                             "Benchmark: :white_check_mark:"
+                         } else {
+                             "Benchmark: :x:"
+                         }),
                          short: Some(true),
                      }])
         .color(color)
