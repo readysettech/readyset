@@ -10,7 +10,7 @@ b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_netsoup = ["tarpc", "serde", "serde_derive"]
 
 [dependencies]
-petgraph = "0.2"
+petgraph = "0.4"
 shortcut = "3.3"
 clocked-dispatch = "4.0"
 regex = "0.1"

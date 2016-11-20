@@ -334,8 +334,11 @@ impl<Q, U, D> FlowGraph<Q, U, D>
     /// non-materialized views so that they end up on the columns of the views that will actually
     /// query into a table of some sort.
     fn add_indices(&mut self) {
+        use petgraph::visit::Walker;
+
         // figure out what indices we should add
-        let mut indices = petgraph::BfsIter::new(&self.graph, self.source)
+        let mut indices = petgraph::visit::Bfs::new(&self.graph, self.source)
+            .iter(&self.graph)
             .filter(|&node| node != self.source)
             .flat_map(|node| self.graph[node].as_ref().unwrap().suggest_indexes(node).into_iter())
             .fold(HashMap::new(), |mut hm, (v, idxs)| {
@@ -417,7 +420,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         // upstream node isn't holding the lock while trying to send to a downstream node that we
         // have already locked.
         let mut max_absorbed = HashMap::new();
-        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
+        let mut topo = petgraph::visit::Topo::new(&self.graph);
         while let Some(node) = topo.next(&self.graph) {
             if node == self.source {
                 continue;
@@ -506,7 +509,7 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         // on other new nodes would observe only max_absorbed[..] = 0 and hence would see their
         // init_ts at 0. this is not correct. and furthermore, even if those new nodes *tried* to
         // init at that time, they would fail, because that time would be in the absorbed state.
-        let mut topo = petgraph::visit::SubTopo::from_node(&self.graph, self.source);
+        let mut topo = petgraph::visit::Topo::new(&self.graph);
         while let Some(node) = topo.next(&self.graph) {
             if !new.contains(&node) {
                 continue;
@@ -565,9 +568,11 @@ impl<Q, U, D> FlowGraph<Q, U, D>
                buf: usize)
                -> (HashMap<NodeIndex, Box<Fn(D) -> i64 + 'static + Send>>,
                    HashMap<NodeIndex, Box<Fn(Option<&Q>) -> Vec<D> + 'static + Send + Sync>>) {
+        use petgraph::visit::Walker;
 
         // which nodes are new?
-        let new = petgraph::BfsIter::new(&self.graph, self.source)
+        let new = petgraph::visit::Bfs::new(&self.graph, self.source)
+            .iter(&self.graph)
             .filter(|&n| n != self.source)
             .filter(|n| !self.contexts.contains_key(n))
             .collect::<HashSet<_>>();
@@ -637,7 +642,10 @@ impl<Q, U, D> FlowGraph<Q, U, D>
         for (node, init_ts) in init_at {
             let srcs = self.graph
                 .edges_directed(node, petgraph::EdgeDirection::Incoming)
-                .map(|(ni, _)| ni)
+                .map(|e| {
+                    use petgraph::visit::EdgeRef;
+                    e.source()
+                })
                 .collect::<Vec<_>>();
 
             let state = NodeState {
