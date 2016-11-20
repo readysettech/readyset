@@ -1,4 +1,4 @@
-pub mod from_sql;
+pub mod sql_to_flow;
 
 use petgraph;
 use clocked_dispatch;

@@ -15,6 +15,8 @@ use std::str;
 use std::sync::Arc;
 use std::vec::Vec;
 
+type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
+
 /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
 /// vector of conditions that `shortcut` understands.
 fn to_conditions(ce: &ConditionExpression) -> Vec<shortcut::Condition<DataType>> {
@@ -43,9 +45,7 @@ fn to_conditions(ce: &ConditionExpression) -> Vec<shortcut::Condition<DataType>>
     }
 }
 
-fn lookup_node(vn: &str,
-               g: &mut FlowGraph<Query, ops::Update, Vec<DataType>>)
-               -> petgraph::graph::NodeIndex {
+fn lookup_node(vn: &str, g: &mut FG) -> petgraph::graph::NodeIndex {
     g.named[vn]
 }
 
@@ -56,9 +56,7 @@ fn make_base_node(st: &InsertStatement) -> Node {
              Base {})
 }
 
-fn make_filter_node(st: &SelectStatement,
-                    g: &mut FlowGraph<Query, ops::Update, Vec<DataType>>)
-                    -> Node {
+fn make_filter_node(st: &SelectStatement, g: &mut FG) -> Node {
     // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
@@ -76,7 +74,7 @@ fn make_filter_node(st: &SelectStatement,
     n
 }
 
-fn nodes_for_query(q: SqlQuery, g: &mut FlowGraph<Query, ops::Update, Vec<DataType>>) -> Vec<Node> {
+fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
     println!("{:#?}", q);
 
     match q {
@@ -86,15 +84,11 @@ fn nodes_for_query(q: SqlQuery, g: &mut FlowGraph<Query, ops::Update, Vec<DataTy
 }
 
 trait ToFlowParts {
-    fn to_flow_parts<'a>(&self,
-                         &mut FlowGraph<Query, ops::Update, Vec<DataType>>)
-                         -> Result<Vec<petgraph::graph::NodeIndex>, String>;
+    fn to_flow_parts<'a>(&self, &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String>;
 }
 
 impl<'a> ToFlowParts for &'a str {
-    fn to_flow_parts(&self,
-                     g: &mut FlowGraph<Query, ops::Update, Vec<DataType>>)
-                     -> Result<Vec<petgraph::graph::NodeIndex>, String> {
+    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
@@ -119,14 +113,14 @@ mod tests {
     use ops::new;
     use ops::base::Base;
     use query::{DataType, Query};
-    use super::ToFlowParts;
+    use super::{FG, ToFlowParts};
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
 
     // Helper to grab a reference to a named view.
     // TODO(malte): maybe this should be available in FlowGraph?
-    fn get_view<'a>(g: &'a FlowGraph<Query, ops::Update, Vec<DataType>>,
+    fn get_view<'a>(g: &'a FG,
                     vn: &str)
                     -> &'a flow::View<Query, Update = ops::Update, Data = Vec<DataType>> {
         &**(g.graph[g.named[vn]].as_ref().unwrap())
