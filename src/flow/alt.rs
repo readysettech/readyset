@@ -5,8 +5,6 @@ use ops;
 use std::sync::mpsc;
 use std::sync;
 
-use std::cell::UnsafeCell;
-
 use std::collections::VecDeque;
 use std::collections::HashMap;
 
@@ -15,21 +13,44 @@ use std::ops::Deref;
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 struct Domain(usize);
 
-type U = usize;
+type U = ops::Update;
+
+/// A Message exchanged over an edge in the graph.
+#[derive(Clone)]
+pub struct Message {
+    pub from: NodeIndex,
+    pub data: U,
+}
+
+macro_rules! broadcast {
+    ($handoffs:ident, $m:expr, $children:ident) => {{
+        let mut m = Some($m); // so we can .take() below
+        for (i, to) in $children.iter().enumerate() {
+            let u = if i == $children.len() - 1 {
+                m.take()
+            } else {
+                m.clone()
+            };
+
+            $handoffs.get_mut(to).unwrap().push_back(u.unwrap());
+        }
+    }}
+}
+
 
 type Edge = ();
 
-trait Ingredient
+pub trait Ingredient
     where Self: Send
 {
     fn ancestors(&self) -> Vec<NodeIndex>;
-    fn do_stuff(&mut self, U) -> Option<U>;
+    fn process(&mut self, m: Message) -> Option<U>;
 }
 
 enum Node {
-    Ingress(Domain, mpsc::Receiver<U>),
+    Ingress(Domain, mpsc::Receiver<Message>),
     Internal(Domain, Box<Ingredient>),
-    Egress(Domain, sync::Arc<sync::Mutex<Vec<mpsc::Sender<U>>>>),
+    Egress(Domain, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
     Unassigned(Box<Ingredient>),
     Taken,
 }
@@ -40,26 +61,6 @@ impl Node {
             Node::Ingress(d, _) |
             Node::Internal(d, _) |
             Node::Egress(d, _) => d,
-            _ => unreachable!(),
-        }
-    }
-
-    fn do_stuff(&mut self, u: U) -> Option<U> {
-        match self {
-            &mut Node::Ingress(_, ref mut rx) => {
-                // receive one update
-                // TODO: make sure U is some useless value
-                rx.recv().ok()
-            }
-            &mut Node::Egress(_, ref txs) => {
-                // send the update to all children
-                let mut txs = txs.lock().unwrap();
-                for tx in txs.iter_mut() {
-                    tx.send(u.clone()).unwrap();
-                }
-                None
-            }
-            &mut Node::Internal(_, ref mut i) => i.do_stuff(u),
             _ => unreachable!(),
         }
     }
@@ -76,19 +77,19 @@ impl Deref for Node {
     }
 }
 
-struct Blender {
+pub struct Blender {
     ingredients: petgraph::Graph<Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
 }
 
-struct Migration<'a> {
+pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<Domain>>,
 }
 
 impl Blender {
-    fn start_migration<'a>(&'a mut self) -> Migration<'a> {
+    pub fn start_migration<'a>(&'a mut self) -> Migration<'a> {
         Migration {
             mainline: self,
             added: Default::default(),
@@ -97,12 +98,12 @@ impl Blender {
 }
 
 impl<'a> Migration<'a> {
-    fn add_domain(&mut self) -> Domain {
+    pub fn add_domain(&mut self) -> Domain {
         self.mainline.ndomains += 1;
         Domain(self.mainline.ndomains - 1)
     }
 
-    fn add_ingredient<I: Ingredient + 'static>(&mut self, i: I) -> NodeIndex {
+    pub fn add_ingredient<I: Ingredient + 'static>(&mut self, i: I) -> NodeIndex {
         let parents = i.ancestors();
         // add to the graph
         let ni = self.mainline.ingredients.add_node(Node::Unassigned(Box::new(i)));
@@ -120,7 +121,7 @@ impl<'a> Migration<'a> {
         ni
     }
 
-    fn assign_domain(&mut self, n: NodeIndex, d: Domain) {
+    pub fn assign_domain(&mut self, n: NodeIndex, d: Domain) {
         assert!(self.added.insert(n, Some(d)).is_none());
     }
 
@@ -148,42 +149,74 @@ impl<'a> Migration<'a> {
                 };
                 (ni, n)
             })
+            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
+            .into_iter()
+            .map(|(ni, n)| {
+                // also include all *internal* descendants
+                let children: Vec<_> = self.mainline
+                    .ingredients
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                    .filter(|&c| self.mainline.ingredients[c].domain() == d)
+                    .collect();
+                (ni, n, children)
+            })
             .collect();
 
         thread::spawn(move || {
-            let mut handoffs: HashMap<NodeIndex, VecDeque<Option<U>>> =
-                nodes.iter().map(|&(ni, _)| (ni, VecDeque::new())).collect();
+            let mut handoffs: HashMap<NodeIndex, VecDeque<Message>> =
+                nodes.iter().map(|&(ni, _, _)| (ni, VecDeque::new())).collect();
 
             loop {
                 // `nodes` is already in topological order, so we just walk over them in order and
                 // do the appropriate action for each one.
-                for &mut (ni, ref mut n) in &mut nodes {
-                    let tos: Vec<NodeIndex> = unimplemented!();
-                    let mut bcast = |u: Option<U>| {
-                        for to in &tos {
-                            // TODO: annoying extra clone
-                            handoffs.get_mut(to).unwrap().push_back(u.clone());
+                for &mut (ni, ref mut n, ref children) in &mut nodes {
+                    match n {
+                        &mut Node::Ingress(_, ref mut rx) => {
+                            // receive an update
+                            debug_assert!(handoffs[&ni].is_empty());
+                            broadcast!(handoffs, rx.recv().unwrap(), children);
                         }
-                    };
+                        &mut Node::Egress(_, ref txs) => {
+                            // send any queued updates to all external children
+                            let mut txs = txs.lock().unwrap();
+                            let txn = txs.len() - 1;
+                            while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
+                                let mut m = Some(m); // so we can use .take()
+                                for (txi, tx) in txs.iter_mut().enumerate() {
+                                    if txi == txn && children.is_empty() {
+                                        tx.send(m.take().unwrap()).unwrap();
+                                    } else {
+                                        tx.send(m.clone().unwrap()).unwrap();
+                                    }
+                                }
 
-                    let tos = unimplemented!();
-                    if handoffs[&ni].is_empty() {
-                        bcast(n.do_stuff(0));
-                    } else {
-                        while let Some(u) = handoffs.get_mut(&ni).unwrap().pop_front() {
-                            if let Some(u) = u {
-                                bcast(n.do_stuff(u));
-                            } else {
-                                bcast(None);
+                                if let Some(m) = m {
+                                    broadcast!(handoffs, m, children);
+                                } else {
+                                    debug_assert!(children.is_empty());
+                                }
                             }
                         }
+                        &mut Node::Internal(_, ref mut i) => {
+                            while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
+                                if let Some(u) = i.process(m) {
+                                    broadcast!(handoffs,
+                                               Message {
+                                                   from: ni,
+                                                   data: u,
+                                               },
+                                               children);
+                                }
+                            }
+                        }
+                        _ => unreachable!(),
                     }
                 }
             }
         });
     }
 
-    fn commit(mut self) {
+    pub fn commit(mut self) {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -191,8 +224,6 @@ impl<'a> Migration<'a> {
         let mut domain_nodes = HashMap::new();
         let mut topo = petgraph::visit::Topo::new(&self.mainline.ingredients);
         while let Some(node) = topo.next(&self.mainline.ingredients) {
-            use petgraph::visit::EdgeRef;
-
             if node == self.mainline.source {
                 continue;
             }
