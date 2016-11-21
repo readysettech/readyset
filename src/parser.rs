@@ -1,6 +1,7 @@
 use nom::IResult;
 use std::str;
 
+use common::Operator;
 use select::*;
 use insert::*;
 
@@ -19,7 +20,7 @@ pub enum ConditionBase {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConditionTree {
-    pub operator: String,
+    pub operator: Operator,
     pub left: Option<Box<ConditionExpression>>,
     pub right: Option<Box<ConditionExpression>>,
 }

@@ -1,7 +1,22 @@
-use nom::{alphanumeric, digit, eof, line_ending, multispace, space};
+use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 use std::str::FromStr;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Operator {
+    Not,
+    And,
+    Or,
+    Like,
+    NotLike,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterOrEqual,
+    Less,
+    LessOrEqual,
+}
 
 /// Parse an unsigned integer.
 named!(pub unsigned_number<&[u8], u64>,
@@ -20,29 +35,24 @@ named!(pub statement_terminator,
 );
 
 /// Parse binary comparison operators
-named!(pub binary_comparison_operator<&[u8], &str>,
-    dbg_dmp!(map_res!(
-        dbg_dmp!(alt_complete!(  tag_s!(b"=")
-             | tag_s!(b"<")
-             | tag_s!(b">")
-             | tag_s!(b"<>")
-             | tag_s!(b">=")
-             | tag_s!(b"<=")
-             | tag_s!(b"LIKE")
-             | tag_s!(b"NOT_LIKE")
-        )),
-        str::from_utf8
+named!(pub binary_comparison_operator<&[u8], Operator>,
+    alt_complete!(
+           map!(caseless_tag!("like"), |_| Operator::Like)
+         | map!(caseless_tag!("not_like"), |_| Operator::NotLike)
+         | map!(caseless_tag!("<>"), |_| Operator::NotEqual)
+         | map!(caseless_tag!(">="), |_| Operator::GreaterOrEqual)
+         | map!(caseless_tag!("<="), |_| Operator::LessOrEqual)
+         | map!(caseless_tag!("="), |_| Operator::Equal)
+         | map!(caseless_tag!("<"), |_| Operator::Less)
+         | map!(caseless_tag!(">"), |_| Operator::Greater)
     )
-));
+);
 
 /// Parse logical operators
-named!(pub binary_logical_operator<&[u8], &str>,
-    map_res!(
-        alt_complete!(
-               tag_s!(b"and")
-             | tag_s!(b"or")
-        ),
-        str::from_utf8
+named!(pub binary_logical_operator<&[u8], Operator>,
+    alt_complete!(
+           map!(caseless_tag!("and"), |_| Operator::And)
+         | map!(caseless_tag!("or"), |_| Operator::Or)
     )
 );
 
@@ -50,22 +60,19 @@ named!(pub binary_logical_operator<&[u8], &str>,
 named!(pub unary_comparison_operator<&[u8], &str>,
     map_res!(
         alt_complete!(
-               tag_s!(b"NOT")
+               tag_s!(b"ISNULL")
+             | tag_s!(b"NOT")
              | tag_s!(b"-") // ??? (number neg)
-             | tag_s!(b"ISNULL")
         ),
         str::from_utf8
     )
 );
 
 /// Parse unary comparison operators
-named!(pub unary_negation_operator<&[u8], &str>,
-    map_res!(
-        alt_complete!(
-              tag_s!(b"not")
-            | tag_s!(b"!")
-        ),
-        str::from_utf8
+named!(pub unary_negation_operator<&[u8], Operator>,
+    alt_complete!(
+          map!(caseless_tag!("not"), |_| Operator::Not)
+        | map!(caseless_tag!("!"), |_| Operator::Not)
     )
 );
 

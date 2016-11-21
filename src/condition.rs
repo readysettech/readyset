@@ -1,31 +1,33 @@
 use nom::{alphanumeric, digit, multispace};
 use std::str;
 
-use common::{binary_comparison_operator, binary_logical_operator, unary_negation_operator};
+use common::{binary_comparison_operator, binary_logical_operator, sql_identifier,
+             unary_negation_operator, Operator};
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
 fn fold_cond_exprs(initial: ConditionExpression,
-                   remainder: Vec<(&str, ConditionExpression)>)
+                   remainder: Vec<(Operator, ConditionExpression)>)
                    -> ConditionExpression {
     remainder.into_iter().fold(initial, |acc, pair| {
         let (oper, expr) = pair;
         match oper {
-            "=" | ">" | "<" | ">=" | "<=" => {
+            Operator::Equal | Operator::Less | Operator::Greater | Operator::LessOrEqual |
+            Operator::GreaterOrEqual | Operator::NotEqual => {
                 ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: String::from(oper.clone()),
+                    operator: oper.clone(),
                     left: Some(Box::new(acc)),
                     right: Some(Box::new(expr)),
                 })
             }
-            "and" | "or" => {
+            Operator::And | Operator::Or => {
                 ConditionExpression::LogicalOp(ConditionTree {
-                    operator: String::from(oper.clone()),
+                    operator: oper.clone(),
                     left: Some(Box::new(acc)),
                     right: Some(Box::new(expr)),
                 })
             }
             o => {
-                println!("unsupported op {}", o);
+                println!("unsupported op {:?}", o);
                 unimplemented!()
             }
         }
@@ -51,10 +53,10 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
             )
         ),
         || {
-            if let Some(no) = neg_op {
+            if let Some(Operator::Not) = neg_op {
                 ConditionExpression::LogicalOp(
                     ConditionTree {
-                        operator: String::from(no),
+                        operator: Operator::Not,
                         left: Some(Box::new(fold_cond_exprs(initial, remainder))),
                         right: None,
                     }
@@ -130,9 +132,13 @@ named!(predicate<&[u8], ConditionExpression>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::Operator;
     use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
-    fn flat_condition_tree(op: String, l: ConditionBase, r: ConditionBase) -> ConditionExpression {
+    fn flat_condition_tree(op: Operator,
+                           l: ConditionBase,
+                           r: ConditionBase)
+                           -> ConditionExpression {
         ConditionExpression::ComparisonOp(ConditionTree {
             operator: op,
             left: Some(Box::new(ConditionExpression::Base(l))),
@@ -146,7 +152,7 @@ mod tests {
 
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1,
-                   flat_condition_tree(String::from("="),
+                   flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(String::from("foo")),
                                        ConditionBase::Placeholder)
                   );
@@ -159,7 +165,7 @@ mod tests {
 
         let res1 = condition_expr(cond1.as_bytes());
         assert_eq!(res1.unwrap().1,
-                   flat_condition_tree(String::from("="),
+                   flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(String::from("foo")),
                                        ConditionBase::Literal(String::from("42"))
                                       )
@@ -167,9 +173,31 @@ mod tests {
 
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
-                   flat_condition_tree(String::from("="),
+                   flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(String::from("foo")),
                                        ConditionBase::Literal(String::from("hello"))
+                                      )
+                   );
+    }
+
+    #[test]
+    fn inequality_literals() {
+        let cond1 = "foo >= 42";
+        let cond2 = "foo <= 5";
+
+        let res1 = condition_expr(cond1.as_bytes());
+        assert_eq!(res1.unwrap().1,
+                   flat_condition_tree(Operator::GreaterOrEqual,
+                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Literal(String::from("42"))
+                                      )
+                   );
+
+        let res2 = condition_expr(cond2.as_bytes());
+        assert_eq!(res2.unwrap().1,
+                   flat_condition_tree(Operator::LessOrEqual,
+                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Literal(String::from("5"))
                                       )
                    );
     }

@@ -68,48 +68,73 @@ named!(limit_clause<&[u8], LimitClause>,
     })
 );
 
+named!(order_clause<&[u8], OrderClause>,
+    dbg_dmp!(chain!(
+        multispace? ~
+        caseless_tag!("order by") ~
+        multispace ~
+        order_expr: field_list ~
+        ordering: opt!(
+            alt_complete!(
+                  map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
+                | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
+            )
+        ),
+    || {
+        OrderClause {
+            cols: order_expr.iter().map(|e| String::from(*e)).collect(),
+            order: match ordering {
+                None => OrderType::OrderAscending,
+                Some(ref o) => o.clone(),
+            },
+        }
+    })
+));
+
 /// Parse WHERE clause of a selection
 named!(where_clause<&[u8], ConditionExpression>,
     dbg_dmp!(chain!(
-        space ~
+        multispace? ~
         caseless_tag!("where") ~
-        space ~
+        multispace ~
         cond: condition_expr,
         || { cond }
-    ))
-);
+    )
+));
 
 /// Parse rule for a SQL selection query.
 /// TODO(malte): support nested queries as selection targets
 named!(pub selection<&[u8], SelectStatement>,
-    dbg_dmp!(chain!(
+    chain!(
         caseless_tag!("select") ~
         space ~
         distinct: opt!(caseless_tag!("distinct")) ~
         space? ~
-        fields: fieldlist ~
-        delimited!(multispace, caseless_tag!("from"), multispace) ~
-        table: table_reference ~
+        fields: field_list ~
+        delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
+        tables: table_list ~
         cond: opt!(where_clause) ~
+        order: opt!(order_clause) ~
         limit: opt!(limit_clause) ~
         statement_terminator,
         || {
             SelectStatement {
-                table: String::from(table),
+                tables: tables.iter().map(|t| String::from(*t)).collect(),
                 distinct: distinct.is_some(),
                 fields: fields.iter().map(|s| String::from(*s)).collect(),
                 where_clause: cond,
                 group_by: None,
-                order: None,
+                order: order,
                 limit: limit,
             }
         }
-    ))
+    )
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::Operator;
     use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
     #[test]
@@ -179,7 +204,7 @@ mod tests {
             left:
                 Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("email"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-            operator: String::from("="),
+            operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
@@ -235,7 +260,7 @@ mod tests {
             left:
                 Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-            operator: String::from("="),
+            operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
