@@ -332,4 +332,30 @@ mod tests {
                        ..Default::default()
                    });
     }
+
+    #[test]
+    fn where_and_limit_clauses() {
+        let qstring = "select * from users where id = ? limit 10\n";
+        let res = selection(qstring.as_bytes());
+
+        let expected_lim = Some(LimitClause {
+            limit: 10,
+            offset: 0,
+        });
+        let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
+            left:
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("id"))))),
+            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+            operator: Operator::Equal,
+        }));
+
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![String::from("users")],
+                       fields: vec!["ALL".into()],
+                       where_clause: expected_where_cond,
+                       limit: expected_lim,
+                       ..Default::default()
+                   });
+    }
 }
