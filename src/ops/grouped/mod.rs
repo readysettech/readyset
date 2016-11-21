@@ -253,7 +253,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     // get back values from query (to avoid cloning)
                     for s in &mut q {
                         if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
-                               s.cmp {
+                            s.cmp {
                             use std::mem;
 
                             let mut x = query::DataType::None;
@@ -271,10 +271,15 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     match current {
                         None => {
                             // emit positive, which is group + new.
-                            let rec = group.into_iter().filter_map(|v| v).chain(Some(new.into()).into_iter()).collect();
+                            let rec = group.into_iter()
+                                .filter_map(|v| v)
+                                .chain(Some(new.into()).into_iter())
+                                .collect();
                             out.push(ops::Record::Positive(rec, new_ts));
-                        },
-                        Some(ref current) if &new == current => {/* no change */}
+                        }
+                        Some(ref current) if &new == current => {
+                            // no change
+                        }
                         Some(current) => {
                             // construct prefix of output record used for both - and +
                             let mut rec = Vec::with_capacity(group.len() + 1);

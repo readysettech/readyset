@@ -33,7 +33,8 @@ impl Permute {
     }
 
     fn permute(&self, data: Vec<query::DataType>) -> Vec<query::DataType> {
-        self.emit.as_ref()
+        self.emit
+            .as_ref()
             .map(|emit| {
                 // TODO: Avoid this clone when the permutation doesn't
                 // duplicate source columns. The borrow checker makes this
@@ -92,10 +93,12 @@ impl NodeOp for Permute {
                         return flow::ProcessingResult::Skip;
                     }
 
-                    let out = rs.into_iter().map(|r| {
-                        let (data, pos, ts) = r.extract();
-                        (self.permute(data), ts, pos).into()
-                    }).collect::<Vec<_>>();
+                    let out = rs.into_iter()
+                        .map(|r| {
+                            let (data, pos, ts) = r.extract();
+                            (self.permute(data), ts, pos).into()
+                        })
+                        .collect::<Vec<_>>();
 
                     flow::ProcessingResult::Done(ops::Update::Records(out))
                 }
@@ -117,17 +120,22 @@ impl NodeOp for Permute {
             .collect::<Vec<_>>();
 
         let q = q.map(|q| {
-            let having = q.having.iter().map(|c| shortcut::Condition {
-                column: self.resolve_col(c.column),
-                cmp: match c.cmp {
-                    Equal(Const(_)) => c.cmp.clone(),
-                    Equal(Column(idx)) => Equal(Column(self.resolve_col(idx)))
+            let having = q.having.iter().map(|c| {
+                shortcut::Condition {
+                    column: self.resolve_col(c.column),
+                    cmp: match c.cmp {
+                        Equal(Const(_)) => c.cmp.clone(),
+                        Equal(Column(idx)) => Equal(Column(self.resolve_col(idx))),
+                    },
                 }
             });
             query::Query::new(&select, having.collect())
         });
 
-        self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts))
+        self.srcn
+            .as_ref()
+            .unwrap()
+            .find(q.as_ref(), Some(ts))
             .into_iter()
             .map(|(r, ts)| (self.permute(r), ts))
             .collect()
@@ -147,7 +155,8 @@ impl NodeOp for Permute {
             Some(emit) => {
                 emit.iter()
                     .map(|e| e.to_string())
-                    .collect::<Vec<_>>().join(", ")
+                    .collect::<Vec<_>>()
+                    .join(", ")
             }
         };
         format!("π[{}]", emit_cols)
@@ -175,15 +184,20 @@ mod tests {
         s.prime(&g);
         let s = g.add_node(Some(sync::Arc::new(s)));
 
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 0.into(), 1.into()], 0).into()), s, 0, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 0.into(), 1.into()], 1).into()), s, 1, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 0.into(), 2.into()], 2).into()), s, 2, true);
+        g[s].as_ref().unwrap().process(Some((vec![1.into(), 0.into(), 1.into()], 0).into()),
+                                       s,
+                                       0,
+                                       true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 0.into(), 1.into()], 1).into()),
+                                       s,
+                                       1,
+                                       true);
+        g[s].as_ref().unwrap().process(Some((vec![2.into(), 0.into(), 2.into()], 2).into()),
+                                       s,
+                                       2,
+                                       true);
 
-        let permutation = if all {
-            vec![0, 1, 2]
-        } else {
-            vec![2, 0]
-        };
+        let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
 
         let mut p = Permute::new(s, &permutation[..]);
         p.prime(&g);
@@ -208,7 +222,8 @@ mod tests {
         let rec = vec!["a".into(), "b".into(), "c".into()];
         match p.forward(Some(rec.clone().into()), src, 0, true, None).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(vec!["c".into(), "b".into()], 0)]);
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec!["c".into(), "b".into()], 0)]);
             }
         }
     }
@@ -256,8 +271,10 @@ mod tests {
 
         let hits = p.find(Some(&q), None);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 1.into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 1.into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
 
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
@@ -267,8 +284,10 @@ mod tests {
 
         let hits = p.find(Some(&q), None);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == 0.into() && r[2] == 1.into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 1.into() && r[1] == 0.into() && r[2] == 1.into()));
+        assert!(hits.iter()
+            .any(|&(ref r, _)| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
     }
 
     #[test]

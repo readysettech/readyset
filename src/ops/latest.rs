@@ -133,7 +133,7 @@ impl NodeOp for Latest {
                     let mut group = Vec::with_capacity(self.key.len());
                     for s in &mut q {
                         if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
-                               s.cmp {
+                            s.cmp {
                             use std::mem;
 
                             let mut x = query::DataType::None;
@@ -260,8 +260,11 @@ impl NodeOp for Latest {
     }
 
     fn description(&self) -> String {
-        let key_cols = self.key.iter().map(|k| k.to_string())
-            .collect::<Vec<_>>().join(", ");
+        let key_cols = self.key
+            .iter()
+            .map(|k| k.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("⧖ γ[{}]", key_cols)
     }
 }
@@ -396,13 +399,11 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into()], 1),
-             ops::Record::Negative(vec![1.into(), 2.into()], 3),
-             ops::Record::Positive(vec![1.into(), 3.into()], 4),
-             ops::Record::Negative(vec![2.into(), 2.into()], 2),
-             ops::Record::Positive(vec![2.into(), 4.into()], 4),
-        ]);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()], 1),
+                                          ops::Record::Negative(vec![1.into(), 2.into()], 3),
+                                          ops::Record::Positive(vec![1.into(), 3.into()], 4),
+                                          ops::Record::Negative(vec![2.into(), 2.into()], 2),
+                                          ops::Record::Positive(vec![2.into(), 4.into()], 4)]);
 
         // negatives and positives should still result in only one new current for each group
         let out = c.process(Some(u), src, 4, true);
@@ -505,13 +506,17 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into(), 1.into()], 1),
-             ops::Record::Negative(vec![1.into(), 1.into(), 2.into()], 3),
-             ops::Record::Positive(vec![1.into(), 1.into(), 3.into()], 4),
-             ops::Record::Negative(vec![1.into(), 2.into(), 2.into()], 2),
-             ops::Record::Positive(vec![1.into(), 2.into(), 4.into()], 4),
-        ]);
+        let u =
+            ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into(), 1.into()],
+                                                            1),
+                                      ops::Record::Negative(vec![1.into(), 1.into(), 2.into()],
+                                                            3),
+                                      ops::Record::Positive(vec![1.into(), 1.into(), 3.into()],
+                                                            4),
+                                      ops::Record::Negative(vec![1.into(), 2.into(), 2.into()],
+                                                            2),
+                                      ops::Record::Positive(vec![1.into(), 2.into(), 4.into()],
+                                                            4)]);
 
         // negatives and positives should still result in only one new current for each group
         let out = c.process(Some(u), src, 4, true);

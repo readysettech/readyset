@@ -100,12 +100,12 @@ impl GroupedOperation for ExtremumOperator {
              -> query::DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
-        let mut extreme_values:Vec<i64> = vec![];
+        let mut extreme_values: Vec<i64> = vec![];
         if let &Some(query::DataType::Number(n)) = current {
             extreme_values.push(n);
         };
 
-        let is_extreme_value = |x:i64| {
+        let is_extreme_value = |x: i64| {
             if let &Some(query::DataType::Number(n)) = current {
                 match self.op {
                     Extremum::MAX => x >= n,
@@ -145,8 +145,11 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::MIN => format!("min({})", self.over),
             Extremum::MAX => format!("max({})", self.over),
         };
-        let group_cols = self.group.iter().map(|g| g.to_string())
-            .collect::<Vec<_>>().join(", ");
+        let group_cols = self.group
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }
@@ -216,8 +219,7 @@ mod tests {
                     }
                     _ => unreachable!(),
                 }
-            }
-            else {
+            } else {
                 unreachable!()
             }
         };
@@ -275,18 +277,14 @@ mod tests {
         check_new_max(1.into(), 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
-        let u = ops::Update::Records(vec![
-            ops::Record::Negative(vec![1.into(), 22.into()], 1),
-            ops::Record::Positive(vec![1.into(), 23.into()], 5),
-        ]);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 22.into()], 1),
+                                          ops::Record::Positive(vec![1.into(), 23.into()], 5)]);
         let out = c.process(Some(u), src, 6, true);
         check_new_max(1.into(), 22.into(), 23.into(), out);
 
         // Competing positive and negative should cancel out.
-        let u = ops::Update::Records(vec![
-            ops::Record::Positive(vec![1.into(), 24.into()], 5),
-            ops::Record::Negative(vec![1.into(), 24.into()], 1),
-        ]);
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 24.into()], 5),
+                                          ops::Record::Negative(vec![1.into(), 24.into()], 1)]);
         match c.process(Some(u), src, 6, true) {
             flow::ProcessingResult::Done(ops::Update::Records(rs)) => assert!(rs.is_empty()),
             _ => unreachable!(),

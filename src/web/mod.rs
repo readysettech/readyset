@@ -36,10 +36,10 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
             let ns = graph.node_weight(ni).unwrap().as_ref().unwrap();
             (ns.name().to_owned(),
              Endpoint {
-                node: ni,
-                arguments: ns.args().iter().cloned().collect(),
-                freshness_probe: None,
-            })
+                 node: ni,
+                 arguments: ns.args().iter().cloned().collect(),
+                 freshness_probe: None,
+             })
         };
 
         // this maps the base nodes to inputs
@@ -47,12 +47,12 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
         // TODO: we may want to allow non-leaves to be outputs too
         (graph.neighbors(source).map(&ni2ep).collect::<Vec<_>>(),
          graph.node_indices()
-            .filter(|ni| {
-                let nw = graph.node_weight(*ni);
-                nw.is_some() && nw.unwrap().as_ref().is_some()
-            })
-            .map(&ni2ep)
-            .collect::<Vec<_>>())
+             .filter(|ni| {
+                 let nw = graph.node_weight(*ni);
+                 nw.is_some() && nw.unwrap().as_ref().is_some()
+             })
+             .map(&ni2ep)
+             .collect::<Vec<_>>())
     };
 
     let (mut put, mut get) = soup.run(10);

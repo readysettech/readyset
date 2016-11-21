@@ -99,12 +99,12 @@ pub fn run<T>(mut soup: FG, addr: T)
         // this maps the base nodes to inputs and other nodes to outputs
         (graph.neighbors(source).map(&ni2ep).collect::<Vec<_>>(),
          graph.node_indices()
-            .filter(|ni| {
-                let nw = graph.node_weight(*ni);
-                nw.is_some() && nw.unwrap().as_ref().is_some()
-            })
-            .map(&ni2ep)
-            .collect::<Vec<_>>())
+             .filter(|ni| {
+                 let nw = graph.node_weight(*ni);
+                 nw.is_some() && nw.unwrap().as_ref().is_some()
+             })
+             .map(&ni2ep)
+             .collect::<Vec<_>>())
     };
 
     // Start Soup

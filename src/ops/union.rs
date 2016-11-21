@@ -183,8 +183,10 @@ impl NodeOp for Union {
         emit.sort();
         emit.iter()
             .map(|&(src, emit)| {
-                let cols = emit.iter().map(|e| e.to_string())
-                    .collect::<Vec<_>>().join(", ");
+                let cols = emit.iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!("{}:[{}]", src.index(), cols)
             })
             .collect::<Vec<_>>()

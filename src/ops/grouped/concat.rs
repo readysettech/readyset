@@ -193,7 +193,8 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn description(&self) -> String {
-        let fields = self.components.iter()
+        let fields = self.components
+            .iter()
             .map(|c| {
                 match *c {
                     TextComponent::Literal(s) => format!("\"{}\"", s),
@@ -206,10 +207,15 @@ impl GroupedOperation for GroupConcat {
         // Sort group by columns for consistent output.
         let mut group_cols = self.group.clone();
         group_cols.sort();
-        let group_cols = group_cols.iter().map(|g| g.to_string())
-            .collect::<Vec<_>>().join(", ");
+        let group_cols = group_cols.iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
 
-        format!("||([{}], \"{}\") γ[{}]", fields, self.separator, group_cols)
+        format!("||([{}], \"{}\") γ[{}]",
+                fields,
+                self.separator,
+                group_cols)
     }
 }
 
@@ -260,7 +266,8 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(true, true);
-        assert_eq!(c.inner.description(), "||([\".\", 1, \";\"], \"#\") γ[0, 2]");
+        assert_eq!(c.inner.description(),
+                   "||([\".\", 1, \";\"], \"#\") γ[0, 2]");
     }
 
     #[test]
@@ -384,19 +391,17 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![
-             // remove non-existing
-             ops::Record::Negative(vec![1.into(), 1.into()], 1),
-             // add old
-             ops::Record::Positive(vec![1.into(), 1.into()], 5),
-             // add duplicate
-             ops::Record::Positive(vec![1.into(), 2.into()], 3),
-             ops::Record::Negative(vec![2.into(), 2.into()], 2),
-             ops::Record::Positive(vec![2.into(), 3.into()], 5),
-             ops::Record::Positive(vec![2.into(), 2.into()], 5),
-             ops::Record::Positive(vec![2.into(), 1.into()], 5),
-             ops::Record::Positive(vec![3.into(), 3.into()], 5),
-        ]);
+        let u = ops::Update::Records(vec![// remove non-existing
+                                          ops::Record::Negative(vec![1.into(), 1.into()], 1),
+                                          // add old
+                                          ops::Record::Positive(vec![1.into(), 1.into()], 5),
+                                          // add duplicate
+                                          ops::Record::Positive(vec![1.into(), 2.into()], 3),
+                                          ops::Record::Negative(vec![2.into(), 2.into()], 2),
+                                          ops::Record::Positive(vec![2.into(), 3.into()], 5),
+                                          ops::Record::Positive(vec![2.into(), 2.into()], 5),
+                                          ops::Record::Positive(vec![2.into(), 1.into()], 5),
+                                          ops::Record::Positive(vec![3.into(), 3.into()], 5)]);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let out = c.process(Some(u), src, 5, true);

@@ -147,18 +147,18 @@ impl From<Builder> for Joiner {
                         // but if there are, emit the mapping we found
                         Some((p,
                               JoinTarget {
-                            fields: pg,
-                            outer: outer,
-                            select: Vec::new(),
-                        }))
+                                  fields: pg,
+                                  outer: outer,
+                                  select: Vec::new(),
+                              }))
                     })
                     .collect();
 
                 (src,
                  Join {
-                    against: other,
-                    node: None,
-                })
+                     against: other,
+                     node: None,
+                 })
             })
             .collect();
 
@@ -222,16 +222,16 @@ impl Joiner {
 
         if rx.is_empty() && target.outer {
             return Box::new(Some((self.emit
-                    .iter()
-                    .map(|&(source, column)| {
-                        if source == other {
-                            query::DataType::None
-                        } else {
-                            // this clone is unnecessary
-                            left.1[column].clone()
-                        }
-                    })
-                    .collect(),
+                                      .iter()
+                                      .map(|&(source, column)| {
+                    if source == other {
+                        query::DataType::None
+                    } else {
+                        // this clone is unnecessary
+                        left.1[column].clone()
+                    }
+                })
+                                      .collect(),
                                   left.2))
                 .into_iter());
         }
@@ -455,10 +455,9 @@ impl NodeOp for Joiner {
                     .flat_map(move |(right, rs)| {
                         let op = if rs.outer { "⋉" } else { "⋈" };
                         rs.fields.iter().map(move |&(li, ri)| {
-                            format!("{}:{} {} {}:{}",
-                                left.index(), li, op, right.index(), ri)
+                            format!("{}:{} {} {}:{}", left.index(), li, op, right.index(), ri)
+                        })
                     })
-                })
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -737,13 +736,12 @@ mod tests {
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let (j, l, r) = setup(false);
-        let hm: HashMap<_, _> = vec![
-            (l, vec![0]), // join column for left
-            (r, vec![0]), // join column for right
-            (2.into(), vec![0]), // output column that is used as join column
-        ]
-            .into_iter()
-            .collect();
+        let hm: HashMap<_, _> =
+            vec![(l, vec![0]), // join column for left
+                 (r, vec![0]), // join column for right
+                 (2.into(), vec![0]) /* output column that is used as join column */]
+                .into_iter()
+                .collect();
         assert_eq!(j.suggest_indexes(2.into()), hm);
     }
 

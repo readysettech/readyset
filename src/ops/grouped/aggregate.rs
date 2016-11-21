@@ -107,8 +107,11 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT => "|*|".into(),
             Aggregation::SUM => format!("𝛴({})", self.over),
         };
-        let group_cols = self.group.iter().map(|g| g.to_string())
-            .collect::<Vec<_>>().join(", ");
+        let group_cols = self.group
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }
@@ -161,11 +164,15 @@ mod tests {
     fn it_describes() {
         let s = 0.into();
 
-        let c = ops::new("count", &["x", "z", "ys"], true,
+        let c = ops::new("count",
+                         &["x", "z", "ys"],
+                         true,
                          Aggregation::COUNT.over(s, 1, &[0, 2]));
         assert_eq!(c.inner.description(), "|*| γ[0, 2]");
 
-        let c = ops::new("sum", &["x", "z", "ys"], true,
+        let c = ops::new("sum",
+                         &["x", "z", "ys"],
+                         true,
                          Aggregation::SUM.over(s, 1, &[2, 0]));
         assert_eq!(c.inner.description(), "𝛴(1) γ[2, 0]");
     }
@@ -291,16 +298,14 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![
-             ops::Record::Negative(vec![1.into(), 1.into()], 1),
-             ops::Record::Positive(vec![1.into(), 1.into()], 5),
-             ops::Record::Positive(vec![1.into(), 2.into()], 3),
-             ops::Record::Negative(vec![2.into(), 2.into()], 2),
-             ops::Record::Positive(vec![2.into(), 2.into()], 5),
-             ops::Record::Positive(vec![2.into(), 3.into()], 5),
-             ops::Record::Positive(vec![2.into(), 1.into()], 5),
-             ops::Record::Positive(vec![3.into(), 3.into()], 5),
-        ]);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()], 1),
+                                          ops::Record::Positive(vec![1.into(), 1.into()], 5),
+                                          ops::Record::Positive(vec![1.into(), 2.into()], 3),
+                                          ops::Record::Negative(vec![2.into(), 2.into()], 2),
+                                          ops::Record::Positive(vec![2.into(), 2.into()], 5),
+                                          ops::Record::Positive(vec![2.into(), 3.into()], 5),
+                                          ops::Record::Positive(vec![2.into(), 1.into()], 5),
+                                          ops::Record::Positive(vec![3.into(), 3.into()], 5)]);
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         // TODO: check for correct output ts'es
