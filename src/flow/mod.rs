@@ -16,7 +16,8 @@ use std::collections::BinaryHeap;
 pub use petgraph::graph::NodeIndex;
 
 use ops;
-mod alt;
+
+pub mod alt;
 
 type Graph<Q, U, D> = petgraph::Graph<Option<sync::Arc<View<Q, Update = U, Data = D>>>, ()>;
 

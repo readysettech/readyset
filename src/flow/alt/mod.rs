@@ -62,12 +62,22 @@ impl Deref for Node {
     }
 }
 
+/// `Blender` is the core component of the alternate Soup implementation.
+///
+/// It keeps track of the structure of the underlying data flow graph and its domains. `Blender`
+/// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
+/// `Migration`, which can be started using `Blender::start_migration`. Only one `Migration` can
+/// occur at any given point in time.
 pub struct Blender {
     ingredients: petgraph::Graph<Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
 }
 
+/// A `Migration` encapsulates a number of changes to the Soup data flow graph.
+///
+/// Only one `Migration` can be in effect at any point in time. No changes are made to the running
+/// graph until the `Migration` is committed (using `Migration::commit`).
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<domain::Index>>,
@@ -75,6 +85,7 @@ pub struct Migration<'a> {
 }
 
 impl Blender {
+    /// Start setting up a new `Migration`.
     pub fn start_migration<'a>(&'a mut self) -> Migration<'a> {
         Migration {
             mainline: self,
@@ -85,11 +96,17 @@ impl Blender {
 }
 
 impl<'a> Migration<'a> {
+    /// Add a new (empty) domain to the graph
     pub fn add_domain(&mut self) -> domain::Index {
         self.mainline.ndomains += 1;
         (self.mainline.ndomains - 1).into()
     }
 
+    /// Add the given `Ingredient` to the Soup.
+    ///
+    /// The returned identifier can later be used to refer to the added ingredient.
+    /// Edges in the data flow graph are automatically added based on the ingredient's reported
+    /// `ancestors`.
     pub fn add_ingredient<I: Ingredient + 'static>(&mut self, i: I) -> NodeIndex {
         let parents = i.ancestors();
         // add to the graph
@@ -108,6 +125,14 @@ impl<'a> Migration<'a> {
         ni
     }
 
+    /// Mark the edge between `src` and `dst` in the graph as requiring materialization.
+    ///
+    /// The reason this is placed per edge rather than per node is that only some children of a
+    /// node may require materialization of their inputs (i.e., only those that will query along
+    /// this edge). Since we must materialize the output of a node in a foreign domain once for
+    /// every receiving domain, this can save us some space if a child that doesn't require
+    /// materialization is in its own domain. If multiple nodes in the same domain require
+    /// materialization of the same parent, that materialized state will be shared.
     pub fn materialize(&mut self, src: NodeIndex, dst: NodeIndex) {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
@@ -127,7 +152,11 @@ impl<'a> Migration<'a> {
         }
     }
 
+    /// Assign the ingredient with identifier `n` to the thread domain `d`.
+    ///
+    /// `n` must be have been added in this migration.
     pub fn assign_domain(&mut self, n: NodeIndex, d: domain::Index) {
+        // TODO: what if a node is added to an *existing* domain?
         assert!(self.added.insert(n, Some(d)).is_none());
     }
 
@@ -136,6 +165,11 @@ impl<'a> Migration<'a> {
         d.boot();
     }
 
+    /// Commit the changes introduced by this `Migration` to the master `Soup`.
+    ///
+    /// This will spin up an execution thread for each new thread domain, and hook those new
+    /// domains into the larger Soup graph. The returned map contains entry points through which
+    /// new updates should be sent to introduce them into the Soup.
     pub fn commit(mut self) -> HashMap<NodeIndex, mpsc::Sender<U>> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.

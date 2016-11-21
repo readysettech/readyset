@@ -394,6 +394,8 @@ pub use ops::latest::Latest;
 pub use query::Query;
 pub use query::DataType;
 
+pub use flow::alt::{Blender, Migration};
+
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
