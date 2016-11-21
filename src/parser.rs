@@ -1,7 +1,7 @@
 use nom::IResult;
 use std::str;
 
-use common::Operator;
+pub use common::Operator;
 use select::*;
 use insert::*;
 
