@@ -163,7 +163,7 @@ impl Domain {
                       nodes: Vec<NodeIndex>,
                       graph: &mut petgraph::Graph<alt::Node, alt::Edge>)
                       -> Self {
-        let mut nodes: Vec<_> = nodes.into_iter()
+        let nodes: Vec<_> = nodes.into_iter()
             .map(|ni| {
                 use std::mem;
                 let n = match *graph.node_weight_mut(ni).unwrap() {
@@ -201,7 +201,7 @@ impl Domain {
             })
             .collect();
 
-        let mut state = nodes.iter()
+        let state = nodes.iter()
             .filter_map(|n| {
                 // materialized state for any nodes that need it
                 // in particular, we keep state for any node that requires its own state to be
