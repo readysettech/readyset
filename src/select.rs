@@ -2,7 +2,7 @@ use nom::{multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
-use common::{fieldlist, unsigned_number, statement_terminator, table_reference};
+use common::{field_list, unsigned_number, statement_terminator, table_list};
 use parser::ConditionExpression;
 
 use condition::*;

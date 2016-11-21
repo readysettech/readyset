@@ -110,7 +110,10 @@ named!(predicate<&[u8], ConditionExpression>,
             )
         |   chain!(
                 field: delimited!(opt!(multispace),
-                                  delimited!(tag!("\""), alphanumeric, tag!("\"")),
+                                  alt_complete!(
+                                        delimited!(tag!("\""), alphanumeric, tag!("\""))
+                                      | delimited!(tag!("'"), alphanumeric, tag!("'"))
+                                  ),
                                   opt!(multispace)),
                 || {
                     ConditionExpression::Base(
@@ -119,7 +122,7 @@ named!(predicate<&[u8], ConditionExpression>,
                 }
             )
         |   chain!(
-                field: delimited!(opt!(multispace), alphanumeric, opt!(multispace)),
+                field: delimited!(opt!(multispace), sql_identifier, opt!(multispace)),
                 || {
                     ConditionExpression::Base(
                         ConditionBase::Field(String::from(str::from_utf8(field).unwrap()))

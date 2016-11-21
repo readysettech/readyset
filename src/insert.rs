@@ -2,7 +2,7 @@ use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
-use common::{statement_terminator, table_reference, valuelist};
+use common::{field_list, statement_terminator, table_reference, value_list};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStatement {
@@ -23,7 +23,7 @@ named!(pub insertion<&[u8], InsertStatement>,
         caseless_tag!("values") ~
         multispace ~
         tag!("(") ~
-        fields: valuelist ~
+        values: value_list ~
         tag!(")") ~
         statement_terminator,
         || {
