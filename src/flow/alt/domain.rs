@@ -7,6 +7,8 @@ use shortcut;
 use std::collections::VecDeque;
 use std::collections::HashMap;
 
+use std::cell;
+
 use flow::alt;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
@@ -153,7 +155,8 @@ impl NodeDescriptor {
 
 pub struct Domain {
     domain: Index,
-    nodes: Vec<NodeDescriptor>,
+    nodes: Vec<cell::RefCell<NodeDescriptor>>,
+    map: HashMap<NodeIndex, usize>,
     state: HashMap<NodeIndex, shortcut::Store<query::DataType>>,
     handoffs: HashMap<NodeIndex, VecDeque<alt::Message>>,
 }
@@ -201,6 +204,7 @@ impl Domain {
             })
             .collect();
 
+
         let state = nodes.iter()
             .filter_map(|n| {
                 // materialized state for any nodes that need it
@@ -225,9 +229,36 @@ impl Domain {
 
         let handoffs = nodes.iter().map(|n| (n.index, VecDeque::new())).collect();
 
+        // okay, this deserves some explanation...
+        //
+        // we're going to be iterating over nodes one at a time, processing updates, each time
+        // having a mutable borrow of the *current* node. however, in order to support queries
+        // on non-materialized nodes, we also want that node to be able to access *other* nodes
+        // using read-only borrows. since they are all in the same vector, this is tricky to do
+        // simply using the borrow checker.
+        //
+        // instead, we make a RefCell of each node to track the borrows at runtime. when we hit
+        // a given node, we can lend it the RefCell of all nodes in this domain, and it can
+        // freely take out borrows on all nodes (except itself, which will be checked at
+        // runtime).
+        //
+        // as if that wasn't enough, we also want an efficient way for a node to look up its
+        // ancestors by node index if it needs to do so. unfortunately, nodes are stored in a
+        // Vec (and need to be, since we want to maintain the topological order). we therefore
+        // construct a map from node index to each node's index in the Vec, which nodes can use
+        // to quickly find ancestor RefCells. this mapping can even be inspected at set-up
+        // time, and all NodeIndexes translated to Vec indices instead, to remove the
+        // performance penalty of the map.
+        //
+        // it's unfortunate that we have to resort to refcounting to solve this, as it means
+        // every query is a bit more expensive. luckily, since we construct the cells inside
+        let map = nodes.iter().enumerate().map(|(i, n)| (n.index, i)).collect();
+        let nodes = nodes.into_iter().map(|n| cell::RefCell::new(n)).collect();
+
         Domain {
             domain: domain,
             nodes: nodes,
+            map: map,
             state: state,
             handoffs: handoffs,
         }
@@ -240,8 +271,8 @@ impl Domain {
             loop {
                 // `nodes` is already in topological order, so we just walk over them in order and
                 // do the appropriate action for each one.
-                for mut node in &mut self.nodes {
-                    node.iterate(&mut self.handoffs, &mut self.state);
+                for node in &self.nodes {
+                    node.borrow_mut().iterate(&mut self.handoffs, &mut self.state);
                 }
             }
         });
