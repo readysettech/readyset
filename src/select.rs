@@ -33,7 +33,7 @@ pub struct OrderClause {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SelectStatement {
-    pub table: String,
+    pub tables: Vec<String>,
     pub distinct: bool,
     pub fields: Vec<String>,
     pub where_clause: Option<ConditionExpression>,
@@ -144,7 +144,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("users"),
+                       tables: vec![String::from("users")],
                        fields: vec!["id".into(), "name".into()],
                        ..Default::default()
                    });
@@ -157,7 +157,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("users"),
+                       tables: vec![String::from("users")],
                        fields: vec!["ALL".into()],
                        ..Default::default()
                    });
@@ -170,7 +170,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("users"),
+                       tables: vec![String::from("users")],
                        fields: vec!["id".into(), "name".into()],
                        ..Default::default()
                    });
@@ -208,7 +208,7 @@ mod tests {
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("ContactInfo"),
+                       tables: vec![String::from("ContactInfo")],
                        fields: vec!["ALL".into()],
                        where_clause: expected_where_cond,
                        ..Default::default()
@@ -271,7 +271,7 @@ mod tests {
         let res1 = selection(qstring1.as_bytes());
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
-                       table: String::from("PaperTag"),
+                       tables: vec![String::from("PaperTag")],
                        fields: vec!["ALL".into()],
                        ..Default::default()
                    });
@@ -292,7 +292,7 @@ mod tests {
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("PaperTag"),
+                       tables: vec![String::from("PaperTag")],
                        distinct: true,
                        fields: vec!["tag".into()],
                        where_clause: expected_where_cond,
@@ -326,7 +326,7 @@ mod tests {
         println!("res: {:#?}", res);
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       table: String::from("PaperStorage"),
+                       tables: vec![String::from("PaperStorage")],
                        fields: vec!["infoJson".into()],
                        where_clause: expected_where_cond,
                        ..Default::default()
