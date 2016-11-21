@@ -20,15 +20,15 @@ pub struct LimitClause {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum OrderType {
-    //   OrderAscending,
-    //   OrderDescending,
+pub enum OrderType {
+    OrderAscending,
+    OrderDescending,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderClause {
-    order_type: OrderType,
-    order_cols: Vec<String>, // TODO(malte): can this be an arbitrary expr?
+    cols: Vec<String>, // TODO(malte): can this be an arbitrary expr?
+    order: OrderType,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -234,6 +234,34 @@ mod tests {
         assert_eq!(res1.unwrap().1.limit, Some(expected_lim1));
         assert_eq!(res2.unwrap().1.limit, Some(expected_lim2));
     }
+
+    #[test]
+    fn order_clause() {
+        let qstring1 = "select * from users order by name desc\n";
+        let qstring2 = "select * from users order by name, age desc\n";
+        let qstring3 = "select * from users order by name\n";
+
+        let expected_ord1 = OrderClause {
+            cols: vec!["name".into()],
+            order: OrderType::OrderDescending,
+        };
+        let expected_ord2 = OrderClause {
+            cols: vec!["name".into(), "age".into()],
+            order: OrderType::OrderDescending,
+        };
+        let expected_ord3 = OrderClause {
+            cols: vec!["name".into()],
+            order: OrderType::OrderAscending,
+        };
+
+        let res1 = selection(qstring1.as_bytes());
+        let res2 = selection(qstring2.as_bytes());
+        let res3 = selection(qstring3.as_bytes());
+        assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
+        assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
+        assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
+    }
+
 
     #[test]
     fn table_alias() {
