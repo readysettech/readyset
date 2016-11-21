@@ -1,20 +1,16 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 use ops;
-use query;
-use shortcut;
 
 use std::sync::mpsc;
 use std::sync;
 
-use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use std::ops::Deref;
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
-struct Domain(usize);
+pub mod domain;
 
 type U = ops::Update;
 
@@ -25,23 +21,7 @@ pub struct Message {
     pub data: U,
 }
 
-macro_rules! broadcast {
-    ($handoffs:ident, $m:expr, $children:ident) => {{
-        let mut m = Some($m); // so we can .take() below
-        for (i, to) in $children.iter().enumerate() {
-            let u = if i == $children.len() - 1 {
-                m.take()
-            } else {
-                m.clone()
-            };
-
-            $handoffs.get_mut(to).unwrap().push_back(u.unwrap());
-        }
-    }}
-}
-
-
-type Edge = bool; // should the edge be materialized?
+pub type Edge = bool; // should the edge be materialized?
 
 pub trait Ingredient
     where Self: Send
@@ -52,16 +32,16 @@ pub trait Ingredient
     fn fields(&self) -> &[&str];
 }
 
-enum Node {
-    Ingress(Domain, mpsc::Receiver<Message>),
-    Internal(Domain, Box<Ingredient>),
-    Egress(Domain, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
+pub enum Node {
+    Ingress(domain::Index, mpsc::Receiver<Message>),
+    Internal(domain::Index, Box<Ingredient>),
+    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
     Unassigned(Box<Ingredient>),
     Taken,
 }
 
 impl Node {
-    fn domain(&self) -> Domain {
+    fn domain(&self) -> domain::Index {
         match *self {
             Node::Ingress(d, _) |
             Node::Internal(d, _) |
@@ -90,7 +70,7 @@ pub struct Blender {
 
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
-    added: HashMap<NodeIndex, Option<Domain>>,
+    added: HashMap<NodeIndex, Option<domain::Index>>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
 }
 
@@ -105,9 +85,9 @@ impl Blender {
 }
 
 impl<'a> Migration<'a> {
-    pub fn add_domain(&mut self) -> Domain {
+    pub fn add_domain(&mut self) -> domain::Index {
         self.mainline.ndomains += 1;
-        Domain(self.mainline.ndomains - 1)
+        (self.mainline.ndomains - 1).into()
     }
 
     pub fn add_ingredient<I: Ingredient + 'static>(&mut self, i: I) -> NodeIndex {
@@ -147,188 +127,13 @@ impl<'a> Migration<'a> {
         }
     }
 
-    pub fn assign_domain(&mut self, n: NodeIndex, d: Domain) {
+    pub fn assign_domain(&mut self, n: NodeIndex, d: domain::Index) {
         assert!(self.added.insert(n, Some(d)).is_none());
     }
 
-    fn boot_domain(&mut self, d: Domain, nodes: Vec<NodeIndex>) {
-        use std::thread;
-
-        let mut nodes: Vec<_> = nodes.into_iter()
-            .map(|ni| {
-                use std::mem;
-                let n = match *self.mainline.ingredients.node_weight_mut(ni).unwrap() {
-                    Node::Egress(d, ref txs) => {
-                        // egress nodes can still be modified externally if subgraphs are added
-                        // so we just make a new one with a clone of the Mutex-protected Vec
-                        Node::Egress(d, txs.clone())
-                    }
-                    ref mut n @ Node::Ingress(..) => {
-                        // no-one else will be using our ingress node, so we take it from the graph
-                        mem::replace(n, Node::Taken)
-                    }
-                    ref mut n @ Node::Internal(..) => {
-                        // same with internal nodes
-                        mem::replace(n, Node::Taken)
-                    }
-                    _ => unreachable!(),
-                };
-                (ni, n)
-            })
-            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
-            .into_iter()
-            .map(|(ni, n)| {
-                // also include all *internal* descendants
-                let children: Vec<_> = self.mainline
-                    .ingredients
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&c| self.mainline.ingredients[c].domain() == d)
-                    .collect();
-                (ni, n, children)
-            })
-            .collect();
-
-        let mut state = nodes.iter()
-            .filter_map(|&(ni, ref n, _)| {
-                // materialized state for any nodes that need it
-                // in particular, we keep state for any node that requires its own state to be
-                // materialized, or that has an outgoing edge marked as materialized (we know that
-                // that edge has to be internal, since ingress/egress nodes have already been
-                // added, and they make sure that there are no cross-domain materialized edges).
-                match n {
-                    &Node::Internal(_, ref i) => {
-                        if i.should_materialize() ||
-                           self.mainline
-                            .ingredients
-                            .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                            .any(|e| *e.weight()) {
-                            Some((ni, shortcut::Store::new(i.fields().len())))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            })
-            .collect();
-
-        thread::spawn(move || {
-            let mut handoffs = nodes.iter().map(|&(ni, _, _)| (ni, VecDeque::new())).collect();
-
-            loop {
-                // `nodes` is already in topological order, so we just walk over them in order and
-                // do the appropriate action for each one.
-                for &mut (ni, ref mut n, ref children) in &mut nodes {
-                    Self::iterate(&mut handoffs, &mut state, ni, n, children);
-                }
-            }
-        });
-    }
-
-    fn iterate(handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
-               state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>,
-               ni: NodeIndex,
-               n: &mut Node,
-               children: &[NodeIndex]) {
-        match n {
-            &mut Node::Ingress(_, ref mut rx) => {
-                // receive an update
-                debug_assert!(handoffs[&ni].is_empty());
-                broadcast!(handoffs, rx.recv().unwrap(), children);
-            }
-            &mut Node::Egress(_, ref txs) => {
-                // send any queued updates to all external children
-                let mut txs = txs.lock().unwrap();
-                let txn = txs.len() - 1;
-                while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
-                    let mut m = Some(m); // so we can use .take()
-                    for (txi, tx) in txs.iter_mut().enumerate() {
-                        if txi == txn && children.is_empty() {
-                            tx.send(m.take().unwrap()).unwrap();
-                        } else {
-                            tx.send(m.clone().unwrap()).unwrap();
-                        }
-                    }
-
-                    if let Some(m) = m {
-                        broadcast!(handoffs, m, children);
-                    } else {
-                        debug_assert!(children.is_empty());
-                    }
-                }
-            }
-            &mut Node::Internal(_, ref mut i) => {
-                while let Some(m) = handoffs.get_mut(&ni).unwrap().pop_front() {
-                    if let Some(u) = Self::process_one(ni, i, m, state) {
-                        broadcast!(handoffs,
-                                   Message {
-                                       from: ni,
-                                       data: u,
-                                   },
-                                   children);
-                    }
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn process_one(ni: NodeIndex,
-                   i: &mut Box<Ingredient>,
-                   m: Message,
-                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>)
-                   -> Option<U> {
-        // first, process the incoming message
-        let u = i.process(m);
-        if u.is_none() {
-            // our output didn't change -- nothing more to do
-            return u;
-        }
-
-        // our output changed -- do we need to modify materialized state?
-        let mut state = state.get_mut(&ni);
-        if state.is_none() {
-            // nope
-            return u;
-        }
-
-        // yes!
-        let mut state = state.unwrap();
-        if let Some(ops::Update::Records(ref rs)) = u {
-            for r in rs.iter().cloned() {
-                match r {
-                    ops::Record::Positive(r, _) => state.insert(r),
-                    ops::Record::Negative(r, _) => {
-                        // we need a cond that will match this row.
-                        let conds = r.into_iter()
-                            .enumerate()
-                            .map(|(coli, v)| {
-                                shortcut::Condition {
-                                    column: coli,
-                                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(v)),
-                                }
-                            })
-                            .collect::<Vec<_>>();
-
-                        // however, multiple rows may have the same values as this row for every
-                        // column. afaict, it is safe to delete any one of these rows. we do this
-                        // by returning true for the first invocation of the filter function, and
-                        // false for all subsequent invocations.
-                        let mut first = true;
-                        state.delete_filter(&conds[..], |_| {
-                            if first {
-                                first = false;
-                                true
-                            } else {
-                                false
-                            }
-                        });
-                    }
-                }
-            }
-        }
-
-        u
+    fn boot_domain(&mut self, d: domain::Index, nodes: Vec<NodeIndex>) {
+        let d = domain::Domain::from_graph(d, nodes, &mut self.mainline.ingredients);
+        d.boot();
     }
 
     pub fn commit(mut self) -> HashMap<NodeIndex, mpsc::Sender<U>> {
