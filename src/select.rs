@@ -310,18 +310,18 @@ mod tests {
             left:
                 Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-            operator: String::from("="),
+            operator: Operator::Equal,
         })));
         let right_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
             left:
                 Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperStorageId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-            operator: String::from("="),
+            operator: Operator::Equal,
         })));
         let expected_where_cond = Some(ConditionExpression::LogicalOp(ConditionTree {
             left: left_comp,
             right: right_comp,
-            operator: String::from("and"),
+            operator: Operator::And,
         }));
         println!("res: {:#?}", res);
         assert_eq!(res.unwrap().1,
