@@ -111,13 +111,11 @@ impl NodeDescriptor {
                         // by returning true for the first invocation of the filter function, and
                         // false for all subsequent invocations.
                         let mut first = true;
-                        state.delete_filter(&conds[..], |_| {
-                            if first {
-                                first = false;
-                                true
-                            } else {
-                                false
-                            }
+                        state.delete_filter(&conds[..], |_| if first {
+                            first = false;
+                            true
+                        } else {
+                            false
                         });
                     }
                 }

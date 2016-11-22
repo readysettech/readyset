@@ -367,14 +367,12 @@ impl<'a> Migration<'a> {
                         // start a thread that does that conversion
                         let (tx2, rx2) = mpsc::channel();
                         let src = self.mainline.source;
-                        thread::spawn(move || {
-                            for u in rx2 {
-                                tx.send(Message {
-                                        from: src,
-                                        data: u,
-                                    })
-                                    .unwrap();
-                            }
+                        thread::spawn(move || for u in rx2 {
+                            tx.send(Message {
+                                    from: src,
+                                    data: u,
+                                })
+                                .unwrap();
                         });
                         sources.insert(ingress, tx2);
                         break;
