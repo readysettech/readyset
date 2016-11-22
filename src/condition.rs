@@ -1,8 +1,8 @@
 use nom::{alphanumeric, digit, multispace};
 use std::str;
 
-use common::{binary_comparison_operator, binary_logical_operator, sql_identifier,
-             unary_negation_operator, Operator};
+use common::{binary_comparison_operator, binary_logical_operator, column_identifier,
+             sql_identifier, unary_negation_operator, Operator};
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
 fn fold_cond_exprs(initial: ConditionExpression,
@@ -122,10 +122,10 @@ named!(predicate<&[u8], ConditionExpression>,
                 }
             )
         |   chain!(
-                field: delimited!(opt!(multispace), sql_identifier, opt!(multispace)),
+                field: delimited!(opt!(multispace), column_identifier, opt!(multispace)),
                 || {
                     ConditionExpression::Base(
-                        ConditionBase::Field(String::from(str::from_utf8(field).unwrap()))
+                        ConditionBase::Field(field)
                     )
                 }
             )
@@ -136,7 +136,7 @@ named!(predicate<&[u8], ConditionExpression>,
 mod tests {
     use super::*;
     use common::Operator;
-    use parser::{ConditionBase, ConditionExpression, ConditionTree};
+    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree};
 
     fn flat_condition_tree(op: Operator,
                            l: ConditionBase,
@@ -156,7 +156,7 @@ mod tests {
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1,
                    flat_condition_tree(Operator::Equal,
-                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Placeholder)
                   );
     }
@@ -169,7 +169,7 @@ mod tests {
         let res1 = condition_expr(cond1.as_bytes());
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::Equal,
-                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from("42"))
                                       )
                    );
@@ -177,7 +177,7 @@ mod tests {
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::Equal,
-                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from("hello"))
                                       )
                    );
@@ -191,7 +191,7 @@ mod tests {
         let res1 = condition_expr(cond1.as_bytes());
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::GreaterOrEqual,
-                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from("42"))
                                       )
                    );
@@ -199,7 +199,7 @@ mod tests {
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::LessOrEqual,
-                                       ConditionBase::Field(String::from("foo")),
+                                       ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from("5"))
                                       )
                    );

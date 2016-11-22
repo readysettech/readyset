@@ -2,14 +2,15 @@ use nom::{multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
-use common::{field_list, unsigned_number, statement_terminator, table_list};
-use parser::ConditionExpression;
+use common::FieldExpression;
+use common::{field_expr, field_list, unsigned_number, statement_terminator, table_list};
+use parser::{Column, ConditionExpression};
 
 use condition::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupByClause {
-    columns: Vec<String>,
+    columns: Vec<Column>,
     having: String, // XXX(malte): should this be an arbitrary expr?
 }
 
@@ -27,7 +28,7 @@ pub enum OrderType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderClause {
-    cols: Vec<String>, // TODO(malte): can this be an arbitrary expr?
+    cols: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
     order: OrderType,
 }
 
@@ -35,7 +36,7 @@ pub struct OrderClause {
 pub struct SelectStatement {
     pub tables: Vec<String>,
     pub distinct: bool,
-    pub fields: Vec<String>,
+    pub fields: FieldExpression,
     pub where_clause: Option<ConditionExpression>,
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
@@ -69,7 +70,7 @@ named!(limit_clause<&[u8], LimitClause>,
 );
 
 named!(order_clause<&[u8], OrderClause>,
-    dbg_dmp!(chain!(
+    chain!(
         multispace? ~
         caseless_tag!("order by") ~
         multispace ~
@@ -82,25 +83,25 @@ named!(order_clause<&[u8], OrderClause>,
         ),
     || {
         OrderClause {
-            cols: order_expr.iter().map(|e| String::from(*e)).collect(),
+            cols: order_expr,
             order: match ordering {
                 None => OrderType::OrderAscending,
                 Some(ref o) => o.clone(),
             },
         }
     })
-));
+);
 
 /// Parse WHERE clause of a selection
 named!(where_clause<&[u8], ConditionExpression>,
-    dbg_dmp!(chain!(
+    chain!(
         multispace? ~
         caseless_tag!("where") ~
         multispace ~
         cond: condition_expr,
         || { cond }
     )
-));
+);
 
 /// Parse rule for a SQL selection query.
 /// TODO(malte): support nested queries as selection targets
@@ -110,7 +111,7 @@ named!(pub selection<&[u8], SelectStatement>,
         space ~
         distinct: opt!(caseless_tag!("distinct")) ~
         space? ~
-        fields: field_list ~
+        fields: field_expr ~
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~
         cond: opt!(where_clause) ~
@@ -121,7 +122,7 @@ named!(pub selection<&[u8], SelectStatement>,
             SelectStatement {
                 tables: tables.iter().map(|t| String::from(*t)).collect(),
                 distinct: distinct.is_some(),
-                fields: fields.iter().map(|s| String::from(*s)).collect(),
+                fields: fields,
                 where_clause: cond,
                 group_by: None,
                 order: order,
@@ -134,8 +135,23 @@ named!(pub selection<&[u8], SelectStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::Operator;
-    use parser::{ConditionBase, ConditionExpression, ConditionTree};
+    use common::{FieldExpression, Operator};
+    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree};
+
+    fn column_vector(t: Option<&str>, cols: &[&str]) -> Vec<Column> {
+        cols.iter()
+            .map(|c| {
+                Column {
+                    name: String::from(*c),
+                    table: if t.is_none() {
+                        None
+                    } else {
+                        Some(String::from(t.unwrap()))
+                    },
+                }
+            })
+            .collect()
+    }
 
     #[test]
     fn simple_select() {
@@ -145,7 +161,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: vec!["id".into(), "name".into()],
+                       fields: FieldExpression::Seq(column_vector(None, &["id", "name"])),
                        ..Default::default()
                    });
     }
@@ -158,7 +174,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: vec!["ALL".into()],
+                       fields: FieldExpression::All,
                        ..Default::default()
                    });
     }
@@ -171,7 +187,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: vec!["id".into(), "name".into()],
+                       fields: FieldExpression::Seq(column_vector(None, &["id", "name"])),
                        ..Default::default()
                    });
     }
@@ -202,14 +218,14 @@ mod tests {
 
         let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("email"))))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("email"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("ContactInfo")],
-                       fields: vec!["ALL".into()],
+                       fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -242,15 +258,15 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            cols: vec!["name".into()],
+            cols: column_vector(None, &["name"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord2 = OrderClause {
-            cols: vec!["name".into(), "age".into()],
+            cols: column_vector(None, &["name", "age"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord3 = OrderClause {
-            cols: vec!["name".into()],
+            cols: column_vector(None, &["name"]),
             order: OrderType::OrderAscending,
         };
 
@@ -272,7 +288,7 @@ mod tests {
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("PaperTag")],
-                       fields: vec!["ALL".into()],
+                       fields: FieldExpression::All,
                        ..Default::default()
                    });
         // let res2 = selection(qstring2.as_bytes());
@@ -286,7 +302,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: Operator::Equal,
         }));
@@ -294,7 +310,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![String::from("PaperTag")],
                        distinct: true,
-                       fields: vec!["tag".into()],
+                       fields: FieldExpression::Seq(column_vector(None, &["tag"])),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -308,13 +324,13 @@ mod tests {
 
         let left_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperId"))))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: Operator::Equal,
         })));
         let right_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("paperStorageId"))))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperStorageId"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: Operator::Equal,
         })));
@@ -327,7 +343,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("PaperStorage")],
-                       fields: vec!["infoJson".into()],
+                       fields: FieldExpression::Seq(column_vector(None, &["infoJson"])),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -344,7 +360,7 @@ mod tests {
         });
         let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
             left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(String::from("id"))))),
+                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("id"))))),
             right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
             operator: Operator::Equal,
         }));
@@ -352,7 +368,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: vec!["ALL".into()],
+                       fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        limit: expected_lim,
                        ..Default::default()

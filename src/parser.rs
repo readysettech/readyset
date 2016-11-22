@@ -12,8 +12,33 @@ pub enum SqlQuery {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Column {
+    pub name: String,
+    pub table: Option<String>,
+}
+
+impl<'a> From<&'a str> for Column {
+    fn from(c: &str) -> Column {
+        match c.find(".") {
+            None => {
+                Column {
+                    name: String::from(c),
+                    table: None,
+                }
+            }
+            Some(i) => {
+                Column {
+                    name: String::from(&c[i..]),
+                    table: Some(String::from(&c[0..i - 1])),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConditionBase {
-    Field(String),
+    Field(Column),
     Literal(String),
     Placeholder,
 }

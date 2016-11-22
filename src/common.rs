@@ -1,5 +1,6 @@
 use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
+use parser::Column;
 use std::str;
 use std::str::FromStr;
 
@@ -18,10 +19,22 @@ pub enum Operator {
     LessOrEqual,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldExpression {
+    All,
+    Seq(Vec<Column>),
+}
+
+impl Default for FieldExpression {
+    fn default() -> FieldExpression {
+        FieldExpression::All
+    }
+}
+
 #[inline]
 pub fn is_sql_identifier(chr: u8) -> bool {
     // XXX(malte): dot should not be in here once we have proper alias handling
-    is_alphanumeric(chr) || chr == '_' as u8 || chr == '.' as u8
+    is_alphanumeric(chr) || chr == '_' as u8
 }
 
 #[inline]
@@ -35,6 +48,29 @@ named!(pub fp_number<&[u8], &[u8]>,
 //      integral: map_res!(take_while1!(is_digit), str::from_utf8) ~
 //      fractional: map_res!(take_while!(is_digit), str::from_utf8),
     take_while1!(is_fp_number)
+);
+
+/// Parses a SQL column identifier in the table.column format
+named!(pub column_identifier<&[u8], Column>,
+    chain!(
+        table: opt!(
+            chain!(
+                tbl_name: map_res!(sql_identifier, str::from_utf8) ~
+                tag!("."),
+                || { tbl_name }
+            )
+        ) ~
+        column: map_res!(sql_identifier, str::from_utf8),
+        || {
+            Column {
+                name: String::from(column),
+                table: match table {
+                    None => None,
+                    Some(t) => Some(String::from(t)),
+                },
+            }
+        }
+    )
 );
 
 /// Parses a SQL identifier (alphanumeric and "_").
@@ -101,32 +137,29 @@ named!(pub unary_negation_operator<&[u8], Operator>,
 );
 
 /// Parse rule for a comma-separated list.
-named!(pub csvlist<&[u8], Vec<&str> >,
+named!(pub field_list<&[u8], Vec<Column> >,
        many0!(
-           map_res!(
-               chain!(
-                   fieldname: sql_identifier ~
-                   opt!(
-                       chain!(
-                           multispace? ~
-                           tag!(",") ~
-                           multispace?,
-                           ||{}
-                       )
-                   ),
-                   ||{ fieldname }
+           chain!(
+               fieldname: column_identifier ~
+               opt!(
+                   chain!(
+                       multispace? ~
+                       tag!(",") ~
+                       multispace?,
+                       ||{}
+                   )
                ),
-               str::from_utf8
+               || { fieldname }
            )
        )
 );
 
 /// Parse list of columns/fields.
 /// XXX(malte): add support for named table notation
-named!(pub field_list<&[u8], Vec<&str> >,
+named!(pub field_expr<&[u8], FieldExpression>,
        alt_complete!(
-           tag!("*") => { |_| vec!["ALL".into()] }
-         | csvlist
+           tag!("*") => { |_| FieldExpression::All }
+         | map!(field_list, |v| FieldExpression::Seq(v))
        )
 );
 

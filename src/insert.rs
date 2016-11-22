@@ -3,11 +3,12 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 use common::{field_list, statement_terminator, table_reference, value_list};
+use parser::Column;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStatement {
     pub table: String,
-    pub fields: Vec<(String, String)>,
+    pub fields: Vec<(Column, String)>,
 }
 
 /// Parse rule for a SQL insert query.
@@ -40,7 +41,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 fields: match fields {
                     Some(ref f) =>
                         f.iter()
-                         .map(|s| String::from(*s))
+                         .cloned()
                          .zip(values.into_iter()
                                     .map(|s| String::from(s))
                                     )
@@ -48,7 +49,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                     None =>
                         values.into_iter()
                               .enumerate()
-                              .map(|(i, v)| (format!("{}", i), String::from(v)))
+                              .map(|(i, v)| (Column { name: format!("{}", i), table: None }, String::from(v)))
                               .collect(),
                 },
             }
@@ -59,6 +60,18 @@ named!(pub insertion<&[u8], InsertStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parser::Column;
+
+    fn column(t: Option<&str>, c: &str) -> Column {
+        Column {
+            name: String::from(c),
+            table: if t.is_none() {
+                None
+            } else {
+                Some(String::from(t.unwrap()))
+            },
+        }
+    }
 
     #[test]
     fn simple_insert() {
@@ -68,7 +81,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![("0".into(), "42".into()), ("1".into(), "test".into())],
+                       fields: vec![(column(None, "0"), "42".into()), (column(None, "1"), "test".into())],
                        ..Default::default()
                    });
     }
@@ -81,7 +94,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![("0".into(), "?".into()), ("1".into(), "?".into())],
+                       fields: vec![(column(None, "0"), "?".into()), (column(None, "1"), "?".into())],
                        ..Default::default()
                    });
     }
@@ -94,7 +107,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![("id".into(), "42".into()), ("name".into(), "test".into())],
+                       fields: vec![(column(None, "id"), "42".into()), (column(None, "name"), "test".into())],
                        ..Default::default()
                    });
     }
