@@ -2,7 +2,7 @@ use nom::{alphanumeric, digit, multispace};
 use std::str;
 
 use common::{binary_comparison_operator, binary_logical_operator, column_identifier,
-             sql_identifier, unary_negation_operator, Operator};
+             unary_negation_operator, Operator};
 use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
 fn fold_cond_exprs(initial: ConditionExpression,
