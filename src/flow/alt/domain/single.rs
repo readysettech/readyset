@@ -50,7 +50,7 @@ impl NodeDescriptor {
             }
             alt::Node::Internal(..) => {
                 while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
-                    if let Some(u) = self.process_one(m, state) {
+                    if let Some(u) = self.process_one(m, state, nodes) {
                         broadcast!(handoffs,
                                    alt::Message {
                                        from: self.index,
@@ -66,12 +66,13 @@ impl NodeDescriptor {
 
     fn process_one(&mut self,
                    m: alt::Message,
-                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>)
+                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>,
+                   nodes: &list::NodeList)
                    -> Option<ops::Update> {
 
         // first, process the incoming message
         let u = match self.inner {
-            alt::Node::Internal(_, ref mut i) => i.process(m),
+            alt::Node::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
             _ => unreachable!(),
         };
 

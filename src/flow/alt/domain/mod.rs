@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use flow::alt;
+pub mod list;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 pub struct Index(usize);
@@ -33,7 +34,6 @@ macro_rules! broadcast {
     }}
 }
 
-mod list;
 mod single;
 
 pub struct Domain {

@@ -47,11 +47,15 @@ impl From<Vec<NodeDescriptor>> for NodeList {
 
 impl NodeList {
     pub fn lookup(&self, node: NodeIndex) -> cell::Ref<NodeDescriptor> {
-        self.nodes[self.map[&node]].borrow()
+        self.nodes[self.translate(node)].borrow()
     }
 
     pub fn index(&self, index: usize) -> cell::Ref<NodeDescriptor> {
         self.nodes[index].borrow()
+    }
+
+    pub fn translate(&self, node: NodeIndex) -> usize {
+        self.map[&node]
     }
 }
 

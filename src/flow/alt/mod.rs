@@ -1,5 +1,7 @@
+use shortcut;
 use petgraph;
 use petgraph::graph::NodeIndex;
+use query;
 use ops;
 
 use std::sync::mpsc;
@@ -8,7 +10,7 @@ use std::sync;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 pub mod domain;
 
@@ -27,9 +29,16 @@ pub trait Ingredient
     where Self: Send
 {
     fn ancestors(&self) -> Vec<NodeIndex>;
-    fn process(&mut self, m: Message) -> Option<U>;
+    fn fields(&self) -> &[String];
     fn should_materialize(&self) -> bool;
-    fn fields(&self) -> &[&str];
+
+    fn on_connected(&mut self, graph: &petgraph::Graph<Node, Edge>);
+    fn on_commit(&mut self, remap: &HashMap<NodeIndex, NodeIndex>);
+    fn on_input(&mut self,
+                input: Message,
+                domain: &domain::list::NodeList,
+                states: &HashMap<NodeIndex, shortcut::Store<query::DataType>>)
+                -> Option<U>;
 }
 
 pub enum Node {
@@ -57,6 +66,16 @@ impl Deref for Node {
         match self {
             &Node::Internal(_, ref i) |
             &Node::Unassigned(ref i) => i.deref(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl DerefMut for Node {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            &mut Node::Internal(_, ref mut i) |
+            &mut Node::Unassigned(ref mut i) => i.deref_mut(),
             _ => unreachable!(),
         }
     }
@@ -107,7 +126,9 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<I: Ingredient + 'static>(&mut self, i: I) -> NodeIndex {
+    pub fn add_ingredient<I: Ingredient + 'static>(&mut self, mut i: I) -> NodeIndex {
+        i.on_connected(&self.mainline.ingredients);
+
         let parents = i.ancestors();
         // add to the graph
         let ni = self.mainline.ingredients.add_node(Node::Unassigned(Box::new(i)));
@@ -174,6 +195,7 @@ impl<'a> Migration<'a> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
+        let mut domain_remap = HashMap::new();
         let mut targets = HashMap::new();
         let mut domain_nodes = HashMap::new();
         let mut topo = petgraph::visit::Topo::new(&self.mainline.ingredients);
@@ -219,6 +241,9 @@ impl<'a> Migration<'a> {
                         targets.insert(ingress, tx);
                     }
 
+                    // keep track of the remapping
+                    domain_remap.entry(domain).or_insert_with(HashMap::new).insert(parent, node);
+
                     let ingress = ingress.unwrap();
                     // we need to hook the ingress node in between us and this parent
                     let old = self.mainline.ingredients.find_edge(parent, node).unwrap();
@@ -236,6 +261,21 @@ impl<'a> Migration<'a> {
                         Node::Internal(domain, inner);
                 }
                 _ => unreachable!(),
+            }
+
+            // let node process the fact that its parents may have changed
+            if let Some(remap) = domain_remap.get(&domain) {
+                self.mainline
+                    .ingredients
+                    .node_weight_mut(node)
+                    .unwrap()
+                    .on_commit(remap);
+            } else {
+                self.mainline
+                    .ingredients
+                    .node_weight_mut(node)
+                    .unwrap()
+                    .on_commit(&HashMap::new());
             }
 
             // in this domain, run this node after any parent ingress nodes we may have added
