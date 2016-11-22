@@ -138,18 +138,9 @@ mod tests {
     use common::{FieldExpression, Operator};
     use parser::{Column, ConditionBase, ConditionExpression, ConditionTree};
 
-    fn column_vector(t: Option<&str>, cols: &[&str]) -> Vec<Column> {
+    fn columns(cols: &[&str]) -> Vec<Column> {
         cols.iter()
-            .map(|c| {
-                Column {
-                    name: String::from(*c),
-                    table: if t.is_none() {
-                        None
-                    } else {
-                        Some(String::from(t.unwrap()))
-                    },
-                }
-            })
+            .map(|c| Column::from(*c))
             .collect()
     }
 
@@ -161,7 +152,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: FieldExpression::Seq(column_vector(None, &["id", "name"])),
+                       fields: FieldExpression::Seq(columns(&["id", "name"])),
                        ..Default::default()
                    });
     }
@@ -187,7 +178,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("users")],
-                       fields: FieldExpression::Seq(column_vector(None, &["id", "name"])),
+                       fields: FieldExpression::Seq(columns(&["id", "name"])),
                        ..Default::default()
                    });
     }
@@ -258,15 +249,15 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            cols: column_vector(None, &["name"]),
+            cols: columns(&["name"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord2 = OrderClause {
-            cols: column_vector(None, &["name", "age"]),
+            cols: columns(&["name", "age"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord3 = OrderClause {
-            cols: column_vector(None, &["name"]),
+            cols: columns(&["name"]),
             order: OrderType::OrderAscending,
         };
 
@@ -310,7 +301,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![String::from("PaperTag")],
                        distinct: true,
-                       fields: FieldExpression::Seq(column_vector(None, &["tag"])),
+                       fields: FieldExpression::Seq(columns(&["tag"])),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -343,7 +334,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![String::from("PaperStorage")],
-                       fields: FieldExpression::Seq(column_vector(None, &["infoJson"])),
+                       fields: FieldExpression::Seq(columns(&["infoJson"])),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });

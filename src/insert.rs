@@ -49,7 +49,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                     None =>
                         values.into_iter()
                               .enumerate()
-                              .map(|(i, v)| (Column { name: format!("{}", i), table: None }, String::from(v)))
+                              .map(|(i, v)| (Column::from(format!("{}", i).as_str()), String::from(v)))
                               .collect(),
                 },
             }
@@ -62,17 +62,6 @@ mod tests {
     use super::*;
     use parser::Column;
 
-    fn column(t: Option<&str>, c: &str) -> Column {
-        Column {
-            name: String::from(c),
-            table: if t.is_none() {
-                None
-            } else {
-                Some(String::from(t.unwrap()))
-            },
-        }
-    }
-
     #[test]
     fn simple_insert() {
         let qstring = "INSERT INTO users VALUES (42, test);";
@@ -81,7 +70,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![(column(None, "0"), "42".into()), (column(None, "1"), "test".into())],
+                       fields: vec![(Column::from("0"), "42".into()), (Column::from("1"), "test".into())],
                        ..Default::default()
                    });
     }
@@ -94,7 +83,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![(column(None, "0"), "?".into()), (column(None, "1"), "?".into())],
+                       fields: vec![(Column::from("0"), "?".into()), (Column::from("1"), "?".into())],
                        ..Default::default()
                    });
     }
@@ -107,7 +96,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: String::from("users"),
-                       fields: vec![(column(None, "id"), "42".into()), (column(None, "name"), "test".into())],
+                       fields: vec![(Column::from("id"), "42".into()), (Column::from("name"), "test".into())],
                        ..Default::default()
                    });
     }
