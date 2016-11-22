@@ -1,23 +1,16 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
+use shortcut;
 
 use std::collections::HashMap;
-use std::cell::RefCell;
 
-use shortcut;
+use flow::prelude::*;
 
 /// A union of a set of views.
 #[derive(Debug)]
 pub struct Union {
-    emit: HashMap<flow::NodeIndex, Vec<usize>>,
-    srcs: HashMap<flow::NodeIndex, ops::V>,
-    cols: HashMap<flow::NodeIndex, usize>,
-
-    gather: RefCell<HashMap<flow::NodeIndex, Vec<ops::Record>>>,
+    emit: HashMap<NodeIndex, Vec<usize>>,
+    cols: HashMap<NodeIndex, usize>,
 }
 
 // gather isn't normally Sync, but we know that we're only
@@ -29,7 +22,7 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
-    pub fn new(emit: HashMap<flow::NodeIndex, Vec<usize>>) -> Union {
+    pub fn new(emit: HashMap<NodeIndex, Vec<usize>>) -> Union {
         for emit in emit.values() {
             let mut last = &emit[0];
             for i in emit {
@@ -41,91 +34,69 @@ impl Union {
         }
         Union {
             emit: emit,
-            srcs: HashMap::new(),
             cols: HashMap::new(),
-
-            gather: RefCell::new(HashMap::new()),
         }
     }
 }
 
-impl From<Union> for NodeType {
-    fn from(b: Union) -> NodeType {
-        NodeType::Union(b)
-    }
-}
-
-impl Union {
-    fn drain<I>(&self, it: I) -> flow::ProcessingResult<ops::Update>
-        where I: Iterator<Item = (flow::NodeIndex, Vec<ops::Record>)>
-    {
-        let rs: Vec<_> = it.flat_map(|(from, rs)| {
-                rs.into_iter().map(move |rec| {
-                    let (r, pos, ts) = rec.extract();
-
-                    // yield selected columns for this source
-                    // TODO: avoid the .clone() here
-                    let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
-
-                    // return new row with appropriate sign
-                    if pos {
-                        ops::Record::Positive(res, ts)
-                    } else {
-                        ops::Record::Negative(res, ts)
-                    }
-                })
-            })
-            .collect();
-
-        if !rs.is_empty() {
-            flow::ProcessingResult::Done(ops::Update::Records(rs))
-        } else {
-            flow::ProcessingResult::Skip
-        }
-    }
-}
-
-impl NodeOp for Union {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcs.extend(self.emit.keys().map(|&n| (n, g[n].as_ref().unwrap().clone())));
-        self.cols.extend(self.srcs.iter().map(|(ni, n)| (*ni, n.args().len())));
+impl Ingredient for Union {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         self.emit.keys().cloned().collect()
     }
 
-    fn forward(&self,
-               u: Option<ops::Update>,
-               from: flow::NodeIndex,
-               _: i64,
-               last: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn fields(&self) -> &[String] {
+        &[]
+    }
 
-        debug_assert!(u.is_some() || last);
-        let mut g = self.gather.borrow_mut();
+    fn should_materialize(&self) -> bool {
+        false
+    }
 
-        match u {
-            Some(ops::Update::Records(rs)) => {
-                // if we haven't received updates from all our ancestors for this timestamp yet,
-                // just buffer this update and delay completing processing of this timestamp.
-                if !last {
-                    g.insert(from, rs);
-                    return flow::ProcessingResult::Accepted;
-                }
+    fn on_connected(&mut self, g: &Graph) {
+        self.cols.extend(self.emit.keys().map(|&n| (n, g[n].fields().len())));
+    }
 
-                // we've received all updates for this ts
-                // emit all of them in a single update
-                self.drain(g.drain().chain(Some((from, rs)).into_iter()))
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        for (from, to) in remap {
+            if let Some(e) = self.emit.remove(from) {
+                assert!(self.emit.insert(*to, e).is_none());
             }
-            None if last => self.drain(g.drain()),
-            _ => unreachable!(),
+            if let Some(e) = self.cols.remove(from) {
+                assert!(self.cols.insert(*to, e).is_none());
+            }
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+        match input.data {
+            Update::Records(rs) => {
+                let from = input.from;
+                let rs = rs.into_iter()
+                    .map(move |rec| {
+                        let (r, pos) = rec.extract();
+
+                        // yield selected columns for this source
+                        // TODO: avoid the .clone() here
+                        let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+
+                        // return new row with appropriate sign
+                        if pos {
+                            ops::Record::Positive(res)
+                        } else {
+                            ops::Record::Negative(res)
+                        }
+                    })
+                    .collect();
+                Some(Update::Records(rs))
+            }
+        }
+    }
+
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
         use std::iter;
 
         let mut params = HashMap::new();
-        for src in self.srcs.keys() {
+        for src in self.emit.keys() {
             params.insert(*src, None);
 
             // Avoid scanning rows that wouldn't match the query anyway. We do this by finding all
@@ -157,23 +128,27 @@ impl NodeOp for Union {
                     select[*c] = true;
                 }
                 let cs = params.unwrap_or_else(Vec::new);
-                // TODO: if we're selecting all and have no conditions, we could pass q = None...
-                self.srcs[&src].find(Some(&query::Query::new(&select[..], cs)), Some(ts))
+                if let Some(state) = states.get(&src) {
+                    // parent is materialized
+                    state.find(&cs[..]).map(|r| r.iter().cloned().collect()).collect()
+                } else {
+                    // parent is not materialized, query into parent
+                    // TODO: if we're selecting all and have no conds, we could pass q = None
+                    domain.lookup(src)
+                        .query(Some(&query::Query::new(&select[..], cs)), domain, states)
+                }
+
             })
-            .filter_map(move |(r, ts)| if let Some(q) = q {
-                q.feed(r).map(move |r| (r, ts))
-            } else {
-                Some((r, ts))
-            })
+            .filter_map(move |r| if let Some(q) = q { q.feed(r) } else { Some(r) })
             .collect()
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index nothing (?)
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
     }
 

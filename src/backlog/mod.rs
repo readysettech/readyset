@@ -170,13 +170,11 @@ impl BufferedStore {
                         // by returning true for the first invocation of the filter function, and
                         // false for all subsequent invocations.
                         let mut first = true;
-                        store.0.delete_filter(&conds[..], |_| {
-                            if first {
-                                first = false;
-                                true
-                            } else {
-                                false
-                            }
+                        store.0.delete_filter(&conds[..], |_| if first {
+                            first = false;
+                            true
+                        } else {
+                            false
                         });
                     }
                 }

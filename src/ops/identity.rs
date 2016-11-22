@@ -1,62 +1,65 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
 
 use std::collections::HashMap;
+
+use flow::prelude::*;
+
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug)]
 pub struct Identity {
-    src: flow::NodeIndex,
-    srcn: Option<ops::V>,
+    src: NodeIndex,
 }
 
 impl Identity {
     /// Construct a new identity operator.
-    pub fn new(src: flow::NodeIndex) -> Identity {
-        Identity {
-            src: src,
-            srcn: None,
-        }
+    pub fn new(src: NodeIndex) -> Identity {
+        Identity { src: src }
     }
 }
 
-impl From<Identity> for NodeType {
-    fn from(b: Identity) -> NodeType {
-        NodeType::Identity(b)
-    }
-}
-
-impl NodeOp for Identity {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().cloned();
-
+impl Ingredient for Identity {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src]
     }
 
-    #[allow(unused_variables)]
-    fn forward(&self,
-               update: Option<ops::Update>,
-               src: flow::NodeIndex,
-               timestamp: i64,
-               last: bool,
-               materialized_view: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
-        update.into()
+    fn fields(&self) -> &[String] {
+        &[]
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
-        self.srcn.as_ref().unwrap().find(q, Some(ts))
+    fn should_materialize(&self) -> bool {
+        false
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        self.srcn.as_ref().unwrap().suggest_indexes(self.src)
+    fn on_connected(&mut self, _: &Graph) {}
+
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        self.src = remap[&self.src];
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+        input.data.into()
+    }
+
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+        if let Some(state) = states.get(&self.src) {
+            // parent is materialized
+            state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // parent is not materialized, query into parent
+            domain.lookup(self.src).query(q, domain, states)
+        }
+    }
+
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        // TODO
+        HashMap::new()
+    }
+
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
 

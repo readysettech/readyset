@@ -1,11 +1,11 @@
-use ops;
 use query;
-use flow::NodeIndex;
 
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
 
 use std::collections::HashSet;
+
+use flow::prelude::*;
 
 /// Designator for what a given position in a group concat output should contain.
 #[derive(Debug)]
@@ -103,9 +103,9 @@ impl GroupConcat {
 impl GroupedOperation for GroupConcat {
     type Diff = Modify;
 
-    fn setup(&mut self, parent: &ops::V) {
+    fn setup(&mut self, parent: &Ingredient) {
         // group by all columns
-        let cols = parent.args().len();
+        let cols = parent.fields().len();
         let mut group = HashSet::new();
         group.extend(0..cols);
         // except the ones that are used in output
@@ -146,10 +146,7 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self,
-             current: &Option<query::DataType>,
-             diffs: Vec<(Self::Diff, i64)>)
-             -> query::DataType {
+    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -168,7 +165,7 @@ impl GroupedOperation for GroupConcat {
 
         // TODO this is not particularly robust, and requires a non-empty separator
         let mut current = BTreeSet::from_iter(current.split_terminator(self.separator));
-        for &(ref diff, _) in &diffs {
+        for diff in &diffs {
             match *diff {
                 Modify::Add(ref s) => {
                     current.insert(s);
@@ -195,11 +192,9 @@ impl GroupedOperation for GroupConcat {
     fn description(&self) -> String {
         let fields = self.components
             .iter()
-            .map(|c| {
-                match *c {
-                    TextComponent::Literal(s) => format!("\"{}\"", s),
-                    TextComponent::Column(i) => i.to_string(),
-                }
+            .map(|c| match *c {
+                TextComponent::Literal(s) => format!("\"{}\"", s),
+                TextComponent::Column(i) => i.to_string(),
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -408,85 +403,73 @@ mod tests {
         if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 had [2], now has [1,2]
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    if r[0] == 1.into() {
-                        assert_eq!(r[1], ".2;".into());
-                        assert_eq!(ts, 4);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                if r[0] == 1.into() {
+                    assert_eq!(r[1], ".2;".into());
+                    assert_eq!(ts, 4);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    if r[0] == 1.into() {
-                        assert_eq!(r[1], ".1;#.2;".into());
-                        assert_eq!(ts, 5);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                if r[0] == 1.into() {
+                    assert_eq!(r[1], ".1;#.2;".into());
+                    assert_eq!(ts, 5);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
             // group 2 was [2], is now [1,2,3]
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    if r[0] == 2.into() {
-                        assert_eq!(r[1], ".2;".into());
-                        assert_eq!(ts, 2);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                if r[0] == 2.into() {
+                    assert_eq!(r[1], ".2;".into());
+                    assert_eq!(ts, 2);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    if r[0] == 2.into() {
-                        assert_eq!(r[1], ".1;#.2;#.3;".into());
-                        assert_eq!(ts, 5);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                if r[0] == 2.into() {
+                    assert_eq!(r[1], ".1;#.2;#.3;".into());
+                    assert_eq!(ts, 5);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
             // group 3 was [], is now [3]
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    if r[0] == 3.into() {
-                        assert_eq!(r[1], "".into());
-                        assert_eq!(ts, 0);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                if r[0] == 3.into() {
+                    assert_eq!(r[1], "".into());
+                    assert_eq!(ts, 0);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    if r[0] == 3.into() {
-                        assert_eq!(r[1], ".3;".into());
-                        assert_eq!(ts, 5);
-                        true
-                    } else {
-                        false
-                    }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                if r[0] == 3.into() {
+                    assert_eq!(r[1], ".3;".into());
+                    assert_eq!(ts, 5);
+                    true
                 } else {
                     false
                 }
+            } else {
+                false
             }));
         } else {
             unreachable!();

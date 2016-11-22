@@ -1,14 +1,11 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
+use shortcut;
 
 use std::iter;
 use std::collections::HashMap;
 
-use shortcut;
+use flow::prelude::*;
 
 #[derive(Debug)]
 struct JoinTarget {
@@ -19,21 +16,21 @@ struct JoinTarget {
 
 #[derive(Debug)]
 struct Join {
-    against: HashMap<flow::NodeIndex, JoinTarget>,
-    node: Option<ops::V>,
+    against: HashMap<NodeIndex, JoinTarget>,
+    node: NodeIndex,
 }
 
 /// Convenience struct for building join nodes.
 pub struct Builder {
-    emit: Vec<(flow::NodeIndex, usize)>,
-    join: HashMap<flow::NodeIndex, (bool, Vec<usize>)>,
+    emit: Vec<(NodeIndex, usize)>,
+    join: HashMap<NodeIndex, (bool, Vec<usize>)>,
 }
 
 impl Builder {
     /// Build a new join operator.
     ///
     /// `emit` dictates, for each output column, which source and column should be used.
-    pub fn new(emit: Vec<(flow::NodeIndex, usize)>) -> Self {
+    pub fn new(emit: Vec<(NodeIndex, usize)>) -> Self {
         Builder {
             emit: emit,
             join: HashMap::new(),
@@ -45,7 +42,7 @@ impl Builder {
     /// This is semantically identical to `join`, except that it also asserts that this is the
     /// first view being added. The first view is of particular importance as it dictates the
     /// behavior of later *left* joins (when they are added).
-    pub fn from(self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn from(self, node: NodeIndex, groups: Vec<usize>) -> Self {
         assert!(self.join.is_empty());
         self.join(node, groups)
     }
@@ -68,7 +65,7 @@ impl Builder {
     /// ```rust,ignore
     /// Builder::new(vec![(a, 0), (b, 0)]).from(a, vec![1, 0]).join(b, vec![0, 1, 0]);
     /// ```
-    pub fn join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn join(mut self, node: NodeIndex, groups: Vec<usize>) -> Self {
         assert!(self.join.insert(node, (false, groups)).is_none());
         self
     }
@@ -79,7 +76,7 @@ impl Builder {
     /// from other tables that join against this table will always be present in the output,
     /// regardless of whether matching records exist in `node`. For such *zero rows*, all columns
     /// emitted from this node will be set to `DataType::None`.
-    pub fn left_join(mut self, node: flow::NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn left_join(mut self, node: NodeIndex, groups: Vec<usize>) -> Self {
         assert!(self.join.insert(node, (true, groups)).is_none());
         self
     }
@@ -117,7 +114,7 @@ impl From<Builder> for Joiner {
                 // which groups are bound to which columns?
                 let g2c = srcg.iter()
                     .enumerate()
-                    .filter_map(|(c, &g)| { if g == 0 { None } else { Some((g, c)) } })
+                    .filter_map(|(c, &g)| if g == 0 { None } else { Some((g, c)) })
                     .collect::<HashMap<_, _>>();
 
                 // for every other view
@@ -157,7 +154,7 @@ impl From<Builder> for Joiner {
                 (src,
                  Join {
                      against: other,
-                     node: None,
+                     node: src,
                  })
             })
             .collect();
@@ -169,18 +166,6 @@ impl From<Builder> for Joiner {
     }
 }
 
-impl From<Joiner> for NodeType {
-    fn from(b: Joiner) -> NodeType {
-        NodeType::Join(b)
-    }
-}
-
-impl From<Builder> for NodeType {
-    fn from(b: Builder) -> NodeType {
-        NodeType::Join(b.into())
-    }
-}
-
 /// Joiner provides a 2-way join between two views.
 ///
 /// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
@@ -188,15 +173,16 @@ impl From<Builder> for NodeType {
 /// this other view".
 #[derive(Debug)]
 pub struct Joiner {
-    emit: Vec<(flow::NodeIndex, usize)>,
-    join: HashMap<flow::NodeIndex, Join>,
+    emit: Vec<(NodeIndex, usize)>,
+    join: HashMap<NodeIndex, Join>,
 }
 
 impl Joiner {
     fn join<'a>(&'a self,
-                left: (flow::NodeIndex, Vec<query::DataType>, i64),
-                ts: i64)
-                -> Box<Iterator<Item = (Vec<query::DataType>, i64)> + 'a> {
+                left: (NodeIndex, Vec<query::DataType>),
+                domain: &NodeList,
+                states: &StateMap)
+                -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
 
         // NOTE: this only works for two-way joins
         let other = *self.join.keys().find(|&other| other != &left.0).unwrap();
@@ -218,29 +204,33 @@ impl Joiner {
         let q = query::Query::new(&target.select[..], params);
 
         // send the parameters to start the query.
-        let rx = self.join[&other].node.as_ref().unwrap().find(Some(&q), Some(ts));
+        // TODO: avoid duplicating this exact code in every querying module
+        let rx = if let Some(state) = states.get(&other) {
+            // other node is materialized
+            state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
+        } else {
+            // other node is not materialized, query instead
+            domain.lookup(other).query(Some(&q), domain, states)
+        };
 
         if rx.is_empty() && target.outer {
-            return Box::new(Some((self.emit
-                                      .iter()
-                                      .map(|&(source, column)| {
-                    if source == other {
-                        query::DataType::None
-                    } else {
-                        // this clone is unnecessary
-                        left.1[column].clone()
-                    }
-                })
-                                      .collect(),
-                                  left.2))
+            return Box::new(Some(self.emit
+                    .iter()
+                    .map(|&(source, column)| {
+                        if source == other {
+                            query::DataType::None
+                        } else {
+                            // this clone is unnecessary
+                            left.1[column].clone()
+                        }
+                    })
+                    .collect::<Vec<_>>())
                 .into_iter());
         }
 
-        Box::new(rx.into_iter().map(move |(right, rts)| {
-            use std::cmp;
-
+        Box::new(rx.into_iter().map(move |right| {
             // weave together r and j according to join rules
-            let r = self.emit
+            self.emit
                 .iter()
                 .map(|&(source, column)| {
                     if source == other {
@@ -255,59 +245,61 @@ impl Joiner {
                         left.1[column].clone()
                     }
                 })
-                .collect();
-
-            // we need to be careful here.
-            // we want to emit a record with the *same* timestamp regardless of which side of the
-            // join is left and right. this is particularly important when the left is a negative,
-            // because we want the resulting negative records to have the same timestamp as the
-            // original positive we sent. however, the original positive *could* have been produced
-            // by a right, not a left. in that case, the positive has the timestamp of the right!
-            // we solve this by making the output timestamp always be the max of the left and
-            // right, as this must be the timestamp that resulted in the join output in the first
-            // place.
-            (r, cmp::max(left.2, rts))
+                .collect()
         }))
     }
 }
 
-impl NodeOp for Joiner {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        for (ni, j) in &mut self.join {
-            j.node = g[*ni].as_ref().cloned();
-
-            for (t, jt) in &mut j.against {
-                jt.select = iter::repeat(true)
-                    .take(g[*t].as_ref().unwrap().args().len())
-                    .collect::<Vec<_>>();
-            }
-        }
+impl Ingredient for Joiner {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         self.join.keys().cloned().collect()
     }
 
-    fn forward(&self,
-               u: Option<ops::Update>,
-               from: flow::NodeIndex,
-               ts: i64,
-               last: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn fields(&self) -> &[String] {
+        &[]
+    }
 
-        if u.is_none() {
-            return if last {
-                // all our ancestors sent a None, so nothing relevant for us to do
-                flow::ProcessingResult::Skip
-            } else {
-                // we should only be called with None on the last ancestor
-                debug_assert!(false);
-                // technically, it's not a problem though, we *could* just ignore it
-                // we keep the unreachable!() in place above anyway, just to catch this
-                flow::ProcessingResult::Accepted
-            };
+    fn should_materialize(&self) -> bool {
+        false
+    }
+
+    fn on_connected(&mut self, g: &Graph) {
+        for (_, j) in &mut self.join {
+            for (t, jt) in &mut j.against {
+                jt.select = iter::repeat(true)
+                    .take(g[*t].fields().len())
+                    .collect::<Vec<_>>();
+            }
         }
-        let u = u.unwrap();
+    }
 
-        match u {
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        // our ancestors may have been remapped
+        // we thus need to fix up any node indices that could have changed
+        for (from, to) in remap {
+            if let Some(j) = self.join.remove(from) {
+                assert!(self.join.insert(*to, j).is_none());
+            }
+
+            for j in self.join.values_mut() {
+                if let Some(t) = j.against.remove(from) {
+                    assert!(j.against.insert(*to, t).is_none());
+                }
+            }
+        }
+
+        for (ni, j) in &mut self.join {
+            j.node = remap[ni];
+        }
+
+        for &mut (ref mut ni, _) in &mut self.emit {
+            *ni = remap[&*ni];
+        }
+    }
+
+    fn on_input(&mut self, input: Message, nodes: &NodeList, state: &StateMap) -> Option<Update> {
+        let from = input.from;
+        match input.data {
             ops::Update::Records(rs) => {
                 // okay, so here's what's going on:
                 // the record(s) we receive are all from one side of the join. we need to query the
@@ -316,25 +308,26 @@ impl NodeOp for Joiner {
 
                 // TODO: we should be clever here, and only query once per *distinct join value*,
                 // instead of once per received record.
-                flow::ProcessingResult::Done(ops::Update::Records(rs.into_iter()
-                    .flat_map(|rec| {
-                        let (r, pos, lts) = rec.extract();
+                ops::Update::Records(rs.into_iter()
+                        .flat_map(|rec| {
+                            let (r, pos) = rec.extract();
 
-                        self.join((from, r, lts), ts).map(move |(res, ts)| {
-                            // return new row with appropriate sign
-                            if pos {
-                                ops::Record::Positive(res, ts)
-                            } else {
-                                ops::Record::Negative(res, ts)
-                            }
+                            self.join((from, r), nodes, state).map(move |res| {
+                                // return new row with appropriate sign
+                                if pos {
+                                    ops::Record::Positive(res)
+                                } else {
+                                    ops::Record::Negative(res)
+                                }
+                            })
                         })
-                    })
-                    .collect()))
+                        .collect())
+                    .into()
             }
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
         use std::iter;
 
         // We're essentially doing nested for loops, where each loop yields rows from one "table".
@@ -380,32 +373,36 @@ impl NodeOp for Joiner {
         // TODO: we probably don't need to select all columns here
         let lq = lparams.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(left.node.as_ref().unwrap().args().len())
+                                  .take(domain.lookup(left.node).fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
 
-        left.node
-            .as_ref()
-            .unwrap()
-            .find(lq.as_ref(), Some(ts))
-            .into_iter()
-            .flat_map(move |(lrec, lts)| {
+        let leftrx = if let Some(state) = states.get(&left.node) {
+            // other node is materialized
+            state.find(lq.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // other node is not materialized, query instead
+            domain.lookup(left.node).query(lq.as_ref(), domain, states)
+        };
+
+        leftrx.into_iter()
+            .flat_map(move |lrec| {
                 // TODO: also add constants from q to filter used to select from right
                 // TODO: respect q.select
-                self.join((lefti, lrec, lts), ts)
+                self.join((lefti, lrec), domain, states)
             })
-            .filter_map(move |(r, ts)| {
-                if let Some(q) = q {
-                    q.feed(r).map(|r| (r, ts))
-                } else {
-                    Some((r, ts))
-                }
+            .filter_map(move |r| if let Some(q) = q {
+                q.feed(r).map(|r| r)
+            } else {
+                Some(r)
             })
             .collect()
     }
 
-    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         use std::collections::HashSet;
 
         // index all join fields
@@ -436,7 +433,7 @@ impl NodeOp for Joiner {
             .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![self.emit[col].clone()])
     }
 

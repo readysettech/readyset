@@ -1,12 +1,11 @@
 use petgraph;
-use petgraph::graph::NodeIndex;
-use query;
 use shortcut;
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
-use flow::alt;
+use flow;
+use flow::prelude::*;
 pub mod list;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
@@ -38,32 +37,29 @@ mod single;
 
 pub struct Domain {
     domain: Index,
-    nodes: list::NodeList,
-    state: HashMap<NodeIndex, shortcut::Store<query::DataType>>,
-    handoffs: HashMap<NodeIndex, VecDeque<alt::Message>>,
+    nodes: NodeList,
+    state: StateMap,
+    handoffs: HashMap<NodeIndex, VecDeque<Message>>,
 }
 
 impl Domain {
-    pub fn from_graph(domain: Index,
-                      nodes: Vec<NodeIndex>,
-                      graph: &mut petgraph::Graph<alt::Node, alt::Edge>)
-                      -> Self {
+    pub fn from_graph(domain: Index, nodes: Vec<NodeIndex>, graph: &mut Graph) -> Self {
         let nodes: Vec<_> = nodes.into_iter()
             .map(|ni| {
                 use std::mem;
                 let n = match *graph.node_weight_mut(ni).unwrap() {
-                    alt::Node::Egress(d, ref txs) => {
+                    flow::Node::Egress(d, ref txs) => {
                         // egress nodes can still be modified externally if subgraphs are added
                         // so we just make a new one with a clone of the Mutex-protected Vec
-                        alt::Node::Egress(d, txs.clone())
+                        flow::Node::Egress(d, txs.clone())
                     }
-                    ref mut n @ alt::Node::Ingress(..) => {
+                    ref mut n @ flow::Node::Ingress(..) => {
                         // no-one else will be using our ingress node, so we take it from the graph
-                        mem::replace(n, alt::Node::Taken)
+                        mem::replace(n, flow::Node::Taken)
                     }
-                    ref mut n @ alt::Node::Internal(..) => {
+                    ref mut n @ flow::Node::Internal(..) => {
                         // same with internal nodes
-                        mem::replace(n, alt::Node::Taken)
+                        mem::replace(n, flow::Node::Taken)
                     }
                     _ => unreachable!(),
                 };
@@ -95,7 +91,7 @@ impl Domain {
                 // that edge has to be internal, since ingress/egress nodes have already been
                 // added, and they make sure that there are no cross-domain materialized edges).
                 match n.inner {
-                    alt::Node::Internal(_, ref i) => {
+                    flow::Node::Internal(_, ref i) => {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {

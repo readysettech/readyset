@@ -379,22 +379,19 @@ extern crate tarpc;
 mod flow;
 mod query;
 mod ops;
-mod backlog;
 
-pub use flow::{FlowGraph, NodeIndex, FreshnessProbe};
-pub use ops::new;
-pub use ops::NodeType;
+pub use flow::{Blender, Migration};
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
+pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
+pub use ops::identity::Identity;
 pub use ops::permute::Permute;
 pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use query::Query;
 pub use query::DataType;
-
-pub use flow::alt::{Blender, Migration};
 
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.

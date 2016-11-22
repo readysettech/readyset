@@ -1,9 +1,9 @@
-use ops;
 use query;
-use flow::NodeIndex;
 
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
+
+use flow::prelude::*;
 
 /// Supported aggregation operators.
 #[derive(Debug)]
@@ -63,8 +63,8 @@ pub struct Aggregator {
 impl GroupedOperation for Aggregator {
     type Diff = i64;
 
-    fn setup(&mut self, parent: &ops::V) {
-        assert!(self.over < parent.args().len(),
+    fn setup(&mut self, parent: &Ingredient) {
+        assert!(self.over < parent.fields().len(),
                 "cannot aggregate over non-existing column");
     }
 
@@ -91,12 +91,9 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn apply(&self,
-             current: &Option<query::DataType>,
-             diffs: Vec<(Self::Diff, i64)>)
-             -> query::DataType {
+    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         if let Some(query::DataType::Number(n)) = *current {
-            diffs.into_iter().fold(n, |n, (d, _)| n + d).into()
+            diffs.into_iter().fold(n, |n, d| n + d).into()
         } else {
             unreachable!();
         }
@@ -313,49 +310,37 @@ mod tests {
         if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 6); // one - and one + for each group
             // group 1 lost 1 and gained 2
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[0] == 1.into() && r[1] == 1.into() && ts == 4
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[0] == 1.into() && r[1] == 1.into() && ts == 4
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[0] == 1.into() && r[1] == 2.into() && ts == 5
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[0] == 1.into() && r[1] == 2.into() && ts == 5
+            } else {
+                false
             }));
             // group 2 lost 1 and gained 3
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[0] == 2.into() && r[1] == 1.into() && ts == 2
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[0] == 2.into() && r[1] == 1.into() && ts == 2
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[0] == 2.into() && r[1] == 3.into() && ts == 5
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[0] == 2.into() && r[1] == 3.into() && ts == 5
+            } else {
+                false
             }));
             // group 3 lost 1 (well, 0) and gained 1
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[0] == 3.into() && r[1] == 0.into() && ts == 0
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[0] == 3.into() && r[1] == 0.into() && ts == 0
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[0] == 3.into() && r[1] == 1.into() && ts == 5
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[0] == 3.into() && r[1] == 1.into() && ts == 5
+            } else {
+                false
             }));
         } else {
             unreachable!();

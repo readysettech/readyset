@@ -1,9 +1,9 @@
-use ops;
 use query;
-use flow::NodeIndex;
 
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
+
+use flow::prelude::*;
 
 /// Supported kinds of extremum operators.
 #[derive(Debug)]
@@ -67,8 +67,8 @@ pub enum DiffType {
 impl GroupedOperation for ExtremumOperator {
     type Diff = DiffType;
 
-    fn setup(&mut self, parent: &ops::V) {
-        assert!(self.over < parent.args().len(),
+    fn setup(&mut self, parent: &Ingredient) {
+        assert!(self.over < parent.fields().len(),
                 "cannot aggregate over non-existing column");
     }
 
@@ -94,10 +94,7 @@ impl GroupedOperation for ExtremumOperator {
         }
     }
 
-    fn apply(&self,
-             current: &Option<query::DataType>,
-             diffs: Vec<(Self::Diff, i64)>)
-             -> query::DataType {
+    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
@@ -105,18 +102,16 @@ impl GroupedOperation for ExtremumOperator {
             extreme_values.push(n);
         };
 
-        let is_extreme_value = |x: i64| {
-            if let &Some(query::DataType::Number(n)) = current {
-                match self.op {
-                    Extremum::MAX => x >= n,
-                    Extremum::MIN => x <= n,
-                }
-            } else {
-                true
+        let is_extreme_value = |x: i64| if let &Some(query::DataType::Number(n)) = current {
+            match self.op {
+                Extremum::MAX => x >= n,
+                Extremum::MIN => x <= n,
             }
+        } else {
+            true
         };
 
-        for (d, _) in diffs {
+        for d in diffs {
             match d {
                 DiffType::Insert(v) if is_extreme_value(v) => extreme_values.push(v),
                 DiffType::Remove(v) if is_extreme_value(v) => {

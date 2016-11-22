@@ -3,7 +3,7 @@ use std::slice;
 use std::collections::HashMap;
 
 use petgraph::graph::NodeIndex;
-use flow::alt::domain::single::NodeDescriptor;
+use flow::domain::single::NodeDescriptor;
 
 pub struct NodeList {
     nodes: Vec<cell::RefCell<NodeDescriptor>>,

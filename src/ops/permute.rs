@@ -1,30 +1,29 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
+use shortcut;
 
 use std::collections::HashMap;
 use std::iter;
 
-use shortcut;
+use flow::prelude::*;
 
 /// Permutes or omits columns from its source node.
 #[derive(Debug)]
 pub struct Permute {
     emit: Option<Vec<usize>>,
-    src: flow::NodeIndex,
-    srcn: Option<ops::V>,
+    src: NodeIndex,
+    cols: usize,
+    us: NodeIndex,
 }
 
 impl Permute {
     /// Construct a new permuter operator.
-    pub fn new(src: flow::NodeIndex, emit: &[usize]) -> Permute {
+    pub fn new(src: NodeIndex, emit: &[usize]) -> Permute {
         Permute {
             emit: Some(emit.into()),
             src: src,
-            srcn: None,
+            cols: 0,
+            us: 0.into(),
         }
     }
 
@@ -32,34 +31,63 @@ impl Permute {
         self.emit.as_ref().map_or(col, |emit| emit[col])
     }
 
-    fn permute(&self, data: Vec<query::DataType>) -> Vec<query::DataType> {
-        self.emit
-            .as_ref()
-            .map(|emit| {
-                // TODO: Avoid this clone when the permutation doesn't
-                // duplicate source columns. The borrow checker makes this
-                // quite hard.
-                emit.iter().map(|&col| data[col].clone()).collect()
-            })
-            .unwrap_or(data)
+    fn permute(&self, data: &mut [query::DataType]) {
+        if let Some(ref emit) = self.emit {
+            use std::iter;
+            // http://stackoverflow.com/a/1683662/472927
+            // TODO: compute the swaps in advance instead
+            let mut done: Vec<_> = iter::repeat(false).take(emit.len()).collect();
+            for i in 0..emit.len() {
+                if done[i] {
+                    continue;
+                }
+                if emit[i] == i {
+                    continue;
+                }
+
+                let t = data[i].clone();
+                let mut j = i;
+                loop {
+                    done[j] = true;
+                    if emit[j] != i {
+                        data[j] = data[emit[j]].clone();
+                        j = emit[j];
+                    } else {
+                        data[j] = t;
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
-impl From<Permute> for NodeType {
-    fn from(b: Permute) -> NodeType {
-        NodeType::Permute(b)
+impl Ingredient for Permute {
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src]
     }
-}
 
-impl NodeOp for Permute {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().cloned();
+    fn fields(&self) -> &[String] {
+        &[]
+    }
+
+    fn should_materialize(&self) -> bool {
+        false
+    }
+
+    fn on_connected(&mut self, g: &Graph) {
+        self.cols = g[self.src].fields().len();
+    }
+
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        self.us = us;
+        self.src = remap[&self.src];
 
         // Eliminate emit specifications which require no permutation of
         // the inputs, so we don't needlessly perform extra work on each
         // update.
         self.emit = self.emit.take().and_then(|emit| {
-            let complete = emit.len() == self.srcn.as_ref().unwrap().args().len();
+            let complete = emit.len() == self.cols;
             let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
             if complete && sequential {
                 None
@@ -67,48 +95,24 @@ impl NodeOp for Permute {
                 Some(emit)
             }
         });
-
-        vec![self.src]
     }
 
-    #[allow(unused_variables)]
-    fn forward(&self,
-               update: Option<ops::Update>,
-               src: flow::NodeIndex,
-               timestamp: i64,
-               last: bool,
-               materialized_view: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn on_input(&mut self, mut input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+        debug_assert_eq!(input.from, self.src);
 
-        if update.is_none() {
-            debug_assert!(last);
-            return update.into();
-        }
-
-        if let Some(ref emit) = self.emit {
-            let update = update.unwrap();
-            match update {
-                ops::Update::Records(rs) => {
-                    if rs.is_empty() {
-                        return flow::ProcessingResult::Skip;
+        if self.emit.is_some() {
+            match input.data {
+                ops::Update::Records(ref mut rs) => {
+                    for r in rs {
+                        self.permute(&mut *r);
                     }
-
-                    let out = rs.into_iter()
-                        .map(|r| {
-                            let (data, pos, ts) = r.extract();
-                            (self.permute(data), ts, pos).into()
-                        })
-                        .collect::<Vec<_>>();
-
-                    flow::ProcessingResult::Done(ops::Update::Records(out))
                 }
             }
-        } else {
-            update.into()
         }
+        input.data.into()
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
         use shortcut::cmp::Comparison::Equal;
         use shortcut::cmp::Value::{Const, Column};
 
@@ -116,7 +120,7 @@ impl NodeOp for Permute {
         // drops some fields--`self.permute` will end up dropping them
         // anyway--but it's not worth the trouble.
         let select = iter::repeat(true)
-            .take(self.srcn.as_ref().unwrap().args().len())
+            .take(domain.lookup(self.src).fields().len())
             .collect::<Vec<_>>();
 
         let q = q.map(|q| {
@@ -132,20 +136,30 @@ impl NodeOp for Permute {
             query::Query::new(&select, having.collect())
         });
 
-        self.srcn
-            .as_ref()
-            .unwrap()
-            .find(q.as_ref(), Some(ts))
-            .into_iter()
-            .map(|(r, ts)| (self.permute(r), ts))
-            .collect()
+        let mut rx = if let Some(state) = states.get(&self.src) {
+            // other node is materialized
+            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // other node is not materialized, query instead
+            domain.lookup(self.src).query(q.as_ref(), domain, states)
+        };
+
+        if self.emit.is_some() {
+            for r in rx.iter_mut() {
+                self.permute(&mut *r);
+            }
+        }
+        rx
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        self.srcn.as_ref().unwrap().suggest_indexes(self.src)
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        // TODO
+        HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![(self.src, self.resolve_col(col))])
     }
 

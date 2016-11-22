@@ -1,14 +1,12 @@
 use ops;
-use flow;
 use query;
-use backlog;
 use shortcut;
-use ops::NodeOp;
-use ops::NodeType;
 
 use std::fmt;
 use std::collections::HashSet;
 use std::collections::HashMap;
+
+use flow::prelude::*;
 
 // pub mod latest;
 pub mod aggregate;
@@ -45,7 +43,7 @@ pub trait GroupedOperation: fmt::Debug {
     /// optimized configuration structures to quickly execute the other trait methods.
     ///
     /// `parent` is a reference to the single ancestor node of this node in the flow graph.
-    fn setup(&mut self, parent: &ops::V);
+    fn setup(&mut self, parent: &Ingredient);
 
     /// List the columns used to group records.
     ///
@@ -64,57 +62,33 @@ pub trait GroupedOperation: fmt::Debug {
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value. When the group is empty, current is set to the zero value.
-    fn apply(&self,
-             current: &Option<query::DataType>,
-             diffs: Vec<(Self::Diff, i64)>)
-             -> query::DataType;
+    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
 
     fn description(&self) -> String;
 }
 
 #[derive(Debug)]
 pub struct GroupedOperator<T: GroupedOperation> {
-    src: flow::NodeIndex,
+    src: NodeIndex,
     inner: T,
 
-    srcn: Option<ops::V>,
+    // some cache state
+    us: NodeIndex,
     cols: usize,
+
+    // precomputed datastructures
     group: HashSet<usize>,
     cond: Vec<shortcut::Condition<query::DataType>>,
     colfix: Vec<usize>,
 }
 
-impl From<GroupedOperator<concat::GroupConcat>> for NodeType {
-    fn from(b: GroupedOperator<concat::GroupConcat>) -> NodeType {
-        NodeType::GroupConcat(b)
-    }
-}
-
-// impl From<GroupedOperator<latest::Latest>> for NodeType {
-//     fn from(b: GroupedOperator<latest::Latest>) -> NodeType {
-//         NodeType::Latest(b)
-//     }
-// }
-
-impl From<GroupedOperator<aggregate::Aggregator>> for NodeType {
-    fn from(b: GroupedOperator<aggregate::Aggregator>) -> NodeType {
-        NodeType::Aggregate(b)
-    }
-}
-
-impl From<GroupedOperator<extremum::ExtremumOperator>> for NodeType {
-    fn from(b: GroupedOperator<extremum::ExtremumOperator>) -> NodeType {
-        NodeType::Extremum(b)
-    }
-}
-
 impl<T: GroupedOperation> GroupedOperator<T> {
-    pub fn new(src: flow::NodeIndex, op: T) -> GroupedOperator<T> {
+    pub fn new(src: NodeIndex, op: T) -> GroupedOperator<T> {
         GroupedOperator {
             src: src,
             inner: op,
 
-            srcn: None,
+            us: 0.into(),
             cols: 0,
             group: HashSet::new(),
             cond: Vec::new(),
@@ -123,16 +97,29 @@ impl<T: GroupedOperation> GroupedOperator<T> {
     }
 }
 
-impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        // who's our parent?
-        self.srcn = g[self.src].as_ref().cloned();
+impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src]
+    }
+
+    fn fields(&self) -> &[String] {
+        &[]
+    }
+
+    fn should_materialize(&self) -> bool {
+        true
+    }
+
+    fn on_connected(&mut self, g: &Graph) {
+        use std::ops::Deref;
+
+        let srcn = &g[self.src];
 
         // give our inner operation a chance to initialize
-        self.inner.setup(self.srcn.as_ref().unwrap());
+        self.inner.setup(srcn.deref());
 
         // group by all columns
-        self.cols = self.srcn.as_ref().unwrap().args().len();
+        self.cols = srcn.fields().len();
         self.group.extend(self.inner.group_by().iter().cloned());
 
         // construct condition for querying into ourselves
@@ -162,34 +149,26 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
             })
             .collect();
         self.colfix.extend(colfix.into_iter());
-
-        vec![self.src]
     }
 
-    fn forward(&self,
-               u: Option<ops::Update>,
-               src: flow::NodeIndex,
-               _: i64,
-               last: bool,
-               db: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        // who's our parent really?
+        self.src = remap[&self.src];
 
-        assert_eq!(src, self.src);
+        // who are we?
+        self.us = us;
+    }
 
-        if u.is_none() {
-            // we only have one ancestor, so this must be last, and our ancestor sent nothing
-            debug_assert!(last);
-            return u.into();
-        }
-        let u = u.unwrap();
+    fn on_input(&mut self, input: Message, _: &NodeList, state: &StateMap) -> Option<Update> {
+        debug_assert_eq!(input.from, self.src);
 
         // Construct the query we'll need to query into ourselves
         let mut q = self.cond.clone();
 
-        match u {
+        match input.data {
             ops::Update::Records(rs) => {
                 if rs.is_empty() {
-                    return flow::ProcessingResult::Skip;
+                    return None;
                 }
 
                 // First, we want to be smart about multiple added/removed rows with same group.
@@ -197,20 +176,18 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                 // execute two queries.
                 let mut consolidate = HashMap::new();
                 for rec in rs {
-                    let (r, pos, ts) = rec.extract();
+                    let (r, pos) = rec.extract();
                     let val = self.inner.to_diff(&r[..], pos);
                     let group = r.into_iter()
                         .enumerate()
-                        .map(|(i, v)| {
-                            if self.group.contains(&i) {
-                                Some(v)
-                            } else {
-                                None
-                            }
+                        .map(|(i, v)| if self.group.contains(&i) {
+                            Some(v)
+                        } else {
+                            None
                         })
                         .collect::<Vec<_>>();
 
-                    consolidate.entry(group).or_insert_with(Vec::new).push((val, ts));
+                    consolidate.entry(group).or_insert_with(Vec::new).push(val);
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
@@ -231,17 +208,16 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                     }
 
                     // find the current value for this group
-                    let (current, old_ts) = match db {
+                    let current = match state.get(&self.us) {
                         Some(db) => {
-                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
-                                assert!(rs.len() <= 1, "a group had more than 1 result");
-                                // current value is in the last output column
-                                // or "" if there is no current group
-                                rs.into_iter()
-                                    .next()
-                                    .map(|(r, ts)| (r[r.len() - 1].clone().into(), ts))
-                                    .unwrap_or((self.inner.zero(), 0))
-                            })
+                            let mut rs = db.find(&q[..]);
+                            // current value is in the last output column
+                            // or "" if there is no current group
+                            let cur = rs.next()
+                                .map(|r| r[r.len() - 1].clone().into())
+                                .unwrap_or(self.inner.zero());
+                            assert_eq!(rs.count(), 0, "a group had more than 1 result");
+                            cur
                         }
                         None => {
                             // TODO
@@ -262,9 +238,6 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                         }
                     }
 
-                    // new ts is the max change timestamp
-                    let new_ts = diffs.iter().map(|&(_, ts)| ts).max().unwrap();
-
                     // new is the result of applying all diffs for the group to the current value
                     let new = self.inner.apply(&current, diffs);
 
@@ -275,7 +248,7 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                                 .filter_map(|v| v)
                                 .chain(Some(new.into()).into_iter())
                                 .collect();
-                            out.push(ops::Record::Positive(rec, new_ts));
+                            out.push(ops::Record::Positive(rec));
                         }
                         Some(ref current) if &new == current => {
                             // no change
@@ -287,24 +260,24 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
 
                             // revoke old value
                             rec.push(current.into());
-                            out.push(ops::Record::Negative(rec.clone(), old_ts));
+                            out.push(ops::Record::Negative(rec.clone()));
 
                             // remove the old value from the end of the record
                             rec.pop();
 
                             // emit new value
                             rec.push(new.into());
-                            out.push(ops::Record::Positive(rec, new_ts));
+                            out.push(ops::Record::Positive(rec));
                         }
                     }
                 }
 
-                flow::ProcessingResult::Done(ops::Update::Records(out))
+                ops::Update::Records(out).into()
             }
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
         use std::iter;
 
         // we're fetching everything from our parent
@@ -340,27 +313,31 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
                               ps)
         });
 
-        let rx = self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts));
+        let rx = if let Some(state) = states.get(&self.src) {
+            // parent is materialized
+            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // parent is not materialized, query into parent
+            domain.lookup(self.src).query(q.as_ref(), domain, states)
+        };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
         let mut consolidate = HashMap::new();
-        for (rec, ts) in rx {
-            use std::cmp;
-
+        for rec in rx {
             let val = self.inner.to_diff(&rec[..], true);
             let group = rec.into_iter()
                 .enumerate()
-                .filter_map(|(i, v)| {
-                    if self.group.contains(&i) {
-                        Some(v)
-                    } else {
-                        None
-                    }
+                .filter_map(|(i, v)| if self.group.contains(&i) {
+                    Some(v)
+                } else {
+                    None
                 })
                 .collect::<Vec<_>>();
 
-            let mut cur = consolidate.entry(group).or_insert_with(|| (self.inner.zero(), ts));
+            let mut cur = consolidate.entry(group).or_insert_with(|| self.inner.zero());
 
             // FIXME: this might turn out to be really expensive, since apply() is allowed to be an
             // expensive operation (like for group_concat). we *could* accumulate all records into
@@ -368,31 +345,28 @@ impl<T: GroupedOperation> NodeOp for GroupedOperator<T> {
             // that would mean much higher (and potentially unnecessary) memory usage. Ideally, we
             // would allow the GroupOperation to define its own aggregation container for this kind
             // of use-case, but we leave that as future work for now.
-            let next = self.inner.apply(&cur.0, vec![(val, ts)]);
-            cur.0 = Some(next);
-
-            // timestamp should always reflect the latest influencing record
-            cur.1 = cmp::max(ts, cur.1);
+            let next = self.inner.apply(&cur, vec![val]);
+            *cur = Some(next);
         }
 
         consolidate.into_iter()
-            .map(|(mut group, (val, ts))| {
+            .map(|(mut group, val)| {
                 group.push(val.unwrap());
                 // TODO: respect q.select
-                (group, ts)
+                group
             })
             .collect()
     }
 
-    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index all group by columns
         Some((this, self.group.iter().cloned().collect()))
             .into_iter()
             .collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
-        if col == self.srcn.as_ref().unwrap().args().len() - 1 {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        if col == self.cols - 1 {
             return None;
         }
         Some(vec![(self.src, self.colfix[col])])

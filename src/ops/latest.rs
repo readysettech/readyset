@@ -1,14 +1,11 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
+use shortcut;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use shortcut;
+use flow::prelude::*;
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///
@@ -16,8 +13,8 @@ use shortcut;
 /// latest for that group.
 #[derive(Debug)]
 pub struct Latest {
-    src: flow::NodeIndex,
-    srcn: Option<ops::V>,
+    us: NodeIndex,
+    src: NodeIndex,
     // MUST be in reverse sorted order!
     key: Vec<usize>,
     key_m: HashMap<usize, usize>,
@@ -29,47 +26,41 @@ impl Latest {
     /// `src` should be the ancestor the operation is performed over, and `keys` should be a list
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
-    pub fn new(src: flow::NodeIndex, mut keys: Vec<usize>) -> Latest {
+    pub fn new(src: NodeIndex, mut keys: Vec<usize>) -> Latest {
         keys.sort();
         let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
         keys.reverse();
         Latest {
+            us: 0.into(),
             src: src,
-            srcn: None,
             key: keys,
             key_m: key_m,
         }
     }
 }
 
-impl From<Latest> for NodeType {
-    fn from(b: Latest) -> NodeType {
-        NodeType::Latest(b)
-    }
-}
-
-impl NodeOp for Latest {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().cloned();
+impl Ingredient for Latest {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src]
     }
 
-    fn forward(&self,
-               u: Option<ops::Update>,
-               src: flow::NodeIndex,
-               _: i64,
-               last: bool,
-               db: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn fields(&self) -> &[String] {
+        &[]
+    }
 
-        assert_eq!(src, self.src);
+    fn should_materialize(&self) -> bool {
+        true
+    }
 
-        if u.is_none() {
-            // we only have one ancestor, so this must be last, and our ancestor sent nothing
-            debug_assert!(last);
-            return u.into();
-        }
-        let u = u.unwrap();
+    fn on_connected(&mut self, _: &Graph) {}
+
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        self.us = us;
+        self.src = remap[&self.src]
+    }
+
+    fn on_input(&mut self, input: Message, _: &NodeList, state: &StateMap) -> Option<Update> {
+        debug_assert_eq!(input.from, self.src);
 
         // Construct the query we'll need to query into ourselves to find current latest
         let mut q = self.key
@@ -82,7 +73,7 @@ impl NodeOp for Latest {
             })
             .collect::<Vec<_>>();
 
-        match u {
+        match input.data {
             ops::Update::Records(rs) => {
                 // We don't allow standalone negatives as input to a latest. This is because it
                 // would be very computationally expensive (and currently impossible) to find what
@@ -112,15 +103,14 @@ impl NodeOp for Latest {
                     }
 
                     // find the current value for this group
-                    let current = match db {
+                    let current = match state.get(&self.us) {
                         Some(db) => {
-                            db.find_and(&q[..], Some(i64::max_value()), |rs| {
-                                println!("{:?}: {:?}", q, rs);
-                                assert!(rs.len() <= 1, "latest group has more than 1 record");
-                                rs.into_iter()
-                                    .next()
-                                    .map(|(r, ts)| (r.into_iter().cloned().collect(), ts))
-                            })
+                            let mut rs = db.find(&q[..]);
+                            let cur = rs.next()
+                                .map(|r| (r.into_iter().cloned().collect(), 0));
+                            assert_eq!(rs.count(), 0, "latest group has more than 1 record");
+                            cur
+
                         }
                         None => {
                             // TODO: query ancestor (self.query?) based on self.key columns
@@ -145,7 +135,7 @@ impl NodeOp for Latest {
 
                     // if there was a previous latest for this key, revoke old record
                     if let Some(current) = current {
-                        out.push(ops::Record::Negative(current.0, current.1));
+                        out.push(ops::Record::Negative(current.0));
                     }
                     out.push(r);
                 }
@@ -155,17 +145,17 @@ impl NodeOp for Latest {
                 // handled groups above, and this loop here. maybe just kill it?
                 for r in neg {
                     // we can swap_remove here because we know self.keys is in reverse sorted order
-                    let (mut r, _, _) = r.extract();
+                    let (mut r, _) = r.extract();
                     let group: Vec<_> = self.key.iter().map(|&i| r.swap_remove(i)).collect();
                     assert!(handled.contains(&group));
                 }
 
-                flow::ProcessingResult::Done(ops::Update::Records(out))
+                ops::Update::Records(out).into()
             }
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
         use std::iter;
 
         // we're fetching everything from our parent
@@ -198,18 +188,26 @@ impl NodeOp for Latest {
 
         let q = params.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(self.srcn.as_ref().unwrap().args().len())
+                                  .take(domain.lookup(self.src).fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = self.srcn.as_ref().unwrap().find(q.as_ref(), Some(ts));
+        let rx = if let Some(state) = states.get(&self.src) {
+            // other node is materialized
+            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // other node is not materialized, query instead
+            domain.lookup(self.src).query(q.as_ref(), domain, states)
+        };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
         // aggregated state in memory until we've seen all rows.
-        let mut consolidate = HashMap::<_, (Vec<_>, i64)>::new();
-        for (rec, ts) in rx {
+        let mut consolidate = HashMap::<_, Vec<_>>::new();
+        for rec in rx {
             use std::collections::hash_map::Entry;
 
             let (group, rest): (Vec<_>, _) =
@@ -220,20 +218,18 @@ impl NodeOp for Latest {
             match consolidate.entry(group) {
                 Entry::Occupied(mut e) => {
                     let e = e.get_mut();
-                    if e.1 < ts {
-                        e.1 = ts;
-                        e.0.clear();
-                        e.0.extend(rest.into_iter().map(|(_, v)| v));
-                    }
+                    // TODO: only if newer
+                    e.clear();
+                    e.extend(rest.into_iter().map(|(_, v)| v));
                 }
                 Entry::Vacant(v) => {
-                    v.insert((rest.into_iter().map(|(_, v)| v).collect(), ts));
+                    v.insert(rest.into_iter().map(|(_, v)| v).collect());
                 }
             }
         }
 
         consolidate.into_iter()
-            .map(|(group, (rest, ts)): (Vec<_>, (Vec<_>, i64))| {
+            .map(|(group, rest): (Vec<_>, Vec<_>)| {
                 let all = group.len() + rest.len();
                 let mut group = group.into_iter();
                 let mut rest = rest.into_iter();
@@ -245,17 +241,17 @@ impl NodeOp for Latest {
                         row.push(rest.next().unwrap());
                     }
                 }
-                (row, ts)
+                row
             })
             .collect()
     }
 
-    fn suggest_indexes(&self, this: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index all key columns
         Some((this, self.key.clone())).into_iter().collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
 
@@ -410,34 +406,26 @@ mod tests {
         if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[0] == 1.into() && r[1] == 2.into() && ts == 3
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[0] == 1.into() && r[1] == 2.into() && ts == 3
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[0] == 1.into() && r[1] == 3.into() && ts == 4
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[0] == 1.into() && r[1] == 3.into() && ts == 4
+            } else {
+                false
             }));
             // group 2 lost 2 and gained 4
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[0] == 2.into() && r[1] == 2.into() && ts == 2
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[0] == 2.into() && r[1] == 2.into() && ts == 2
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[0] == 2.into() && r[1] == 4.into() && ts == 4
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[0] == 2.into() && r[1] == 4.into() && ts == 4
+            } else {
+                false
             }));
         } else {
             unreachable!();
@@ -523,34 +511,26 @@ mod tests {
         if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
             assert_eq!(rs.len(), 4); // one - and one + for each group
             // group 1 lost 2 and gained 3
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[1] == 1.into() && r[2] == 2.into() && ts == 3
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[1] == 1.into() && r[2] == 2.into() && ts == 3
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[1] == 1.into() && r[2] == 3.into() && ts == 4
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[1] == 1.into() && r[2] == 3.into() && ts == 4
+            } else {
+                false
             }));
             // group 2 lost 2 and gained 4
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Negative(ref r, ts) = *r {
-                    r[1] == 2.into() && r[2] == 2.into() && ts == 2
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r, ts) = *r {
+                r[1] == 2.into() && r[2] == 2.into() && ts == 2
+            } else {
+                false
             }));
-            assert!(rs.iter().any(|r| {
-                if let ops::Record::Positive(ref r, ts) = *r {
-                    r[1] == 2.into() && r[2] == 4.into() && ts == 4
-                } else {
-                    false
-                }
+            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r, ts) = *r {
+                r[1] == 2.into() && r[2] == 4.into() && ts == 4
+            } else {
+                false
             }));
         } else {
             unreachable!();

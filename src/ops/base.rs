@@ -1,9 +1,5 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
 
 use std::collections::HashMap;
 
@@ -13,57 +9,39 @@ use std::collections::HashMap;
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
 #[derive(Debug)]
-pub struct Base {}
+pub struct Base { }
 
-impl From<Base> for NodeType {
-    fn from(b: Base) -> NodeType {
-        NodeType::Base(b)
-    }
-}
+use flow::prelude::*;
 
-impl NodeOp for Base {
-    fn prime(&mut self, _: &ops::Graph) -> Vec<flow::NodeIndex> {
+impl Ingredient for Base {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         vec![]
     }
 
-    fn forward(&self,
-               mut u: Option<ops::Update>,
-               _: flow::NodeIndex,
-               ts: i64,
-               last: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
-
-        // basically our only job is to record timestamps
-        if let Some(ops::Update::Records(ref mut rs)) = u {
-            for r in rs.iter_mut() {
-                match *r {
-                    ops::Record::Positive(_, ref mut rts) |
-                    ops::Record::Negative(_, ref mut rts) => *rts = ts,
-                }
-            }
-        }
-
-        // we should only have one ancestor
-        debug_assert!(last);
-        u.into()
+    fn fields(&self) -> &[String] {
+        &[]
     }
 
-    fn query(&self, _: Option<&query::Query>, _: i64) -> ops::Datas {
-        unreachable!("base nodes are always materialized");
+    fn should_materialize(&self) -> bool {
+        true
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn on_connected(&mut self, _: &Graph) {}
+    fn on_commit(&mut self, _: NodeIndex, _: &HashMap<NodeIndex, NodeIndex>) {}
+    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+        Some(input.data)
+    }
+
+    fn query(&self, _: Option<&query::Query>, _: &NodeList, _: &StateMap) -> ops::Datas {
+        unreachable!("base nodes should never be queried directly");
+    }
+
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         HashMap::new()
     }
 
-    fn resolve(&self, _: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
-        // base tables are always materialized
-        unreachable!();
-    }
-
-    fn is_base(&self) -> bool {
-        true
+    fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        None
     }
 
     fn description(&self) -> String {

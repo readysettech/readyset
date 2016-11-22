@@ -1,33 +1,31 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
-use petgraph::graph::NodeIndex;
-
-use flow::alt;
-use flow::alt::domain::list;
+use flow;
+use flow::prelude::*;
 
 use ops;
-use query;
 use shortcut;
 
 pub struct NodeDescriptor {
     pub index: NodeIndex,
-    pub inner: alt::Node,
+    pub inner: flow::Node,
     pub children: Vec<NodeIndex>,
 }
 
 impl NodeDescriptor {
     pub fn iterate(&mut self,
-                   handoffs: &mut HashMap<NodeIndex, VecDeque<alt::Message>>,
-                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>,
-                   nodes: &list::NodeList) {
+                   handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
+                   state: &mut StateMap,
+                   nodes: &NodeList) {
         match self.inner {
-            alt::Node::Ingress(_, ref mut rx) => {
+            flow::Node::Ingress(_, ref mut rx) => {
                 // receive an update
                 debug_assert!(handoffs[&self.index].is_empty());
                 broadcast!(handoffs, rx.recv().unwrap(), &self.children[..]);
+                // TODO: may also need to materialize its output
             }
-            alt::Node::Egress(_, ref txs) => {
+            flow::Node::Egress(_, ref txs) => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
@@ -48,11 +46,11 @@ impl NodeDescriptor {
                     }
                 }
             }
-            alt::Node::Internal(..) => {
+            flow::Node::Internal(..) => {
                 while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
                     if let Some(u) = self.process_one(m, state, nodes) {
                         broadcast!(handoffs,
-                                   alt::Message {
+                                   Message {
                                        from: self.index,
                                        data: u,
                                    },
@@ -65,14 +63,14 @@ impl NodeDescriptor {
     }
 
     fn process_one(&mut self,
-                   m: alt::Message,
-                   state: &mut HashMap<NodeIndex, shortcut::Store<query::DataType>>,
-                   nodes: &list::NodeList)
-                   -> Option<ops::Update> {
+                   m: Message,
+                   state: &mut StateMap,
+                   nodes: &NodeList)
+                   -> Option<Update> {
 
         // first, process the incoming message
         let u = match self.inner {
-            alt::Node::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
+            flow::Node::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
             _ => unreachable!(),
         };
 
@@ -93,8 +91,8 @@ impl NodeDescriptor {
         if let Some(ops::Update::Records(ref rs)) = u {
             for r in rs.iter().cloned() {
                 match r {
-                    ops::Record::Positive(r, _) => state.insert(r),
-                    ops::Record::Negative(r, _) => {
+                    ops::Record::Positive(r) => state.insert(r),
+                    ops::Record::Negative(r) => {
                         // we need a cond that will match this row.
                         let conds = r.into_iter()
                             .enumerate()
@@ -123,5 +121,13 @@ impl NodeDescriptor {
         }
 
         u
+    }
+}
+
+use std::ops::Deref;
+impl Deref for NodeDescriptor {
+    type Target = Ingredient;
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
     }
 }
