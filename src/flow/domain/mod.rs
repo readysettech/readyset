@@ -23,22 +23,6 @@ impl Into<usize> for Index {
     }
 }
 
-macro_rules! broadcast {
-    ($handoffs:ident, $m:expr, $children:expr) => {{
-        let c = $children;
-        let mut m = Some($m); // so we can .take() below
-        for (i, to) in c.iter().enumerate() {
-            let u = if i == c.len() - 1 {
-                m.take()
-            } else {
-                m.clone()
-            };
-
-            $handoffs.get_mut(to).unwrap().push_back(u.unwrap());
-        }
-    }}
-}
-
 mod single;
 
 pub struct Domain {
