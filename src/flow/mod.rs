@@ -4,8 +4,6 @@ use petgraph::graph::NodeIndex;
 use query;
 use ops;
 
-use regex::Regex;
-
 use std::sync::mpsc;
 
 use std::collections::HashMap;
@@ -117,7 +115,6 @@ impl Blender {
 impl fmt::Display for Blender {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
-        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
 
         // Output header.
         writeln!(f, "digraph {{")?;
@@ -130,43 +127,19 @@ impl fmt::Display for Blender {
         for index in self.ingredients.node_indices() {
             indentln(f)?;
             write!(f, "{}", index.index())?;
-            write!(f, " [label=\"")?;
-
-            let n = &self.ingredients[index];
-            if let node::Type::Source = **n {
-                write!(f, "(source)")?;
-            } else {
-                write!(f, "{{")?;
-
-                // Output node name and description. First row.
-                write!(f,
-                       "{{ {} / {} | {} }}",
-                       index.index(),
-                       escape(n.name()),
-                       escape(&n.description()))?;
-
-                // Output node outputs. Second row.
-                write!(f, " | {}", n.fields().join(", "))?;
-
-                // Maybe output node's HAVING conditions. Optional third row.
-                // TODO
-                // if let Some(conds) = n.node().unwrap().having_conditions() {
-                //     let conds = conds.iter()
-                //         .map(|c| format!("{}", c))
-                //         .collect::<Vec<_>>()
-                //         .join(" ∧ ");
-                //     write!(f, " | σ({})", escape(&conds))?;
-                // }
-
-                write!(f, " }}")?;
-            }
-            writeln!(f, "\"]")?;
+            self.ingredients[index].describe(f, index)?;
         }
 
         // Output edges.
         for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
             indentln(f)?;
-            writeln!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
+            write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
+            if !edge.weight {
+                // not materialized
+                writeln!(f, " [style=\"dashed\"]")?;
+            } else {
+                writeln!(f, "")?;
+            }
         }
 
         // Output footer.
@@ -219,7 +192,15 @@ impl<'a> Migration<'a> {
             self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, false);
+                // TODO: what if parent is an egress/ingress/taken?
+                // TODO: how do we expres the fact that a node wants to be materialized
+                // *regardless* of its children? (e.g., for those nodes that query into
+                // themselves).
+                if self.mainline.ingredients[parent].should_materialize() {
+                    self.mainline.ingredients.add_edge(parent, ni, true);
+                } else {
+                    self.mainline.ingredients.add_edge(parent, ni, false);
+                }
             }
         }
         // and tell the caller its id
@@ -430,7 +411,8 @@ impl<'a> Migration<'a> {
         //     :  | \         :   o
         //
         // etc.
-        //
+        println!("{}", self.mainline);
+
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
             self.boot_domain(domain, nodes);

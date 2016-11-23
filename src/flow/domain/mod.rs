@@ -17,6 +17,12 @@ impl From<usize> for Index {
     }
 }
 
+impl Into<usize> for Index {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+
 macro_rules! broadcast {
     ($handoffs:ident, $m:expr, $children:expr) => {{
         let c = $children;

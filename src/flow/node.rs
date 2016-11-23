@@ -1,5 +1,8 @@
+use petgraph::graph::NodeIndex;
+
 use std::sync::mpsc;
 use std::sync;
+use std::fmt;
 
 use std::ops::{Deref, DerefMut};
 
@@ -120,6 +123,53 @@ impl Node {
             }
             _ => unreachable!(),
         }
+    }
+
+    pub fn describe(&self, f: &mut fmt::Formatter, idx: NodeIndex) -> fmt::Result {
+        use regex::Regex;
+
+        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
+        write!(f,
+               " [style=filled, fillcolor={}, label=\"",
+               self.domain()
+                   .map(|d| -> usize { d.into() })
+                   .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                   .unwrap_or("white".into()))?;
+
+        match self.inner {
+            Type::Source => write!(f, "(source)"),
+            Type::Ingress(..) => write!(f, "(ingress)"),
+            Type::Egress(..) => write!(f, "(egress)"),
+            Type::Unassigned(ref i) |
+            Type::Internal(_, ref i) => {
+                write!(f, "{{")?;
+
+                // Output node name and description. First row.
+                write!(f,
+                       "{{ {} / {} | {} }}",
+                       idx.index(),
+                       escape(self.name()),
+                       escape(&i.description()))?;
+
+                // Output node outputs. Second row.
+                write!(f, " | {}", self.fields().join(", "))?;
+
+                // Maybe output node's HAVING conditions. Optional third row.
+                // TODO
+                // if let Some(conds) = n.node().unwrap().having_conditions() {
+                //     let conds = conds.iter()
+                //         .map(|c| format!("{}", c))
+                //         .collect::<Vec<_>>()
+                //         .join(" ∧ ");
+                //     write!(f, " | σ({})", escape(&conds))?;
+                // }
+
+                write!(f, " }}")
+            }
+            Type::Taken => write!(f, "(taken)"),
+        }?;
+
+        writeln!(f, "\"]")
     }
 }
 
