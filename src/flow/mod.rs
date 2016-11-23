@@ -280,6 +280,10 @@ impl<'a> Migration<'a> {
         let mut domain_remap = HashMap::new();
         let mut targets = HashMap::new();
         let mut domain_nodes = HashMap::new();
+
+        // find all new nodes in topological order
+        // we collect first since we'll be mutating the graph below
+        let mut topo_list = Vec::with_capacity(self.added.len());
         let mut topo = petgraph::visit::Topo::new(&self.mainline.ingredients);
         while let Some(node) = topo.next(&self.mainline.ingredients) {
             if node == self.mainline.source {
@@ -289,45 +293,66 @@ impl<'a> Migration<'a> {
                 // not new
                 continue;
             }
+            topo_list.push(node);
+        }
 
+        for node in topo_list {
             let domain = self.added.get(&node).unwrap().unwrap_or_else(|| {
                 // new node that doesn't belong to a domain
                 // create a new domain just for that node
                 self.add_domain()
             });
 
+            // identity mapping
+            domain_remap.entry(domain).or_insert_with(HashMap::new).insert(node, node);
+
             let parents: Vec<_> = self.mainline
                 .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .collect(); // collect so we can mutate mainline.ingredients
 
-            let mut ingress = None;
             for parent in parents {
                 if parent == self.mainline.source ||
-                   domain != self.mainline.ingredients[parent].domain() {
+                   domain != self.mainline.ingredients[parent].domain().unwrap() {
                     // parent is in a different domain
-                    // create an ingress node to handle that if we haven't already
-                    if ingress.is_none() {
-                        // it's going to need its own channel
-                        let (tx, rx) = mpsc::channel();
-                        // and it needs to be in the graph
-                        let proxy = self.mainline.ingredients[parent]
-                            .mirror(node::Type::Ingress(domain, rx));
-                        ingress = Some(self.mainline.ingredients.add_node(proxy));
+                    // create an ingress node to handle that
+                    // it's going to need its own channel
+                    let (tx, rx) = mpsc::channel();
+                    // and it needs to be in the graph
+                    let proxy = self.mainline.ingredients[parent]
+                        .mirror(node::Type::Ingress(domain, rx));
+                    let ingress = self.mainline.ingredients.add_node(proxy);
 
-                        let ingress = ingress.unwrap();
-                        // that ingress node also needs to run before us
-                        domain_nodes.entry(domain).or_insert_with(Vec::new).push(ingress);
-                        // we're also going to need to tell any egress node that will send to this
-                        // node about the channel it should use. we'll do that later, so just keep
-                        // track of this work for later for now.
-                        targets.insert(ingress, tx);
+                    // that ingress node also needs to run before us
+                    domain_nodes.entry(domain).or_insert_with(Vec::new).push(ingress);
+
+                    // we're also going to need to tell any egress node that will send to this
+                    // node about the channel it should use. we'll do that later, so just keep
+                    // track of this work for later for now.
+                    targets.insert(ingress, tx);
+
+                    // note that, since we are traversing in topological order, our parent in this
+                    // case should either be the source node, or it should be an egress node!
+                    if cfg!(debug_assertions) && parent != self.mainline.source {
+                        if let node::Type::Egress(..) = *self.mainline.ingredients[parent] {
+                        } else {
+                            unreachable!("parent of ingress is not an egress");
+                        }
                     }
 
-                    // keep track of the remapping
-                    domain_remap.entry(domain).or_insert_with(HashMap::new).insert(parent, node);
+                    // anything that used to depend on the *parent* of the egress node above us
+                    // should now depend on this ingress node instead
+                    if parent != self.mainline.source {
+                        let original = self.mainline
+                            .ingredients
+                            .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
+                            .next()
+                            .unwrap();
+                        domain_remap.entry(domain)
+                            .or_insert_with(HashMap::new)
+                            .insert(original, ingress);
+                    }
 
-                    let ingress = ingress.unwrap();
                     // we need to hook the ingress node in between us and this parent
                     let old = self.mainline.ingredients.find_edge(parent, node).unwrap();
                     let was_materialized = self.mainline.ingredients.remove_edge(old).unwrap();
@@ -363,7 +388,10 @@ impl<'a> Migration<'a> {
                 .collect(); // collect so we can mutate mainline.ingredients
 
             for child in children {
-                if domain != self.mainline.ingredients[child].domain() {
+                let cdomain = self.mainline.ingredients[child]
+                    .domain()
+                    .or_else(|| self.added.get(&child).unwrap().clone());
+                if cdomain.is_none() || domain != cdomain.unwrap() {
                     // child is in a different domain
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
@@ -372,21 +400,10 @@ impl<'a> Migration<'a> {
                     let egress = self.mainline.ingredients.add_node(proxy);
 
                     // we need to hook that node in between us and this child
-                    // note that we *know* that this is an edge to an ingress node, as we prepended
-                    // all nodes with a different-domain parent with an ingress node above.
-                    if cfg!(debug_assertions) {
-                        if let node::Type::Ingress(..) = *self.mainline.ingredients[child] {
-                        } else {
-                            unreachable!("child of egress is not an ingress");
-                        }
-                    }
-
                     let old = self.mainline.ingredients.find_edge(node, child).unwrap();
-                    self.mainline.ingredients.remove_edge(old);
-                    // because all our outgoing edges are to ingress nodes,
-                    // they should never be materialized
+                    let was_materialized = self.mainline.ingredients.remove_edge(old).unwrap();
                     self.mainline.ingredients.add_edge(node, egress, false);
-                    self.mainline.ingredients.add_edge(egress, child, false);
+                    self.mainline.ingredients.add_edge(egress, child, was_materialized);
                     // that egress node also needs to run
                     domain_nodes.entry(domain).or_insert_with(Vec::new).push(egress);
                 }

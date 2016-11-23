@@ -16,12 +16,12 @@ pub enum Type {
 }
 
 impl Type {
-    fn domain(&self) -> domain::Index {
+    fn domain(&self) -> Option<domain::Index> {
         match *self {
             Type::Ingress(d, _) |
             Type::Internal(d, _) |
-            Type::Egress(d, _) => d,
-            _ => unreachable!(),
+            Type::Egress(d, _) => Some(d),
+            _ => None,
         }
     }
 }
@@ -86,7 +86,7 @@ impl Node {
         &self.fields[..]
     }
 
-    pub fn domain(&self) -> domain::Index {
+    pub fn domain(&self) -> Option<domain::Index> {
         self.inner.domain()
     }
 
