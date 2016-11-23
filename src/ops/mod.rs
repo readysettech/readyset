@@ -64,7 +64,7 @@ impl DerefMut for Record {
 
 impl From<Vec<query::DataType>> for Record {
     fn from(other: Vec<query::DataType>) -> Self {
-        (other).into()
+        Record::Positive(other)
     }
 }
 
