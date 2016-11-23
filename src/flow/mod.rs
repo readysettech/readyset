@@ -1,4 +1,5 @@
 pub mod sql_to_flow;
+mod query_graph;
 
 use petgraph;
 use clocked_dispatch;

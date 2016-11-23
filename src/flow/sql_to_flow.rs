@@ -2,12 +2,14 @@ use nom_sql::parser as sql_parser;
 use nom_sql::parser::{Column, ConditionBase, ConditionExpression, FieldExpression, Operator,
                       SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
+use flow;
 use FlowGraph;
 use ops;
 use ops::Node;
 use ops::base::Base;
 use ops::identity::Identity;
 use query::{DataType, Query};
+use super::query_graph::to_query_graph;
 use shortcut;
 
 use petgraph;
@@ -90,12 +92,29 @@ fn make_filter_nodes(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
     nodes
 }
 
+fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
+    let qg = to_query_graph(st);
+    println!("Query graph: {:#?}", qg);
+
+    let new_nodes = Vec::new();
+    for rel in qg.relations.iter() {
+        // add a basic filter/permute node for each query graph node
+        // TODO(malte): implement!
+    }
+    for edge in qg.edges.iter() {
+        // query graph edges are joins, so add a join node for each
+        // TODO(malte): implement!
+    }
+    new_nodes
+}
+
 fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
     println!("{:#?}", q);
 
     match q {
         SqlQuery::Insert(iq) => vec![make_base_node(&iq)],
         SqlQuery::Select(sq) => make_filter_nodes(&sq, g),
+        // SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
     }
 }
 
