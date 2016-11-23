@@ -66,7 +66,7 @@ fn make_filter_nodes(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
         FieldExpression::All => unimplemented!(),
         FieldExpression::Seq(ref s) => s.clone(),
     };
-    let nodes = Vec::new();
+    let mut nodes = Vec::new();
     for t in st.tables.iter() {
         // XXX(malte): This isn't correct yet, because it completely ignores joins. This basically
         // creates an edge node that projects the right base columns and applies any filter
@@ -85,6 +85,7 @@ fn make_filter_nodes(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
                 n = n.having(to_conditions(cond));
             }
         }
+        nodes.push(n);
     }
     nodes
 }
@@ -152,7 +153,7 @@ mod tests {
         assert_eq!(g.graph.node_count(), 2);
         assert_eq!(get_view(&g, "users").name(), "users");
 
-        assert!("SELECT * from users;".to_flow_parts(&mut g).is_ok());
+        assert!("SELECT users.id from users;".to_flow_parts(&mut g).is_ok());
         // Should now have source, "users" and the new selection
         assert_eq!(g.graph.node_count(), 3);
 
@@ -174,7 +175,9 @@ mod tests {
         assert_eq!(get_view(&g, "users").name(), "users");
 
         // Try a simple query
-        assert!("SELECT * from users;".to_flow_parts(&mut g).is_ok());
+        assert!("SELECT users.id, users.name FROM users WHERE id = 42;"
+            .to_flow_parts(&mut g)
+            .is_ok());
         println!("{}", g);
     }
 }
