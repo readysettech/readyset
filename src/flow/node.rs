@@ -14,13 +14,14 @@ pub enum Type {
     Internal(domain::Index, Box<Ingredient>),
     Egress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
     Unassigned(Box<Ingredient>),
-    Taken,
+    Taken(domain::Index),
     Source,
 }
 
 impl Type {
     fn domain(&self) -> Option<domain::Index> {
         match *self {
+            Type::Taken(d) |
             Type::Ingress(d, _) |
             Type::Internal(d, _) |
             Type::Egress(d, _) => Some(d),
@@ -95,6 +96,7 @@ impl Node {
 
     pub fn take(&mut self) -> Node {
         use std::mem;
+        let domain = self.domain();
         let inner = match self.inner {
             Type::Egress(d, ref txs) => {
                 // egress nodes can still be modified externally if subgraphs are added
@@ -103,11 +105,11 @@ impl Node {
             }
             ref mut n @ Type::Ingress(..) => {
                 // no-one else will be using our ingress node, so we take it from the graph
-                mem::replace(n, Type::Taken)
+                mem::replace(n, Type::Taken(domain.unwrap()))
             }
             ref mut n @ Type::Internal(..) => {
                 // same with internal nodes
-                mem::replace(n, Type::Taken)
+                mem::replace(n, Type::Taken(domain.unwrap()))
             }
             _ => unreachable!(),
         };
@@ -117,7 +119,7 @@ impl Node {
 
     pub fn add_to(&mut self, domain: domain::Index) {
         use std::mem;
-        match mem::replace(&mut self.inner, Type::Taken) {
+        match mem::replace(&mut self.inner, Type::Taken(domain)) {
             Type::Unassigned(inner) => {
                 self.inner = Type::Internal(domain, inner);
             }
@@ -138,8 +140,8 @@ impl Node {
 
         match self.inner {
             Type::Source => write!(f, "(source)"),
-            Type::Ingress(..) => write!(f, "(ingress)"),
-            Type::Egress(..) => write!(f, "(egress)"),
+            Type::Ingress(..) => write!(f, "{{ {} | (ingress) }}", idx.index()),
+            Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::Unassigned(ref i) |
             Type::Internal(_, ref i) => {
                 write!(f, "{{")?;
@@ -166,7 +168,7 @@ impl Node {
 
                 write!(f, " }}")
             }
-            Type::Taken => write!(f, "(taken)"),
+            Type::Taken(_) => write!(f, "(taken)"),
         }?;
 
         writeln!(f, "\"]")

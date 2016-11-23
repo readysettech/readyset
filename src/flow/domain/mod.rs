@@ -45,7 +45,9 @@ impl Domain {
                 // also include all *internal* descendants
                 let children: Vec<_> = graph
                     .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&c| graph[c].domain().unwrap() == domain)
+                    .filter(|&c| {
+                        graph[c].domain().unwrap() == domain
+                    })
                     .collect();
 
                 single::NodeDescriptor {
