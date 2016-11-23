@@ -166,6 +166,14 @@ impl From<Builder> for Joiner {
     }
 }
 
+use flow::node;
+impl Into<node::Type> for Builder {
+    fn into(self) -> node::Type {
+        let j: Joiner = self.into();
+        node::Type::Unassigned(Box::new(j) as Box<Ingredient>)
+    }
+}
+
 /// Joiner provides a 2-way join between two views.
 ///
 /// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring

@@ -107,8 +107,6 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        use std::ops::Deref;
-
         let srcn = &g[self.src];
 
         // give our inner operation a chance to initialize

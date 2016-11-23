@@ -7,14 +7,11 @@ use ops;
 use regex::Regex;
 
 use std::sync::mpsc;
-use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use std::fmt;
-
-use std::ops::{Deref, DerefMut};
 
 pub mod domain;
 pub mod prelude;
@@ -94,6 +91,29 @@ pub struct Blender {
     ndomains: usize,
 }
 
+impl Blender {
+    /// Construct a new, empty `Blender`
+    pub fn new() -> Self {
+        let mut g = petgraph::Graph::new();
+        let source =
+            g.add_node(node::Node::new("source", &["because-type-inference"], node::Type::Source));
+        Blender {
+            ingredients: g,
+            source: source,
+            ndomains: 0,
+        }
+    }
+
+    /// Start setting up a new `Migration`.
+    pub fn start_migration<'a>(&'a mut self) -> Migration<'a> {
+        Migration {
+            mainline: self,
+            added: Default::default(),
+            materialize: Default::default(),
+        }
+    }
+}
+
 impl fmt::Display for Blender {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
@@ -166,17 +186,6 @@ pub struct Migration<'a> {
     materialize: HashSet<(NodeIndex, NodeIndex)>,
 }
 
-impl Blender {
-    /// Start setting up a new `Migration`.
-    pub fn start_migration<'a>(&'a mut self) -> Migration<'a> {
-        Migration {
-            mainline: self,
-            added: Default::default(),
-            materialize: Default::default(),
-        }
-    }
-}
-
 impl<'a> Migration<'a> {
     /// Add a new (empty) domain to the graph
     pub fn add_domain(&mut self) -> domain::Index {
@@ -189,20 +198,19 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, mut i: I) -> NodeIndex
+    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>,
-              I: Ingredient + 'static
+              I: Into<node::Type>
     {
+        let mut i = i.into();
         i.on_connected(&self.mainline.ingredients);
 
         let parents = i.ancestors();
 
         // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name, fields, node::Type::Unassigned(Box::new(i))));
+        let ni = self.mainline.ingredients.add_node(node::Node::new(name, fields, i));
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
@@ -263,7 +271,9 @@ impl<'a> Migration<'a> {
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
-    pub fn commit(mut self) -> HashMap<NodeIndex, mpsc::Sender<U>> {
+    pub fn commit(mut self)
+                  -> (HashMap<NodeIndex, Box<Fn(Vec<query::DataType>) + Send + 'static>>,
+                      HashMap<NodeIndex, Box<Fn(Option<&query::Query>) -> Vec<Vec<query::DataType>> + Send + Sync>>) {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -420,8 +430,6 @@ impl<'a> Migration<'a> {
                     .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming) {
 
                     if egress == self.mainline.source {
-                        use std::thread;
-
                         // input node
                         debug_assert_eq!(self
                             .mainline
@@ -432,17 +440,16 @@ impl<'a> Migration<'a> {
 
                         // we want to avoid forcing the end-user to cook up Messages
                         // they should instead just make Us
-                        // start a thread that does that conversion
-                        let (tx2, rx2) = mpsc::channel();
                         let src = self.mainline.source;
-                        thread::spawn(move || for u in rx2 {
+                        sources.insert(ingress,
+                                       Box::new(move |u: Vec<query::DataType>| {
                             tx.send(Message {
                                     from: src,
-                                    data: u,
+                                    data: u.into(),
                                 })
-                                .unwrap();
-                        });
-                        sources.insert(ingress, tx2);
+                                .unwrap()
+
+                        }) as Box<Fn(_) + Send>);
                         break;
                     }
 
@@ -459,6 +466,7 @@ impl<'a> Migration<'a> {
             }
         }
 
-        sources
+        // TODO: getters
+        (sources, HashMap::new())
     }
 }

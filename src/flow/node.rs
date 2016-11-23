@@ -47,6 +47,14 @@ impl DerefMut for Type {
     }
 }
 
+impl<I> From<I> for Type
+    where I: Ingredient + 'static
+{
+    fn from(i: I) -> Type {
+        Type::Unassigned(Box::new(i))
+    }
+}
+
 pub struct Node {
     inner: Type,
     name: String,
