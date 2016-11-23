@@ -4,13 +4,15 @@ use petgraph::graph::NodeIndex;
 use query;
 use ops;
 
+use regex::Regex;
+
 use std::sync::mpsc;
 use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use std::fmt::Debug;
+use std::fmt;
 
 use std::ops::{Deref, DerefMut};
 
@@ -29,7 +31,7 @@ pub struct Message {
 pub type Edge = bool; // should the edge be materialized?
 
 pub trait Ingredient
-    where Self: Send + Debug
+    where Self: Send
 {
     fn ancestors(&self) -> Vec<NodeIndex>;
     fn should_materialize(&self) -> bool;
@@ -208,11 +210,6 @@ impl DerefMut for Node {
 //         &*self.inner
 //     }
 // }
-// impl Debug for Node {
-//    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//        write!(f, "{:?}({:#?})", self.name, self.inner)
-//    }
-//
 
 /// `Blender` is the core component of the alternate Soup implementation.
 ///
@@ -224,6 +221,68 @@ pub struct Blender {
     ingredients: petgraph::Graph<Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
+}
+
+impl fmt::Display for Blender {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let indentln = |f: &mut fmt::Formatter| write!(f, "    ");
+        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
+
+        // Output header.
+        writeln!(f, "digraph {{")?;
+
+        // Output global formatting.
+        indentln(f)?;
+        writeln!(f, "node [shape=record, fontsize=10]")?;
+
+        // Output node descriptions.
+        for index in self.ingredients.node_indices() {
+            indentln(f)?;
+            write!(f, "{}", index.index())?;
+            write!(f, " [label=\"")?;
+
+            let n = &self.ingredients[index];
+            if let NodeType::Source = n.inner {
+                write!(f, "(source)")?;
+            } else {
+                write!(f, "{{")?;
+
+                // Output node name and description. First row.
+                write!(f,
+                       "{{ {} / {} | {} }}",
+                       index.index(),
+                       escape(n.name()),
+                       escape(&n.description()))?;
+
+                // Output node outputs. Second row.
+                write!(f, " | {}", n.fields().join(", "))?;
+
+                // Maybe output node's HAVING conditions. Optional third row.
+                // TODO
+                // if let Some(conds) = n.node().unwrap().having_conditions() {
+                //     let conds = conds.iter()
+                //         .map(|c| format!("{}", c))
+                //         .collect::<Vec<_>>()
+                //         .join(" ∧ ");
+                //     write!(f, " | σ({})", escape(&conds))?;
+                // }
+
+                write!(f, " }}")?;
+            }
+            writeln!(f, "\"]")?;
+        }
+
+        // Output edges.
+        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
+            indentln(f)?;
+            writeln!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
+        }
+
+        // Output footer.
+        write!(f, "}}")?;
+
+        Ok(())
+    }
 }
 
 /// A `Migration` encapsulates a number of changes to the Soup data flow graph.
