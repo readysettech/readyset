@@ -18,14 +18,14 @@ impl NodeDescriptor {
                    handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
                    state: &mut StateMap,
                    nodes: &NodeList) {
-        match self.inner {
-            flow::Node::Ingress(_, ref mut rx) => {
+        match self.inner.inner {
+            flow::NodeType::Ingress(_, ref mut rx) => {
                 // receive an update
                 debug_assert!(handoffs[&self.index].is_empty());
                 broadcast!(handoffs, rx.recv().unwrap(), &self.children[..]);
                 // TODO: may also need to materialize its output
             }
-            flow::Node::Egress(_, ref txs) => {
+            flow::NodeType::Egress(_, ref txs) => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
@@ -46,7 +46,7 @@ impl NodeDescriptor {
                     }
                 }
             }
-            flow::Node::Internal(..) => {
+            flow::NodeType::Internal(..) => {
                 while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
                     if let Some(u) = self.process_one(m, state, nodes) {
                         broadcast!(handoffs,
@@ -69,8 +69,8 @@ impl NodeDescriptor {
                    -> Option<Update> {
 
         // first, process the incoming message
-        let u = match self.inner {
-            flow::Node::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
+        let u = match *self.inner {
+            flow::NodeType::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
             _ => unreachable!(),
         };
 
@@ -126,8 +126,8 @@ impl NodeDescriptor {
 
 use std::ops::Deref;
 impl Deref for NodeDescriptor {
-    type Target = Ingredient;
+    type Target = Node;
     fn deref(&self) -> &Self::Target {
-        self.inner.deref()
+        &self.inner
     }
 }

@@ -103,7 +103,7 @@ impl GroupConcat {
 impl GroupedOperation for GroupConcat {
     type Diff = Modify;
 
-    fn setup(&mut self, parent: &Ingredient) {
+    fn setup(&mut self, parent: &Node) {
         // group by all columns
         let cols = parent.fields().len();
         let mut group = HashSet::new();

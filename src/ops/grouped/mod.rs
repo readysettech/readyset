@@ -43,7 +43,7 @@ pub trait GroupedOperation: fmt::Debug {
     /// optimized configuration structures to quickly execute the other trait methods.
     ///
     /// `parent` is a reference to the single ancestor node of this node in the flow graph.
-    fn setup(&mut self, parent: &Ingredient);
+    fn setup(&mut self, parent: &Node);
 
     /// List the columns used to group records.
     ///
@@ -102,10 +102,6 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         vec![self.src]
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         true
     }
@@ -116,7 +112,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         let srcn = &g[self.src];
 
         // give our inner operation a chance to initialize
-        self.inner.setup(srcn.deref());
+        self.inner.setup(srcn);
 
         // group by all columns
         self.cols = srcn.fields().len();

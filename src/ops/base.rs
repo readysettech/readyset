@@ -18,10 +18,6 @@ impl Ingredient for Base {
         vec![]
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         true
     }

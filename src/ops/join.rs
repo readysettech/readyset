@@ -255,10 +255,6 @@ impl Ingredient for Joiner {
         self.join.keys().cloned().collect()
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         false
     }

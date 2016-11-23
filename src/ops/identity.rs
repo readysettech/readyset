@@ -24,10 +24,6 @@ impl Ingredient for Identity {
         vec![self.src]
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         false
     }

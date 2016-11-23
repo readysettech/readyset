@@ -67,7 +67,7 @@ pub enum DiffType {
 impl GroupedOperation for ExtremumOperator {
     type Diff = DiffType;
 
-    fn setup(&mut self, parent: &Ingredient) {
+    fn setup(&mut self, parent: &Node) {
         assert!(self.over < parent.fields().len(),
                 "cannot aggregate over non-existing column");
     }

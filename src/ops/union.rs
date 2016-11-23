@@ -44,10 +44,6 @@ impl Ingredient for Union {
         self.emit.keys().cloned().collect()
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         false
     }

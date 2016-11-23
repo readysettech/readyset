@@ -46,24 +46,7 @@ impl Domain {
     pub fn from_graph(domain: Index, nodes: Vec<NodeIndex>, graph: &mut Graph) -> Self {
         let nodes: Vec<_> = nodes.into_iter()
             .map(|ni| {
-                use std::mem;
-                let n = match *graph.node_weight_mut(ni).unwrap() {
-                    flow::Node::Egress(d, ref txs) => {
-                        // egress nodes can still be modified externally if subgraphs are added
-                        // so we just make a new one with a clone of the Mutex-protected Vec
-                        flow::Node::Egress(d, txs.clone())
-                    }
-                    ref mut n @ flow::Node::Ingress(..) => {
-                        // no-one else will be using our ingress node, so we take it from the graph
-                        mem::replace(n, flow::Node::Taken)
-                    }
-                    ref mut n @ flow::Node::Internal(..) => {
-                        // same with internal nodes
-                        mem::replace(n, flow::Node::Taken)
-                    }
-                    _ => unreachable!(),
-                };
-                (ni, n)
+                (ni, graph.node_weight_mut(ni).unwrap().take())
             })
             .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
             .into_iter()
@@ -90,12 +73,12 @@ impl Domain {
                 // materialized, or that has an outgoing edge marked as materialized (we know that
                 // that edge has to be internal, since ingress/egress nodes have already been
                 // added, and they make sure that there are no cross-domain materialized edges).
-                match n.inner {
-                    flow::Node::Internal(_, ref i) => {
+                match *n.inner {
+                    flow::NodeType::Internal(_, ref i) => {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {
-                            Some((n.index, shortcut::Store::new(i.fields().len())))
+                            Some((n.index, shortcut::Store::new(n.inner.fields().len())))
                         } else {
                             None
                         }

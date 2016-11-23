@@ -63,7 +63,7 @@ pub struct Aggregator {
 impl GroupedOperation for Aggregator {
     type Diff = i64;
 
-    fn setup(&mut self, parent: &Ingredient) {
+    fn setup(&mut self, parent: &Node) {
         assert!(self.over < parent.fields().len(),
                 "cannot aggregate over non-existing column");
     }

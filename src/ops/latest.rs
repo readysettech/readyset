@@ -44,10 +44,6 @@ impl Ingredient for Latest {
         vec![self.src]
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         true
     }

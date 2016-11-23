@@ -67,10 +67,6 @@ impl Ingredient for Permute {
         vec![self.src]
     }
 
-    fn fields(&self) -> &[String] {
-        &[]
-    }
-
     fn should_materialize(&self) -> bool {
         false
     }
