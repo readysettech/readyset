@@ -74,7 +74,7 @@ impl Domain {
                 // that edge has to be internal, since ingress/egress nodes have already been
                 // added, and they make sure that there are no cross-domain materialized edges).
                 match *n.inner {
-                    flow::NodeType::Internal(_, ref i) => {
+                    flow::node::Type::Internal(_, ref i) => {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {

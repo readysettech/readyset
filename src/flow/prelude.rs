@@ -2,7 +2,7 @@ pub use flow::Ingredient;
 
 use petgraph;
 pub use petgraph::graph::NodeIndex;
-pub use flow::Node;
+pub use flow::node::Node;
 use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
 pub use flow::Message;

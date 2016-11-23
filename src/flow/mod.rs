@@ -18,8 +18,10 @@ use std::ops::{Deref, DerefMut};
 
 pub mod domain;
 pub mod prelude;
+pub mod node;
 
 type U = ops::Update;
+pub type Edge = bool; // should the edge be materialized?
 
 /// A Message exchanged over an edge in the graph.
 #[derive(Clone)]
@@ -27,8 +29,6 @@ pub struct Message {
     pub from: NodeIndex,
     pub data: U,
 }
-
-pub type Edge = bool; // should the edge be materialized?
 
 pub trait Ingredient
     where Self: Send
@@ -73,7 +73,7 @@ pub trait Ingredient
     ///    ⋃    |  Union
     fn description(&self) -> String;
 
-    fn on_connected(&mut self, graph: &petgraph::Graph<Node, Edge>);
+    fn on_connected(&mut self, graph: &petgraph::Graph<node::Node, Edge>);
     fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>);
     fn on_input(&mut self,
                 input: Message,
@@ -82,135 +82,6 @@ pub trait Ingredient
                 -> Option<U>;
 }
 
-pub enum NodeType {
-    Ingress(domain::Index, mpsc::Receiver<Message>),
-    Internal(domain::Index, Box<Ingredient>),
-    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
-    Unassigned(Box<Ingredient>),
-    Taken,
-    Source,
-}
-
-impl NodeType {
-    fn domain(&self) -> domain::Index {
-        match *self {
-            NodeType::Ingress(d, _) |
-            NodeType::Internal(d, _) |
-            NodeType::Egress(d, _) => d,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl Deref for NodeType {
-    type Target = Ingredient;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            &NodeType::Internal(_, ref i) |
-            &NodeType::Unassigned(ref i) => i.deref(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl DerefMut for NodeType {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            &mut NodeType::Internal(_, ref mut i) |
-            &mut NodeType::Unassigned(ref mut i) => i.deref_mut(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-pub struct Node {
-    inner: NodeType,
-    name: String,
-    fields: Vec<String>,
-}
-
-impl Node {
-    pub fn mirror(&self, n: NodeType) -> Node {
-        Node {
-            inner: n,
-            name: self.name.clone(),
-            fields: self.fields.clone(),
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        &*self.name
-    }
-
-    pub fn fields(&self) -> &[String] {
-        &self.fields[..]
-    }
-
-    pub fn domain(&self) -> domain::Index {
-        self.inner.domain()
-    }
-
-    pub fn take(&mut self) -> Node {
-        use std::mem;
-        let inner = match self.inner {
-            NodeType::Egress(d, ref txs) => {
-                // egress nodes can still be modified externally if subgraphs are added
-                // so we just make a new one with a clone of the Mutex-protected Vec
-                NodeType::Egress(d, txs.clone())
-            }
-            ref mut n @ NodeType::Ingress(..) => {
-                // no-one else will be using our ingress node, so we take it from the graph
-                mem::replace(n, NodeType::Taken)
-            }
-            ref mut n @ NodeType::Internal(..) => {
-                // same with internal nodes
-                mem::replace(n, NodeType::Taken)
-            }
-            _ => unreachable!(),
-        };
-
-        self.mirror(inner)
-    }
-}
-
-impl Deref for Node {
-    type Target = NodeType;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Node {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-// TODO: what do we do about .having?
-// impl Node {
-//     /// Add an output filter to this node.
-//     ///
-//     /// Only records matching the given conditions will be output from this node. This filtering
-//     /// applies both to feed-forward and to queries. Note that adding conditions in this way does
-//     /// *not* modify a node's input, and so the node may end up performing computation whose result
-//     /// will simply be discarded.
-//     ///
-//     /// Adding a HAVING condition will not reduce the size of the node's materialized state.
-//     pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
-//         self.having = Some(query::Query::new(&[], cond));
-//         self
-//     }
-//
-//     /// Retrieve a list of this node's output filters.
-//     pub fn having_conditions(&self) -> Option<&[shortcut::Condition<query::DataType>]> {
-//         self.having.as_ref().map(|q| &q.having[..])
-//     }
-//
-//     pub fn operator(&self) -> &NodeType {
-//         &*self.inner
-//     }
-// }
-
 /// `Blender` is the core component of the alternate Soup implementation.
 ///
 /// It keeps track of the structure of the underlying data flow graph and its domains. `Blender`
@@ -218,7 +89,7 @@ impl DerefMut for Node {
 /// `Migration`, which can be started using `Blender::start_migration`. Only one `Migration` can
 /// occur at any given point in time.
 pub struct Blender {
-    ingredients: petgraph::Graph<Node, Edge>,
+    ingredients: petgraph::Graph<node::Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
 }
@@ -242,7 +113,7 @@ impl fmt::Display for Blender {
             write!(f, " [label=\"")?;
 
             let n = &self.ingredients[index];
-            if let NodeType::Source = n.inner {
+            if let node::Type::Source = **n {
                 write!(f, "(source)")?;
             } else {
                 write!(f, "{{")?;
@@ -319,8 +190,8 @@ impl<'a> Migration<'a> {
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
     pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, mut i: I) -> NodeIndex
-        where S1: Into<String>,
-              S2: Into<String>,
+        where S1: ToString,
+              S2: ToString,
               FS: IntoIterator<Item = S2>,
               I: Ingredient + 'static
     {
@@ -329,11 +200,9 @@ impl<'a> Migration<'a> {
         let parents = i.ancestors();
 
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(Node {
-            name: name.into(),
-            fields: fields.into_iter().map(|s| s.into()).collect(),
-            inner: NodeType::Unassigned(Box::new(i)),
-        });
+        let ni = self.mainline
+            .ingredients
+            .add_node(node::Node::new(name, fields, node::Type::Unassigned(Box::new(i))));
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
@@ -433,7 +302,7 @@ impl<'a> Migration<'a> {
                         let (tx, rx) = mpsc::channel();
                         // and it needs to be in the graph
                         let proxy = self.mainline.ingredients[parent]
-                            .mirror(NodeType::Ingress(domain, rx));
+                            .mirror(node::Type::Ingress(domain, rx));
                         ingress = Some(self.mainline.ingredients.add_node(proxy));
 
                         let ingress = ingress.unwrap();
@@ -458,14 +327,7 @@ impl<'a> Migration<'a> {
             }
 
             // all user-supplied nodes are internal
-            use std::mem;
-            match mem::replace(&mut self.mainline.ingredients[node].inner, NodeType::Taken) {
-                NodeType::Unassigned(inner) => {
-                    self.mainline.ingredients.node_weight_mut(node).unwrap().inner =
-                        NodeType::Internal(domain, inner);
-                }
-                _ => unreachable!(),
-            }
+            self.mainline.ingredients[node].add_to(domain);
 
             // let node process the fact that its parents may have changed
             if let Some(remap) = domain_remap.get(&domain) {
@@ -496,14 +358,14 @@ impl<'a> Migration<'a> {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
                     let proxy = self.mainline.ingredients[node]
-                        .mirror(NodeType::Egress(domain, Default::default()));
+                        .mirror(node::Type::Egress(domain, Default::default()));
                     let egress = self.mainline.ingredients.add_node(proxy);
 
                     // we need to hook that node in between us and this child
                     // note that we *know* that this is an edge to an ingress node, as we prepended
                     // all nodes with a different-domain parent with an ingress node above.
                     if cfg!(debug_assertions) {
-                        if let NodeType::Ingress(..) = self.mainline.ingredients[child].inner {
+                        if let node::Type::Ingress(..) = *self.mainline.ingredients[child] {
                         } else {
                             unreachable!("child of egress is not an ingress");
                         }
@@ -550,7 +412,7 @@ impl<'a> Migration<'a> {
         // then, hook up the channels to new ingress nodes
         let mut sources = HashMap::new();
         for (ingress, tx) in targets {
-            if let NodeType::Ingress(..) = self.mainline.ingredients[ingress].inner {
+            if let node::Type::Ingress(..) = *self.mainline.ingredients[ingress] {
                 // any egress with an edge to this node needs to have a tx clone added to its tx
                 // channel set.
                 for egress in self.mainline
@@ -584,7 +446,7 @@ impl<'a> Migration<'a> {
                         break;
                     }
 
-                    if let NodeType::Egress(_, ref txs) = self.mainline.ingredients[egress].inner {
+                    if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
                         // connected to egress from other domain
                         txs.lock().unwrap().push(tx.clone());
                         continue;

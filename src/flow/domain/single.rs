@@ -9,7 +9,7 @@ use shortcut;
 
 pub struct NodeDescriptor {
     pub index: NodeIndex,
-    pub inner: flow::Node,
+    pub inner: Node,
     pub children: Vec<NodeIndex>,
 }
 
@@ -18,14 +18,14 @@ impl NodeDescriptor {
                    handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
                    state: &mut StateMap,
                    nodes: &NodeList) {
-        match self.inner.inner {
-            flow::NodeType::Ingress(_, ref mut rx) => {
+        match *self.inner {
+            flow::node::Type::Ingress(_, ref mut rx) => {
                 // receive an update
                 debug_assert!(handoffs[&self.index].is_empty());
                 broadcast!(handoffs, rx.recv().unwrap(), &self.children[..]);
                 // TODO: may also need to materialize its output
             }
-            flow::NodeType::Egress(_, ref txs) => {
+            flow::node::Type::Egress(_, ref txs) => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
@@ -46,19 +46,24 @@ impl NodeDescriptor {
                     }
                 }
             }
-            flow::NodeType::Internal(..) => {
-                while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
-                    if let Some(u) = self.process_one(m, state, nodes) {
-                        broadcast!(handoffs,
-                                   Message {
-                                       from: self.index,
-                                       data: u,
-                                   },
-                                   &self.children[..]);
-                    }
-                }
+            flow::node::Type::Internal(..) => {
+                // we need &mut self
+                // workaround for https://github.com/rust-lang/rust/issues/37949
             }
             _ => unreachable!(),
+        }
+
+        if let flow::node::Type::Internal(..) = *self.inner {
+            while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
+                if let Some(u) = self.process_one(m, state, nodes) {
+                    broadcast!(handoffs,
+                               Message {
+                                   from: self.index,
+                                   data: u,
+                               },
+                               &self.children[..]);
+                }
+            }
         }
     }
 
@@ -70,7 +75,7 @@ impl NodeDescriptor {
 
         // first, process the incoming message
         let u = match *self.inner {
-            flow::NodeType::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
+            flow::node::Type::Internal(_, ref mut i) => i.on_input(m, nodes, &state),
             _ => unreachable!(),
         };
 
