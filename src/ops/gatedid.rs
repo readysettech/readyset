@@ -1,9 +1,5 @@
 use ops;
-use flow;
 use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
 
 use std::collections::HashMap;
 
@@ -12,65 +8,67 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
+use flow::prelude::*;
+
 /// Applies the identity operation to the view but waits for an recv on a
 /// channel before forwarding. This is useful for writing tests because it
 /// enables precise control of the propogation of updates through the graph.
 #[derive(Debug)]
 pub struct GatedIdentity {
-    src: flow::NodeIndex,
-    srcn: Option<ops::V>,
+    src: NodeIndex,
     rx: Mutex<Receiver<()>>,
 }
 
 impl GatedIdentity {
     /// Construct a new gated identity operator.
-    pub fn new(src: flow::NodeIndex) -> (GatedIdentity, Sender<()>) {
+    pub fn new(src: NodeIndex) -> (GatedIdentity, Sender<()>) {
         let (tx, rx) = channel();
         let g = GatedIdentity {
             src: src,
-            srcn: None,
             rx: Mutex::new(rx),
         };
         (g, tx)
     }
 }
 
-impl From<GatedIdentity> for NodeType {
-    fn from(b: GatedIdentity) -> NodeType {
-        NodeType::GatedIdentity(b)
-    }
-}
-
-impl NodeOp for GatedIdentity {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
-
+impl Ingredient for GatedIdentity {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src]
     }
 
-    fn forward(&self,
-               update: Option<ops::Update>,
-               _: flow::NodeIndex,
-               _: i64,
-               _: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
+    fn should_materialize(&self) -> bool {
+        false
+    }
 
-        if update.is_some() {
-            self.rx.lock().unwrap().recv().unwrap();
+    fn on_connected(&mut self, _: &Graph) {}
+
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+        self.src = remap[&self.src];
+    }
+
+    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+        self.rx.lock().unwrap().recv().unwrap();
+        input.data.into()
+    }
+
+    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+        if let Some(state) = states.get(&self.src) {
+            // parent is materialized
+            state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .collect()
+        } else {
+            // parent is not materialized, query into parent
+            domain.lookup(self.src).query(q, domain, states)
         }
-        update.into()
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
-        self.srcn.as_ref().unwrap().find(q, Some(ts))
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        // TODO
+        HashMap::new()
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        self.srcn.as_ref().unwrap().suggest_indexes(self.src)
-    }
-
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         Some(vec![(self.src, col)])
     }
 
