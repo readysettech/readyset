@@ -1,5 +1,6 @@
 use nom_sql::parser as sql_parser;
-use nom_sql::parser::{ConditionBase, ConditionExpression, SqlQuery};
+use nom_sql::parser::{Column, ConditionBase, ConditionExpression, FieldExpression, Operator,
+                      SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use FlowGraph;
 use ops;
@@ -24,7 +25,7 @@ fn to_conditions(ce: &ConditionExpression) -> Vec<shortcut::Condition<DataType>>
         ConditionExpression::Base(_) => vec![],
         ConditionExpression::ComparisonOp(ref ct) => {
             // TODO(malte): fix this once nom-sql has better operator representations
-            assert_eq!(ct.operator, "=");
+            assert_eq!(ct.operator, Operator::Equal);
             // TODO(malte): we only support one level of condition nesting at this point :(
             let l = match ct.left.as_ref().unwrap().as_ref() {
                 &ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
@@ -50,28 +51,42 @@ fn lookup_node(vn: &str, g: &mut FG) -> petgraph::graph::NodeIndex {
 }
 
 fn make_base_node(st: &InsertStatement) -> Node {
+    let (cols, vals): (Vec<Column>, Vec<String>) = st.fields.iter().cloned().unzip();
     ops::new(st.table.clone(),
-             Vec::from_iter(st.fields.iter().map(String::as_str)).as_slice(),
+             Vec::from_iter(cols.iter().map(|c| c.name.as_str())).as_slice(),
              true,
              Base {})
 }
 
-fn make_filter_node(st: &SelectStatement, g: &mut FG) -> Node {
+fn make_filter_nodes(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
     // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
-    let mut n = ops::new(st.table.clone(),
-                         Vec::from_iter(st.fields.iter().map(String::as_str)).as_slice(),
-                         true,
-                         Identity::new(lookup_node(&st.table, g)));
-    match st.where_clause {
-        None => (),
-        // convert ConditionTree to shortcut-style condition vector
-        Some(ref cond) => {
-            n = n.having(to_conditions(cond));
+    let cols = match st.fields {
+        FieldExpression::All => unimplemented!(),
+        FieldExpression::Seq(ref s) => s.clone(),
+    };
+    let nodes = Vec::new();
+    for t in st.tables.iter() {
+        // XXX(malte): This isn't correct yet, because it completely ignores joins. This basically
+        // creates an edge node that projects the right base columns and applies any filter
+        // conditions from the query.
+        let mut n = ops::new(t.clone(),
+                             Vec::from_iter(cols.iter()
+                                     .filter(|c| c.table.as_ref().unwrap() == t)
+                                     .map(|c| c.name.as_str()))
+                                 .as_slice(),
+                             true,
+                             Identity::new(lookup_node(t, g)));
+        match st.where_clause {
+            None => (),
+            // convert ConditionTree to shortcut-style condition vector
+            Some(ref cond) => {
+                n = n.having(to_conditions(cond));
+            }
         }
     }
-    n
+    nodes
 }
 
 fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
@@ -79,7 +94,7 @@ fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
 
     match q {
         SqlQuery::Insert(iq) => vec![make_base_node(&iq)],
-        SqlQuery::Select(sq) => vec![make_filter_node(&sq, g)],
+        SqlQuery::Select(sq) => make_filter_nodes(&sq, g),
     }
 }
 
