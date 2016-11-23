@@ -417,47 +417,52 @@ impl<'a> Migration<'a> {
         // then, hook up the channels to new ingress nodes
         let mut sources = HashMap::new();
         for (ingress, tx) in targets {
-            if let node::Type::Ingress(..) = *self.mainline.ingredients[ingress] {
-                // any egress with an edge to this node needs to have a tx clone added to its tx
-                // channel set.
-                for egress in self.mainline
-                    .ingredients
-                    .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming) {
+            // this node is of type ingress, but since the domain has since claimed ownership of
+            // the node, it is now just a node::Type::Taken
+            // any egress with an edge to this node needs to have a tx clone added to its tx
+            // channel set.
+            for egress in self.mainline
+                .ingredients
+                .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming) {
 
-                    if egress == self.mainline.source {
-                        // input node
-                        debug_assert_eq!(self
-                            .mainline
-                            .ingredients
-                            .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming)
-                            .count()
-                            , 1);
+                if egress == self.mainline.source {
+                    // input node
+                    debug_assert_eq!(self.mainline
+                                         .ingredients
+                                         .neighbors_directed(ingress,
+                                                             petgraph::EdgeDirection::Incoming)
+                                         .count(),
+                                     1);
 
-                        // we want to avoid forcing the end-user to cook up Messages
-                        // they should instead just make Us
-                        let src = self.mainline.source;
-                        sources.insert(ingress,
-                                       Box::new(move |u: Vec<query::DataType>| {
-                            tx.send(Message {
-                                    from: src,
-                                    data: u.into(),
-                                })
-                                .unwrap()
+                    // the node index the user knows about is that of the original node
+                    let idx = self.mainline
+                        .ingredients
+                        .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+                        .next()
+                        .unwrap();
 
-                        }) as Box<Fn(_) + Send>);
-                        break;
-                    }
+                    // we want to avoid forcing the end-user to cook up Messages
+                    // they should instead just make Us
+                    let src = self.mainline.source;
+                    sources.insert(idx,
+                                   Box::new(move |u: Vec<query::DataType>| {
+                        tx.send(Message {
+                                from: src,
+                                data: u.into(),
+                            })
+                            .unwrap()
 
-                    if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
-                        // connected to egress from other domain
-                        txs.lock().unwrap().push(tx.clone());
-                        continue;
-                    }
-
-                    unreachable!("ingress parent is not egress");
+                    }) as Box<Fn(_) + Send>);
+                    break;
                 }
-            } else {
-                unreachable!("ingress node not of ingress type");
+
+                if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
+                    // connected to egress from other domain
+                    txs.lock().unwrap().push(tx.clone());
+                    continue;
+                }
+
+                unreachable!("ingress parent is not egress");
             }
         }
 
