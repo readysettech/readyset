@@ -48,6 +48,10 @@ impl Ingredient for Union {
         false
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        false
+    }
+
     fn on_connected(&mut self, g: &Graph) {
         self.cols.extend(self.emit.keys().map(|&n| (n, g[n].fields().len())));
     }

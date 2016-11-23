@@ -22,6 +22,10 @@ impl Ingredient for Base {
         true
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        false
+    }
+
     fn on_connected(&mut self, _: &Graph) {}
     fn on_commit(&mut self, _: NodeIndex, _: &HashMap<NodeIndex, NodeIndex>) {}
     fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {

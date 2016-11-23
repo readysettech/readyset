@@ -267,6 +267,10 @@ impl Ingredient for Joiner {
         false
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        true
+    }
+
     fn on_connected(&mut self, g: &Graph) {
         for (_, j) in &mut self.join {
             for (t, jt) in &mut j.against {

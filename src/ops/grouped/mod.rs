@@ -106,6 +106,10 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         true
     }
 
+    fn will_query(&self, materialized: bool) -> bool {
+        !materialized
+    }
+
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src];
 

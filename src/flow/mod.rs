@@ -31,6 +31,10 @@ pub trait Ingredient
     fn ancestors(&self) -> Vec<NodeIndex>;
     fn should_materialize(&self) -> bool;
 
+    /// Should return true if this ingredient will ever query the state of an ancestor outside of a
+    /// call to `Self::query()`.
+    fn will_query(&self, materialized: bool) -> bool;
+
     /// Called whenever this node is being queried for records, and it is not materialized. The
     /// node should use the list of ancestor query functions to fetch relevant data from upstream,
     /// and emit resulting records as they come in. Note that there may be no query, in which case
@@ -192,15 +196,7 @@ impl<'a> Migration<'a> {
             self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                // TODO: what if parent is an egress/ingress/taken?
-                // TODO: how do we expres the fact that a node wants to be materialized
-                // *regardless* of its children? (e.g., for those nodes that query into
-                // themselves).
-                if self.mainline.ingredients[parent].should_materialize() {
-                    self.mainline.ingredients.add_edge(parent, ni, true);
-                } else {
-                    self.mainline.ingredients.add_edge(parent, ni, false);
-                }
+                self.mainline.ingredients.add_edge(parent, ni, false);
             }
         }
         // and tell the caller its id

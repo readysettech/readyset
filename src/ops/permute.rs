@@ -71,6 +71,10 @@ impl Ingredient for Permute {
         false
     }
 
+    fn will_query(&self, materialized: bool) -> bool {
+        !materialized
+    }
+
     fn on_connected(&mut self, g: &Graph) {
         self.cols = g[self.src].fields().len();
     }

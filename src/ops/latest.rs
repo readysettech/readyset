@@ -48,6 +48,10 @@ impl Ingredient for Latest {
         true
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        true // because the latest may be retracted
+    }
+
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {

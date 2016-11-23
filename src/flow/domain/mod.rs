@@ -2,6 +2,7 @@ use petgraph;
 use shortcut;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use flow;
@@ -55,14 +56,20 @@ impl Domain {
             })
             .collect();
 
-
-        let state = nodes.iter()
+        let mut state: HashMap<_, _> = nodes.iter()
             .filter_map(|n| {
                 // materialized state for any nodes that need it
-                // in particular, we keep state for any node that requires its own state to be
-                // materialized, or that has an outgoing edge marked as materialized (we know that
-                // that edge has to be internal, since ingress/egress nodes have already been
-                // added, and they make sure that there are no cross-domain materialized edges).
+                // in particular, we keep state for
+                //
+                //  - any internal node that requires its own state to be materialized
+                //  - any internal node that has an outgoing edge marked as materialized (we know
+                //    that that edge has to be internal, since ingress/egress nodes have already
+                //    been added, and they make sure that there are no cross-domain materialized
+                //    edges).
+                //  - any ingress node with children that say that they may query their ancestors
+                //
+                // that last point needs to be checked *after* we have determined if all internal
+                // nodes should be materialized
                 match *n.inner {
                     flow::node::Type::Internal(_, ref i) => {
                         if i.should_materialize() ||
@@ -77,6 +84,27 @@ impl Domain {
                 }
             })
             .collect();
+
+        let inquisitive_children: HashSet<_> = nodes.iter()
+            .filter_map(|n| {
+                if let flow::node::Type::Internal(..) = *n.inner {
+                    if n.will_query(state.contains_key(&n.index)) {
+                        return Some(n.index);
+                    }
+                }
+                None
+            })
+            .collect();
+
+
+        for n in &nodes {
+            if let flow::node::Type::Ingress(..) = *n.inner {
+                if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
+                    .any(|child| inquisitive_children.contains(&child)) {
+                    state.insert(n.index, shortcut::Store::new(n.inner.fields().len()));
+                }
+            }
+        }
 
         let handoffs = nodes.iter().map(|n| (n.index, VecDeque::new())).collect();
 

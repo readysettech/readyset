@@ -28,6 +28,10 @@ impl Ingredient for Identity {
         false
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        false
+    }
+
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
