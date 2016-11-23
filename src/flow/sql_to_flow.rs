@@ -27,13 +27,13 @@ fn to_conditions(ce: &ConditionExpression) -> Vec<shortcut::Condition<DataType>>
             // TODO(malte): fix this once nom-sql has better operator representations
             assert_eq!(ct.operator, Operator::Equal);
             // TODO(malte): we only support one level of condition nesting at this point :(
-            let l = match ct.left.as_ref().unwrap().as_ref() {
-                &ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            let l = match *ct.left.as_ref().unwrap().as_ref() {
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                 _ => unimplemented!(),
             };
-            let r = match ct.right.as_ref().unwrap().as_ref() {
-                &ConditionExpression::Base(ConditionBase::Placeholder) => String::from("?"),
-                &ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+            let r = match *ct.right.as_ref().unwrap().as_ref() {
+                ConditionExpression::Base(ConditionBase::Placeholder) => String::from("?"),
+                ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
                 _ => unimplemented!(),
             };
             vec![shortcut::Condition {

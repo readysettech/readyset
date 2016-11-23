@@ -988,9 +988,11 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
                     write!(f, "{{")?;
 
                     // Output node name and description. First row.
-                    write!(f, "{{ {} / {} | {} }}",
-                        index.index(), escape(n.name()),
-                        escape(&n.node().unwrap().operator().description()))?;
+                    write!(f,
+                           "{{ {} / {} | {} }}",
+                           index.index(),
+                           escape(n.name()),
+                           escape(&n.node().unwrap().operator().description()))?;
 
                     // Output node outputs. Second row.
                     write!(f, " | {}", n.args().join(", "))?;
