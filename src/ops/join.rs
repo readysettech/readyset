@@ -281,7 +281,12 @@ impl Ingredient for Joiner {
         // our ancestors may have been remapped
         // we thus need to fix up any node indices that could have changed
         for (from, to) in remap {
-            if let Some(j) = self.join.remove(from) {
+            if from == to {
+                continue;
+            }
+
+            if let Some(mut j) = self.join.remove(from) {
+                j.node = *to;
                 assert!(self.join.insert(*to, j).is_none());
             }
 
@@ -290,10 +295,6 @@ impl Ingredient for Joiner {
                     assert!(j.against.insert(*to, t).is_none());
                 }
             }
-        }
-
-        for (ni, j) in &mut self.join {
-            j.node = remap[ni];
         }
 
         for &mut (ref mut ni, _) in &mut self.emit {

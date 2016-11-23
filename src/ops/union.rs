@@ -54,6 +54,10 @@ impl Ingredient for Union {
 
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
         for (from, to) in remap {
+            if from == to {
+                continue;
+            }
+
             if let Some(e) = self.emit.remove(from) {
                 assert!(self.emit.insert(*to, e).is_none());
             }
