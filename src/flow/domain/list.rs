@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use petgraph::graph::NodeIndex;
 use flow::domain::single::NodeDescriptor;
+use flow::node;
 
 pub struct NodeList {
     nodes: Vec<cell::RefCell<NodeDescriptor>>,
@@ -47,7 +48,18 @@ impl From<Vec<NodeDescriptor>> for NodeList {
 
 impl NodeList {
     pub fn lookup(&self, node: NodeIndex) -> cell::Ref<NodeDescriptor> {
-        self.nodes[self.translate(node)].borrow()
+        let nd = self.nodes[self.translate(node)].borrow();
+        match *nd.inner {
+            node::Type::Internal(..) => (),
+            node::Type::Ingress(..) => {
+                println!("attempt at looking up foreign node {:?}", node);
+                unimplemented!();
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+        nd
     }
 
     pub fn index(&self, index: usize) -> cell::Ref<NodeDescriptor> {
