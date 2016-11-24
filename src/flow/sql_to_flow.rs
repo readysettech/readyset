@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, FieldExpression, Operator,
-                      SqlQuery};
+use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+                      Operator, SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use flow;
 use FlowGraph;
@@ -9,7 +9,7 @@ use ops::Node;
 use ops::base::Base;
 use ops::identity::Identity;
 use query::{DataType, Query};
-use super::query_graph::to_query_graph;
+use super::query_graph::{QueryGraph, QueryGraphNode, to_query_graph};
 use shortcut;
 
 use petgraph;
@@ -22,29 +22,29 @@ type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
 
 /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
 /// vector of conditions that `shortcut` understands.
-fn to_conditions(ce: &ConditionExpression) -> Vec<shortcut::Condition<DataType>> {
-    match *ce {
-        ConditionExpression::Base(_) => vec![],
-        ConditionExpression::ComparisonOp(ref ct) => {
-            // TODO(malte): fix this once nom-sql has better operator representations
-            assert_eq!(ct.operator, Operator::Equal);
-            // TODO(malte): we only support one level of condition nesting at this point :(
-            let l = match *ct.left.as_ref().unwrap().as_ref() {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            let r = match *ct.right.as_ref().unwrap().as_ref() {
-                ConditionExpression::Base(ConditionBase::Placeholder) => String::from("?"),
-                ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
-                _ => unimplemented!(),
-            };
-            vec![shortcut::Condition {
-                     // column: field_to_columnid(l),
+fn to_conditions(ct: &ConditionTree) -> Vec<shortcut::Condition<DataType>> {
+    // TODO(malte): fix this once nom-sql has better operator representations
+    if ct.operator != Operator::Equal {
+        println!("Conditionals with {:?} are not supported in shortcut yet, so ignoring {:?}",
+                 ct.operator,
+                 ct);
+        vec![]
+    } else {
+        // TODO(malte): we only support one level of condition nesting at this point :(
+        let l = match *ct.left.as_ref().unwrap().as_ref() {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        let r = match *ct.right.as_ref().unwrap().as_ref() {
+            ConditionExpression::Base(ConditionBase::Placeholder) => String::from("?"),
+            ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+            _ => unimplemented!(),
+        };
+        vec![shortcut::Condition {
+                     //column: field_to_columnid(v, l).unwrap(),
                      column: 1,
                      cmp: shortcut::Comparison::Equal(shortcut::Value::Const(DataType::Text(Arc::new(r)))),
                  }]
-        }
-        _ => unimplemented!(),
     }
 }
 
@@ -60,46 +60,32 @@ fn make_base_node(st: &InsertStatement) -> Node {
              Base {})
 }
 
-fn make_filter_nodes(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
+fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
-    let cols = match st.fields {
-        FieldExpression::All => unimplemented!(),
-        FieldExpression::Seq(ref s) => s.clone(),
-    };
-    let mut nodes = Vec::new();
-    for t in st.tables.iter() {
-        // XXX(malte): This isn't correct yet, because it completely ignores joins. This basically
-        // creates an edge node that projects the right base columns and applies any filter
-        // conditions from the query.
-        let mut n = ops::new(t.clone(),
-                             Vec::from_iter(cols.iter()
-                                     .filter(|c| c.table.as_ref().unwrap() == t)
-                                     .map(|c| c.name.as_str()))
-                                 .as_slice(),
-                             true,
-                             Identity::new(lookup_node(t, g)));
-        match st.where_clause {
-            None => (),
-            // convert ConditionTree to shortcut-style condition vector
-            Some(ref cond) => {
-                n = n.having(to_conditions(cond));
-            }
-        }
-        nodes.push(n);
+    let mut n = ops::new(String::from(name),
+                         Vec::from_iter(qgn.columns.iter().map(String::as_str)).as_slice(),
+                         true,
+                         Identity::new(lookup_node(&qgn.rel_name, g)));
+    for cond in qgn.predicates.iter() {
+        // convert ConditionTree to shortcut-style condition vector
+        n = n.having(to_conditions(cond));
     }
-    nodes
+    n
 }
 
 fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
     let qg = to_query_graph(st);
     println!("Query graph: {:#?}", qg);
 
-    let new_nodes = Vec::new();
-    for rel in qg.relations.iter() {
+    let mut new_nodes = Vec::new();
+    let mut i = 0;
+    for (rel, qgn) in qg.relations.iter() {
         // add a basic filter/permute node for each query graph node
-        // TODO(malte): implement!
+        let n = make_filter_node(&format!("query-{}", i), qgn, g);
+        new_nodes.push(n);
+        i += 1;
     }
     for edge in qg.edges.iter() {
         // query graph edges are joins, so add a join node for each
@@ -113,8 +99,7 @@ fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
 
     match q {
         SqlQuery::Insert(iq) => vec![make_base_node(&iq)],
-        SqlQuery::Select(sq) => make_filter_nodes(&sq, g),
-        // SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
+        SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
     }
 }
 
@@ -194,7 +179,7 @@ mod tests {
         assert_eq!(get_view(&g, "users").name(), "users");
 
         // Try a simple query
-        assert!("SELECT users.id, users.name FROM users WHERE id = 42;"
+        assert!("SELECT users.id, users.name FROM users WHERE users.id = 42;"
             .to_flow_parts(&mut g)
             .is_ok());
         println!("{}", g);

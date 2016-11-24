@@ -7,14 +7,14 @@ use std::vec::Vec;
 
 #[derive(Clone, Debug)]
 pub struct QueryGraphNode {
-    rel_name: String,
-    predicates: Vec<ConditionTree>,
-    columns: Vec<String>,
+    pub rel_name: String,
+    pub predicates: Vec<ConditionTree>,
+    pub columns: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct QueryGraphEdge {
-    join_predicates: Vec<ConditionTree>,
+    pub join_predicates: Vec<ConditionTree>,
 }
 
 #[derive(Clone, Debug)]
