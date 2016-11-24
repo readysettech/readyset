@@ -19,10 +19,23 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
+type V = flow::View<Query, Update = ops::Update, Data = Vec<DataType>>;
+
+fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<DataType>>,
+                     f: String)
+                     -> Result<usize, String> {
+    let i = 0;
+    for field in v.args().iter() {
+        if *field == f {
+            return Ok(i);
+        }
+    }
+    Err(format!("field {} not found", f))
+}
 
 /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
 /// vector of conditions that `shortcut` understands.
-fn to_conditions(ct: &ConditionTree) -> Vec<shortcut::Condition<DataType>> {
+fn to_conditions(ct: &ConditionTree, v: &V) -> Vec<shortcut::Condition<DataType>> {
     // TODO(malte): fix this once nom-sql has better operator representations
     if ct.operator != Operator::Equal {
         println!("Conditionals with {:?} are not supported in shortcut yet, so ignoring {:?}",
@@ -41,8 +54,7 @@ fn to_conditions(ct: &ConditionTree) -> Vec<shortcut::Condition<DataType>> {
             _ => unimplemented!(),
         };
         vec![shortcut::Condition {
-                     //column: field_to_columnid(v, l).unwrap(),
-                     column: 1,
+                     column: field_to_columnid(v, l.name).unwrap(),
                      cmp: shortcut::Comparison::Equal(shortcut::Value::Const(DataType::Text(Arc::new(r)))),
                  }]
     }
@@ -70,7 +82,8 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
                          Identity::new(lookup_node(&qgn.rel_name, g)));
     for cond in qgn.predicates.iter() {
         // convert ConditionTree to shortcut-style condition vector
-        n = n.having(to_conditions(cond));
+        let filter = to_conditions(cond, &n);
+        n = n.having(filter);
     }
     n
 }
@@ -128,21 +141,18 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
-    use flow;
     use ops;
     use ops::new;
     use ops::base::Base;
     use query::{DataType, Query};
-    use super::{FG, ToFlowParts};
+    use super::{FG, ToFlowParts, V};
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
 
-    // Helper to grab a reference to a named view.
-    // TODO(malte): maybe this should be available in FlowGraph?
-    fn get_view<'a>(g: &'a FG,
-                    vn: &str)
-                    -> &'a flow::View<Query, Update = ops::Update, Data = Vec<DataType>> {
+    /// Helper to grab a reference to a named view.
+    /// TODO(malte): maybe this should be available in FlowGraph?
+    fn get_view<'a>(g: &'a FG, vn: &str) -> &'a V {
         &**(g.graph[g.named[vn]].as_ref().unwrap())
     }
 
