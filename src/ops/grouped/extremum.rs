@@ -154,61 +154,44 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
     use query;
-    use petgraph;
     use shortcut;
 
-    use flow::View;
-    use ops::NodeOp;
-
-    fn setup(mat: bool, wide: bool) -> ops::Node {
-        use std::sync;
-        use flow::View;
-
-        let mut g = petgraph::Graph::new();
-        let mut s = if wide {
-            ops::new("source", &["x", "y", "z"], true, ops::base::Base {})
+    fn setup(mat: bool, wide: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = if wide {
+            g.add_base("source", &["x", "y", "z"])
         } else {
-            ops::new("source", &["x", "y"], true, ops::base::Base {})
+            g.add_base("source", &["x", "y"])
         };
+        g.seed(s, vec![1.into(), 4.into()]);
+        g.seed(s, vec![2.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 2.into()]);
+        g.seed(s, vec![1.into(), 2.into()]);
+        g.seed(s, vec![1.into(), 7.into()]);
+        g.seed(s, vec![1.into(), 0.into()]);
 
-        s.prime(&g);
-        let s = g.add_node(Some(sync::Arc::new(s)));
-
-        let mut c = if wide {
-            Extremum::MAX.over(s, 1, &[0, 2])
+        if wide {
+            g.set_op("agg", &["x", "z", "ys"], Extremum::MAX.over(s, 1, &[0, 2]));
         } else {
-            Extremum::MAX.over(s, 1, &[0])
-        };
-        c.prime(&g);
-
-        let node = if wide {
-            ops::new("agg", &["x", "z", "ys"], mat, c)
-        } else {
-            ops::new("agg", &["x", "ys"], mat, c)
-        };
-
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 4.into()], 0).into()), s, 0, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 7.into()], 4).into()), s, 4, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 0.into()], 5).into()), s, 5, true);
-        node
+            g.set_op("agg", &["x", "ys"], Extremum::MAX.over(s, 1, &[0]));
+        }
+        if mat {
+            g.set_materialized();
+        }
+        g
     }
 
     #[test]
     fn it_forwards() {
-        let src = flow::NodeIndex::new(0);
-        let c = setup(true, false);
+        let mut c = setup(true, false);
 
-        let check_first_max = |group, val, out: flow::ProcessingResult<_>| {
-            if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
+        let check_first_max =
+            |group, val, out: Option<ops::Update>| if let Some(ops::Update::Records(rs)) = out {
                 assert_eq!(rs.len(), 1);
 
                 match rs.into_iter().next().unwrap() {
-                    ops::Record::Positive(r, _) => {
+                    ops::Record::Positive(r) => {
                         assert_eq!(r[0], group);
                         assert_eq!(r[1], val);
                     }
@@ -216,23 +199,22 @@ mod tests {
                 }
             } else {
                 unreachable!()
-            }
-        };
+            };
 
-        let check_new_max = |group, old, new, out: flow::ProcessingResult<_>| {
-            if let flow::ProcessingResult::Done(ops::Update::Records(rs)) = out {
+        let check_new_max = |group, old, new, out: Option<ops::Update>| {
+            if let Some(ops::Update::Records(rs)) = out {
                 assert_eq!(rs.len(), 2);
                 let mut rs = rs.into_iter();
 
                 match rs.next().unwrap() {
-                    ops::Record::Negative(r, _) => {
+                    ops::Record::Negative(r) => {
                         assert_eq!(r[0], group);
                         assert_eq!(r[1], old);
                     }
                     _ => unreachable!(),
                 }
                 match rs.next().unwrap() {
-                    ops::Record::Positive(r, _) => {
+                    ops::Record::Positive(r) => {
                         assert_eq!(r[0], group);
                         assert_eq!(r[1], new);
                     }
@@ -244,44 +226,44 @@ mod tests {
         };
 
         // First insertion should trigger an update.
-        let out = c.process(Some((vec![1.into(), 4.into()], 0).into()), src, 0, true);
+        let out = c.narrow_one_row(vec![1.into(), 4.into()], true);
         check_first_max(1.into(), 4.into(), out);
 
         // Larger value should also trigger an update.
-        let out = c.process(Some((vec![1.into(), 7.into()], 1).into()), src, 1, true);
+        let out = c.narrow_one_row(vec![1.into(), 7.into()], true);
         check_new_max(1.into(), 4.into(), 7.into(), out);
 
         // No change if new value isn't the max.
-        match c.process(Some((vec![1.into(), 2.into()], 2).into()), src, 2, true) {
-            flow::ProcessingResult::Done(ops::Update::Records(rs)) => assert!(rs.is_empty()),
+        match c.narrow_one_row(vec![1.into(), 2.into()], true) {
+            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
             _ => unreachable!(),
         }
 
         // Insertion into a different group should be independent.
-        let out = c.process(Some((vec![2.into(), 3.into()], 3).into()), src, 3, true);
+        let out = c.narrow_one_row(vec![2.into(), 3.into()], true);
         check_first_max(2.into(), 3.into(), out);
 
         // Larger than last value, but not largest in group.
-        match c.process(Some((vec![1.into(), 5.into()], 4).into()), src, 4, true) {
-            flow::ProcessingResult::Done(ops::Update::Records(rs)) => assert!(rs.is_empty()),
+        match c.narrow_one_row(vec![1.into(), 5.into()], true) {
+            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
             _ => unreachable!(),
         }
 
         // One more new max.
-        let out = c.process(Some((vec![1.into(), 22.into()], 5).into()), src, 5, true);
+        let out = c.narrow_one_row(vec![1.into(), 22.into()], true);
         check_new_max(1.into(), 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 22.into()], 1),
-                                          ops::Record::Positive(vec![1.into(), 23.into()], 5)]);
-        let out = c.process(Some(u), src, 6, true);
+        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 22.into()]),
+                                          ops::Record::Positive(vec![1.into(), 23.into()])]);
+        let out = c.narrow_one(u, true);
         check_new_max(1.into(), 22.into(), 23.into(), out);
 
         // Competing positive and negative should cancel out.
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 24.into()], 5),
-                                          ops::Record::Negative(vec![1.into(), 24.into()], 1)]);
-        match c.process(Some(u), src, 6, true) {
-            flow::ProcessingResult::Done(ops::Update::Records(rs)) => assert!(rs.is_empty()),
+        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 24.into()]),
+                                          ops::Record::Negative(vec![1.into(), 24.into()])]);
+        match c.narrow_one(u, true) {
+            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
             _ => unreachable!(),
         }
     }
@@ -292,10 +274,10 @@ mod tests {
     fn it_queries() {
         let c = setup(false, false);
 
-        let hits = c.find(None, None);
+        let hits = c.query(None);
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 1.into() && r[1] == 7.into()));
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 7.into()));
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
 
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
@@ -303,9 +285,9 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = c.find(Some(&q), None);
+        let hits = c.query(Some(&q));
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|&(ref r, _)| r[0] == 2.into() && r[1] == 2.into()));
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
@@ -318,14 +300,14 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
                          }]);
 
-        let hits = c.find(Some(&q), None);
+        let hits = c.query(Some(&q));
         assert!(hits.is_empty());
     }
 
     #[test]
     fn it_suggests_indices() {
         let c = setup(false, true);
-        let idx = c.suggest_indexes(1.into());
+        let idx = c.node().suggest_indexes(1.into());
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
@@ -340,8 +322,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false, true);
-        assert_eq!(c.resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(c.resolve(1), Some(vec![(0.into(), 2)]));
-        assert_eq!(c.resolve(2), None);
+        assert_eq!(c.node().resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(c.node().resolve(1), Some(vec![(0.into(), 2)]));
+        assert_eq!(c.node().resolve(2), None);
     }
 }

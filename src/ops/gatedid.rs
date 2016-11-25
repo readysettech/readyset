@@ -40,6 +40,10 @@ impl Ingredient for GatedIdentity {
         false
     }
 
+    fn will_query(&self, _: bool) -> bool {
+        false
+    }
+
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
@@ -82,49 +86,36 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
-    use petgraph;
 
-    use flow::View;
-    use ops::NodeOp;
     use std::thread;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::sync::mpsc::Sender;
 
-    fn setup(materialized: bool) -> (ops::Node, Sender<()>) {
-        use std::sync;
-
-        let mut g = petgraph::Graph::new();
-        let mut s = ops::new("source", &["x", "y", "z"], true, ops::base::Base {});
-        s.prime(&g);
-        let s = g.add_node(Some(sync::Arc::new(s)));
-
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
-        g[s].as_ref().unwrap().process(Some((vec![3.into(), 3.into()], 4).into()), s, 4, true);
-
-        let (mut i, tx) = GatedIdentity::new(s);
-        i.prime(&g);
-
-        let op = ops::new("latest", &["x", "y", "z"], materialized, i);
-        (op, tx)
+    fn setup() -> (ops::test::MockGraph, Sender<()>) {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        g.seed(s, vec![1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 2.into()]);
+        g.seed(s, vec![1.into(), 2.into()]);
+        g.seed(s, vec![3.into(), 3.into()]);
+        let (i, tx) = GatedIdentity::new(s);
+        g.set_op("identity", &["x", "y", "z"], i);
+        (g, tx)
     }
 
     #[test]
     fn it_forwards() {
-        let src = flow::NodeIndex::new(0);
-        let (i, tx) = GatedIdentity::new(src);
+        let (mut i, tx) = setup();
         let left = vec![1.into(), "a".into()];
 
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            match i.forward(Some(left.clone().into()), src, 0, true, None).unwrap() {
+            match i.narrow_one_row(left.clone(), false).unwrap() {
                 ops::Update::Records(rs) => {
-                    assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
+                    assert_eq!(rs, vec![ops::Record::Positive(left)]);
                 }
             };
             &done.store(true, Ordering::SeqCst);
@@ -138,24 +129,23 @@ mod tests {
 
     #[test]
     fn it_queries() {
-        let (i, _) = setup(false);
-        let hits = i.find(None, None);
-        println!("{:?}", hits);
+        let (i, _) = setup();
+        let hits = i.query(None);
         assert_eq!(hits.len(), 5);
     }
 
     #[test]
     fn it_suggests_indices() {
-        let (i, _) = setup(false);
-        let idx = i.suggest_indexes(1.into());
+        let (i, _) = setup();
+        let idx = i.node().suggest_indexes(1.into());
         assert_eq!(idx.len(), 0);
     }
 
     #[test]
     fn it_resolves() {
-        let (i, _) = setup(false);
-        assert_eq!(i.resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(i.resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(i.resolve(2), Some(vec![(0.into(), 2)]));
+        let (i, _) = setup();
+        assert_eq!(i.node().resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(i.node().resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(i.node().resolve(2), Some(vec![(0.into(), 2)]));
     }
 }

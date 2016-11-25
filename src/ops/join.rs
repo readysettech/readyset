@@ -476,60 +476,47 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
     use query;
-    use petgraph;
     use shortcut;
 
-    use flow::View;
-    use ops::NodeOp;
+    fn setup(left: bool) -> (ops::test::MockGraph, NodeIndex, NodeIndex) {
+        let mut g = ops::test::MockGraph::new();
+        let l = g.add_base("left", &["l0", "l1"]);
+        let r = g.add_base("right", &["r0", "r1"]);
 
-    fn setup(left: bool) -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
-        use std::sync;
-
-        let mut g = petgraph::Graph::new();
-        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base {});
-        let mut r = ops::new("right", &["r0", "r1"], true, ops::base::Base {});
-
-        l.prime(&g);
-        r.prime(&g);
-
-        let l = g.add_node(Some(sync::Arc::new(l)));
-        let r = g.add_node(Some(sync::Arc::new(r)));
-
-        g[l].as_ref().unwrap().process(Some((vec![1.into(), "a".into()], 0).into()), l, 0, true);
-        g[l].as_ref().unwrap().process(Some((vec![2.into(), "b".into()], 1).into()), l, 1, true);
-        g[l].as_ref().unwrap().process(Some((vec![3.into(), "c".into()], 2).into()), l, 2, true);
-        g[r].as_ref().unwrap().process(Some((vec![1.into(), "x".into()], 0).into()), r, 0, true);
-        g[r].as_ref().unwrap().process(Some((vec![1.into(), "y".into()], 1).into()), r, 1, true);
-        g[r].as_ref().unwrap().process(Some((vec![2.into(), "z".into()], 2).into()), r, 2, true);
+        g.seed(l, vec![1.into(), "a".into()]);
+        g.seed(l, vec![2.into(), "b".into()]);
+        g.seed(l, vec![3.into(), "c".into()]);
+        g.seed(r, vec![1.into(), "x".into()]);
+        g.seed(r, vec![1.into(), "y".into()]);
+        g.seed(r, vec![2.into(), "z".into()]);
 
         // join on first field
-        let b = Builder::new(vec![(0.into(), 0), (0.into(), 1), (1.into(), 1)]).from(l, vec![1, 0]);
+        let b = Builder::new(vec![(l, 0), (l, 1), (r, 1)]).from(l, vec![1, 0]);
         let b = if left {
             b.left_join(r, vec![1, 0])
         } else {
             b.join(r, vec![1, 0])
         };
-        let mut c: Joiner = b.into();
-        c.prime(&g);
-        (ops::new("join", &["j0", "j1", "j2"], false, c), l, r)
-    }
 
+        let j: Joiner = b.into();
+        g.set_op("join", &["j0", "j1", "j2"], j);
+        (g, l, r)
+    }
 
     #[test]
     fn it_describes() {
         let (j, _, _) = setup(false);
-        assert_eq!(j.inner.description(), "[0:0, 0:1, 1:1] 0:0 ⋈ 1:0");
+        assert_eq!(j.node().description(), "[0:0, 0:1, 1:1] 0:0 ⋈ 1:0");
     }
 
     #[test]
     fn it_describes_left() {
         let (j, _, _) = setup(true);
-        assert_eq!(j.inner.description(), "[0:0, 0:1, 1:1] 0:0 ⋉ 1:0");
+        assert_eq!(j.node().description(), "[0:0, 0:1, 1:1] 0:0 ⋉ 1:0");
     }
 
-    fn forward_non_weird(j: ops::Node, l: flow::NodeIndex, r: flow::NodeIndex) {
+    fn forward_non_weird(mut j: ops::test::MockGraph, l: NodeIndex, r: NodeIndex) {
         // these are the data items we have to work with
         // these are in left
         let l_a1 = vec![1.into(), "a".into()];
@@ -545,16 +532,16 @@ mod tests {
         // *************************************
 
         // forward b2 from left; should produce [b2*z2]
-        match j.process(Some(l_b2.clone().into()), l, 100, true).unwrap() {
+        match j.one_row(l, l_b2.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting to only match z2
                 assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 2)]);
+                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
             }
         }
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.process(Some(l_a1.clone().into()), l, 100, true).unwrap() {
+        match j.one_row(l, l_a1.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // we're expecting two results: x1 and y1
                 assert_eq!(rs.len(), 2);
@@ -563,9 +550,8 @@ mod tests {
                 // they should all have the correct values from the provided left
                 assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
                 // and both join results should be present
-                // with ts set to be the max of left and right
-                assert!(rs.iter().any(|r| r.rec()[2] == "x".into() && r.ts() == 0));
-                assert!(rs.iter().any(|r| r.rec()[2] == "y".into() && r.ts() == 1));
+                assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
+                assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
             }
         }
 
@@ -574,40 +560,40 @@ mod tests {
         // *************************************
 
         // forward x1 from right; should produce [a1*x1]
-        match j.process(Some(r_x1.clone().into()), r, 100, true).unwrap() {
+        match j.one_row(r, r_x1.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()], 0)]);
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()])]);
             }
         }
 
         // forward y1 from right; should produce [a1*y1]
-        match j.process(Some(r_y1.clone().into()), r, 100, true).unwrap() {
+        match j.one_row(r, r_y1.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
                 assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "y".into()], 0)]);
+                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "y".into()])]);
             }
         }
 
         // forward z2 from right; should produce [b2*z2]
-        match j.process(Some(r_z2.clone().into()), r, 100, true).unwrap() {
+        match j.one_row(r, r_z2.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
                 // right's (b2's) timestamp will be used.
                 assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()], 1)]);
+                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
             }
         }
     }
 
     #[test]
     fn it_works() {
-        let (j, l, r) = setup(false);
+        let (mut j, l, r) = setup(false);
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.process(Some(l_c3.clone().into()), l, 100, true).unwrap() {
+        match j.one_row(l, l_c3.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3
                 assert_eq!(rs.len(), 0);
@@ -619,12 +605,12 @@ mod tests {
 
     #[test]
     fn it_works_left() {
-        let (j, l, r) = setup(true);
+        let (mut j, l, r) = setup(true);
 
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        match j.process(Some(l_c3.clone().into()), l, 100, true).unwrap() {
+        match j.one_row(l, l_c3.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
                 // right has no records with value 3, so we're expecting a single record with None
                 // for all columns output from the (non-existing) right record
@@ -635,9 +621,6 @@ mod tests {
                 assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
                 // and None for the remaining column
                 assert!(rs.iter().any(|r| r.rec()[2] == query::DataType::None));
-                // and finally, the timestamp of the output should be the timestamp of the left
-                // (which is 0 given that we use the Vec -> ops::Update conversion)
-                assert!(rs.iter().any(|r| r.ts() == 0));
             }
         }
 
@@ -650,20 +633,14 @@ mod tests {
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz]
-        let hits = j.find(None, None);
+        let hits = j.query(None);
         assert_eq!(hits.len(), 3);
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
-            }));
+            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using join field
         let q = query::Query::new(&[true, true, true],
@@ -672,12 +649,10 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = j.find(Some(&q), None);
+        let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
-            }));
+            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using field from left
         let q = query::Query::new(&[true, true, true],
@@ -686,16 +661,12 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
                          }]);
 
-        let hits = j.find(Some(&q), None);
+        let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 2);
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
 
         // query using field from right
         let q = query::Query::new(&[true, true, true],
@@ -704,12 +675,10 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
                          }]);
 
-        let hits = j.find(Some(&q), None);
+        let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 1);
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
-            }));
+            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
     }
 
     #[test]
@@ -718,24 +687,16 @@ mod tests {
 
         // do a full query, which should return product of left + right:
         // [ax, ay, bz, c+None]
-        let hits = j.find(None, None);
+        let hits = j.query(None);
         assert_eq!(hits.len(), 4);
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 0 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 1 && r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()
-            }));
+            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 2 && r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()
-            }));
+            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
         assert!(hits.iter()
-            .any(|&(ref r, ts)| {
-                ts == 2 && r[0] == 3.into() && r[1] == "c".into() && r[2] == query::DataType::None
-            }));
+            .any(|r| r[0] == 3.into() && r[1] == "c".into() && r[2] == query::DataType::None));
     }
 
     #[test]
@@ -748,14 +709,14 @@ mod tests {
                  (2.into(), vec![0]) /* output column that is used as join column */]
                 .into_iter()
                 .collect();
-        assert_eq!(j.suggest_indexes(2.into()), hm);
+        assert_eq!(j.node().suggest_indexes(2.into()), hm);
     }
 
     #[test]
     fn it_resolves() {
         let (j, _, _) = setup(false);
-        assert_eq!(j.resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(j.resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(j.resolve(2), Some(vec![(1.into(), 1)]));
+        assert_eq!(j.node().resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(j.node().resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(j.node().resolve(2), Some(vec![(1.into(), 1)]));
     }
 }

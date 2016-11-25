@@ -12,4 +12,4 @@ use query;
 pub type State = shortcut::Store<query::DataType>;
 use std::collections::HashMap;
 pub type StateMap = HashMap<NodeIndex, State>;
-pub use ops::Update;
+pub use ops::{Update, Record};

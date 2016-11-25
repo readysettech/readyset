@@ -62,6 +62,16 @@ impl NodeList {
         nd
     }
 
+    // #[cfg(test)]
+    pub fn lookup_mut(&self, node: NodeIndex) -> cell::RefMut<NodeDescriptor> {
+        let nd = self.nodes[self.translate(node)].borrow_mut();
+        if let node::Type::Internal(..) = *nd.inner {
+        } else {
+            unreachable!();
+        }
+        nd
+    }
+
     pub fn index(&self, index: usize) -> cell::Ref<NodeDescriptor> {
         self.nodes[index].borrow()
     }

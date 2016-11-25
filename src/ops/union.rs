@@ -178,70 +178,48 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
     use query;
-    use petgraph;
     use shortcut;
 
-    use flow::View;
-    use ops::NodeOp;
-    use std::collections::HashMap;
+    fn setup() -> (ops::test::MockGraph, NodeIndex, NodeIndex) {
+        let mut g = ops::test::MockGraph::new();
+        let l = g.add_base("left", &["l0", "l1"]);
+        let r = g.add_base("right", &["r0", "r1", "r2"]);
 
-    fn setup() -> (ops::Node, flow::NodeIndex, flow::NodeIndex) {
-        use std::sync;
-
-        let mut g = petgraph::Graph::new();
-        let mut l = ops::new("left", &["l0", "l1"], true, ops::base::Base {});
-        let mut r = ops::new("right", &["r0", "r1", "r2"], true, ops::base::Base {});
-
-        l.prime(&g);
-        r.prime(&g);
-
-        let l = g.add_node(Some(sync::Arc::new(l)));
-        let r = g.add_node(Some(sync::Arc::new(r)));
-
-        g[l].as_ref().unwrap().process(Some((vec![1.into(), "a".into()], 0).into()), l, 0, true);
-        g[l].as_ref().unwrap().process(Some((vec![2.into(), "b".into()], 1).into()), l, 1, true);
-        g[r].as_ref()
-            .unwrap()
-            .process(Some((vec![1.into(), "skipped".into(), "x".into()], 2).into()),
-                     r,
-                     2,
-                     true);
+        g.seed(l, vec![1.into(), "a".into()]);
+        g.seed(l, vec![2.into(), "b".into()]);
+        g.seed(r, vec![1.into(), "skipped".into(), "x".into()]);
 
         let mut emits = HashMap::new();
         emits.insert(l, vec![0, 1]);
         emits.insert(r, vec![0, 2]);
-
-        let mut c = Union::new(emits);
-        c.prime(&g);
-        (ops::new("union", &["u0", "u1"], false, c), l, r)
+        g.set_op("union", &["u0", "u1"], Union::new(emits));
+        (g, l, r)
     }
 
     #[test]
     fn it_describes() {
         let (u, _, _) = setup();
-        assert_eq!(u.inner.description(), "0:[0, 1] ⋃ 1:[0, 2]");
+        assert_eq!(u.node().description(), "0:[0, 1] ⋃ 1:[0, 2]");
     }
 
     #[test]
     fn it_works() {
-        let (u, l, r) = setup();
+        let (mut u, l, r) = setup();
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.process(Some(left.clone().into()), l, 0, true).unwrap() {
+        match u.one_row(l, left.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
+                assert_eq!(rs, vec![ops::Record::Positive(left)]);
             }
         }
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.process(Some(right.clone().into()), r, 0, true).unwrap() {
+        match u.one_row(r, right.clone(), false).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![1.into(), "x".into()], 0)]);
+                assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()])]);
             }
         }
     }
@@ -252,11 +230,11 @@ mod tests {
 
         // do a full query, which should return left + right:
         // [a, b, x]
-        let hits = u.find(None, None);
+        let hits = u.query(None);
         assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameters matching on both sides
         let q = query::Query::new(&[true, true],
@@ -265,10 +243,10 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
                          }]);
 
-        let hits = u.find(Some(&q), None);
+        let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 0 && r[0] == 1.into() && r[1] == "a".into()));
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "a".into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter matching only on left
         let q = query::Query::new(&[true, true],
@@ -277,9 +255,9 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
                          }]);
 
-        let hits = u.find(Some(&q), None);
+        let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 1 && r[0] == 2.into() && r[1] == "b".into()));
+        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
         // query with parameter matching only on right
         let q = query::Query::new(&[true, true],
@@ -288,9 +266,9 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const("x".into())),
                          }]);
 
-        let hits = u.find(Some(&q), None);
+        let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|&(ref r, ts)| ts == 2 && r[0] == 1.into() && r[1] == "x".into()));
+        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter with no matches
         let q = query::Query::new(&[true, true],
@@ -299,7 +277,7 @@ mod tests {
                              cmp: shortcut::Comparison::Equal(shortcut::Value::Const(3.into())),
                          }]);
 
-        let hits = u.find(Some(&q), None);
+        let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 0);
     }
 
@@ -307,16 +285,16 @@ mod tests {
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let (u, _, _) = setup();
-        assert_eq!(u.suggest_indexes(1.into()), HashMap::new());
+        assert_eq!(u.node().suggest_indexes(1.into()), HashMap::new());
     }
 
     #[test]
     fn it_resolves() {
         let (u, l, r) = setup();
-        let r0 = u.resolve(0);
+        let r0 = u.node().resolve(0);
         assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 0));
         assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 0));
-        let r1 = u.resolve(1);
+        let r1 = u.node().resolve(1);
         assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 1));
         assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 2));
     }

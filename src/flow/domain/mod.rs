@@ -24,7 +24,7 @@ impl Into<usize> for Index {
     }
 }
 
-mod single;
+pub mod single;
 
 pub struct Domain {
     domain: Index,

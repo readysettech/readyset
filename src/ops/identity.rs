@@ -73,65 +73,54 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
-    use petgraph;
 
-    use flow::View;
-    use ops::NodeOp;
-
-    fn setup(materialized: bool) -> ops::Node {
-        use std::sync;
-
-        let mut g = petgraph::Graph::new();
-        let mut s = ops::new("source", &["x", "y", "z"], true, ops::base::Base {});
-        s.prime(&g);
-        let s = g.add_node(Some(sync::Arc::new(s)));
-
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
-        g[s].as_ref().unwrap().process(Some((vec![3.into(), 3.into()], 4).into()), s, 4, true);
-
-        let mut i = Identity::new(s);
-        i.prime(&g);
-
-        ops::new("latest", &["x", "y", "z"], materialized, i)
+    fn setup(materialized: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        g.seed(s, vec![1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 2.into()]);
+        g.seed(s, vec![1.into(), 2.into()]);
+        g.seed(s, vec![3.into(), 3.into()]);
+        g.set_op("identity", &["x", "y", "z"], Identity::new(s));
+        if materialized {
+            g.set_materialized();
+        }
+        g
     }
 
     #[test]
     fn it_forwards() {
-        let src = flow::NodeIndex::new(0);
-        let i = Identity::new(src);
+        let mut g = setup(false);
 
-        let left = vec![1.into(), "a".into()];
-        match i.forward(Some(left.clone().into()), src, 0, true, None).unwrap() {
+        let left = ops::Record::Positive(vec![1.into(), "a".into()]);
+        match g.narrow_one(vec![left.clone()], false).unwrap() {
             ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
+                assert_eq!(rs, vec![left]);
             }
         }
     }
 
     #[test]
     fn it_queries() {
-        let i = setup(false);
-        let hits = i.find(None, None);
+        let g = setup(false);
+        let hits = g.query(None);
         println!("{:?}", hits);
         assert_eq!(hits.len(), 5);
     }
 
     #[test]
     fn it_suggests_indices() {
-        let i = setup(false);
-        let idx = i.suggest_indexes(1.into());
+        let g = setup(false);
+        let idx = g.node().suggest_indexes(1.into());
         assert_eq!(idx.len(), 0);
     }
 
     #[test]
     fn it_resolves() {
-        let i = setup(false);
-        assert_eq!(i.resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(i.resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(i.resolve(2), Some(vec![(0.into(), 2)]));
+        let g = setup(false);
+        assert_eq!(g.node().resolve(0), Some(vec![(0.into(), 0)]));
+        assert_eq!(g.node().resolve(1), Some(vec![(0.into(), 1)]));
+        assert_eq!(g.node().resolve(2), Some(vec![(0.into(), 2)]));
     }
 }
