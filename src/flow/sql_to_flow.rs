@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator,
-                      SqlQuery};
+use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+                      Operator, SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use flow;
 use FlowGraph;
@@ -13,6 +13,7 @@ use super::query_graph::{QueryGraphNode, to_query_graph};
 use shortcut;
 
 use petgraph;
+use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str;
 use std::sync::Arc;
@@ -20,6 +21,70 @@ use std::vec::Vec;
 
 type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
 type V = flow::View<Query, Update = ops::Update, Data = Vec<DataType>>;
+
+trait Pass {
+    fn apply(&mut self, q: SqlQuery) -> SqlQuery;
+}
+
+struct AliasRemoval {
+    table_aliases: HashMap<String, String>,
+    column_aliases: HashMap<String, Column>,
+}
+
+impl AliasRemoval {
+    fn new() -> AliasRemoval {
+        AliasRemoval {
+            table_aliases: HashMap::new(),
+            column_aliases: HashMap::new(),
+        }
+    }
+}
+
+impl Pass for AliasRemoval {
+    fn apply(&mut self, mut q: SqlQuery) -> SqlQuery {
+        match q {
+            // nothing to do for INSERTs, as they cannot have aliases
+            SqlQuery::Insert(i) => SqlQuery::Insert(i),
+            SqlQuery::Select(mut sq) => {
+                // Collect table aliases
+                for t in sq.tables.iter() {
+                    match t.alias {
+                        None => (),
+                        Some(ref a) => {
+                            self.table_aliases.insert(a.clone(), t.name.clone());
+                        }
+                    }
+                }
+                // Remove them from fields
+                sq.fields = match sq.fields {
+                    FieldExpression::All => FieldExpression::All,
+                    FieldExpression::Seq(fs) => {
+                        let new_fs = fs.into_iter()
+                            .map(|mut f| {
+                                match f.table {
+                                    None => f,
+                                    Some(mut t) => {
+                                        Column {
+                                            name: f.name,
+                                            table: if self.table_aliases.contains_key(&t) {
+                                                Some(self.table_aliases[&t].clone())
+                                            } else {
+                                                Some(t)
+                                            },
+                                        }
+                                    }
+                                }
+                            })
+                            .collect();
+                        FieldExpression::Seq(new_fs)
+                    }
+                };
+                SqlQuery::Select(sq)
+            }
+            // Remove them from conditions
+        }
+    }
+}
 
 fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<DataType>>,
                      f: String)
@@ -110,6 +175,11 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
 fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
     println!("{:#?}", q);
 
+    // first run some standard rewrite passes on the query. This makes the later work easier, as we
+    // no longer have to consider complications like aliases.
+    let mut ar = AliasRemoval::new();
+    let q = ar.apply(q);
+
     match q {
         SqlQuery::Insert(iq) => vec![make_base_node(&iq)],
         SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
@@ -141,11 +211,13 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
+    use nom_sql::SelectStatement;
+    use nom_sql::parser::{Column, FieldExpression, SqlQuery, Table};
     use ops;
     use ops::new;
     use ops::base::Base;
     use query::DataType;
-    use super::{FG, ToFlowParts, V};
+    use super::{AliasRemoval, FG, Pass, ToFlowParts, V};
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
@@ -175,6 +247,28 @@ mod tests {
         assert!("foo bar from whatever;".to_flow_parts(&mut g).is_err());
         // Should still only have source, "users" and the new selection
         assert_eq!(g.graph.node_count(), 3);
+    }
+
+    #[test]
+    fn it_removes_aliases() {
+        let q = SelectStatement {
+            tables: vec![Table {
+                             name: String::from("PaperTag"),
+                             alias: Some(String::from("t")),
+                         }],
+            fields: FieldExpression::Seq(vec![Column::from("t.id")]),
+            ..Default::default()
+        };
+        let mut ar = AliasRemoval::new();
+        let res = ar.apply(SqlQuery::Select(q));
+        // Table alias removed in field list
+        match res {
+            SqlQuery::Select(tq) => {
+                assert_eq!(tq.fields,
+                           FieldExpression::Seq(vec![Column::from("PaperTag.id")]))
+            }
+            _ => panic!(),
+        }
     }
 
     #[test]
