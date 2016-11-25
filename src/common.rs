@@ -1,6 +1,6 @@
 use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace, space};
 use nom::{IResult, Err, ErrorKind, Needed};
-use parser::Column;
+use parser::{Column, Table};
 use std::str;
 use std::str::FromStr;
 
@@ -165,10 +165,10 @@ named!(pub field_expr<&[u8], FieldExpression>,
 
 /// Parse list of table names.
 /// XXX(malte): add support for aliases
-named!(pub table_list<&[u8], Vec<&str> >,
+named!(pub table_list<&[u8], Vec<Table> >,
        many0!(
            chain!(
-               name: table_reference ~
+               table: table_reference ~
                opt!(
                    chain!(
                        multispace? ~
@@ -177,7 +177,7 @@ named!(pub table_list<&[u8], Vec<&str> >,
                        || {}
                    )
                ),
-               || { name }
+               || { table }
            )
        )
 );
@@ -211,19 +211,24 @@ named!(pub value_list<&[u8], Vec<&str> >,
 
 /// Parse a reference to a named table
 /// XXX(malte): add support for schema.table notation
-named!(pub table_reference<&[u8], &str>,
+named!(pub table_reference<&[u8], Table>,
     chain!(
         table: map_res!(sql_identifier, str::from_utf8) ~
-        opt!(
+        alias: opt!(
             chain!(
                 space ~
                 caseless_tag!("as") ~
                 space ~
                 alias: map_res!(sql_identifier, str::from_utf8),
-                || { println!("got alias: {} -> {}", table, alias); alias }
+                || { String::from(alias) }
             )
         ),
-        || { table }
+        || {
+            Table {
+                name: String::from(table),
+                alias: alias,
+            }
+        }
     )
 );
 

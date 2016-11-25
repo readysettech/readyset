@@ -4,7 +4,7 @@ use std::str;
 
 use common::FieldExpression;
 use common::{field_expr, field_list, unsigned_number, statement_terminator, table_list};
-use parser::{Column, ConditionExpression};
+use parser::{Column, ConditionExpression, Table};
 
 use condition::*;
 
@@ -34,7 +34,7 @@ pub struct OrderClause {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SelectStatement {
-    pub tables: Vec<String>,
+    pub tables: Vec<Table>,
     pub distinct: bool,
     pub fields: FieldExpression,
     pub where_clause: Option<ConditionExpression>,
@@ -120,7 +120,7 @@ named!(pub selection<&[u8], SelectStatement>,
         statement_terminator,
         || {
             SelectStatement {
-                tables: tables.iter().map(|t| String::from(*t)).collect(),
+                tables: tables,
                 distinct: distinct.is_some(),
                 fields: fields,
                 where_clause: cond,
@@ -136,7 +136,7 @@ named!(pub selection<&[u8], SelectStatement>,
 mod tests {
     use super::*;
     use common::{FieldExpression, Operator};
-    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree};
+    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Table};
 
     fn columns(cols: &[&str]) -> Vec<Column> {
         cols.iter()
@@ -151,7 +151,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("users")],
+                       tables: vec![Table::from("users")],
                        fields: FieldExpression::Seq(columns(&["id", "name"])),
                        ..Default::default()
                    });
@@ -164,7 +164,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("users")],
+                       tables: vec![Table::from("users")],
                        fields: FieldExpression::All,
                        ..Default::default()
                    });
@@ -177,7 +177,7 @@ mod tests {
         let res = selection(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("users")],
+                       tables: vec![Table::from("users")],
                        fields: FieldExpression::Seq(columns(&["id", "name"])),
                        ..Default::default()
                    });
@@ -215,7 +215,7 @@ mod tests {
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("ContactInfo")],
+                       tables: vec![Table::from("ContactInfo")],
                        fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        ..Default::default()
@@ -278,7 +278,10 @@ mod tests {
         let res1 = selection(qstring1.as_bytes());
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("PaperTag")],
+                       tables: vec![Table {
+                           name: String::from("PaperTag"),
+                           alias: Some(String::from("t")),
+                       }],
                        fields: FieldExpression::All,
                        ..Default::default()
                    });
@@ -299,7 +302,7 @@ mod tests {
         }));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("PaperTag")],
+                       tables: vec![Table::from("PaperTag")],
                        distinct: true,
                        fields: FieldExpression::Seq(columns(&["tag"])),
                        where_clause: expected_where_cond,
@@ -333,7 +336,7 @@ mod tests {
         println!("res: {:#?}", res);
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("PaperStorage")],
+                       tables: vec![Table::from("PaperStorage")],
                        fields: FieldExpression::Seq(columns(&["infoJson"])),
                        where_clause: expected_where_cond,
                        ..Default::default()
@@ -358,7 +361,7 @@ mod tests {
 
         assert_eq!(res.unwrap().1,
                    SelectStatement {
-                       tables: vec![String::from("users")],
+                       tables: vec![Table::from("users")],
                        fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        limit: expected_lim,

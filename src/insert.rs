@@ -3,11 +3,11 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 use common::{field_list, statement_terminator, table_reference, value_list};
-use parser::Column;
+use parser::{Column, Table};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStatement {
-    pub table: String,
+    pub table: Table,
     pub fields: Vec<(Column, String)>,
 }
 
@@ -36,8 +36,10 @@ named!(pub insertion<&[u8], InsertStatement>,
         tag!(")") ~
         statement_terminator,
         || {
+            // "table AS alias" isn't legal in INSERT statements
+            assert!(table.alias.is_none());
             InsertStatement {
-                table: String::from(table),
+                table: table,
                 fields: match fields {
                     Some(ref f) =>
                         f.iter()
@@ -60,7 +62,7 @@ named!(pub insertion<&[u8], InsertStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parser::Column;
+    use parser::{Column, Table};
 
     #[test]
     fn simple_insert() {
@@ -69,7 +71,7 @@ mod tests {
         let res = insertion(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    InsertStatement {
-                       table: String::from("users"),
+                       table: Table::from("users"),
                        fields: vec![(Column::from("0"), "42".into()), (Column::from("1"), "test".into())],
                        ..Default::default()
                    });
@@ -82,7 +84,7 @@ mod tests {
         let res = insertion(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    InsertStatement {
-                       table: String::from("users"),
+                       table: Table::from("users"),
                        fields: vec![(Column::from("0"), "?".into()), (Column::from("1"), "?".into())],
                        ..Default::default()
                    });
@@ -95,7 +97,7 @@ mod tests {
         let res = insertion(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
                    InsertStatement {
-                       table: String::from("users"),
+                       table: Table::from("users"),
                        fields: vec![(Column::from("id"), "42".into()), (Column::from("name"), "test".into())],
                        ..Default::default()
                    });
