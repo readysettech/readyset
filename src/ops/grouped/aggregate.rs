@@ -128,9 +128,15 @@ mod tests {
         } else {
             g.add_base("source", &["x", "y"])
         };
-        g.seed(s, vec![1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into()]);
+        if wide {
+            g.seed(s, vec![1.into(), 1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
+        } else {
+            g.seed(s, vec![1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 2.into()]);
+        }
 
         if wide {
             g.set_op("identity",

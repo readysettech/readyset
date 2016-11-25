@@ -282,8 +282,13 @@ mod tests {
         } else {
             g.add_base("source", &["x", "y"])
         };
-        g.seed(s, vec![1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into()]);
+        if big {
+            g.seed(s, vec![1.into(), 1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
+        } else {
+            g.seed(s, vec![1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 2.into()]);
+        }
         // TODO: test when last *isn't* latest!
 
         if big {

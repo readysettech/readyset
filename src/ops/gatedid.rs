@@ -95,11 +95,11 @@ mod tests {
     fn setup() -> (ops::test::MockGraph, Sender<()>) {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.seed(s, vec![1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into()]);
-        g.seed(s, vec![1.into(), 2.into()]);
-        g.seed(s, vec![3.into(), 3.into()]);
+        g.seed(s, vec![1.into(), 1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 2.into(), 1.into()]);
+        g.seed(s, vec![1.into(), 2.into(), 1.into()]);
+        g.seed(s, vec![3.into(), 3.into(), 1.into()]);
         let (i, tx) = GatedIdentity::new(s);
         g.set_op("identity", &["x", "y", "z"], i);
         (g, tx)

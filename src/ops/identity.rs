@@ -77,11 +77,11 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.seed(s, vec![1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into()]);
-        g.seed(s, vec![1.into(), 2.into()]);
-        g.seed(s, vec![3.into(), 3.into()]);
+        g.seed(s, vec![1.into(), 1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 1.into(), 1.into()]);
+        g.seed(s, vec![2.into(), 2.into(), 1.into()]);
+        g.seed(s, vec![1.into(), 2.into(), 1.into()]);
+        g.seed(s, vec![3.into(), 3.into(), 1.into()]);
         g.set_op("identity", &["x", "y", "z"], Identity::new(s));
         if materialized {
             g.set_materialized();
