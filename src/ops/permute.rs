@@ -206,13 +206,16 @@ mod tests {
     fn it_describes() {
         let p = setup(false, false);
         assert_eq!(p.node().description(), "π[2, 0]");
+    }
 
+    #[test]
+    fn it_describes_all() {
         let p = setup(false, true);
         assert_eq!(p.node().description(), "π[*]");
     }
 
     #[test]
-    fn it_forwards() {
+    fn it_forwards_some() {
         let mut p = setup(false, false);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
@@ -220,6 +223,19 @@ mod tests {
             ops::Update::Records(rs) => {
                 assert_eq!(rs,
                            vec![ops::Record::Positive(vec!["c".into(), "a".into()])]);
+            }
+        }
+    }
+
+    #[test]
+    fn it_forwards_all() {
+        let mut p = setup(false, true);
+
+        let rec = vec!["a".into(), "b".into(), "c".into()];
+        match p.narrow_one_row(rec, false).unwrap() {
+            ops::Update::Records(rs) => {
+                assert_eq!(rs,
+                           vec![ops::Record::Positive(vec!["a".into(), "b".into(), "c".into()])]);
             }
         }
     }
@@ -255,8 +271,10 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
+    }
 
-
+    #[test]
+    fn it_queries_all() {
         let p = setup(false, true);
 
         let q = query::Query::new(&[true, true, true],
@@ -298,7 +316,10 @@ mod tests {
         let p = setup(false, false);
         assert_eq!(p.node().resolve(0), Some(vec![(0.into(), 2)]));
         assert_eq!(p.node().resolve(1), Some(vec![(0.into(), 0)]));
+    }
 
+    #[test]
+    fn it_resolves_all() {
         let p = setup(false, true);
         assert_eq!(p.node().resolve(0), Some(vec![(0.into(), 0)]));
         assert_eq!(p.node().resolve(1), Some(vec![(0.into(), 1)]));
