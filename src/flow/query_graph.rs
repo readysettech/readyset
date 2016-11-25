@@ -60,9 +60,9 @@ fn classify_conditionals(ce: &ConditionExpression,
             if let ConditionExpression::Base(ref l) = *ct.left.as_ref().unwrap().as_ref() {
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref().unwrap().as_ref() {
                     match *r {
-                        ConditionBase::Field(ref f) => {
+                        ConditionBase::Field(_) => {
                             // column/column comparison
-                            if let ConditionBase::Field(ref lf) = *l {
+                            if let ConditionBase::Field(_) = *l {
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
                                     join.push(ct.clone());

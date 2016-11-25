@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-                      Operator, SqlQuery};
+use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator,
+                      SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use flow;
 use FlowGraph;
@@ -9,7 +9,7 @@ use ops::Node;
 use ops::base::Base;
 use ops::identity::Identity;
 use query::{DataType, Query};
-use super::query_graph::{QueryGraph, QueryGraphNode, to_query_graph};
+use super::query_graph::{QueryGraphNode, to_query_graph};
 use shortcut;
 
 use petgraph;
@@ -65,7 +65,7 @@ fn lookup_node(vn: &str, g: &mut FG) -> petgraph::graph::NodeIndex {
 }
 
 fn make_base_node(st: &InsertStatement) -> Node {
-    let (cols, vals): (Vec<Column>, Vec<String>) = st.fields.iter().cloned().unzip();
+    let (cols, _): (Vec<Column>, Vec<String>) = st.fields.iter().cloned().unzip();
     ops::new(st.table.clone(),
              Vec::from_iter(cols.iter().map(|c| c.name.as_str())).as_slice(),
              true,
@@ -94,13 +94,13 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
 
     let mut new_nodes = Vec::new();
     let mut i = 0;
-    for (rel, qgn) in qg.relations.iter() {
+    for (_, qgn) in qg.relations.iter() {
         // add a basic filter/permute node for each query graph node
         let n = make_filter_node(&format!("query-{}", i), qgn, g);
         new_nodes.push(n);
         i += 1;
     }
-    for edge in qg.edges.iter() {
+    for _edge in qg.edges.iter() {
         // query graph edges are joins, so add a join node for each
         // TODO(malte): implement!
     }
@@ -144,7 +144,7 @@ mod tests {
     use ops;
     use ops::new;
     use ops::base::Base;
-    use query::{DataType, Query};
+    use query::DataType;
     use super::{FG, ToFlowParts, V};
 
     type Update = ops::Update;
