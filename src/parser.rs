@@ -28,8 +28,8 @@ impl<'a> From<&'a str> for Column {
             }
             Some(i) => {
                 Column {
-                    name: String::from(&c[i..]),
-                    table: Some(String::from(&c[0..i - 1])),
+                    name: String::from(&c[i + 1..]),
+                    table: Some(String::from(&c[0..i])),
                 }
             }
         }
@@ -94,4 +94,21 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     };
 
     Err("failed to parse query")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_from_str() {
+        let s = "table.col";
+        let c = Column::from(s);
+
+        assert_eq!(c,
+                   Column {
+                       name: String::from("col"),
+                       table: Some(String::from("table")),
+                   });
+    }
 }
