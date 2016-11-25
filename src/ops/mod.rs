@@ -144,7 +144,9 @@ pub mod test {
             i.on_connected(&self.graph);
             let ni = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, ni, false);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(ni, &HashMap::new());
+            let mut remap = HashMap::new();
+            remap.insert(ni, ni);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(ni, &remap);
             self.states.insert(ni, State::new(fields.len()));
             self.bases.push(ni);
             ni
@@ -166,6 +168,12 @@ pub mod test {
             for parent in parents {
                 self.graph.add_edge(parent, ni, false);
             }
+            let mut remap = HashMap::new();
+            for b in &self.bases {
+                remap.insert(*b, *b);
+            }
+            remap.insert(ni, ni);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(ni, &remap);
 
             // we're now committing to testing this op
             // store the id
