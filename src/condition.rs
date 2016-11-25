@@ -12,7 +12,7 @@ fn fold_cond_exprs(initial: ConditionExpression,
         let (oper, expr) = pair;
         match oper {
             Operator::Equal | Operator::Less | Operator::Greater | Operator::LessOrEqual |
-            Operator::GreaterOrEqual | Operator::NotEqual => {
+            Operator::Like | Operator::GreaterOrEqual | Operator::NotEqual => {
                 ConditionExpression::ComparisonOp(ConditionTree {
                     operator: oper.clone(),
                     left: Some(Box::new(acc)),
