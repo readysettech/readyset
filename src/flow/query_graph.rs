@@ -102,20 +102,10 @@ fn classify_conditionals(ce: &ConditionExpression,
 pub fn to_query_graph(st: &SelectStatement) -> QueryGraph {
     let mut qg = QueryGraph::new();
 
-    if let Some(ref cond) = st.where_clause {
-        let mut join_predicates = Vec::new();
-        let mut local_predicates = HashMap::new();
-        let mut global_predicates = Vec::<ConditionTree>::new();
-        // Let's classify the predicates we have in the query
-        classify_conditionals(cond,
-                              &mut local_predicates,
-                              &mut join_predicates,
-                              &mut global_predicates);
-
-        // Now we're ready to build the query graph
-        // 1. Set up nodes for each relation
-        for (rel, preds) in local_predicates.into_iter() {
-            let n = QueryGraphNode {
+    // a handy closure for making new relation nodes
+    let new_node =
+        |rel: String, preds: Vec<ConditionTree>, st: &SelectStatement| -> QueryGraphNode {
+            QueryGraphNode {
                 rel_name: rel.clone(),
                 predicates: preds,
                 columns: match st.fields {
@@ -128,7 +118,23 @@ pub fn to_query_graph(st: &SelectStatement) -> QueryGraph {
                             .collect()
                     }
                 },
-            };
+            }
+        };
+
+    if let Some(ref cond) = st.where_clause {
+        let mut join_predicates = Vec::new();
+        let mut local_predicates = HashMap::new();
+        let mut global_predicates = Vec::<ConditionTree>::new();
+        // Let's classify the predicates we have in the query
+        classify_conditionals(cond,
+                              &mut local_predicates,
+                              &mut join_predicates,
+                              &mut global_predicates);
+
+        // Now we're ready to build the query graph
+        // 1. Set up nodes for each relation that we have local predicates for
+        for (rel, preds) in local_predicates.into_iter() {
+            let n = new_node(rel.clone(), preds, &st);
             qg.relations.insert(rel, n);
         }
         // 2. Add edges for each pair of joined relations
@@ -156,5 +162,14 @@ pub fn to_query_graph(st: &SelectStatement) -> QueryGraph {
             }
         }
     }
+    // 3. Add any relations mentioned in the query but not in any conditionals.
+    // This is also needed so that we don't end up with an empty query graph when there are no
+    // conditionals, but rather with a one-node query graph that has no predicates.
+    for rel in st.tables.iter() {
+        if !qg.relations.contains_key(rel.as_str()) {
+            qg.relations.insert(rel.clone(), new_node(rel.clone(), Vec::new(), &st));
+        }
+    }
+
     qg
 }
