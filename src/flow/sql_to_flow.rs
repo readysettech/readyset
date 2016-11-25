@@ -66,7 +66,7 @@ fn lookup_node(vn: &str, g: &mut FG) -> petgraph::graph::NodeIndex {
 
 fn make_base_node(st: &InsertStatement) -> Node {
     let (cols, _): (Vec<Column>, Vec<String>) = st.fields.iter().cloned().unzip();
-    ops::new(st.table.clone(),
+    ops::new(st.table.name.clone(),
              Vec::from_iter(cols.iter().map(|c| c.name.as_str())).as_slice(),
              true,
              Base {})

@@ -165,9 +165,10 @@ pub fn to_query_graph(st: &SelectStatement) -> QueryGraph {
     // 3. Add any relations mentioned in the query but not in any conditionals.
     // This is also needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
-    for rel in st.tables.iter() {
-        if !qg.relations.contains_key(rel.as_str()) {
-            qg.relations.insert(rel.clone(), new_node(rel.clone(), Vec::new(), &st));
+    for table in st.tables.iter() {
+        if !qg.relations.contains_key(table.name.as_str()) {
+            qg.relations.insert(table.name.clone(),
+                                new_node(table.name.clone(), Vec::new(), &st));
         }
     }
 
