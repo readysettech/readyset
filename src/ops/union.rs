@@ -134,7 +134,14 @@ impl Ingredient for Union {
                 let cs = params.unwrap_or_else(Vec::new);
                 if let Some(state) = states.get(&src) {
                     // parent is materialized
-                    state.find(&cs[..]).map(|r| r.iter().cloned().collect()).collect()
+                    state.find(&cs[..])
+                        .map(|r| {
+                            r.iter()
+                                .enumerate()
+                                .filter_map(|(i, v)| if select[i] { Some(v.clone()) } else { None })
+                                .collect()
+                        })
+                        .collect()
                 } else {
                     // parent is not materialized, query into parent
                     // TODO: if we're selecting all and have no conds, we could pass q = None
