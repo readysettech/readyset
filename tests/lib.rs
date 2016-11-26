@@ -9,16 +9,18 @@ use std::collections::HashMap;
 #[test]
 fn it_works() {
     // set up graph
-    let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}));
-    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}));
+    let mut g = distributary::Blender::new();
+    let mut mig = g.start_migration();
+    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
     let mut emits = HashMap::new();
     emits.insert(a, vec![0, 1]);
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
-    let c = g.incorporate(distributary::new("c", &["a", "b"], false, u));
-    let (put, get) = g.run(10);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+
+    let (put, get) = mig.commit();
 
     // send a value on a
     put[&a](vec![1.into(), 2.into()]);
@@ -44,16 +46,18 @@ fn it_works() {
 #[test]
 fn it_works_w_mat() {
     // set up graph
-    let mut g = distributary::FlowGraph::new();
-    let a = g.incorporate(distributary::new("a", &["a", "b"], true, distributary::Base {}));
-    let b = g.incorporate(distributary::new("b", &["a", "b"], true, distributary::Base {}));
+    let mut g = distributary::Blender::new();
+    let mut mig = g.start_migration();
+    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
     let mut emits = HashMap::new();
     emits.insert(a, vec![0, 1]);
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
-    let c = g.incorporate(distributary::new("c", &["a", "b"], true, u));
-    let (put, get) = g.run(10);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+
+    let (put, get) = mig.commit();
 
     // send a few values on a
     put[&a](vec![1.into(), 1.into()]);
@@ -89,39 +93,39 @@ fn it_works_w_mat() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Query, Aggregation, JoinBuilder, new};
+    use distributary::{Base, Union, Query, Aggregation, JoinBuilder};
 
     // set up graph
-    let mut g = distributary::FlowGraph::new();
+    let mut g = distributary::Blender::new();
+    let mut mig = g.start_migration();
 
     // add article base nodes (we use two so we can exercise unions too)
-    let article1 = g.incorporate(new("article1", &["id", "title"], true, Base {}));
-    let article2 = g.incorporate(new("article2", &["id", "title"], true, Base {}));
+    let article1 = mig.add_ingredient("article1", &["id", "title"], Base {});
+    let article2 = mig.add_ingredient("article1", &["id", "title"], Base {});
 
     // add a (stupid) union of article1 + article2
     let mut emits = HashMap::new();
     emits.insert(article1, vec![0, 1]);
     emits.insert(article2, vec![0, 1]);
     let u = Union::new(emits);
-    let article = g.incorporate(new("article", &["id", "title"], false, u));
+    let article = mig.add_ingredient("article", &["id", "title"], u);
 
     // add vote base table
-    let vote = g.incorporate(new("vote", &["user", "id"], true, Base {}));
+    let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
 
     // add vote count
-    let vc = g.incorporate(new("vc",
-                               &["id", "votes"],
-                               true,
-                               Aggregation::COUNT.over(vote, 0, &[1])));
+    let vc = mig.add_ingredient("vc",
+                                &["id", "votes"],
+                                Aggregation::COUNT.over(vote, 0, &[1]));
 
     // add final join using first field from article and first from vc
     let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
         .from(article, vec![1, 0])
         .join(vc, vec![1, 0]);
-    let end = g.incorporate(new("end", &["id", "title", "votes"], true, j));
+    let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
 
     // start processing
-    let (put, get) = g.run(10);
+    let (put, get) = mig.commit();
 
     // make one article
     put[&article1](vec![1.into(), 2.into()]);
