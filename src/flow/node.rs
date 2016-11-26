@@ -12,7 +12,7 @@ use flow::{Message, Ingredient};
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
-    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeIndex, mpsc::Sender<Message>)>>>),
+    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeIndex, mpsc::SyncSender<Message>)>>>),
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
     Source,

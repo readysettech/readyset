@@ -320,7 +320,7 @@ impl<'a> Migration<'a> {
                     // node about the channel it should use. we'll do that later, so just keep
                     // track of this work for later for now.
                     if !rxs.contains_key(&domain) {
-                        let (tx, rx) = mpsc::channel();
+                        let (tx, rx) = mpsc::sync_channel(10);
                         rxs.insert(domain, rx);
                         txs.insert(domain, tx);
                     }
