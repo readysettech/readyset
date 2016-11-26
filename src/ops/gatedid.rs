@@ -50,12 +50,16 @@ impl Ingredient for GatedIdentity {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
         self.rx.lock().unwrap().recv().unwrap();
         input.data.into()
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         if let Some(state) = states.get(&self.src) {
             // parent is materialized
             state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
@@ -63,7 +67,7 @@ impl Ingredient for GatedIdentity {
                 .collect()
         } else {
             // parent is not materialized, query into parent
-            domain.lookup(self.src).query(q, domain, states)
+            domain[&self.src].borrow().query(q, domain, states)
         }
     }
 

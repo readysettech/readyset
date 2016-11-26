@@ -71,7 +71,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
         match input.data {
             Update::Records(rs) => {
                 let from = input.from;
@@ -96,7 +96,11 @@ impl Ingredient for Union {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         use std::iter;
 
         let mut params = HashMap::new();
@@ -145,7 +149,8 @@ impl Ingredient for Union {
                 } else {
                     // parent is not materialized, query into parent
                     // TODO: if we're selecting all and have no conds, we could pass q = None
-                    domain.lookup(src)
+                    domain[&src]
+                        .borrow()
                         .query(Some(&query::Query::new(&select[..], cs)), domain, states)
                 }
 

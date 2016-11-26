@@ -118,7 +118,7 @@ pub mod test {
         source: NodeIndex,
         nut: Option<NodeIndex>, // node under test
         states: StateMap,
-        nodes: NodeList,
+        nodes: DomainNodes,
         bases: Vec<NodeIndex>,
     }
 
@@ -133,7 +133,7 @@ pub mod test {
                 source: source,
                 nut: None,
                 states: StateMap::new(),
-                nodes: NodeList::from(vec![]),
+                nodes: DomainNodes::default(),
                 bases: Vec::new(),
             }
         }
@@ -203,7 +203,13 @@ pub mod test {
                     }
                 })
                 .collect();
-            self.nodes = NodeList::from(nodes);
+
+            self.nodes = nodes.into_iter()
+                .map(|n| {
+                    use std::cell;
+                    (n.index, cell::RefCell::new(n))
+                })
+                .collect();
         }
 
         pub fn seed(&mut self, base: NodeIndex, data: Vec<query::DataType>) {
@@ -254,8 +260,8 @@ pub mod test {
                 data: u.into(),
             };
 
-            let u = self.nodes
-                .lookup_mut(self.nut.unwrap())
+            let u = self.nodes[&self.nut.unwrap()]
+                .borrow_mut()
                 .inner
                 .on_input(m, &self.nodes, &self.states);
 
@@ -326,7 +332,7 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes.lookup(self.nut.unwrap())
+            self.nodes[&self.nut.unwrap()].borrow()
         }
 
         pub fn narrow_base_id(&self) -> NodeIndex {

@@ -169,7 +169,7 @@ impl Ingredient for Permute {
         });
     }
 
-    fn on_input(&mut self, mut input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, mut input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
         debug_assert_eq!(input.from, self.src);
 
         if self.emit.is_some() {
@@ -184,7 +184,11 @@ impl Ingredient for Permute {
         input.data.into()
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         use shortcut::cmp::Comparison::Equal;
         use shortcut::cmp::Value::{Const, Column};
 
@@ -192,7 +196,7 @@ impl Ingredient for Permute {
         // drops some fields--`self.permute` will end up dropping them
         // anyway--but it's not worth the trouble.
         let select = iter::repeat(true)
-            .take(domain.lookup(self.src).fields().len())
+            .take(domain[&self.src].borrow().fields().len())
             .collect::<Vec<_>>();
 
         let q = q.map(|q| {
@@ -215,7 +219,7 @@ impl Ingredient for Permute {
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain.lookup(self.src).query(q.as_ref(), domain, states)
+            domain[&self.src].borrow().query(q.as_ref(), domain, states)
         };
 
         if self.emit.is_some() {

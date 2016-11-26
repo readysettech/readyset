@@ -42,7 +42,7 @@ pub trait Ingredient
     /// all records should be returned.
     fn query(&self,
              q: Option<&query::Query>,
-             domain: &prelude::NodeList,
+             domain: &prelude::DomainNodes,
              states: &prelude::StateMap)
              -> ops::Datas;
 
@@ -77,7 +77,7 @@ pub trait Ingredient
     fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>);
     fn on_input(&mut self,
                 input: Message,
-                domain: &domain::list::NodeList,
+                domain: &prelude::DomainNodes,
                 states: &HashMap<NodeIndex, shortcut::Store<query::DataType>>)
                 -> Option<U>;
 }

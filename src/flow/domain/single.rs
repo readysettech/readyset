@@ -32,7 +32,7 @@ impl NodeDescriptor {
     pub fn process(&mut self,
                    m: Message,
                    state: &mut StateMap,
-                   nodes: &NodeList)
+                   nodes: &DomainNodes)
                    -> Option<Update> {
 
         // i wish we could use match here, but unfortunately the borrow checker isn't quite

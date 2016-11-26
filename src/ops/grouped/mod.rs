@@ -157,7 +157,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         self.us = us;
     }
 
-    fn on_input(&mut self, input: Message, _: &NodeList, state: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
         debug_assert_eq!(input.from, self.src);
 
         // Construct the query we'll need to query into ourselves
@@ -275,7 +275,11 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         use std::iter;
 
         // we're fetching everything from our parent
@@ -318,7 +322,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                 .collect()
         } else {
             // parent is not materialized, query into parent
-            domain.lookup(self.src).query(q.as_ref(), domain, states)
+            domain[&self.src].borrow().query(q.as_ref(), domain, states)
         };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire

@@ -28,11 +28,11 @@ impl Ingredient for Base {
 
     fn on_connected(&mut self, _: &Graph) {}
     fn on_commit(&mut self, _: NodeIndex, _: &HashMap<NodeIndex, NodeIndex>) {}
-    fn on_input(&mut self, input: Message, _: &NodeList, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
         Some(input.data)
     }
 
-    fn query(&self, _: Option<&query::Query>, _: &NodeList, _: &StateMap) -> ops::Datas {
+    fn query(&self, _: Option<&query::Query>, _: &DomainNodes, _: &StateMap) -> ops::Datas {
         unreachable!("base nodes should never be queried directly");
     }
 

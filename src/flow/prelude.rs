@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 pub use flow::Ingredient;
 
 use petgraph;
@@ -6,10 +8,11 @@ pub use flow::node::Node;
 use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
 pub use flow::Message;
-pub use flow::domain::list::NodeList;
+use flow::domain::single;
+use std::cell;
+pub type DomainNodes = HashMap<NodeIndex, cell::RefCell<single::NodeDescriptor>>;
 use shortcut;
 use query;
 pub type State = shortcut::Store<query::DataType>;
-use std::collections::HashMap;
 pub type StateMap = HashMap<NodeIndex, State>;
 pub use ops::{Update, Record};

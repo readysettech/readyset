@@ -4,10 +4,10 @@ use shortcut;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::mpsc;
+use std::cell;
 
 use flow;
 use flow::prelude::*;
-pub mod list;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 pub struct Index(usize);
@@ -28,7 +28,7 @@ pub mod single;
 
 pub struct Domain {
     domain: Index,
-    nodes: NodeList,
+    nodes: DomainNodes,
     state: StateMap,
 }
 
@@ -107,21 +107,22 @@ impl Domain {
             }
         }
 
+        let nodes = nodes.into_iter().map(|n| (n.index, cell::RefCell::new(n))).collect();
         Domain {
             domain: domain,
-            nodes: nodes.into(),
+            nodes: nodes,
             state: state,
         }
     }
 
-    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &NodeList) {
+    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes) {
         let me = m.to;
 
-        let mut n = nodes.lookup_mut(me);
+        let mut n = nodes[&me].borrow_mut();
         let mut u = n.process(m, states, nodes);
         drop(n);
 
-        let n = nodes.lookup(me);
+        let n = nodes[&me].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can
             let data = if i == n.children.len() - 1 {

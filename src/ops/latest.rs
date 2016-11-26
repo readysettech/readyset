@@ -59,7 +59,7 @@ impl Ingredient for Latest {
         self.src = remap[&self.src]
     }
 
-    fn on_input(&mut self, input: Message, _: &NodeList, state: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
         debug_assert_eq!(input.from, self.src);
 
         // Construct the query we'll need to query into ourselves to find current latest
@@ -155,7 +155,11 @@ impl Ingredient for Latest {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         use std::iter;
 
         // we're fetching everything from our parent
@@ -188,7 +192,7 @@ impl Ingredient for Latest {
 
         let q = params.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(domain.lookup(self.src).fields().len())
+                                  .take(domain[&self.src].borrow().fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
@@ -201,7 +205,7 @@ impl Ingredient for Latest {
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain.lookup(self.src).query(q.as_ref(), domain, states)
+            domain[&self.src].borrow().query(q.as_ref(), domain, states)
         };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire

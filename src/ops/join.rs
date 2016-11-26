@@ -188,7 +188,7 @@ pub struct Joiner {
 impl Joiner {
     fn join<'a>(&'a self,
                 left: (NodeIndex, Vec<query::DataType>),
-                domain: &NodeList,
+                domain: &DomainNodes,
                 states: &StateMap)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
 
@@ -218,7 +218,7 @@ impl Joiner {
             state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
         } else {
             // other node is not materialized, query instead
-            domain.lookup(other).query(Some(&q), domain, states)
+            domain[&other].borrow().query(Some(&q), domain, states)
         };
 
         if rx.is_empty() && target.outer {
@@ -306,7 +306,11 @@ impl Ingredient for Joiner {
         }
     }
 
-    fn on_input(&mut self, input: Message, nodes: &NodeList, state: &StateMap) -> Option<Update> {
+    fn on_input(&mut self,
+                input: Message,
+                nodes: &DomainNodes,
+                state: &StateMap)
+                -> Option<Update> {
         let from = input.from;
         match input.data {
             ops::Update::Records(rs) => {
@@ -336,7 +340,11 @@ impl Ingredient for Joiner {
         }
     }
 
-    fn query(&self, q: Option<&query::Query>, domain: &NodeList, states: &StateMap) -> ops::Datas {
+    fn query(&self,
+             q: Option<&query::Query>,
+             domain: &DomainNodes,
+             states: &StateMap)
+             -> ops::Datas {
         use std::iter;
 
         // We're essentially doing nested for loops, where each loop yields rows from one "table".
@@ -382,7 +390,7 @@ impl Ingredient for Joiner {
         // TODO: we probably don't need to select all columns here
         let lq = lparams.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(domain.lookup(left.node).fields().len())
+                                  .take(domain[&left.node].borrow().fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
@@ -394,7 +402,7 @@ impl Ingredient for Joiner {
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain.lookup(left.node).query(lq.as_ref(), domain, states)
+            domain[&left.node].borrow().query(lq.as_ref(), domain, states)
         };
 
         leftrx.into_iter()
