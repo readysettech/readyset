@@ -60,36 +60,23 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
         "tasted nice"
     };
 
+    let check = |title: &str, result: bool| {
+        let mut out = format!("{}: ", title);
+        if result {
+            out.push_str(":white_check_mark:");
+        } else {
+            out.push_str(":x:");
+        }
+        out
+    };
+
     let mut attachments = Vec::new();
     let build_att = AttachmentBuilder::new("")
         .title(format!("It {}.", taste))
-        .fields(vec![Field {
-                         title: "".into(),
-                         value: SlackText::new(if res.build {
-                             "Build: :white_check_mark:"
-                         } else {
-                             "Build: :x:"
-                         }),
-                         short: Some(true),
-                     },
-                     Field {
-                         title: "".into(),
-                         value: SlackText::new(if res.test {
-                             "Tests: :white_check_mark:"
-                         } else {
-                             "Tests: :x:"
-                         }),
-                         short: Some(true),
-                     },
-                     Field {
-                         title: "".into(),
-                         value: SlackText::new(if res.bench {
-                             "Benchmark: :white_check_mark:"
-                         } else {
-                             "Benchmark: :x:"
-                         }),
-                         short: Some(true),
-                     }])
+        .text(format!("{} {} {}",
+                      check("Build", res.build),
+                      check("Tests", res.test),
+                      check("Benchmark", res.bench)))
         .color(color)
         .build()
         .unwrap();
