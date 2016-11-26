@@ -3,7 +3,7 @@ use shortcut;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
+use std::sync::mpsc;
 
 use flow;
 use flow::prelude::*;
@@ -30,7 +30,6 @@ pub struct Domain {
     domain: Index,
     nodes: NodeList,
     state: StateMap,
-    handoffs: HashMap<NodeIndex, VecDeque<Message>>,
 }
 
 impl Domain {
@@ -108,26 +107,47 @@ impl Domain {
             }
         }
 
-        let handoffs = nodes.iter().map(|n| (n.index, VecDeque::new())).collect();
-
         Domain {
             domain: domain,
             nodes: nodes.into(),
             state: state,
-            handoffs: handoffs,
         }
     }
 
-    pub fn boot(mut self) {
+    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &NodeList) {
+        let me = m.to;
+
+        let mut n = nodes.lookup_mut(me);
+        let mut u = n.process(m, states, nodes);
+        drop(n);
+
+        let n = nodes.lookup(me);
+        for i in 0..n.children.len() {
+            // avoid cloning if we can
+            let data = if i == n.children.len() - 1 {
+                u.take()
+            } else {
+                u.clone()
+            };
+
+            let m = Message {
+                from: me,
+                to: n.children[i],
+                data: data.unwrap(),
+            };
+
+            Self::dispatch(m, states, nodes)
+        }
+    }
+
+    pub fn boot(self, rx: mpsc::Receiver<Message>) {
         use std::thread;
 
         thread::spawn(move || {
-            loop {
-                // `nodes` is already in topological order, so we just walk over them in order and
-                // do the appropriate action for each one.
-                for node in &self.nodes {
-                    node.borrow_mut().iterate(&mut self.handoffs, &mut self.state, &self.nodes);
-                }
+            let mut states = self.state;
+            let nodes = self.nodes;
+            for m in rx {
+                Self::dispatch(m, &mut states, &nodes);
             }
         });
     }

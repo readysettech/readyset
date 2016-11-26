@@ -209,6 +209,7 @@ pub mod test {
         pub fn seed(&mut self, base: NodeIndex, data: Vec<query::DataType>) {
             let m = Message {
                 from: self.source,
+                to: base,
                 data: data.into(),
             };
 
@@ -249,6 +250,7 @@ pub mod test {
 
             let m = Message {
                 from: src,
+                to: self.nut.unwrap(),
                 data: u.into(),
             };
 

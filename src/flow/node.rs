@@ -10,9 +10,9 @@ use flow::domain;
 use flow::{Message, Ingredient};
 
 pub enum Type {
-    Ingress(domain::Index, mpsc::Receiver<Message>),
+    Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
-    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::Sender<Message>>>>),
+    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeIndex, mpsc::Sender<Message>)>>>),
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
     Source,
@@ -22,7 +22,7 @@ impl Type {
     fn domain(&self) -> Option<domain::Index> {
         match *self {
             Type::Taken(d) |
-            Type::Ingress(d, _) |
+            Type::Ingress(d) |
             Type::Internal(d, _) |
             Type::Egress(d, _) => Some(d),
             _ => None,

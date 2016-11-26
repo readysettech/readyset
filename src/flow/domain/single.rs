@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::collections::VecDeque;
-
 use flow;
 use flow::prelude::*;
 
@@ -32,75 +29,60 @@ pub struct NodeDescriptor {
 }
 
 impl NodeDescriptor {
-    pub fn iterate(&mut self,
-                   handoffs: &mut HashMap<NodeIndex, VecDeque<Message>>,
+    pub fn process(&mut self,
+                   m: Message,
                    state: &mut StateMap,
-                   nodes: &NodeList) {
+                   nodes: &NodeList)
+                   -> Option<Update> {
 
         // i wish we could use match here, but unfortunately the borrow checker isn't quite
         // sophisticated enough to deal with match and DerefMut in a way that lets us do it
         //
         //   https://github.com/rust-lang/rust/issues/37949
         //
-        // so, instead, we do multiple if-lets
-
+        // so, instead, we have to do it in two parts
         if let flow::node::Type::Ingress(..) = *self.inner {
-            let m = if let flow::node::Type::Ingress(_, ref mut rx) = *self.inner {
-                // receive an update
-                debug_assert!(handoffs[&self.index].is_empty());
-                rx.recv().ok()
-            } else {
-                None
-            };
-
-            if let Some(m) = m {
-                self.materialize(&m.data, state);
-                broadcast!(self.index, handoffs, m, &self.children[..]);
-            }
+            self.materialize(&m.data, state);
+            return Some(m.data);
         }
 
         if let flow::node::Type::Egress(_, ref txs) = *self.inner {
             // send any queued updates to all external children
             let mut txs = txs.lock().unwrap();
             let txn = txs.len() - 1;
-            while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
-                let mut m = Some(m); // so we can use .take()
-                for (txi, tx) in txs.iter_mut().enumerate() {
-                    if txi == txn && self.children.is_empty() {
-                        tx.send(m.take().unwrap()).unwrap();
+
+            let mut u = Some(m.data); // so we can use .take()
+            for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
+                if txi == txn && self.children.is_empty() {
+                        tx.send(Message {
+                            from: self.index,
+                            to: dst,
+                            data: u.take().unwrap(),
+                        })
                     } else {
-                        tx.send(m.clone().unwrap()).unwrap();
+                        tx.send(Message {
+                            from: self.index,
+                            to: dst,
+                            data: u.clone().unwrap(),
+                        })
                     }
-                }
-
-                if let Some(m) = m {
-                    broadcast!(self.index, handoffs, m, &self.children[..]);
-                } else {
-                    debug_assert!(self.children.is_empty());
-                }
+                    .unwrap();
             }
+
+            debug_assert!(u.is_some() || self.children.is_empty());
+            return u;
         }
 
-        if let flow::node::Type::Internal(..) = *self.inner {
-            while let Some(m) = handoffs.get_mut(&self.index).unwrap().pop_front() {
-                let u = if let flow::node::Type::Internal(_, ref mut i) = *self.inner {
-                    i.on_input(m, nodes, state)
-                } else {
-                    None
-                };
+        let u = if let flow::node::Type::Internal(_, ref mut i) = *self.inner {
+            i.on_input(m, nodes, state)
+        } else {
+            unreachable!();
+        };
 
-                if let Some(u) = u {
-                    self.materialize(&u, state);
-                    broadcast!(self.index,
-                               handoffs,
-                               Message {
-                                   from: self.index,
-                                   data: u,
-                               },
-                               &self.children[..]);
-                }
-            }
+        if let Some(ref u) = u {
+            self.materialize(u, state);
         }
+        u
     }
 
     fn materialize(&mut self, u: &Update, state: &mut StateMap) {

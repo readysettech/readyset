@@ -22,6 +22,7 @@ pub type Edge = bool; // should the edge be materialized?
 #[derive(Clone)]
 pub struct Message {
     pub from: NodeIndex,
+    pub to: NodeIndex,
     pub data: U,
 }
 
@@ -238,9 +239,12 @@ impl<'a> Migration<'a> {
         assert!(self.added.insert(n, Some(d)).is_none());
     }
 
-    fn boot_domain(&mut self, d: domain::Index, nodes: Vec<NodeIndex>) {
+    fn boot_domain(&mut self,
+                   d: domain::Index,
+                   nodes: Vec<NodeIndex>,
+                   rx: mpsc::Receiver<Message>) {
         let d = domain::Domain::from_graph(d, nodes, &mut self.mainline.ingredients);
-        d.boot();
+        d.boot(rx);
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -254,12 +258,23 @@ impl<'a> Migration<'a> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
+        // some nodes that used to be the children of other nodes will now be children of ingress
+        // nodes instead. keep track of this mapping for each domain.
         let mut domain_remap = HashMap::new();
+
+        // for each domain, we need to keep track of its channel pair so any egress nodes in other
+        // domain trying to send to it know where to send.
+        let mut txs = HashMap::new();
+        let mut rxs = HashMap::new();
         let mut targets = HashMap::new();
+
+        // keep track of the nodes assigned to each domain.
         let mut domain_nodes = HashMap::new();
 
-        // find all new nodes in topological order
-        // we collect first since we'll be mutating the graph below
+        // find all new nodes in topological order>
+        // we collect first since we'll be mutating the graph below.
+        // we need them to be in topological order here so that we know that parents have been
+        // processed, and that children have not (which matters for ingress/egress setup).
         let mut topo_list = Vec::with_capacity(self.added.len());
         let mut topo = petgraph::visit::Topo::new(&self.mainline.ingredients);
         while let Some(node) = topo.next(&self.mainline.ingredients) {
@@ -293,20 +308,23 @@ impl<'a> Migration<'a> {
                    domain != self.mainline.ingredients[parent].domain().unwrap() {
                     // parent is in a different domain
                     // create an ingress node to handle that
-                    // it's going to need its own channel
-                    let (tx, rx) = mpsc::channel();
-                    // and it needs to be in the graph
                     let proxy = self.mainline.ingredients[parent]
-                        .mirror(node::Type::Ingress(domain, rx));
+                        .mirror(node::Type::Ingress(domain));
                     let ingress = self.mainline.ingredients.add_node(proxy);
 
                     // that ingress node also needs to run before us
                     domain_nodes.entry(domain).or_insert_with(Vec::new).push(ingress);
 
+                    // we also need to make sure there's a channel to reach the domain on
                     // we're also going to need to tell any egress node that will send to this
                     // node about the channel it should use. we'll do that later, so just keep
                     // track of this work for later for now.
-                    targets.insert(ingress, tx);
+                    if !rxs.contains_key(&domain) {
+                        let (tx, rx) = mpsc::channel();
+                        rxs.insert(domain, rx);
+                        txs.insert(domain, tx);
+                    }
+                    targets.insert(ingress, txs[&domain].clone());
 
                     // note that, since we are traversing in topological order, our parent in this
                     // case should either be the source node, or it should be an egress node!
@@ -411,8 +429,10 @@ impl<'a> Migration<'a> {
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
-            self.boot_domain(domain, nodes);
+            self.boot_domain(domain, nodes, rxs.remove(&domain).unwrap());
         }
+        drop(rxs);
+        drop(txs); // all necessary copies are in targets
 
         // then, hook up the channels to new ingress nodes
         let mut sources = HashMap::new();
@@ -448,6 +468,7 @@ impl<'a> Migration<'a> {
                                    Box::new(move |u: Vec<query::DataType>| {
                         tx.send(Message {
                                 from: src,
+                                to: ingress,
                                 data: u.into(),
                             })
                             .unwrap()
@@ -458,7 +479,7 @@ impl<'a> Migration<'a> {
 
                 if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
                     // connected to egress from other domain
-                    txs.lock().unwrap().push(tx.clone());
+                    txs.lock().unwrap().push((ingress, tx.clone()));
                     continue;
                 }
 
