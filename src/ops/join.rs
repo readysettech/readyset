@@ -506,14 +506,20 @@ mod tests {
 
     #[test]
     fn it_describes() {
-        let (j, _, _) = setup(false);
-        assert_eq!(j.node().description(), "[0:0, 0:1, 1:1] 0:0 ⋈ 1:0");
+        let (j, l, r) = setup(false);
+        let l = l.index();
+        let r = r.index();
+        assert_eq!(j.node().description(),
+                   format!("[{}:0, {}:1, {}:1] {}:0 ⋈ {}:0", l, l, r, l, r));
     }
 
     #[test]
     fn it_describes_left() {
-        let (j, _, _) = setup(true);
-        assert_eq!(j.node().description(), "[0:0, 0:1, 1:1] 0:0 ⋉ 1:0");
+        let (j, l, r) = setup(true);
+        let l = l.index();
+        let r = r.index();
+        assert_eq!(j.node().description(),
+                   format!("[{}:0, {}:1, {}:1] {}:0 ⋉ {}:0", l, l, r, l, r));
     }
 
     fn forward_non_weird(mut j: ops::test::MockGraph, l: NodeIndex, r: NodeIndex) {

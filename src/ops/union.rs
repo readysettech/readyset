@@ -199,8 +199,9 @@ mod tests {
 
     #[test]
     fn it_describes() {
-        let (u, _, _) = setup();
-        assert_eq!(u.node().description(), "0:[0, 1] ⋃ 1:[0, 2]");
+        let (u, l, r) = setup();
+        assert_eq!(u.node().description(),
+                   format!("{}:[0, 1] ⋃ {}:[0, 2]", l.index(), r.index()));
     }
 
     #[test]
