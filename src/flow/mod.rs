@@ -407,7 +407,7 @@ impl<'a> Migration<'a> {
         //     :  | \         :   o
         //
         // etc.
-        println!("{}", self.mainline);
+        // println!("{}", self.mainline);
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
