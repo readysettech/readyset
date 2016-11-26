@@ -40,7 +40,7 @@ impl SlackNotifier {
 }
 
 fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
-    let color = if !res.build || !res.bench {
+    let color = if !res.build || !res.tests || !res.bench {
         "danger"
     } else {
         "good"
@@ -48,6 +48,8 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
 
     let title = if !res.build {
         "Build failure!"
+    } else if !res.test {
+        "Test failure!"
     } else if !res.bench {
         "Benchmark failure!"
     } else {
@@ -56,6 +58,8 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
 
     let taste = if !res.build || !res.bench {
         "was inedible"
+    } else if !res.tests {
+        "had a mixed palate"
     } else {
         "tasted nice"
     };
