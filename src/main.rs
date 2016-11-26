@@ -80,6 +80,10 @@ pub fn main() {
             .takes_value(true)
             .required(false)
             .help("Do a one-off taste of a specific commit"))
+        .arg(Arg::with_name("taste_head_only")
+            .long("taste_head_only")
+            .required(false)
+            .help("When multiple commits are pushed, taste the head commit only"))
         .arg(Arg::with_name("workdir")
             .short("w")
             .long("workdir")
@@ -97,6 +101,7 @@ pub fn main() {
     let slack_hook_url = args.value_of("slack_hook_url");
     let slack_channel = args.value_of("slack_channel");
     let taste_commit = args.value_of("taste_commit");
+    let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
     let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
@@ -139,18 +144,8 @@ pub fn main() {
     let mut hub = Hub::new();
     hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
         match delivery.payload {
-            Event::Push { ref commits, ref pusher, .. } => {
-                println!("Handling {} commits pushed by {}",
-                         commits.len(),
-                         pusher.name);
-                {
-                    let ws = wsl.lock().unwrap();
-                    ws.fetch().unwrap();
-                }
-                for c in commits.iter() {
-                    // taste
-                    let res = taste::taste_commit(&wsl, &c.id, &c.message, &c.url);
-
+            Event::Push { ref commits, ref head_commit, ref pusher, .. } => {
+                let notify = |res: &taste::TastingResult| {
                     // email notification
                     if en.is_some() {
                         en.as_ref().unwrap().notify(&res).unwrap();
@@ -159,6 +154,33 @@ pub fn main() {
                     if sn.is_some() {
                         sn.as_ref().unwrap().notify(&res).unwrap();
                     }
+                };
+                println!("Handling {} commits pushed by {}",
+                         commits.len(),
+                         pusher.name);
+                {
+                    let ws = wsl.lock().unwrap();
+                    ws.fetch().unwrap();
+                }
+                // First state the head commit
+                let head_res = taste::taste_commit(&wsl,
+                                                   &head_commit.id,
+                                                   &head_commit.message,
+                                                   &head_commit.url);
+                notify(&head_res);
+                // Taste others if needed
+                if !taste_head_only || !head_res.build || !head_res.bench {
+                    for c in commits.iter() {
+                        if c.id == head_commit.id {
+                            // skip HEAD as we've already tested it
+                            continue;
+                        }
+                        // taste
+                        let res = taste::taste_commit(&wsl, &c.id, &c.message, &c.url);
+                        notify(&res);
+                    }
+                } else {
+                    println!("Skipping {} remaining commits in push!", commits.len() - 1);
                 }
             }
             _ => (),
