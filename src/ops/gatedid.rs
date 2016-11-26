@@ -144,8 +144,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (i, _) = setup();
-        assert_eq!(i.node().resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(i.node().resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(i.node().resolve(2), Some(vec![(0.into(), 2)]));
+        assert_eq!(i.node().resolve(0), Some(vec![(i.narrow_base_id(), 0)]));
+        assert_eq!(i.node().resolve(1), Some(vec![(i.narrow_base_id(), 1)]));
+        assert_eq!(i.node().resolve(2), Some(vec![(i.narrow_base_id(), 2)]));
     }
 }

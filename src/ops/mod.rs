@@ -326,5 +326,10 @@ pub mod test {
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
             self.nodes.lookup(self.nut.unwrap())
         }
+
+        pub fn narrow_base_id(&self) -> NodeIndex {
+            assert_eq!(self.bases.len(), 1);
+            self.bases[0]
+        }
     }
 }

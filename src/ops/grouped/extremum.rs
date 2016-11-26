@@ -331,8 +331,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false, true);
-        assert_eq!(c.node().resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(c.node().resolve(1), Some(vec![(0.into(), 2)]));
+        assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
+        assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 2)]));
         assert_eq!(c.node().resolve(2), None);
     }
 }

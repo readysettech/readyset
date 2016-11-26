@@ -714,9 +714,9 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let (j, _, _) = setup(false);
-        assert_eq!(j.node().resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(j.node().resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(j.node().resolve(2), Some(vec![(1.into(), 1)]));
+        let (j, l, r) = setup(false);
+        assert_eq!(j.node().resolve(0), Some(vec![(l, 0)]));
+        assert_eq!(j.node().resolve(1), Some(vec![(l, 1)]));
+        assert_eq!(j.node().resolve(2), Some(vec![(r, 1)]));
     }
 }

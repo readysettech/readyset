@@ -386,15 +386,15 @@ mod tests {
     #[test]
     fn it_resolves() {
         let p = setup(false, false);
-        assert_eq!(p.node().resolve(0), Some(vec![(0.into(), 2)]));
-        assert_eq!(p.node().resolve(1), Some(vec![(0.into(), 0)]));
+        assert_eq!(p.node().resolve(0), Some(vec![(p.narrow_base_id(), 2)]));
+        assert_eq!(p.node().resolve(1), Some(vec![(p.narrow_base_id(), 0)]));
     }
 
     #[test]
     fn it_resolves_all() {
         let p = setup(false, true);
-        assert_eq!(p.node().resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(p.node().resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(p.node().resolve(2), Some(vec![(0.into(), 2)]));
+        assert_eq!(p.node().resolve(0), Some(vec![(p.narrow_base_id(), 0)]));
+        assert_eq!(p.node().resolve(1), Some(vec![(p.narrow_base_id(), 1)]));
+        assert_eq!(p.node().resolve(2), Some(vec![(p.narrow_base_id(), 2)]));
     }
 }
