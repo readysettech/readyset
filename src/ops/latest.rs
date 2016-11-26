@@ -284,10 +284,16 @@ mod tests {
         };
         if big {
             g.seed(s, vec![1.into(), 1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
             g.seed(s, vec![2.into(), 2.into(), 1.into()]);
+            g.seed(s, vec![1.into(), 2.into(), 1.into()]);
+            g.seed(s, vec![3.into(), 3.into(), 1.into()]);
         } else {
             g.seed(s, vec![1.into(), 1.into()]);
+            g.seed(s, vec![2.into(), 1.into()]);
             g.seed(s, vec![2.into(), 2.into()]);
+            g.seed(s, vec![1.into(), 2.into()]);
+            g.seed(s, vec![3.into(), 3.into()]);
         }
         // TODO: test when last *isn't* latest!
 
