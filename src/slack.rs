@@ -74,6 +74,15 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
                      },
                      Field {
                          title: "".into(),
+                         value: SlackText::new(if res.test {
+                             "Tests: :white_check_mark:"
+                         } else {
+                             "Tests: :x:"
+                         }),
+                         short: Some(true),
+                     },
+                     Field {
+                         title: "".into(),
                          value: SlackText::new(if res.bench {
                              "Benchmark: :white_check_mark:"
                          } else {

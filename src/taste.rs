@@ -22,6 +22,7 @@ pub struct TastingResult {
     pub commit_msg: String,
     pub commit_url: String,
     pub build: bool,
+    pub test: bool,
     pub bench: bool,
     pub results: Option<Vec<HashMap<String, BenchmarkResult<String>>>>,
 }
@@ -69,6 +70,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
     ws.checkout_commit(id);
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
+    let test_success = test(&ws.path).success();
 
     let cfg = match parse_config(Path::new(&format!("{}/taster.toml", ws.path))) {
         Ok(c) => c,
@@ -81,6 +83,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
                         commit_msg: String::from(msg),
                         commit_url: String::from(url),
                         build: build_success,
+                        test: test_success,
                         bench: false,
                         results: None,
                     };
@@ -101,9 +104,20 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
         commit_msg: String::from(msg),
         commit_url: String::from(url),
         build: build_success,
+        test: test_success,
         bench: bench_success,
         results: Some(bench_results),
     }
+}
+
+fn test(workdir: &str) -> ExitStatus {
+    Command::new("cargo")
+        .current_dir(workdir)
+        .arg("test")
+        .env("RUST_BACKTRACE", "1")
+        .env("RUST_TEST_THREADS", "1")
+        .status()
+        .expect("Failed to execute 'cargo test'!")
 }
 
 fn update(workdir: &str) -> ExitStatus {
