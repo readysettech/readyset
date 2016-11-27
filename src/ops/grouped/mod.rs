@@ -361,8 +361,9 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        // index all group by columns
-        Some((this, self.group.iter().cloned().collect()))
+        // index all group by columns,
+        // which are the first self.group.len() columns of our output
+        Some((this, (0..self.group.len()).collect()))
             .into_iter()
             .collect()
     }

@@ -486,7 +486,8 @@ mod tests {
         // should only index on group-by columns
         assert_eq!(idx[&1.into()].len(), 2);
         assert!(idx[&1.into()].iter().any(|&i| i == 0));
-        assert!(idx[&1.into()].iter().any(|&i| i == 2));
+        assert!(idx[&1.into()].iter().any(|&i| i == 1));
+        // specifically, not last column, which is output
     }
 
     #[test]
