@@ -87,6 +87,11 @@ impl NodeDescriptor {
 
     fn materialize(&mut self, u: &Update, state: &mut StateMap) {
         // our output changed -- do we need to modify materialized state?
+
+        // TODO
+        // turns out, this lookup is on a serious fast-path, and the hashing is actually a
+        // bottleneck. we could probably make a Vec of Option<State> instead by fiddling around
+        // with indices, but that is a task for another day
         let state = state.get_mut(&self.index);
         if state.is_none() {
             // nope
