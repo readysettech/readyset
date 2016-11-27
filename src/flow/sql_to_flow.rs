@@ -28,15 +28,16 @@ trait Pass {
 
 struct AliasRemoval {
     table_aliases: HashMap<String, String>,
+    #[allow(dead_code)]
     column_aliases: HashMap<String, Column>,
 }
 
 impl AliasRemoval {
-    fn rewrite_conditional(&self, mut ce: ConditionExpression) -> ConditionExpression {
+    fn rewrite_conditional(&self, ce: ConditionExpression) -> ConditionExpression {
         let translate = |f: Column| {
             let new_f = match f.table {
                 None => f,
-                Some(mut t) => {
+                Some(t) => {
                     Column {
                         name: f.name,
                         table: if self.table_aliases.contains_key(&t) {
@@ -97,7 +98,7 @@ impl AliasRemoval {
 }
 
 impl Pass for AliasRemoval {
-    fn apply(&mut self, mut q: SqlQuery) -> SqlQuery {
+    fn apply(&mut self, q: SqlQuery) -> SqlQuery {
         match q {
             // nothing to do for INSERTs, as they cannot have aliases
             SqlQuery::Insert(i) => SqlQuery::Insert(i),
@@ -116,10 +117,10 @@ impl Pass for AliasRemoval {
                     FieldExpression::All => FieldExpression::All,
                     FieldExpression::Seq(fs) => {
                         let new_fs = fs.into_iter()
-                            .map(|mut f| {
+                            .map(|f| {
                                 match f.table {
                                     None => f,
-                                    Some(mut t) => {
+                                    Some(t) => {
                                         Column {
                                             name: f.name,
                                             table: if self.table_aliases.contains_key(&t) {
