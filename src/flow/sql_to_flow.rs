@@ -202,13 +202,16 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
+    let parent = lookup_node(&qgn.rel_name, g);
     let mut n = ops::new(String::from(name),
                          Vec::from_iter(qgn.columns.iter().map(String::as_str)).as_slice(),
                          true,
-                         Identity::new(lookup_node(&qgn.rel_name, g)));
+                         Identity::new(parent));
     for cond in qgn.predicates.iter() {
-        // convert ConditionTree to shortcut-style condition vector
-        let filter = to_conditions(cond, &n);
+        // TODO(malte): get rid of this monster...
+        let parent_view = g.graph().0.node_weight(parent).unwrap().as_ref().unwrap().as_ref();
+        // convert ConditionTree to shortcut-style condition vector.
+        let filter = to_conditions(cond, parent_view);
         n = n.having(filter);
     }
     n
