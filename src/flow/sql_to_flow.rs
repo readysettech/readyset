@@ -161,9 +161,6 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
-    use flow::sql::passes::alias_removal::AliasRemoval;
-    use nom_sql::SelectStatement;
-    use nom_sql::parser::{Column, FieldExpression, SqlQuery, Table};
     use ops;
     use ops::new;
     use ops::base::Base;
