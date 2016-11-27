@@ -1,19 +1,18 @@
 use nom_sql::parser as sql_parser;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-                      Operator, SqlQuery};
-use nom_sql::{InsertStatement, SelectStatement};
 use flow;
+use flow::sql::query_graph::{QueryGraphNode, to_query_graph};
 use FlowGraph;
+use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator,
+                      SqlQuery};
+use nom_sql::{InsertStatement, SelectStatement};
 use ops;
 use ops::Node;
 use ops::base::Base;
 use ops::identity::Identity;
 use query::{DataType, Query};
-use super::query_graph::{QueryGraphNode, to_query_graph};
 use shortcut;
 
 use petgraph;
-use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str;
 use std::sync::Arc;
@@ -21,131 +20,6 @@ use std::vec::Vec;
 
 type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
 type V = flow::View<Query, Update = ops::Update, Data = Vec<DataType>>;
-
-trait Pass {
-    fn apply(&mut self, q: SqlQuery) -> SqlQuery;
-}
-
-struct AliasRemoval {
-    table_aliases: HashMap<String, String>,
-    #[allow(dead_code)]
-    column_aliases: HashMap<String, Column>,
-}
-
-impl AliasRemoval {
-    fn rewrite_conditional(&self, ce: ConditionExpression) -> ConditionExpression {
-        let translate = |f: Column| {
-            let new_f = match f.table {
-                None => f,
-                Some(t) => {
-                    Column {
-                        name: f.name,
-                        table: if self.table_aliases.contains_key(&t) {
-                            Some(self.table_aliases[&t].clone())
-                        } else {
-                            Some(t)
-                        },
-                    }
-                }
-            };
-            ConditionExpression::Base(ConditionBase::Field(new_f))
-        };
-
-        match ce {
-            ConditionExpression::ComparisonOp(ct) => {
-                // TODO(malte): handle NOT case (r == None)
-                let l = match *ct.left.unwrap() {
-                    ConditionExpression::Base(ConditionBase::Field(f)) => translate(f),
-                    ConditionExpression::Base(b) => ConditionExpression::Base(b),
-                    _ => unimplemented!(),
-                };
-                let r = match *ct.right.unwrap() {
-                    ConditionExpression::Base(ConditionBase::Field(f)) => translate(f),
-                    ConditionExpression::Base(b) => ConditionExpression::Base(b),
-                    _ => unimplemented!(),
-                };
-                let rewritten_ct = ConditionTree {
-                    operator: ct.operator,
-                    left: Some(Box::new(l)),
-                    right: Some(Box::new(r)),
-                };
-                ConditionExpression::ComparisonOp(rewritten_ct)
-            }
-            ConditionExpression::LogicalOp(ct) => {
-                let rewritten_ct = ConditionTree {
-                    operator: ct.operator,
-                    left: match ct.left {
-                        Some(lct) => Some(Box::new(self.rewrite_conditional(*lct))),
-                        None => None,
-                    },
-                    right: match ct.right {
-                        Some(rct) => Some(Box::new(self.rewrite_conditional(*rct))),
-                        None => None,
-                    },
-                };
-                ConditionExpression::LogicalOp(rewritten_ct)
-            }
-            ConditionExpression::Base(b) => ConditionExpression::Base(b),
-        }
-    }
-
-    fn new() -> AliasRemoval {
-        AliasRemoval {
-            table_aliases: HashMap::new(),
-            column_aliases: HashMap::new(),
-        }
-    }
-}
-
-impl Pass for AliasRemoval {
-    fn apply(&mut self, q: SqlQuery) -> SqlQuery {
-        match q {
-            // nothing to do for INSERTs, as they cannot have aliases
-            SqlQuery::Insert(i) => SqlQuery::Insert(i),
-            SqlQuery::Select(mut sq) => {
-                // Collect table aliases
-                for t in sq.tables.iter() {
-                    match t.alias {
-                        None => (),
-                        Some(ref a) => {
-                            self.table_aliases.insert(a.clone(), t.name.clone());
-                        }
-                    }
-                }
-                // Remove them from fields
-                sq.fields = match sq.fields {
-                    FieldExpression::All => FieldExpression::All,
-                    FieldExpression::Seq(fs) => {
-                        let new_fs = fs.into_iter()
-                            .map(|f| {
-                                match f.table {
-                                    None => f,
-                                    Some(t) => {
-                                        Column {
-                                            name: f.name,
-                                            table: if self.table_aliases.contains_key(&t) {
-                                                Some(self.table_aliases[&t].clone())
-                                            } else {
-                                                Some(t)
-                                            },
-                                        }
-                                    }
-                                }
-                            })
-                            .collect();
-                        FieldExpression::Seq(new_fs)
-                    }
-                };
-                // Remove them from conditions
-                sq.where_clause = match sq.where_clause {
-                    None => None,
-                    Some(wc) => Some(self.rewrite_conditional(wc)),
-                };
-                SqlQuery::Select(sq)
-            }
-        }
-    }
-}
 
 fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<DataType>>,
                      f: String)
@@ -237,6 +111,9 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
 }
 
 fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
+    use flow::sql::passes::Pass;
+    use flow::sql::passes::alias_removal::AliasRemoval;
+
     println!("{:#?}", q);
 
     // first run some standard rewrite passes on the query. This makes the later work easier, as we
@@ -275,13 +152,14 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
+    use flow::sql::passes::alias_removal::AliasRemoval;
     use nom_sql::SelectStatement;
     use nom_sql::parser::{Column, FieldExpression, SqlQuery, Table};
     use ops;
     use ops::new;
     use ops::base::Base;
     use query::DataType;
-    use super::{AliasRemoval, FG, Pass, ToFlowParts, V};
+    use super::{FG, ToFlowParts, V};
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
@@ -311,48 +189,6 @@ mod tests {
         assert!("foo bar from whatever;".to_flow_parts(&mut g).is_err());
         // Should still only have source, "users" and the new selection
         assert_eq!(g.graph.node_count(), 3);
-    }
-
-    #[test]
-    fn it_removes_aliases() {
-        use nom_sql::parser::{ConditionBase, ConditionExpression, ConditionTree, Operator};
-
-        let q = SelectStatement {
-            tables: vec![Table {
-                             name: String::from("PaperTag"),
-                             alias: Some(String::from("t")),
-                         }],
-            fields: FieldExpression::Seq(vec![Column::from("t.id")]),
-            where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
-                operator: Operator::Equal,
-                left: Some(Box::new(ConditionExpression::Base(
-                            ConditionBase::Field(
-                                Column::from("t.id"))
-                            ))),
-                right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-            })),
-            ..Default::default()
-        };
-        let mut ar = AliasRemoval::new();
-        let res = ar.apply(SqlQuery::Select(q));
-        // Table alias removed in field list
-        match res {
-            SqlQuery::Select(tq) => {
-                assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("PaperTag.id")]));
-                assert_eq!(tq.where_clause,
-                           Some(ConditionExpression::ComparisonOp(ConditionTree {
-                               operator: Operator::Equal,
-                               left: Some(Box::new(ConditionExpression::Base(
-                                       ConditionBase::Field(
-                                           Column::from("PaperTag.id"))
-                                       ))),
-                               right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
-                           })));
-            }
-            // if we get anything other than a selection query back, something really weird is up
-            _ => panic!(),
-        }
     }
 
     #[test]
