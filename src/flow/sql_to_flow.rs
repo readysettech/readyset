@@ -8,7 +8,7 @@ use nom_sql::{InsertStatement, SelectStatement};
 use ops;
 use ops::Node;
 use ops::base::Base;
-use ops::identity::Identity;
+use ops::permute::Permute;
 use query::{DataType, Query};
 use shortcut;
 
@@ -22,10 +22,10 @@ type FG = FlowGraph<Query, ops::Update, Vec<DataType>>;
 type V = flow::View<Query, Update = ops::Update, Data = Vec<DataType>>;
 
 fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<DataType>>,
-                     f: String)
+                     f: &str)
                      -> Result<usize, String> {
     for (i, field) in v.args().iter().enumerate() {
-        if *field == f {
+        if field == f {
             return Ok(i);
         }
     }
@@ -53,7 +53,7 @@ fn to_conditions(ct: &ConditionTree, v: &V) -> Vec<shortcut::Condition<DataType>
             _ => unimplemented!(),
         };
         vec![shortcut::Condition {
-                     column: field_to_columnid(v, l.name).unwrap(),
+                     column: field_to_columnid(v, &l.name).unwrap(),
                      cmp: shortcut::Comparison::Equal(shortcut::Value::Const(DataType::Text(Arc::new(r)))),
                  }]
     }
@@ -76,13 +76,17 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
     let parent = lookup_node(&qgn.rel_name, g);
+    // TODO(malte): get rid of this monster...
+    let parent_view = g.graph().0.node_weight(parent).unwrap().as_ref().unwrap().as_ref();
+    let projected_columns: Vec<usize> = qgn.columns
+        .iter()
+        .map(|c| field_to_columnid(parent_view, &c).unwrap())
+        .collect();
     let mut n = ops::new(String::from(name),
                          Vec::from_iter(qgn.columns.iter().map(String::as_str)).as_slice(),
                          true,
-                         Identity::new(parent));
+                         Permute::new(parent, projected_columns.as_slice()));
     for cond in qgn.predicates.iter() {
-        // TODO(malte): get rid of this monster...
-        let parent_view = g.graph().0.node_weight(parent).unwrap().as_ref().unwrap().as_ref();
         // convert ConditionTree to shortcut-style condition vector.
         let filter = to_conditions(cond, parent_view);
         n = n.having(filter);
@@ -200,6 +204,8 @@ mod tests {
 
     #[test]
     fn it_incorporates_simple_selection() {
+        use ops::NodeOp;
+
         // set up graph
         let mut g = FlowGraph::new();
 
@@ -208,11 +214,18 @@ mod tests {
         // Should have source and "users" base table node
         assert_eq!(g.graph.node_count(), 2);
         assert_eq!(get_view(&g, "users").name(), "users");
+        assert_eq!(get_view(&g, "users").args(), &["id", "name"]);
+        assert_eq!(get_view(&g, "users").node().unwrap().operator().description(),
+                   "B");
 
         // Try a simple query
-        assert!("SELECT users.id, users.name FROM users WHERE users.id = 42;"
+        assert!("SELECT users.name FROM users WHERE users.id = 42;"
             .to_flow_parts(&mut g)
             .is_ok());
+        let new_view = get_view(&g, "query-0");
+        assert_eq!(new_view.args(), &["name"]);
+        assert_eq!(new_view.node().unwrap().operator().description(),
+                   format!("π[1]"));
         println!("{}", g);
     }
 
