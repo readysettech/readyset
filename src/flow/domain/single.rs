@@ -129,6 +129,14 @@ impl NodeDescriptor {
             }
         }
     }
+
+    pub fn is_internal(&self) -> bool {
+        if let flow::node::Type::Internal(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 use std::ops::Deref;

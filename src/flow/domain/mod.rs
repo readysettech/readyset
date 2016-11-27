@@ -107,6 +107,80 @@ impl Domain {
             }
         }
 
+        // Now let's talk indices.
+        //
+        // We need to query all our nodes for what indices they believe should be maintained, and
+        // apply those to the stores in state. However, this is somewhat complicated by the fact
+        // that we need to push indices through non-materialized views so that they end up on the
+        // columns of the views that will actually query into a table of some sort.
+        {
+            let nodes: HashMap<_, _> = nodes.iter().map(|n| (n.index, n)).collect();
+            let mut indices = nodes.iter()
+                .filter(|&(_, node)| node.is_internal()) // only internal nodes can suggest indices
+                .filter(|&(_, node)| {
+                    // under what circumstances might a node need indices to be placed?
+                    // there are two cases:
+                    //
+                    //  - if makes queries into its ancestors regardless of whether it's
+                    //    materialized or not
+                    //  - if it queries its ancestors when it is *not* materialized (implying that
+                    //    it queries into its own output)
+                    //
+                    //  unless we come up with a weird operators that *doesn't* need indices when
+                    //  it is *not* materialized, but *does* when is, we can therefore just use
+                    //  will_query(false) as an indicator of whether indices are necessary.
+                    node.will_query(false)
+                })
+                .flat_map(|(ni, node)| node.suggest_indexes(*ni).into_iter())
+                .filter(|&(ref node, _)| nodes.contains_key(node))
+                .fold(HashMap::new(), |mut hm, (v, idxs)| {
+                    hm.entry(v).or_insert_with(HashSet::new).extend(idxs.into_iter());
+                    hm
+                });
+
+            // push down indices
+            let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
+            let mut tmp = HashMap::new();
+            while !leftover_indices.is_empty() {
+                for (v, cols) in leftover_indices.drain() {
+                    if let Some(ref mut state) = state.get_mut(&v) {
+                        // this node is materialized! add the indices!
+                        for col in cols {
+                            println!("adding index on column {:?} of view {:?}", col, v);
+                            // TODO: don't re-add indices that already exist
+                            state.index(col, shortcut::idx::HashIndex::new());
+                        }
+                    } else if let Some(ref node) = nodes.get(&v) {
+                        // this node is not materialized
+                        // we need to push the index up to its ancestor(s)
+                        if let flow::node::Type::Ingress(..) = *node.inner {
+                            // we can't push further up!
+                            unreachable!("node suggested index outside domain, and ingress isn't \
+                                          materalized");
+                        }
+
+                        assert!(node.is_internal());
+                        for col in cols {
+                            let really = node.resolve(col);
+                            if let Some(really) = really {
+                                // the index should instead be placed on the corresponding
+                                // columns of this view's inputs
+                                for (v, col) in really {
+                                    tmp.entry(v).or_insert_with(HashSet::new).insert(col);
+                                }
+                            } else {
+                                // this view is materialized, so we should index this column
+                                indices.entry(v).or_insert_with(HashSet::new).insert(col);
+                            }
+                        }
+                    } else {
+                        unreachable!("node suggested index outside domain");
+                    }
+                }
+                leftover_indices.extend(tmp.drain());
+            }
+        }
+
         let nodes = nodes.into_iter().map(|n| (n.index, cell::RefCell::new(n))).collect();
         Domain {
             domain: domain,
