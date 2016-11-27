@@ -24,8 +24,7 @@ type V = flow::View<Query, Update = ops::Update, Data = Vec<DataType>>;
 fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<DataType>>,
                      f: String)
                      -> Result<usize, String> {
-    let i = 0;
-    for field in v.args().iter() {
+    for (i, field) in v.args().iter().enumerate() {
         if *field == f {
             return Ok(i);
         }
