@@ -361,7 +361,7 @@ mod tests {
         let mut g = FlowGraph::new();
 
         // Establish a base write type
-        assert!("INSERT INTO users VALUES (?, ?);".to_flow_parts(&mut g).is_ok());
+        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut g).is_ok());
         // Should have source and "users" base table node
         assert_eq!(g.graph.node_count(), 2);
         assert_eq!(get_view(&g, "users").name(), "users");
