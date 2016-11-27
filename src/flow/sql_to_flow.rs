@@ -30,7 +30,7 @@ fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<Data
             return Ok(i);
         }
     }
-    Err(format!("field {} not found", f))
+    Err(format!("field {} not found in view {}", f, v.name()))
 }
 
 /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
