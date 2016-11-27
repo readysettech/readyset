@@ -131,6 +131,12 @@ trait ToFlowParts {
     fn to_flow_parts<'a>(&self, &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String>;
 }
 
+impl<'a> ToFlowParts for &'a String {
+    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String> {
+        self.as_str().to_flow_parts(g)
+    }
+}
+
 impl<'a> ToFlowParts for &'a str {
     fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String> {
         // try parsing the incoming SQL
@@ -160,6 +166,8 @@ mod tests {
     use ops::base::Base;
     use query::DataType;
     use super::{FG, ToFlowParts, V};
+    use std::io::Read;
+    use std::fs::File;
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
@@ -206,6 +214,35 @@ mod tests {
         assert!("SELECT users.id, users.name FROM users WHERE users.id = 42;"
             .to_flow_parts(&mut g)
             .is_ok());
+        println!("{}", g);
+    }
+
+    #[test]
+    fn it_incorporates_finkelstein1982_naively() {
+        // set up graph
+        let mut g = FlowGraph::new();
+
+        let mut f = File::open("tests/finkelstein82.txt").unwrap();
+        let mut s = String::new();
+
+        // Load queries
+        f.read_to_string(&mut s).unwrap();
+        let lines: Vec<String> = s.lines()
+            .filter(|l| !l.is_empty() && !l.starts_with("#"))
+            .map(|l| {
+                if !(l.ends_with("\n") || l.ends_with(";")) {
+                    String::from(l) + "\n"
+                } else {
+                    String::from(l)
+                }
+            })
+            .collect();
+
+        // Add them one by one
+        for q in lines.iter() {
+            q.to_flow_parts(&mut g);
+        }
+
         println!("{}", g);
     }
 }

@@ -1,0 +1,26 @@
+#CREATE TABLE people (name varchar(100), employer int, age int, experience int, salary int, commission int, education varchar(50));
+INSERT INTO people (name, employer, age, experience, salary, commission, education) VALUES (?, ?, ?, ?, ?, ?, ?);
+#CREATE TABLE companies (corpname varchar(50), location varchar(2), earnings int, president varchar(100), business varchar(50));
+INSERT INTO companies (corpname, location, earnings, president, business) VALUES (?, ?, ?, ?, ?);
+#CREATE TABLE schools (schoolname varchar(50), level varchar(50));
+INSERT INTO schools (schoolname, level) VALUES (?, ?);
+
+# Q1
+#SELECT name, experience FROM people WHERE experience >= 10;
+SELECT people.name, people.experience FROM people WHERE people.experience >= 10;
+
+# Q2
+#SELECT name, experience FROM people WHERE experience >= 20 AND age <= 65;
+SELECT people.name, people.experience FROM people WHERE people.experience >= 20 AND people.age <= 65;
+
+# Q3
+SELECT p.name, c.corpname, c.location, c.president FROM people AS p, companies AS c WHERE p.experience >= 10 AND p.employer = c.corpname AND c.location <> 'AK' AND c.earnings > 500000;
+
+# Q4
+SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location == 'NY' AND c.earnings > 500000;
+
+# Q5
+SELECT p.name, s.schoolname FROM people AS p, companies AS c, schools AS s WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location = 'NY' AND c.earnings > 500000 AND p.education = s.schoolname AND s.level = 'university';
+
+# Q6
+SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c, companies AS c1 WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND ( c.location = 'NY' OR c.location = 'CA' ) AND c.earnings > 500000 AND p.name = c1.president AND c1.president = 'Smith' AND c1.business = 'manufacturing';
