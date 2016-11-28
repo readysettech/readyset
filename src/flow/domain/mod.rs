@@ -84,7 +84,7 @@ impl Domain {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {
-                            Some((n.addr, shortcut::Store::new(n.inner.fields().len())))
+                            Some((*n.addr.as_local(), shortcut::Store::new(n.inner.fields().len())))
                         } else {
                             None
                         }
@@ -97,7 +97,7 @@ impl Domain {
         let inquisitive_children: HashSet<_> = nodes.iter()
             .filter_map(|n| {
                 if let flow::node::Type::Internal(..) = *n.inner {
-                    if n.will_query(state.contains_key(&n.addr)) {
+                    if n.will_query(state.contains_key(n.addr.as_local())) {
                         return Some(n.index);
                     }
                 }
@@ -110,7 +110,8 @@ impl Domain {
             if let flow::node::Type::Ingress(..) = *n.inner {
                 if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
                     .any(|child| inquisitive_children.contains(&child)) {
-                    state.insert(n.addr, shortcut::Store::new(n.inner.fields().len()));
+                    state.insert(*n.addr.as_local(),
+                                 shortcut::Store::new(n.inner.fields().len()));
                 }
             }
         }
@@ -151,7 +152,7 @@ impl Domain {
             let mut tmp = HashMap::new();
             while !leftover_indices.is_empty() {
                 for (v, cols) in leftover_indices.drain() {
-                    if let Some(ref mut state) = state.get_mut(&v) {
+                    if let Some(ref mut state) = state.get_mut(&v.as_local()) {
                         // this node is materialized! add the indices!
                         for col in cols {
                             println!("adding index on column {:?} of view {:?}", col, v);
@@ -189,7 +190,8 @@ impl Domain {
             }
         }
 
-        let nodes = nodes.into_iter().map(|n| (n.addr, cell::RefCell::new(n))).collect();
+        let nodes =
+            nodes.into_iter().map(|n| (*n.addr.as_local(), cell::RefCell::new(n))).collect();
         Domain {
             domain: domain,
             nodes: nodes,
@@ -200,11 +202,11 @@ impl Domain {
     pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes) {
         let me = m.to;
 
-        let mut n = nodes[&me].borrow_mut();
+        let mut n = nodes[me.as_local()].borrow_mut();
         let mut u = n.process(m, states, nodes);
         drop(n);
 
-        let n = nodes[&me].borrow();
+        let n = nodes[me.as_local()].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can
             let data = if i == n.children.len() - 1 {

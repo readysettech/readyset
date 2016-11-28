@@ -214,12 +214,12 @@ impl Joiner {
 
             // send the parameters to start the query.
             // TODO: avoid duplicating this exact code in every querying module
-            if let Some(state) = states.get(&other) {
+            if let Some(state) = states.get(other.as_local()) {
                 // other node is materialized
                 state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
             } else {
                 // other node is not materialized, query instead
-                domain[&other].borrow().query(Some(&q), domain, states)
+                domain[other.as_local()].borrow().query(Some(&q), domain, states)
             }
         };
 
@@ -277,7 +277,7 @@ impl Ingredient for Joiner {
         for (_, j) in &mut self.join {
             for (t, jt) in &mut j.against {
                 jt.select = iter::repeat(true)
-                    .take(g[t.as_global()].fields().len())
+                    .take(g[*t.as_global()].fields().len())
                     .collect::<Vec<_>>();
             }
         }
@@ -392,19 +392,19 @@ impl Ingredient for Joiner {
         // TODO: we probably don't need to select all columns here
         let lq = lparams.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(domain[&left.node].borrow().fields().len())
+                                  .take(domain[left.node.as_local()].borrow().fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
 
-        let leftrx = if let Some(state) = states.get(&left.node) {
+        let leftrx = if let Some(state) = states.get(left.node.as_local()) {
             // other node is materialized
             state.find(lq.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
                 .map(|r| r.iter().cloned().collect())
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain[&left.node].borrow().query(lq.as_ref(), domain, states)
+            domain[left.node.as_local()].borrow().query(lq.as_ref(), domain, states)
         };
 
         leftrx.into_iter()

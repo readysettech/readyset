@@ -53,7 +53,7 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols.extend(self.emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
+        self.cols.extend(self.emit.keys().map(|&n| (n, g[*n.as_global()].fields().len())));
     }
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
@@ -136,7 +136,7 @@ impl Ingredient for Union {
                     select[*c] = true;
                 }
                 let cs = params.unwrap_or_else(Vec::new);
-                if let Some(state) = states.get(&src) {
+                if let Some(state) = states.get(src.as_local()) {
                     // parent is materialized
                     state.find(&cs[..])
                         .map(|r| {
@@ -149,7 +149,7 @@ impl Ingredient for Union {
                 } else {
                     // parent is not materialized, query into parent
                     // TODO: if we're selecting all and have no conds, we could pass q = None
-                    domain[&src]
+                    domain[src.as_local()]
                         .borrow()
                         .query(Some(&query::Query::new(&select[..], cs)), domain, states)
                 }

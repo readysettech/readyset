@@ -2,6 +2,7 @@ pub use flow::Ingredient;
 
 use petgraph;
 pub use flow::NodeAddress;
+pub use flow::LocalNodeIndex;
 pub use flow::node::Node;
 use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;

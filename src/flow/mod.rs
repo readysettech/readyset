@@ -72,16 +72,16 @@ impl fmt::Display for NodeAddress {
 }
 
 impl NodeAddress {
-    pub fn as_global(&self) -> NodeIndex {
+    pub fn as_global(&self) -> &NodeIndex {
         match self.addr {
-            NodeAddress_::Global(ni) => ni,
+            NodeAddress_::Global(ref ni) => ni,
             NodeAddress_::Local(_) => unreachable!("tried to use local address as global"),
         }
     }
 
-    pub fn as_local(&self) -> LocalNodeIndex {
+    pub fn as_local(&self) -> &LocalNodeIndex {
         match self.addr {
-            NodeAddress_::Local(i) => i,
+            NodeAddress_::Local(ref i) => i,
             NodeAddress_::Global(_) => unreachable!("tried to use global address as local"),
         }
     }
@@ -275,7 +275,7 @@ impl<'a> Migration<'a> {
             self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent.as_global(), ni, false);
+                self.mainline.ingredients.add_edge(*parent.as_global(), ni, false);
             }
         }
         // and tell the caller its id
@@ -296,7 +296,7 @@ impl<'a> Migration<'a> {
         // converted to an egress/ingress pair?
         let e = self.mainline
             .ingredients
-            .find_edge(src.as_global(), dst.as_global())
+            .find_edge(*src.as_global(), *dst.as_global())
             .expect("asked to materialize non-existing edge");
 
         let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
@@ -305,7 +305,7 @@ impl<'a> Migration<'a> {
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
             // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
             // commit())
-            self.materialize.insert((src.as_global(), dst.as_global()));
+            self.materialize.insert((*src.as_global(), *dst.as_global()));
         }
     }
 
@@ -314,7 +314,7 @@ impl<'a> Migration<'a> {
     /// `n` must be have been added in this migration.
     pub fn assign_domain(&mut self, n: NodeAddress, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
-        assert_eq!(self.added.insert(n.as_global(), Some(d)).unwrap(), None);
+        assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
     fn boot_domain(&mut self,

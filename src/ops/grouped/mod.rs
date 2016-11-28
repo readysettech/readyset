@@ -111,7 +111,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[self.src.as_global()];
+        let srcn = &g[*self.src.as_global()];
 
         // give our inner operation a chance to initialize
         self.inner.setup(srcn);
@@ -203,7 +203,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                         }
 
                         // find the current value for this group
-                        match state.get(self.us.as_ref().unwrap()) {
+                        match state.get(&self.us.as_ref().unwrap().as_local()) {
                             Some(db) => {
                                 let mut rs = db.find(&q[..]);
                                 // current value is in the last output column
@@ -301,14 +301,14 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                               ps)
         });
 
-        let rx = if let Some(state) = states.get(&self.src) {
+        let rx = if let Some(state) = states.get(self.src.as_local()) {
             // parent is materialized
             state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
                 .map(|r| r.iter().cloned().collect())
                 .collect()
         } else {
             // parent is not materialized, query into parent
-            domain[&self.src].borrow().query(q.as_ref(), domain, states)
+            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
         };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire

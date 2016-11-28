@@ -47,14 +47,14 @@ impl Ingredient for Identity {
              domain: &DomainNodes,
              states: &StateMap)
              -> ops::Datas {
-        if let Some(state) = states.get(&self.src) {
+        if let Some(state) = states.get(self.src.as_local()) {
             // parent is materialized
             state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
                 .map(|r| r.iter().cloned().collect())
                 .collect()
         } else {
             // parent is not materialized, query into parent
-            domain[&self.src].borrow().query(q, domain, states)
+            domain[self.src.as_local()].borrow().query(q, domain, states)
         }
     }
 

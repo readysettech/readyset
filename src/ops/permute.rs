@@ -148,7 +148,7 @@ impl Ingredient for Permute {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols = g[self.src.as_global()].fields().len();
+        self.cols = g[*self.src.as_global()].fields().len();
     }
 
     fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
@@ -196,7 +196,7 @@ impl Ingredient for Permute {
         // drops some fields--`self.permute` will end up dropping them
         // anyway--but it's not worth the trouble.
         let select = iter::repeat(true)
-            .take(domain[&self.src].borrow().fields().len())
+            .take(domain[self.src.as_local()].borrow().fields().len())
             .collect::<Vec<_>>();
 
         let q = q.map(|q| {
@@ -212,14 +212,14 @@ impl Ingredient for Permute {
             query::Query::new(&select, having.collect())
         });
 
-        let mut rx = if let Some(state) = states.get(&self.src) {
+        let mut rx = if let Some(state) = states.get(self.src.as_local()) {
             // other node is materialized
             state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
                 .map(|r| r.iter().cloned().collect())
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain[&self.src].borrow().query(q.as_ref(), domain, states)
+            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
         };
 
         if self.emit.is_some() {

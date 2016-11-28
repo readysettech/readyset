@@ -100,7 +100,7 @@ impl Ingredient for Latest {
 
 
                         // find the current value for this group
-                        match state.get(self.us.as_ref().unwrap()) {
+                        match state.get(&self.us.as_ref().unwrap().as_local()) {
                             Some(db) => {
                                 let mut rs = db.find(&q[..]);
                                 let cur = rs.next()
@@ -175,20 +175,20 @@ impl Ingredient for Latest {
 
         let q = params.map(|ps| {
             query::Query::new(&iter::repeat(true)
-                                  .take(domain[&self.src].borrow().fields().len())
+                                  .take(domain[self.src.as_local()].borrow().fields().len())
                                   .collect::<Vec<_>>(),
                               ps)
         });
 
         // now, query our ancestor, and aggregate into groups.
-        let rx = if let Some(state) = states.get(&self.src) {
+        let rx = if let Some(state) = states.get(self.src.as_local()) {
             // other node is materialized
             state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
                 .map(|r| r.iter().cloned().collect())
                 .collect()
         } else {
             // other node is not materialized, query instead
-            domain[&self.src].borrow().query(q.as_ref(), domain, states)
+            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
         };
 
         // FIXME: having an order by would be nice here, so that we didn't have to keep the entire

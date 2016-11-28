@@ -94,7 +94,7 @@ impl NodeDescriptor {
         // turns out, this lookup is on a serious fast-path, and the hashing is actually a
         // bottleneck. we could probably make a Vec of Option<State> instead by fiddling around
         // with indices, but that is a task for another day
-        let state = state.get_mut(&self.addr);
+        let state = state.get_mut(&self.addr.as_local());
         if state.is_none() {
             // nope
             return;

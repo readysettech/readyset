@@ -150,7 +150,7 @@ pub mod test {
             let local = NodeAddress::mock_local(self.remap.len());
             remap.insert(global, local);
             self.graph.node_weight_mut(ni).unwrap().on_commit(local, &remap);
-            self.states.insert(local, State::new(fields.len()));
+            self.states.insert(*local.as_local(), State::new(fields.len()));
             self.remap.insert(global, local);
             global
         }
@@ -171,7 +171,7 @@ pub mod test {
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
             for parent in parents {
-                self.graph.add_edge(parent.as_global(), ni, false);
+                self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
             self.graph.node_weight_mut(ni).unwrap().on_commit(local, &self.remap);
@@ -205,7 +205,7 @@ pub mod test {
             self.nodes = nodes.into_iter()
                 .map(|n| {
                     use std::cell;
-                    (n.addr, cell::RefCell::new(n))
+                    (*n.addr.as_local(), cell::RefCell::new(n))
                 })
                 .collect();
         }
@@ -226,11 +226,11 @@ pub mod test {
             };
 
             let u = self.graph
-                .node_weight_mut(base.as_global())
+                .node_weight_mut(*base.as_global())
                 .unwrap()
                 .on_input(m, &self.nodes, &self.states);
 
-            let state = self.states.get_mut(&local).unwrap();
+            let state = self.states.get_mut(local.as_local()).unwrap();
             match u {
                 Some(Update::Records(rs)) => {
                     for r in rs {
@@ -247,7 +247,7 @@ pub mod test {
         pub fn set_materialized(&mut self) {
             assert!(self.nut.is_some());
             let fs = self.graph[self.nut.unwrap().0].fields().len();
-            self.states.insert(self.nut.unwrap().1, State::new(fs));
+            self.states.insert(*self.nut.unwrap().1.as_local(), State::new(fs));
         }
 
         pub fn one<U: Into<Update>>(&mut self,
@@ -258,7 +258,7 @@ pub mod test {
             use shortcut;
 
             assert!(self.nut.is_some());
-            assert!(!remember || self.states.contains_key(&self.nut.unwrap().1));
+            assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
             let m = Message {
                 from: src,
@@ -266,16 +266,16 @@ pub mod test {
                 data: u.into(),
             };
 
-            let u = self.nodes[&self.nut.unwrap().1]
+            let u = self.nodes[self.nut.unwrap().1.as_local()]
                 .borrow_mut()
                 .inner
                 .on_input(m, &self.nodes, &self.states);
 
-            if !remember || !self.states.contains_key(&self.nut.unwrap().1) {
+            if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;
             }
 
-            let state = self.states.get_mut(&self.nut.unwrap().1).unwrap();
+            let state = self.states.get_mut(self.nut.unwrap().1.as_local()).unwrap();
             if let Some(Update::Records(ref rs)) = u {
                 for r in rs {
                     // TODO: avoid duplication with Domain::materialize
@@ -337,7 +337,7 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes[&self.nut.unwrap().1].borrow()
+            self.nodes[self.nut.unwrap().1.as_local()].borrow()
         }
 
         pub fn narrow_base_id(&self) -> NodeAddress {
