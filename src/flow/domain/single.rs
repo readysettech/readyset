@@ -102,17 +102,17 @@ impl NodeDescriptor {
         let mut state = state.unwrap();
         match u {
             &ops::Update::Records(ref rs) => {
-                for r in rs.iter().cloned() {
-                    match r {
-                        ops::Record::Positive(r) => state.insert(r),
-                        ops::Record::Negative(r) => {
+                for r in rs {
+                    match *r {
+                        ops::Record::Positive(ref r) => state.insert(r.clone()),
+                        ops::Record::Negative(ref r) => {
                             // we need a cond that will match this row.
-                            let conds = r.into_iter()
+                            let conds = r.iter()
                                 .enumerate()
                                 .map(|(coli, v)| {
                                     shortcut::Condition {
                                         column: coli,
-                                        cmp: shortcut::Comparison::Equal(shortcut::Value::Const(v)),
+                                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
                                     }
                                 })
                                 .collect::<Vec<_>>();

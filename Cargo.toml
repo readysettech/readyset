@@ -11,7 +11,7 @@ b_netsoup = ["tarpc", "serde", "serde_derive"]
 
 [dependencies]
 petgraph = "0.4"
-shortcut = "3.3"
+shortcut = "4.0"
 clocked-dispatch = "4.0"
 regex = "0.1"
 

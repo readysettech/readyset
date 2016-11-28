@@ -9,7 +9,7 @@ use std::cell;
 use flow;
 use flow::prelude::*;
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
 
 impl From<usize> for Index {

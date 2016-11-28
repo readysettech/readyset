@@ -68,7 +68,7 @@ pub trait GroupedOperation: fmt::Debug {
 }
 
 #[derive(Debug)]
-pub struct GroupedOperator<T: GroupedOperation> {
+pub struct GroupedOperator<'a, T: GroupedOperation> {
     src: NodeIndex,
     inner: T,
 
@@ -78,12 +78,12 @@ pub struct GroupedOperator<T: GroupedOperation> {
 
     // precomputed datastructures
     group: HashSet<usize>,
-    cond: Vec<shortcut::Condition<query::DataType>>,
+    cond: Vec<shortcut::Condition<'a, query::DataType>>,
     colfix: Vec<usize>,
 }
 
-impl<T: GroupedOperation> GroupedOperator<T> {
-    pub fn new(src: NodeIndex, op: T) -> GroupedOperator<T> {
+impl<'a, T: GroupedOperation> GroupedOperator<'a, T> {
+    pub fn new(src: NodeIndex, op: T) -> GroupedOperator<'a, T> {
         GroupedOperator {
             src: src,
             inner: op,
@@ -97,7 +97,7 @@ impl<T: GroupedOperation> GroupedOperator<T> {
     }
 }
 
-impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
+impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src]
     }
@@ -126,7 +126,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
             .map(|col| {
                 shortcut::Condition {
                     column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
+                    cmp: shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::None)),
                 }
             })
             .collect::<Vec<_>>();
@@ -160,9 +160,6 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
     fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
         debug_assert_eq!(input.from, self.src);
 
-        // Construct the query we'll need to query into ourselves
-        let mut q = self.cond.clone();
-
         match input.data {
             ops::Update::Records(rs) => {
                 if rs.is_empty() {
@@ -189,52 +186,41 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                 }
 
                 let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (mut group, diffs) in consolidate {
-                    // note that each value in group is an Option so that we can take/swap without
-                    // having to .remove or .insert into the HashMap (which is much more expensive)
-                    // it should only be None for self.over
-
-                    // build a query for this group
-                    for s in &mut q {
-                        s.cmp = shortcut::Comparison::Equal(
-                            shortcut::Value::Const(
-                                group[self.colfix[s.column]]
-                                .take()
-                                .unwrap()
-                            )
-                        );
-                    }
-
+                for (group, diffs) in consolidate {
                     // find the current value for this group
-                    let current = match state.get(&self.us) {
-                        Some(db) => {
-                            let mut rs = db.find(&q[..]);
-                            // current value is in the last output column
-                            // or "" if there is no current group
-                            let cur = rs.next()
-                                .map(|r| r[r.len() - 1].clone().into())
-                                .unwrap_or(self.inner.zero());
-                            assert_eq!(rs.count(), 0, "a group had more than 1 result");
-                            cur
+                    let current = {
+                        // Construct the query we'll need to query into ourselves
+                        let mut q = self.cond.clone();
+
+                        for s in &mut q {
+                            s.cmp = shortcut::Comparison::Equal(
+                                shortcut::Value::using(
+                                    group[self.colfix[s.column]]
+                                    .as_ref()
+                                    .unwrap()
+                                )
+                            );
                         }
-                        None => {
-                            // TODO
-                            // query ancestor (self.query?) based on self.group columns
-                            unimplemented!()
+
+                        // find the current value for this group
+                        match state.get(&self.us) {
+                            Some(db) => {
+                                let mut rs = db.find(&q[..]);
+                                // current value is in the last output column
+                                // or "" if there is no current group
+                                let cur = rs.next()
+                                    .map(|r| r[r.len() - 1].clone().into())
+                                    .unwrap_or(self.inner.zero());
+                                assert_eq!(rs.count(), 0, "a group had more than 1 result");
+                                cur
+                            }
+                            None => {
+                                // TODO
+                                // query ancestor (self.query?) based on self.group columns
+                                unimplemented!()
+                            }
                         }
                     };
-
-                    // get back values from query (to avoid cloning)
-                    for s in &mut q {
-                        if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
-                            s.cmp {
-                            use std::mem;
-
-                            let mut x = query::DataType::None;
-                            mem::swap(&mut x, v);
-                            group[self.colfix[s.column]] = Some(x);
-                        }
-                    }
 
                     // new is the result of applying all diffs for the group to the current value
                     let new = self.inner.apply(&current, diffs);

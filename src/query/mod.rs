@@ -9,7 +9,7 @@ use std::sync;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
-#[derive(Eq, PartialOrd, Hash, Debug, Clone)]
+#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone)]
 #[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
 pub enum DataType {
     /// A placeholder value -- is considered equal to every other `DataType` value.
@@ -109,14 +109,14 @@ impl fmt::Display for DataType {
 
 /// `Query` provides a mechanism for filtering and projecting records.
 #[derive(Clone, Debug)]
-pub struct Query {
+pub struct Query<'a> {
     select: Vec<bool>,
     selects: usize,
     /// The filtering conditions set for this query.
-    pub having: Vec<shortcut::Condition<DataType>>,
+    pub having: Vec<shortcut::Condition<'a, DataType>>,
 }
 
-impl Query {
+impl<'a> Query<'a> {
     /// Filter the given record `r` through this query's conditions.
     pub fn filter(&self, r: &[DataType]) -> bool {
         self.having.iter().all(|c| c.matches(r))
@@ -146,7 +146,7 @@ impl Query {
 
     /// Construct a new `Query` that selects the fields marked `true` in `s` for all rows that
     /// match the set of conditions in `h`.
-    pub fn new(s: &[bool], h: Vec<shortcut::Condition<DataType>>) -> Query {
+    pub fn new(s: &[bool], h: Vec<shortcut::Condition<'a, DataType>>) -> Query<'a> {
         Query {
             select: s.iter().cloned().collect(),
             selects: s.len(),

@@ -197,28 +197,30 @@ impl Joiner {
         let this = &self.join[&left.0];
         let target = &this.against[&other];
 
-        // figure out the join values for this record
-        let params = target.fields
-            .iter()
-            .map(|&(lefti, righti)| {
-                shortcut::Condition {
-                    column: righti,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(left.1[lefti].clone())),
-                }
-            })
-            .collect();
+        let rx = {
+            // figure out the join values for this record
+            let params = target.fields
+                .iter()
+                .map(|&(lefti, righti)| {
+                    shortcut::Condition {
+                        column: righti,
+                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(&left.1[lefti])),
+                    }
+                })
+                .collect();
 
-        // TODO: technically, we only need the columns in .join and .emit
-        let q = query::Query::new(&target.select[..], params);
+            // TODO: technically, we only need the columns in .join and .emit
+            let q = query::Query::new(&target.select[..], params);
 
-        // send the parameters to start the query.
-        // TODO: avoid duplicating this exact code in every querying module
-        let rx = if let Some(state) = states.get(&other) {
-            // other node is materialized
-            state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
-        } else {
-            // other node is not materialized, query instead
-            domain[&other].borrow().query(Some(&q), domain, states)
+            // send the parameters to start the query.
+            // TODO: avoid duplicating this exact code in every querying module
+            if let Some(state) = states.get(&other) {
+                // other node is materialized
+                state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
+            } else {
+                // other node is not materialized, query instead
+                domain[&other].borrow().query(Some(&q), domain, states)
+            }
         };
 
         if rx.is_empty() && target.outer {

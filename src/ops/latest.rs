@@ -62,17 +62,6 @@ impl Ingredient for Latest {
     fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
         debug_assert_eq!(input.from, self.src);
 
-        // Construct the query we'll need to query into ourselves to find current latest
-        let mut q = self.key
-            .iter()
-            .map(|&col| {
-                shortcut::Condition {
-                    column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::Const(query::DataType::None)),
-                }
-            })
-            .collect::<Vec<_>>();
-
         match input.data {
             ops::Update::Records(rs) => {
                 // We don't allow standalone negatives as input to a latest. This is because it
@@ -91,47 +80,41 @@ impl Ingredient for Latest {
                 // buffer emitted records
                 let mut out = Vec::with_capacity(pos.len());
                 for r in pos {
-                    {
+                    let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
+                    handled.insert(group);
+
+                    let current = {
                         let r = r.rec();
 
-                        // set up the query for the current record for this record's key
-                        for s in &mut q {
-                            s.cmp =
-                                shortcut::Comparison::Equal(shortcut::Value::Const(r[s.column]
-                                    .clone()));
-                        }
-                    }
+                        // Construct the query we'll need to query into ourselves to find current latest
+                        let q =
+                            self.key
+                                .iter()
+                                .map(|&col| {
+                                    shortcut::Condition {
+                                column: col,
+                                cmp: shortcut::Comparison::Equal(shortcut::Value::using(&r[col])),
+                            }
+                                })
+                                .collect::<Vec<_>>();
 
-                    // find the current value for this group
-                    let current = match state.get(&self.us) {
-                        Some(db) => {
-                            let mut rs = db.find(&q[..]);
-                            let cur = rs.next()
-                                .map(|r| (r.into_iter().cloned().collect(), 0));
-                            assert_eq!(rs.count(), 0, "latest group has more than 1 record");
-                            cur
 
-                        }
-                        None => {
-                            // TODO: query ancestor (self.query?) based on self.key columns
-                            unimplemented!()
+                        // find the current value for this group
+                        match state.get(&self.us) {
+                            Some(db) => {
+                                let mut rs = db.find(&q[..]);
+                                let cur = rs.next()
+                                    .map(|r| (r.into_iter().cloned().collect(), 0));
+                                assert_eq!(rs.count(), 0, "latest group has more than 1 record");
+                                cur
+
+                            }
+                            None => {
+                                // TODO: query ancestor (self.query?) based on self.key columns
+                                unimplemented!()
+                            }
                         }
                     };
-
-
-                    // get back values from query (to avoid cloning again)
-                    let mut group = Vec::with_capacity(self.key.len());
-                    for s in &mut q {
-                        if let shortcut::Comparison::Equal(shortcut::Value::Const(ref mut v)) =
-                            s.cmp {
-                            use std::mem;
-
-                            let mut x = query::DataType::None;
-                            mem::swap(&mut x, v);
-                            group.push(x);
-                        }
-                    }
-                    handled.insert(group);
 
                     // if there was a previous latest for this key, revoke old record
                     if let Some(current) = current {
@@ -141,8 +124,8 @@ impl Ingredient for Latest {
                 }
 
                 // check that there aren't any standalone negatives
-                // XXX: this check actually incurs a decent performance hit -- both tracking
-                // handled groups above, and this loop here. maybe just kill it?
+                // XXX: this check actually incurs a decent performance hit, as it causes us to
+                // have to clone above, plus do this loop. maybe just kill it?
                 for r in neg {
                     // we can swap_remove here because we know self.keys is in reverse sorted order
                     let (mut r, _) = r.extract();
