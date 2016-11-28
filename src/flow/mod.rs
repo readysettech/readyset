@@ -236,7 +236,7 @@ impl<'a> Migration<'a> {
     /// `n` must be have been added in this migration.
     pub fn assign_domain(&mut self, n: NodeIndex, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
-        assert!(self.added.insert(n, Some(d)).is_none());
+        assert_eq!(self.added.insert(n, Some(d)).unwrap(), None);
     }
 
     fn boot_domain(&mut self,
