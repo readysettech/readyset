@@ -5,7 +5,6 @@ pub mod latest;
 pub mod permute;
 pub mod union;
 pub mod identity;
-#[cfg(test)]
 pub mod gatedid;
 
 use query;
