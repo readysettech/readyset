@@ -7,12 +7,12 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use flow::domain;
-use flow::{Message, Ingredient};
+use flow::{Message, Ingredient, NodeAddress};
 
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
-    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeIndex, mpsc::SyncSender<Message>)>>>),
+    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
     Source,

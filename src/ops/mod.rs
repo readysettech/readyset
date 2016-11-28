@@ -113,13 +113,15 @@ pub mod test {
     use flow::node;
     use query;
 
+    use petgraph::graph::NodeIndex;
+
     pub struct MockGraph {
         graph: Graph,
         source: NodeIndex,
-        nut: Option<NodeIndex>, // node under test
+        nut: Option<(NodeIndex, NodeAddress)>, // node under test
         states: StateMap,
         nodes: DomainNodes,
-        bases: Vec<NodeIndex>,
+        remap: HashMap<NodeAddress, NodeAddress>,
     }
 
     impl MockGraph {
@@ -134,22 +136,24 @@ pub mod test {
                 nut: None,
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
-                bases: Vec::new(),
+                remap: HashMap::new(),
             }
         }
 
-        pub fn add_base(&mut self, name: &str, fields: &[&str]) -> NodeIndex {
+        pub fn add_base(&mut self, name: &str, fields: &[&str]) -> NodeAddress {
             use ops::base::Base;
             let mut i: node::Type = Base {}.into();
             i.on_connected(&self.graph);
             let ni = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, ni, false);
             let mut remap = HashMap::new();
-            remap.insert(ni, ni);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(ni, &remap);
-            self.states.insert(ni, State::new(fields.len()));
-            self.bases.push(ni);
-            ni
+            let global = NodeAddress::mock_global(ni);
+            let local = NodeAddress::mock_local(self.remap.len());
+            remap.insert(global, local);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(local, &remap);
+            self.states.insert(local, State::new(fields.len()));
+            self.remap.insert(global, local);
+            global
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], i: I)
@@ -165,19 +169,17 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let ni = self.graph.add_node(node::Node::new(name, fields, i));
+            let global = NodeAddress::mock_global(ni);
+            let local = NodeAddress::mock_local(self.remap.len());
             for parent in parents {
-                self.graph.add_edge(parent, ni, false);
+                self.graph.add_edge(parent.as_global(), ni, false);
             }
-            let mut remap = HashMap::new();
-            for b in &self.bases {
-                remap.insert(*b, *b);
-            }
-            remap.insert(ni, ni);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(ni, &remap);
+            self.remap.insert(global, local);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(local, &self.remap);
 
             // we're now committing to testing this op
             // store the id
-            self.nut = Some(ni);
+            self.nut = Some((ni, local));
             // and also set up the node list
             let mut nodes = vec![];
             let mut topo = petgraph::visit::Topo::new(&self.graph);
@@ -190,16 +192,13 @@ pub mod test {
             }
 
             let nodes: Vec<_> = nodes.into_iter()
-                .map(|(ni, n)| {
-                    // also include all *internal* descendants
-                    let children: Vec<_> = self.graph
-                        .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                        .collect();
-
+                .enumerate()
+                .map(|(i, (ni, n))| {
                     single::NodeDescriptor {
                         index: ni,
+                        addr: NodeAddress::mock_local(i),
                         inner: n,
-                        children: children,
+                        children: Vec::default(),
                     }
                 })
                 .collect();
@@ -207,24 +206,32 @@ pub mod test {
             self.nodes = nodes.into_iter()
                 .map(|n| {
                     use std::cell;
-                    (n.index, cell::RefCell::new(n))
+                    (n.addr, cell::RefCell::new(n))
                 })
                 .collect();
         }
 
-        pub fn seed(&mut self, base: NodeIndex, data: Vec<query::DataType>) {
+        pub fn seed(&mut self, base: NodeAddress, data: Vec<query::DataType>) {
+            // base here is some identifier that was returned by Self::add_base.
+            // which means it's a global address (and has to be so that it will correctly refer to
+            // ancestors pre on_commit). we need to translate it into a local address.
+            // since we set up the graph, we actually know that the NodeIndex is simply one greater
+            // than the local index (since bases are added first, and assigned local + global
+            // indices in order, but global ids are prefixed by the id of the source node).
+            let local = self.to_local(base);
+
             let m = Message {
-                from: self.source,
-                to: base,
+                from: NodeAddress::mock_global(self.source),
+                to: local,
                 data: data.into(),
             };
 
             let u = self.graph
-                .node_weight_mut(base)
+                .node_weight_mut(base.as_global())
                 .unwrap()
                 .on_input(m, &self.nodes, &self.states);
 
-            let state = self.states.get_mut(&base).unwrap();
+            let state = self.states.get_mut(&local).unwrap();
             match u {
                 Some(Update::Records(rs)) => {
                     for r in rs {
@@ -240,36 +247,36 @@ pub mod test {
 
         pub fn set_materialized(&mut self) {
             assert!(self.nut.is_some());
-            let fs = self.graph[self.nut.unwrap()].fields().len();
-            self.states.insert(self.nut.unwrap(), State::new(fs));
+            let fs = self.graph[self.nut.unwrap().0].fields().len();
+            self.states.insert(self.nut.unwrap().1, State::new(fs));
         }
 
         pub fn one<U: Into<Update>>(&mut self,
-                                    src: NodeIndex,
+                                    src: NodeAddress,
                                     u: Update,
                                     remember: bool)
                                     -> Option<Update> {
             use shortcut;
 
             assert!(self.nut.is_some());
-            assert!(!remember || self.states.contains_key(&self.nut.unwrap()));
+            assert!(!remember || self.states.contains_key(&self.nut.unwrap().1));
 
             let m = Message {
                 from: src,
-                to: self.nut.unwrap(),
+                to: self.nut.unwrap().1,
                 data: u.into(),
             };
 
-            let u = self.nodes[&self.nut.unwrap()]
+            let u = self.nodes[&self.nut.unwrap().1]
                 .borrow_mut()
                 .inner
                 .on_input(m, &self.nodes, &self.states);
 
-            if !remember || !self.states.contains_key(&self.nut.unwrap()) {
+            if !remember || !self.states.contains_key(&self.nut.unwrap().1) {
                 return u;
             }
 
-            let state = self.states.get_mut(&self.nut.unwrap()).unwrap();
+            let state = self.states.get_mut(&self.nut.unwrap().1).unwrap();
             if let Some(Update::Records(ref rs)) = u {
                 for r in rs {
                     // TODO: avoid duplication with Domain::materialize
@@ -307,7 +314,7 @@ pub mod test {
         }
 
         pub fn one_row(&mut self,
-                       src: NodeIndex,
+                       src: NodeAddress,
                        d: Vec<query::DataType>,
                        remember: bool)
                        -> Option<Update> {
@@ -315,8 +322,7 @@ pub mod test {
         }
 
         pub fn narrow_one<U: Into<Update>>(&mut self, u: U, remember: bool) -> Option<Update> {
-            assert_eq!(self.bases.len(), 1);
-            let src = self.bases[0];
+            let src = self.narrow_base_id();
             self.one::<Update>(src, u.into(), remember)
         }
 
@@ -332,12 +338,16 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes[&self.nut.unwrap()].borrow()
+            self.nodes[&self.nut.unwrap().1].borrow()
         }
 
-        pub fn narrow_base_id(&self) -> NodeIndex {
-            assert_eq!(self.bases.len(), 1);
-            self.bases[0]
+        pub fn narrow_base_id(&self) -> NodeAddress {
+            assert_eq!(self.remap.len(), 2 /* base + nut */);
+            *self.remap.values().skip_while(|&&n| n == self.nut.unwrap().1).next().unwrap()
+        }
+
+        pub fn to_local(&self, global: NodeAddress) -> NodeAddress {
+            NodeAddress::mock_local(global.as_global().index() - 1)
         }
     }
 }

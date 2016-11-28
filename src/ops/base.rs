@@ -14,7 +14,7 @@ pub struct Base { }
 use flow::prelude::*;
 
 impl Ingredient for Base {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![]
     }
 
@@ -27,7 +27,7 @@ impl Ingredient for Base {
     }
 
     fn on_connected(&mut self, _: &Graph) {}
-    fn on_commit(&mut self, _: NodeIndex, _: &HashMap<NodeIndex, NodeIndex>) {}
+    fn on_commit(&mut self, _: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {}
     fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
         Some(input.data)
     }
@@ -36,11 +36,11 @@ impl Ingredient for Base {
         unreachable!("base nodes should never be queried directly");
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         HashMap::new()
     }
 
-    fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, _: usize) -> Option<Vec<(NodeAddress, usize)>> {
         None
     }
 

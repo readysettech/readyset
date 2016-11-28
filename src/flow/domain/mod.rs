@@ -1,4 +1,5 @@
 use petgraph;
+use petgraph::graph::NodeIndex;
 use shortcut;
 
 use std::collections::HashMap;
@@ -33,25 +34,31 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn from_graph(domain: Index, nodes: Vec<NodeIndex>, graph: &mut Graph) -> Self {
+    pub fn from_graph(domain: Index,
+                      nodes: Vec<(NodeIndex, NodeAddress)>,
+                      graph: &mut Graph)
+                      -> Self {
+        let ni2na: HashMap<NodeIndex, NodeAddress> = nodes.iter().cloned().collect();
+
         let nodes: Vec<_> = nodes.into_iter()
-            .map(|ni| {
-                (ni, graph.node_weight_mut(ni).unwrap().take())
-            })
-            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
-            .into_iter()
-            .map(|(ni, n)| {
+            .map(|(ni, _)| {
                 // also include all *internal* descendants
                 let children: Vec<_> = graph
                     .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                     .filter(|&c| {
                         graph[c].domain().unwrap() == domain
                     })
+                    .map(|ni| ni2na[&ni])
                     .collect();
-
+                    (ni, children)
+            })
+            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
+            .into_iter()
+            .map(|(ni, children)| {
                 single::NodeDescriptor {
                     index: ni,
-                    inner: n,
+                    addr: ni2na[&ni],
+                    inner: graph.node_weight_mut(ni).unwrap().take(),
                     children: children,
                 }
             })
@@ -76,7 +83,7 @@ impl Domain {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {
-                            Some((n.index, shortcut::Store::new(n.inner.fields().len())))
+                            Some((n.addr, shortcut::Store::new(n.inner.fields().len())))
                         } else {
                             None
                         }
@@ -89,7 +96,7 @@ impl Domain {
         let inquisitive_children: HashSet<_> = nodes.iter()
             .filter_map(|n| {
                 if let flow::node::Type::Internal(..) = *n.inner {
-                    if n.will_query(state.contains_key(&n.index)) {
+                    if n.will_query(state.contains_key(&n.addr)) {
                         return Some(n.index);
                     }
                 }
@@ -102,7 +109,7 @@ impl Domain {
             if let flow::node::Type::Ingress(..) = *n.inner {
                 if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
                     .any(|child| inquisitive_children.contains(&child)) {
-                    state.insert(n.index, shortcut::Store::new(n.inner.fields().len()));
+                    state.insert(n.addr, shortcut::Store::new(n.inner.fields().len()));
                 }
             }
         }
@@ -114,7 +121,7 @@ impl Domain {
         // that we need to push indices through non-materialized views so that they end up on the
         // columns of the views that will actually query into a table of some sort.
         {
-            let nodes: HashMap<_, _> = nodes.iter().map(|n| (n.index, n)).collect();
+            let nodes: HashMap<_, _> = nodes.iter().map(|n| (n.addr, n)).collect();
             let mut indices = nodes.iter()
                 .filter(|&(_, node)| node.is_internal()) // only internal nodes can suggest indices
                 .filter(|&(_, node)| {
@@ -181,7 +188,7 @@ impl Domain {
             }
         }
 
-        let nodes = nodes.into_iter().map(|n| (n.index, cell::RefCell::new(n))).collect();
+        let nodes = nodes.into_iter().map(|n| (n.addr, cell::RefCell::new(n))).collect();
         Domain {
             domain: domain,
             nodes: nodes,

@@ -9,18 +9,18 @@ use flow::prelude::*;
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug)]
 pub struct Identity {
-    src: NodeIndex,
+    src: NodeAddress,
 }
 
 impl Identity {
     /// Construct a new identity operator.
-    pub fn new(src: NodeIndex) -> Identity {
+    pub fn new(src: NodeAddress) -> Identity {
         Identity { src: src }
     }
 }
 
 impl Ingredient for Identity {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
@@ -34,7 +34,7 @@ impl Ingredient for Identity {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
         self.src = remap[&self.src];
     }
 
@@ -58,12 +58,12 @@ impl Ingredient for Identity {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![(self.src, col)])
     }
 
@@ -116,7 +116,8 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let g = setup(false);
-        let idx = g.node().suggest_indexes(1.into());
+        let me = NodeAddress::mock_global(1.into());
+        let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
 

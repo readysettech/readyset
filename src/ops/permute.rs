@@ -10,20 +10,20 @@ use flow::prelude::*;
 /// Permutes or omits columns from its source node.
 #[derive(Debug)]
 pub struct Permute {
+    us: Option<NodeAddress>,
     emit: Option<Vec<usize>>,
-    src: NodeIndex,
+    src: NodeAddress,
     cols: usize,
-    us: NodeIndex,
 }
 
 impl Permute {
     /// Construct a new permuter operator.
-    pub fn new(src: NodeIndex, emit: &[usize]) -> Permute {
+    pub fn new(src: NodeAddress, emit: &[usize]) -> Permute {
         Permute {
             emit: Some(emit.into()),
             src: src,
             cols: 0,
-            us: 0.into(),
+            us: None,
         }
     }
 
@@ -135,7 +135,7 @@ impl Permute {
 }
 
 impl Ingredient for Permute {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
@@ -148,11 +148,11 @@ impl Ingredient for Permute {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols = g[self.src].fields().len();
+        self.cols = g[self.src.as_global()].fields().len();
     }
 
-    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
-        self.us = us;
+    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+        self.us = Some(us);
         self.src = remap[&self.src];
 
         // Eliminate emit specifications which require no permutation of
@@ -230,12 +230,12 @@ impl Ingredient for Permute {
         rx
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![(self.src, self.resolve_col(col))])
     }
 
@@ -384,8 +384,9 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
+        let me = NodeAddress::mock_global(1.into());
         let p = setup(false, false);
-        let idx = p.node().suggest_indexes(1.into());
+        let idx = p.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
 

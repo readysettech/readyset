@@ -317,17 +317,18 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
+        let me = NodeAddress::mock_global(1.into());
         let c = setup(false, true);
-        let idx = c.node().suggest_indexes(1.into());
+        let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
-        assert!(idx.contains_key(&1.into()));
+        assert!(idx.contains_key(&me));
 
         // should only index on group-by columns
-        assert_eq!(idx[&1.into()].len(), 2);
-        assert!(idx[&1.into()].iter().any(|&i| i == 0));
-        assert!(idx[&1.into()].iter().any(|&i| i == 1));
+        assert_eq!(idx[&me].len(), 2);
+        assert!(idx[&me].iter().any(|&i| i == 0));
+        assert!(idx[&me].iter().any(|&i| i == 1));
         // specifically, not last column, which is output
     }
 

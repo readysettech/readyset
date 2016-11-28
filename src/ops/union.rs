@@ -9,8 +9,8 @@ use flow::prelude::*;
 /// A union of a set of views.
 #[derive(Debug)]
 pub struct Union {
-    emit: HashMap<NodeIndex, Vec<usize>>,
-    cols: HashMap<NodeIndex, usize>,
+    emit: HashMap<NodeAddress, Vec<usize>>,
+    cols: HashMap<NodeAddress, usize>,
 }
 
 // gather isn't normally Sync, but we know that we're only
@@ -22,7 +22,7 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
-    pub fn new(emit: HashMap<NodeIndex, Vec<usize>>) -> Union {
+    pub fn new(emit: HashMap<NodeAddress, Vec<usize>>) -> Union {
         for emit in emit.values() {
             let mut last = &emit[0];
             for i in emit {
@@ -40,7 +40,7 @@ impl Union {
 }
 
 impl Ingredient for Union {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         self.emit.keys().cloned().collect()
     }
 
@@ -53,10 +53,10 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols.extend(self.emit.keys().map(|&n| (n, g[n].fields().len())));
+        self.cols.extend(self.emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
     }
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
         for (from, to) in remap {
             if from == to {
                 continue;
@@ -159,12 +159,12 @@ impl Ingredient for Union {
             .collect()
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index nothing (?)
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
     }
 
@@ -178,7 +178,7 @@ impl Ingredient for Union {
                     .map(|e| e.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}:[{}]", src.index(), cols)
+                format!("{}:[{}]", src, cols)
             })
             .collect::<Vec<_>>()
             .join(" ⋃ ")
@@ -193,7 +193,7 @@ mod tests {
     use query;
     use shortcut;
 
-    fn setup() -> (ops::test::MockGraph, NodeIndex, NodeIndex) {
+    fn setup() -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1", "r2"]);
@@ -206,6 +206,7 @@ mod tests {
         emits.insert(l, vec![0, 1]);
         emits.insert(r, vec![0, 2]);
         g.set_op("union", &["u0", "u1"], Union::new(emits));
+        let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
 
@@ -213,7 +214,7 @@ mod tests {
     fn it_describes() {
         let (u, l, r) = setup();
         assert_eq!(u.node().description(),
-                   format!("{}:[0, 1] ⋃ {}:[0, 2]", l.index(), r.index()));
+                   format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r));
     }
 
     #[test]
@@ -302,7 +303,8 @@ mod tests {
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let (u, _, _) = setup();
-        assert_eq!(u.node().suggest_indexes(1.into()), HashMap::new());
+        let me = NodeAddress::mock_global(1.into());
+        assert_eq!(u.node().suggest_indexes(me), HashMap::new());
     }
 
     #[test]

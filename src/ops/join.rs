@@ -16,21 +16,21 @@ struct JoinTarget {
 
 #[derive(Debug)]
 struct Join {
-    against: HashMap<NodeIndex, JoinTarget>,
-    node: NodeIndex,
+    against: HashMap<NodeAddress, JoinTarget>,
+    node: NodeAddress,
 }
 
 /// Convenience struct for building join nodes.
 pub struct Builder {
-    emit: Vec<(NodeIndex, usize)>,
-    join: HashMap<NodeIndex, (bool, Vec<usize>)>,
+    emit: Vec<(NodeAddress, usize)>,
+    join: HashMap<NodeAddress, (bool, Vec<usize>)>,
 }
 
 impl Builder {
     /// Build a new join operator.
     ///
     /// `emit` dictates, for each output column, which source and column should be used.
-    pub fn new(emit: Vec<(NodeIndex, usize)>) -> Self {
+    pub fn new(emit: Vec<(NodeAddress, usize)>) -> Self {
         Builder {
             emit: emit,
             join: HashMap::new(),
@@ -42,7 +42,7 @@ impl Builder {
     /// This is semantically identical to `join`, except that it also asserts that this is the
     /// first view being added. The first view is of particular importance as it dictates the
     /// behavior of later *left* joins (when they are added).
-    pub fn from(self, node: NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn from(self, node: NodeAddress, groups: Vec<usize>) -> Self {
         assert!(self.join.is_empty());
         self.join(node, groups)
     }
@@ -65,7 +65,7 @@ impl Builder {
     /// ```rust,ignore
     /// Builder::new(vec![(a, 0), (b, 0)]).from(a, vec![1, 0]).join(b, vec![0, 1, 0]);
     /// ```
-    pub fn join(mut self, node: NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn join(mut self, node: NodeAddress, groups: Vec<usize>) -> Self {
         assert!(self.join.insert(node, (false, groups)).is_none());
         self
     }
@@ -76,7 +76,7 @@ impl Builder {
     /// from other tables that join against this table will always be present in the output,
     /// regardless of whether matching records exist in `node`. For such *zero rows*, all columns
     /// emitted from this node will be set to `DataType::None`.
-    pub fn left_join(mut self, node: NodeIndex, groups: Vec<usize>) -> Self {
+    pub fn left_join(mut self, node: NodeAddress, groups: Vec<usize>) -> Self {
         assert!(self.join.insert(node, (true, groups)).is_none());
         self
     }
@@ -104,8 +104,8 @@ impl From<Builder> for Joiner {
         //
         // so, we construct a map of the form
         //
-        //   src: NodeIndex => {
-        //     p: NodeIndex => [(srci, pi), ...]
+        //   src: NodeAddress => {
+        //     p: NodeAddress => [(srci, pi), ...]
         //   }
         //
         let join = b.join
@@ -181,13 +181,13 @@ impl Into<node::Type> for Builder {
 /// this other view".
 #[derive(Debug)]
 pub struct Joiner {
-    emit: Vec<(NodeIndex, usize)>,
-    join: HashMap<NodeIndex, Join>,
+    emit: Vec<(NodeAddress, usize)>,
+    join: HashMap<NodeAddress, Join>,
 }
 
 impl Joiner {
     fn join<'a>(&'a self,
-                left: (NodeIndex, Vec<query::DataType>),
+                left: (NodeAddress, Vec<query::DataType>),
                 domain: &DomainNodes,
                 states: &StateMap)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
@@ -261,7 +261,7 @@ impl Joiner {
 }
 
 impl Ingredient for Joiner {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         self.join.keys().cloned().collect()
     }
 
@@ -277,13 +277,13 @@ impl Ingredient for Joiner {
         for (_, j) in &mut self.join {
             for (t, jt) in &mut j.against {
                 jt.select = iter::repeat(true)
-                    .take(g[*t].fields().len())
+                    .take(g[t.as_global()].fields().len())
                     .collect::<Vec<_>>();
             }
         }
     }
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
         // our ancestors may have been remapped
         // we thus need to fix up any node indices that could have changed
         for (from, to) in remap {
@@ -421,7 +421,7 @@ impl Ingredient for Joiner {
             .collect()
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         use std::collections::HashSet;
 
         // index all join fields
@@ -437,7 +437,7 @@ impl Ingredient for Joiner {
                     .chain(rs.fields.iter().map(move |&(_, ri)| (right, ri)))
                 })
             })
-            // we now have (NodeIndex, usize) for every join column.
+            // we now have (NodeAddress, usize) for every join column.
             .fold(HashMap::new(), |mut hm, (node, col)| {
                 hm.entry(*node).or_insert_with(HashSet::new).insert(col);
 
@@ -452,14 +452,14 @@ impl Ingredient for Joiner {
             .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![self.emit[col].clone()])
     }
 
     fn description(&self) -> String {
         let emit = self.emit
             .iter()
-            .map(|&(src, col)| format!("{}:{}", src.index(), col))
+            .map(|&(src, col)| format!("{}:{}", src, col))
             .collect::<Vec<_>>()
             .join(", ");
         let joins = self.join
@@ -471,7 +471,7 @@ impl Ingredient for Joiner {
                     .flat_map(move |(right, rs)| {
                         let op = if rs.outer { "⋉" } else { "⋈" };
                         rs.fields.iter().map(move |&(li, ri)| {
-                            format!("{}:{} {} {}:{}", left.index(), li, op, right.index(), ri)
+                            format!("{}:{} {} {}:{}", left, li, op, right, ri)
                         })
                     })
             })
@@ -489,7 +489,7 @@ mod tests {
     use query;
     use shortcut;
 
-    fn setup(left: bool) -> (ops::test::MockGraph, NodeIndex, NodeIndex) {
+    fn setup(left: bool) -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
@@ -511,14 +511,13 @@ mod tests {
 
         let j: Joiner = b.into();
         g.set_op("join", &["j0", "j1", "j2"], j);
+        let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
 
     #[test]
     fn it_describes() {
         let (j, l, r) = setup(false);
-        let l = l.index();
-        let r = r.index();
         assert_eq!(j.node().description(),
                    format!("[{}:0, {}:1, {}:1] {}:0 ⋈ {}:0", l, l, r, l, r));
     }
@@ -526,13 +525,11 @@ mod tests {
     #[test]
     fn it_describes_left() {
         let (j, l, r) = setup(true);
-        let l = l.index();
-        let r = r.index();
         assert_eq!(j.node().description(),
                    format!("[{}:0, {}:1, {}:1] {}:0 ⋉ {}:0", l, l, r, l, r));
     }
 
-    fn forward_non_weird(mut j: ops::test::MockGraph, l: NodeIndex, r: NodeIndex) {
+    fn forward_non_weird(mut j: ops::test::MockGraph, l: NodeAddress, r: NodeAddress) {
         // these are the data items we have to work with
         // these are in left
         let l_a1 = vec![1.into(), "a".into()];
@@ -721,14 +718,14 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
+        let me = NodeAddress::mock_global(2.into());
         let (j, l, r) = setup(false);
-        let hm: HashMap<_, _> =
-            vec![(l, vec![0]), // join column for left
-                 (r, vec![0]), // join column for right
-                 (2.into(), vec![0]) /* output column that is used as join column */]
-                .into_iter()
-                .collect();
-        assert_eq!(j.node().suggest_indexes(2.into()), hm);
+        let hm: HashMap<_, _> = vec![(l, vec![0]), // join column for left
+                                     (r, vec![0]), // join column for right
+                                     (me, vec![0]) /* output column that is used as join column */]
+            .into_iter()
+            .collect();
+        assert_eq!(j.node().suggest_indexes(me), hm);
     }
 
     #[test]

@@ -15,13 +15,13 @@ use flow::prelude::*;
 /// enables precise control of the propogation of updates through the graph.
 #[derive(Debug)]
 pub struct GatedIdentity {
-    src: NodeIndex,
+    src: NodeAddress,
     rx: Mutex<Receiver<()>>,
 }
 
 impl GatedIdentity {
     /// Construct a new gated identity operator.
-    pub fn new(src: NodeIndex) -> (GatedIdentity, Sender<()>) {
+    pub fn new(src: NodeAddress) -> (GatedIdentity, Sender<()>) {
         let (tx, rx) = channel();
         let g = GatedIdentity {
             src: src,
@@ -32,7 +32,7 @@ impl GatedIdentity {
 }
 
 impl Ingredient for GatedIdentity {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
@@ -46,7 +46,7 @@ impl Ingredient for GatedIdentity {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
         self.src = remap[&self.src];
     }
 
@@ -71,12 +71,12 @@ impl Ingredient for GatedIdentity {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![(self.src, col)])
     }
 
@@ -141,7 +141,8 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let (i, _) = setup();
-        let idx = i.node().suggest_indexes(1.into());
+        let me = NodeAddress::mock_global(1.into());
+        let idx = i.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
 

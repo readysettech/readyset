@@ -69,11 +69,11 @@ pub trait GroupedOperation: fmt::Debug {
 
 #[derive(Debug)]
 pub struct GroupedOperator<'a, T: GroupedOperation> {
-    src: NodeIndex,
+    src: NodeAddress,
     inner: T,
 
     // some cache state
-    us: NodeIndex,
+    us: Option<NodeAddress>,
     cols: usize,
 
     // precomputed datastructures
@@ -83,12 +83,12 @@ pub struct GroupedOperator<'a, T: GroupedOperation> {
 }
 
 impl<'a, T: GroupedOperation> GroupedOperator<'a, T> {
-    pub fn new(src: NodeIndex, op: T) -> GroupedOperator<'a, T> {
+    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<'a, T> {
         GroupedOperator {
             src: src,
             inner: op,
 
-            us: 0.into(),
+            us: None,
             cols: 0,
             group: HashSet::new(),
             cond: Vec::new(),
@@ -98,7 +98,7 @@ impl<'a, T: GroupedOperation> GroupedOperator<'a, T> {
 }
 
 impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
@@ -111,7 +111,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[self.src];
+        let srcn = &g[self.src.as_global()];
 
         // give our inner operation a chance to initialize
         self.inner.setup(srcn);
@@ -149,12 +149,12 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         self.colfix.extend(colfix.into_iter());
     }
 
-    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
+    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
         // who's our parent really?
         self.src = remap[&self.src];
 
         // who are we?
-        self.us = us;
+        self.us = Some(us);
     }
 
     fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
@@ -203,7 +203,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                         }
 
                         // find the current value for this group
-                        match state.get(&self.us) {
+                        match state.get(self.us.as_ref().unwrap()) {
                             Some(db) => {
                                 let mut rs = db.find(&q[..]);
                                 // current value is in the last output column
@@ -346,7 +346,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
             .collect()
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index all group by columns,
         // which are the first self.group.len() columns of our output
         Some((this, (0..self.group.len()).collect()))
@@ -354,7 +354,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
             .collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         if col == self.cols - 1 {
             return None;
         }

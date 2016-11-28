@@ -1,4 +1,5 @@
 use flow;
+use petgraph::graph::NodeIndex;
 use flow::prelude::*;
 
 use ops;
@@ -24,8 +25,9 @@ macro_rules! broadcast {
 
 pub struct NodeDescriptor {
     pub index: NodeIndex,
+    pub addr: NodeAddress,
     pub inner: Node,
-    pub children: Vec<NodeIndex>,
+    pub children: Vec<NodeAddress>,
 }
 
 impl NodeDescriptor {
@@ -55,13 +57,13 @@ impl NodeDescriptor {
             for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
                 if txi == txn && self.children.is_empty() {
                         tx.send(Message {
-                            from: self.index,
+                            from: NodeAddress::make_global(self.index), // the ingress node knows where it should go
                             to: dst,
                             data: u.take().unwrap(),
                         })
                     } else {
                         tx.send(Message {
-                            from: self.index,
+                            from: NodeAddress::make_global(self.index),
                             to: dst,
                             data: u.clone().unwrap(),
                         })
@@ -92,7 +94,7 @@ impl NodeDescriptor {
         // turns out, this lookup is on a serious fast-path, and the hashing is actually a
         // bottleneck. we could probably make a Vec of Option<State> instead by fiddling around
         // with indices, but that is a task for another day
-        let state = state.get_mut(&self.index);
+        let state = state.get_mut(&self.addr);
         if state.is_none() {
             // nope
             return;

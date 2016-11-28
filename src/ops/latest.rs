@@ -13,8 +13,8 @@ use flow::prelude::*;
 /// latest for that group.
 #[derive(Debug)]
 pub struct Latest {
-    us: NodeIndex,
-    src: NodeIndex,
+    us: Option<NodeAddress>,
+    src: NodeAddress,
     // MUST be in reverse sorted order!
     key: Vec<usize>,
     key_m: HashMap<usize, usize>,
@@ -26,12 +26,12 @@ impl Latest {
     /// `src` should be the ancestor the operation is performed over, and `keys` should be a list
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
-    pub fn new(src: NodeIndex, mut keys: Vec<usize>) -> Latest {
+    pub fn new(src: NodeAddress, mut keys: Vec<usize>) -> Latest {
         keys.sort();
         let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
         keys.reverse();
         Latest {
-            us: 0.into(),
+            us: None,
             src: src,
             key: keys,
             key_m: key_m,
@@ -40,7 +40,7 @@ impl Latest {
 }
 
 impl Ingredient for Latest {
-    fn ancestors(&self) -> Vec<NodeIndex> {
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
@@ -54,8 +54,8 @@ impl Ingredient for Latest {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>) {
-        self.us = us;
+    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+        self.us = Some(us);
         self.src = remap[&self.src]
     }
 
@@ -100,7 +100,7 @@ impl Ingredient for Latest {
 
 
                         // find the current value for this group
-                        match state.get(&self.us) {
+                        match state.get(self.us.as_ref().unwrap()) {
                             Some(db) => {
                                 let mut rs = db.find(&q[..]);
                                 let cur = rs.next()
@@ -233,12 +233,12 @@ impl Ingredient for Latest {
             .collect()
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index all key columns
         Some((this, self.key.clone())).into_iter().collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![(self.src, col)])
     }
 
@@ -523,18 +523,20 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
+        let me = NodeAddress::mock_global(1.into());
         let c = setup(vec![0, 1], false);
-        let idx = c.node().suggest_indexes(1.into());
+        let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
-        assert!(idx.contains_key(&1.into()));
+        assert!(idx.contains_key(&me));
 
         // should only index on group-by columns
-        assert_eq!(idx[&1.into()].len(), 2);
-        assert!(idx[&1.into()].iter().any(|&i| i == 0));
-        assert!(idx[&1.into()].iter().any(|&i| i == 1));
+        assert_eq!(idx[&me].len(), 2);
+        assert!(idx[&me].iter().any(|&i| i == 0));
+        assert!(idx[&me].iter().any(|&i| i == 1));
     }
+
 
     #[test]
     fn it_resolves() {

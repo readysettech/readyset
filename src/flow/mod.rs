@@ -1,4 +1,3 @@
-use shortcut;
 use petgraph;
 use petgraph::graph::NodeIndex;
 use query;
@@ -21,15 +20,77 @@ pub type Edge = bool; // should the edge be materialized?
 /// A Message exchanged over an edge in the graph.
 #[derive(Clone)]
 pub struct Message {
-    pub from: NodeIndex,
-    pub to: NodeIndex,
+    pub from: NodeAddress,
+    pub to: NodeAddress,
     pub data: U,
+}
+
+/// A domain-local node identifier.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+pub struct LocalNodeIndex {
+    id: usize, // not a tuple struct so this field can be made private
+}
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+enum NodeAddress_ {
+    Global(NodeIndex),
+    Local(LocalNodeIndex), // XXX: maybe include domain here?
+}
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+pub struct NodeAddress {
+    addr: NodeAddress_, // wrap the enum so people can't create these accidentally
+}
+
+impl NodeAddress {
+    fn make_local(id: usize) -> NodeAddress {
+        NodeAddress { addr: NodeAddress_::Local(LocalNodeIndex { id: id }) }
+    }
+
+    fn make_global(id: NodeIndex) -> NodeAddress {
+        NodeAddress { addr: NodeAddress_::Global(id) }
+    }
+
+    #[cfg(test)]
+    pub fn mock_local(id: usize) -> NodeAddress {
+        Self::make_local(id)
+    }
+
+    #[cfg(test)]
+    pub fn mock_global(id: NodeIndex) -> NodeAddress {
+        Self::make_global(id)
+    }
+}
+
+impl fmt::Display for NodeAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.addr {
+            NodeAddress_::Global(ref ni) => write!(f, "g{}", ni.index()),
+            NodeAddress_::Local(ref ni) => write!(f, "l{}", ni.id),
+        }
+    }
+}
+
+impl NodeAddress {
+    pub fn as_global(&self) -> NodeIndex {
+        match self.addr {
+            NodeAddress_::Global(ni) => ni,
+            NodeAddress_::Local(_) => unreachable!("tried to use local address as global"),
+        }
+    }
+
+    pub fn as_local(&self) -> LocalNodeIndex {
+        match self.addr {
+            NodeAddress_::Local(i) => i,
+            NodeAddress_::Global(_) => unreachable!("tried to use global address as local"),
+        }
+    }
 }
 
 pub trait Ingredient
     where Self: Send
 {
-    fn ancestors(&self) -> Vec<NodeIndex>;
+    fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 
     /// Should return true if this ingredient will ever query the state of an ancestor outside of a
@@ -47,11 +108,11 @@ pub trait Ingredient
              -> ops::Datas;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>>;
+    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>>;
+    fn resolve(&self, i: usize) -> Option<Vec<(NodeAddress, usize)>>;
 
     /// Returns true for base node types.
     fn is_base(&self) -> bool {
@@ -73,12 +134,29 @@ pub trait Ingredient
     ///    ⋃    |  Union
     fn description(&self) -> String;
 
-    fn on_connected(&mut self, graph: &petgraph::Graph<node::Node, Edge>);
-    fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, NodeIndex>);
+    /// Called when a node is first connected to the graph.
+    ///
+    /// All its ancestors are present, but this node and its children may not have been connected
+    /// yet. Only addresses of the type `NodeAddress::Global` may be used.
+    fn on_connected(&mut self, graph: &prelude::Graph);
+
+    /// Called when a domain is finalized and is about to be booted.
+    ///
+    /// The provided arguments give mappings from global to local addresses. After this method has
+    /// been invoked (and crucially, in `Ingredient::on_input`) only addresses of the type
+    /// `NodeAddress::Local` may be used.
+    fn on_commit(&mut self,
+                 you: prelude::NodeAddress,
+                 remap: &HashMap<prelude::NodeAddress, prelude::NodeAddress>);
+
+    /// Process a single incoming message, optionally producing an update to be propagated to
+    /// children.
+    ///
+    /// Only addresses of the type `NodeAddress::Local` may be used in this function.
     fn on_input(&mut self,
                 input: Message,
                 domain: &prelude::DomainNodes,
-                states: &HashMap<NodeIndex, shortcut::Store<query::DataType>>)
+                states: &prelude::StateMap)
                 -> Option<U>;
 }
 
@@ -176,7 +254,7 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
+    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeAddress
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>,
@@ -197,11 +275,11 @@ impl<'a> Migration<'a> {
             self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, false);
+                self.mainline.ingredients.add_edge(parent.as_global(), ni, false);
             }
         }
         // and tell the caller its id
-        ni
+        NodeAddress::make_global(ni)
     }
 
     /// Mark the edge between `src` and `dst` in the graph as requiring materialization.
@@ -212,13 +290,13 @@ impl<'a> Migration<'a> {
     /// every receiving domain, this can save us some space if a child that doesn't require
     /// materialization is in its own domain. If multiple nodes in the same domain require
     /// materialization of the same parent, that materialized state will be shared.
-    pub fn materialize(&mut self, src: NodeIndex, dst: NodeIndex) {
+    pub fn materialize(&mut self, src: NodeAddress, dst: NodeAddress) {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
         // converted to an egress/ingress pair?
         let e = self.mainline
             .ingredients
-            .find_edge(src, dst)
+            .find_edge(src.as_global(), dst.as_global())
             .expect("asked to materialize non-existing edge");
 
         let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
@@ -227,21 +305,21 @@ impl<'a> Migration<'a> {
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
             // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
             // commit())
-            self.materialize.insert((src, dst));
+            self.materialize.insert((src.as_global(), dst.as_global()));
         }
     }
 
     /// Assign the ingredient with identifier `n` to the thread domain `d`.
     ///
     /// `n` must be have been added in this migration.
-    pub fn assign_domain(&mut self, n: NodeIndex, d: domain::Index) {
+    pub fn assign_domain(&mut self, n: NodeAddress, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
-        assert_eq!(self.added.insert(n, Some(d)).unwrap(), None);
+        assert_eq!(self.added.insert(n.as_global(), Some(d)).unwrap(), None);
     }
 
     fn boot_domain(&mut self,
                    d: domain::Index,
-                   nodes: Vec<NodeIndex>,
+                   nodes: Vec<(NodeIndex, NodeAddress)>,
                    rx: mpsc::Receiver<Message>) {
         let d = domain::Domain::from_graph(d, nodes, &mut self.mainline.ingredients);
         d.boot(rx);
@@ -253,8 +331,8 @@ impl<'a> Migration<'a> {
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(mut self)
-                  -> (HashMap<NodeIndex, Box<Fn(Vec<query::DataType>) + Send + 'static>>,
-                      HashMap<NodeIndex, Box<Fn(Option<&query::Query>) -> Vec<Vec<query::DataType>> + Send + Sync>>) {
+                  -> (HashMap<NodeAddress, Box<Fn(Vec<query::DataType>) + Send + 'static>>,
+                      HashMap<NodeAddress, Box<Fn(Option<&query::Query>) -> Vec<Vec<query::DataType>> + Send + Sync>>) {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -295,9 +373,6 @@ impl<'a> Migration<'a> {
                 self.add_domain()
             });
 
-            // identity mapping
-            domain_remap.entry(domain).or_insert_with(HashMap::new).insert(node, node);
-
             let parents: Vec<_> = self.mainline
                 .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
@@ -313,7 +388,10 @@ impl<'a> Migration<'a> {
                     let ingress = self.mainline.ingredients.add_node(proxy);
 
                     // that ingress node also needs to run before us
-                    domain_nodes.entry(domain).or_insert_with(Vec::new).push(ingress);
+                    let no = NodeAddress::make_local(domain_nodes.entry(domain)
+                        .or_insert_with(Vec::new)
+                        .len());
+                    domain_nodes.get_mut(&domain).unwrap().push((ingress, no));
 
                     // we also need to make sure there's a channel to reach the domain on
                     // we're also going to need to tell any egress node that will send to this
@@ -324,7 +402,7 @@ impl<'a> Migration<'a> {
                         rxs.insert(domain, rx);
                         txs.insert(domain, tx);
                     }
-                    targets.insert(ingress, txs[&domain].clone());
+                    targets.insert(ingress, (no, txs[&domain].clone()));
 
                     // note that, since we are traversing in topological order, our parent in this
                     // case should either be the source node, or it should be an egress node!
@@ -343,9 +421,10 @@ impl<'a> Migration<'a> {
                             .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
                             .next()
                             .unwrap();
+
                         domain_remap.entry(domain)
                             .or_insert_with(HashMap::new)
-                            .insert(original, ingress);
+                            .insert(NodeAddress::make_global(original), no);
                     }
 
                     // we need to hook the ingress node in between us and this parent
@@ -359,23 +438,32 @@ impl<'a> Migration<'a> {
             // all user-supplied nodes are internal
             self.mainline.ingredients[node].add_to(domain);
 
+            // assign the node a local identifier
+            let no =
+                NodeAddress::make_local(domain_nodes.entry(domain).or_insert_with(Vec::new).len());
+
+            // record mapping to local id
+            domain_remap.entry(domain)
+                .or_insert_with(HashMap::new)
+                .insert(NodeAddress::make_global(node), no);
+
+            // in this domain, run this node after any parent ingress nodes we may have added
+            domain_nodes.get_mut(&domain).unwrap().push((node, no));
+
             // let node process the fact that its parents may have changed
             if let Some(remap) = domain_remap.get(&domain) {
                 self.mainline
                     .ingredients
                     .node_weight_mut(node)
                     .unwrap()
-                    .on_commit(node, remap);
+                    .on_commit(no, remap);
             } else {
                 self.mainline
                     .ingredients
                     .node_weight_mut(node)
                     .unwrap()
-                    .on_commit(node, &HashMap::new());
+                    .on_commit(no, &HashMap::new());
             }
-
-            // in this domain, run this node after any parent ingress nodes we may have added
-            domain_nodes.entry(domain).or_insert_with(Vec::new).push(node);
 
             let children: Vec<_> = self.mainline
                 .ingredients
@@ -400,7 +488,8 @@ impl<'a> Migration<'a> {
                     self.mainline.ingredients.add_edge(node, egress, false);
                     self.mainline.ingredients.add_edge(egress, child, was_materialized);
                     // that egress node also needs to run
-                    domain_nodes.entry(domain).or_insert_with(Vec::new).push(egress);
+                    let no = NodeAddress::make_local(domain_nodes[&domain].len());
+                    domain_nodes.get_mut(&domain).unwrap().push((egress, no));
                 }
             }
 
@@ -435,8 +524,9 @@ impl<'a> Migration<'a> {
         drop(txs); // all necessary copies are in targets
 
         // then, hook up the channels to new ingress nodes
+        let src = NodeAddress::make_global(self.mainline.source);
         let mut sources = HashMap::new();
-        for (ingress, tx) in targets {
+        for (ingress, (no, tx)) in targets {
             // this node is of type ingress, but since the domain has since claimed ownership of
             // the node, it is now just a node::Type::Taken
             // any egress with an edge to this node needs to have a tx clone added to its tx
@@ -463,12 +553,11 @@ impl<'a> Migration<'a> {
 
                     // we want to avoid forcing the end-user to cook up Messages
                     // they should instead just make Us
-                    let src = self.mainline.source;
-                    sources.insert(idx,
+                    sources.insert(NodeAddress::make_global(idx),
                                    Box::new(move |u: Vec<query::DataType>| {
                         tx.send(Message {
                                 from: src,
-                                to: ingress,
+                                to: no,
                                 data: u.into(),
                             })
                             .unwrap()
@@ -479,7 +568,7 @@ impl<'a> Migration<'a> {
 
                 if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
                     // connected to egress from other domain
-                    txs.lock().unwrap().push((ingress, tx.clone()));
+                    txs.lock().unwrap().push((no, tx.clone()));
                     continue;
                 }
 
