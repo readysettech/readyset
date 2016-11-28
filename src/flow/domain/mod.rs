@@ -26,6 +26,7 @@ impl Into<usize> for Index {
 }
 
 pub mod single;
+pub mod local;
 
 pub struct Domain {
     domain: Index,
@@ -64,7 +65,7 @@ impl Domain {
             })
             .collect();
 
-        let mut state: HashMap<_, _> = nodes.iter()
+        let mut state: StateMap = nodes.iter()
             .filter_map(|n| {
                 // materialized state for any nodes that need it
                 // in particular, we keep state for
