@@ -101,7 +101,7 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
                                 Some(shortcut::Condition {
                                     column: i,
                                     cmp:
-                                        shortcut::Comparison::Equal(shortcut::Value::Const(arg))
+                                        shortcut::Comparison::Equal(shortcut::Value::new(arg))
                                 })
                             } else {
                                 None

@@ -93,7 +93,7 @@ fn it_works_w_mat() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Query, Aggregation, JoinBuilder};
+    use distributary::{DataType, Base, Union, Query, Aggregation, JoinBuilder};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -190,24 +190,13 @@ fn votes() {
     assert!(res.len() <= 2); // could be 2 if we had zero result rows
 
     // check that this is the case also if we query for the ID directly
+    let val = shortcut::Comparison::Equal(shortcut::Value::new(DataType::from(1)));
     let q = vec![shortcut::Condition {
                      column: 0,
-                     cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
+                     cmp: val,
                  }];
     let res = get[&end](Some(&Query::new(&[true, true, true], q)));
     assert_eq!(res.len(), 1);
     assert!(res.iter()
         .any(|r| r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())));
-
-    // again, zero values are tricky...
-    if false {
-        // and that we get zero if the other one is queried
-        let q = vec![shortcut::Condition {
-                         column: 0,
-                         cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                     }];
-        let res = get[&end](Some(&Query::new(&[true, true, true], q)));
-        assert_eq!(res.len(), 1);
-        assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
-    }
 }

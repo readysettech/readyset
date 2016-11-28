@@ -250,11 +250,12 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameters matching on both sides
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(1)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(1.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 2);
@@ -262,33 +263,36 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter matching only on left
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == "b".into()));
 
         // query with parameter matching only on right
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from("x")));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 1,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const("x".into())),
-                         }]);
+                                           column: 1,
+                                           cmp: val,
+                                       }]);
 
         let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 1);
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == "x".into()));
 
         // query with parameter with no matches
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(3)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(3.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = u.query(Some(&q));
         assert_eq!(hits.len(), 0);

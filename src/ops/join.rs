@@ -659,11 +659,12 @@ mod tests {
             .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using join field
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 1);
@@ -671,11 +672,12 @@ mod tests {
             .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
 
         // query using field from left
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from("a")));
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
-                             column: 1,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const("a".into())),
-                         }]);
+                                           column: 1,
+                                           cmp: val,
+                                       }]);
 
         let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 2);
@@ -685,11 +687,12 @@ mod tests {
             .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
 
         // query using field from right
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from("z")));
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
-                             column: 2,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const("z".into())),
-                         }]);
+                                           column: 2,
+                                           cmp: val,
+                                       }]);
 
         let hits = j.query(Some(&q));
         assert_eq!(hits.len(), 1);

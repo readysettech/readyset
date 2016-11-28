@@ -326,11 +326,12 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 2.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
 
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 1,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }]);
+                                           column: 1,
+                                           cmp: val,
+                                       }]);
 
         let hits = p.query(Some(&q));
         assert_eq!(hits.len(), 2);
@@ -340,7 +341,7 @@ mod tests {
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
                              column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Column(1)),
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::column(1)),
                          }]);
 
         let hits = p.query(Some(&q));
@@ -353,11 +354,12 @@ mod tests {
     fn it_queries_all() {
         let p = setup(false, true);
 
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = p.query(Some(&q));
         assert_eq!(hits.len(), 2);
@@ -369,7 +371,7 @@ mod tests {
         let q = query::Query::new(&[true, true, true],
                                   vec![shortcut::Condition {
                              column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Column(2)),
+                             cmp: shortcut::Comparison::Equal(shortcut::Value::column(2)),
                          }]);
 
         let hits = p.query(Some(&q));

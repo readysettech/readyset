@@ -20,11 +20,11 @@ impl Extremum {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn over(self,
-                src: NodeIndex,
-                over: usize,
-                group_by: &[usize])
-                -> GroupedOperator<ExtremumOperator> {
+    pub fn over<'a>(self,
+                    src: NodeAddress,
+                    over: usize,
+                    group_by: &[usize])
+                    -> GroupedOperator<'a, ExtremumOperator> {
         assert!(!group_by.iter().any(|&i| i == over),
                 "cannot group by aggregation column");
         GroupedOperator::new(src,
@@ -288,11 +288,12 @@ mod tests {
         assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 7.into()));
         assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
 
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(2.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = c.query(Some(&q));
         assert_eq!(hits.len(), 1);
@@ -303,11 +304,12 @@ mod tests {
     fn it_queries_zeros() {
         let c = setup(false, false);
 
+        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(100)));
         let q = query::Query::new(&[true, true],
                                   vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::Const(100.into())),
-                         }]);
+                                           column: 0,
+                                           cmp: val,
+                                       }]);
 
         let hits = c.query(Some(&q));
         assert!(hits.is_empty());

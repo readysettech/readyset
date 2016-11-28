@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn query() {
-        let t = |s: &str| -> shortcut::Value<DataType> { shortcut::Value::Const(s.into()) };
+        let t = |s: &str| -> shortcut::Value<DataType> { shortcut::Value::new(s.to_string()) };
         let d = vec!["a".into(), "b".into(), "c".into()];
         let c_good = shortcut::Condition {
             cmp: shortcut::Comparison::Equal(t("a")),

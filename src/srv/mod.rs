@@ -55,7 +55,7 @@ impl ext::Service for Server {
                     args.get_mut(i).and_then(|a| a.take()).map(|arg| {
                         shortcut::Condition {
                             column: i,
-                            cmp: shortcut::Comparison::Equal(shortcut::Value::Const(arg)),
+                            cmp: shortcut::Comparison::Equal(shortcut::Value::new(arg)),
                         }
                     })
                 })

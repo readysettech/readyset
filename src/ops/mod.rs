@@ -271,18 +271,18 @@ pub mod test {
 
             let state = self.states.get_mut(&self.nut.unwrap()).unwrap();
             if let Some(Update::Records(ref rs)) = u {
-                for r in rs.iter().cloned() {
+                for r in rs {
                     // TODO: avoid duplication with Domain::materialize
-                    match r {
-                        Record::Positive(r) => state.insert(r),
-                        Record::Negative(r) => {
+                    match *r {
+                        Record::Positive(ref r) => state.insert(r.clone()),
+                        Record::Negative(ref r) => {
                             // we need a cond that will match this row.
-                            let conds = r.into_iter()
+                            let conds = r.iter()
                                 .enumerate()
                                 .map(|(coli, v)| {
                                     shortcut::Condition {
                                         column: coli,
-                                        cmp: shortcut::Comparison::Equal(shortcut::Value::Const(v)),
+                                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
                                     }
                                 })
                                 .collect::<Vec<_>>();
