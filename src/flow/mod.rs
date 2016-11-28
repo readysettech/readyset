@@ -31,6 +31,12 @@ pub struct LocalNodeIndex {
     id: usize, // not a tuple struct so this field can be made private
 }
 
+impl LocalNodeIndex {
+    pub fn id(&self) -> usize {
+        self.id
+    }
+}
+
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 enum NodeAddress_ {
     Global(NodeIndex),
