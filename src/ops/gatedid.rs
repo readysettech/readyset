@@ -14,6 +14,7 @@ use flow::prelude::*;
 /// channel before forwarding. This is useful for writing tests because it
 /// enables precise control of the propogation of updates through the graph.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GatedIdentity {
     src: NodeAddress,
     rx: Mutex<Receiver<()>>,
@@ -21,6 +22,7 @@ pub struct GatedIdentity {
 
 impl GatedIdentity {
     /// Construct a new gated identity operator.
+    #[allow(dead_code)]
     pub fn new(src: NodeAddress) -> (GatedIdentity, Sender<()>) {
         let (tx, rx) = channel();
         let g = GatedIdentity {
