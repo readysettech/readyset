@@ -75,6 +75,16 @@ impl From<i32> for DataType {
     }
 }
 
+impl Into<String> for DataType {
+    fn into(self) -> String {
+        if let DataType::Text(s) = self {
+            (*s).clone()
+        } else {
+            unreachable!();
+        }
+    }
+}
+
 impl Into<i64> for DataType {
     fn into(self) -> i64 {
         if let DataType::Number(s) = self {
