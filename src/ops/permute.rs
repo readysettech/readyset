@@ -184,52 +184,6 @@ impl Ingredient for Permute {
         input.data.into()
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        use shortcut::cmp::Comparison::Equal;
-        use shortcut::cmp::Value::{Const, Column};
-
-        // TODO: We don't need to select all fields if our permutation
-        // drops some fields--`self.permute` will end up dropping them
-        // anyway--but it's not worth the trouble.
-        let select = iter::repeat(true)
-            .take(domain[self.src.as_local()].borrow().fields().len())
-            .collect::<Vec<_>>();
-
-        let q = q.map(|q| {
-            let having = q.having.iter().map(|c| {
-                shortcut::Condition {
-                    column: self.resolve_col(c.column),
-                    cmp: match c.cmp {
-                        Equal(Const(_)) => c.cmp.clone(),
-                        Equal(Column(idx)) => Equal(Column(self.resolve_col(idx))),
-                    },
-                }
-            });
-            query::Query::new(&select, having.collect())
-        });
-
-        let mut rx = if let Some(state) = states.get(self.src.as_local()) {
-            // other node is materialized
-            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // other node is not materialized, query instead
-            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
-        };
-
-        if self.emit.is_some() {
-            for r in rx.iter_mut() {
-                self.permute(r);
-            }
-        }
-        rx
-    }
-
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
@@ -264,9 +218,6 @@ mod tests {
     fn setup(materialized: bool, all: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.seed(s, vec![1.into(), 0.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 0.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 0.into(), 2.into()]);
 
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         g.set_op("permute",
@@ -314,72 +265,6 @@ mod tests {
                            vec![ops::Record::Positive(vec!["a".into(), "b".into(), "c".into()])]);
             }
         }
-    }
-
-    #[test]
-    fn it_queries() {
-        let p = setup(false, false);
-
-        let hits = p.query(None);
-        assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 2.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 1,
-                                           cmp: val,
-                                       }]);
-
-        let hits = p.query(Some(&q));
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 2.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::column(1)),
-                         }]);
-
-        let hits = p.query(Some(&q));
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-    }
-
-    #[test]
-    fn it_queries_all() {
-        let p = setup(false, true);
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = p.query(Some(&q));
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == 0.into() && r[2] == 1.into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
-
-        let q = query::Query::new(&[true, true, true],
-                                  vec![shortcut::Condition {
-                             column: 0,
-                             cmp: shortcut::Comparison::Equal(shortcut::Value::column(2)),
-                         }]);
-
-        let hits = p.query(Some(&q));
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == 0.into() && r[2] == 1.into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == 0.into() && r[2] == 2.into()));
     }
 
     #[test]

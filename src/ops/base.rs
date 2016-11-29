@@ -32,10 +32,6 @@ impl Ingredient for Base {
         Some(input.data)
     }
 
-    fn query(&self, _: Option<&query::Query>, _: &DomainNodes, _: &StateMap) -> ops::Datas {
-        unreachable!("base nodes should never be queried directly");
-    }
-
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         HashMap::new()
     }

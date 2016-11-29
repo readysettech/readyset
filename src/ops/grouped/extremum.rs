@@ -164,21 +164,6 @@ mod tests {
         } else {
             g.add_base("source", &["x", "y"])
         };
-        if wide {
-            g.seed(s, vec![1.into(), 4.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-            g.seed(s, vec![1.into(), 2.into(), 1.into()]);
-            g.seed(s, vec![1.into(), 7.into(), 1.into()]);
-            g.seed(s, vec![1.into(), 0.into(), 1.into()]);
-        } else {
-            g.seed(s, vec![1.into(), 4.into()]);
-            g.seed(s, vec![2.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into()]);
-            g.seed(s, vec![1.into(), 2.into()]);
-            g.seed(s, vec![1.into(), 7.into()]);
-            g.seed(s, vec![1.into(), 0.into()]);
-        }
 
         if wide {
             g.set_op("agg", &["x", "z", "ys"], Extremum::MAX.over(s, 1, &[0, 2]));
@@ -278,42 +263,6 @@ mod tests {
     }
 
     // TODO: also test MIN
-
-    #[test]
-    fn it_queries() {
-        let c = setup(false, false);
-
-        let hits = c.query(None);
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 7.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = c.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-    }
-
-    #[test]
-    fn it_queries_zeros() {
-        let c = setup(false, false);
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(100)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = c.query(Some(&q));
-        assert!(hits.is_empty());
-    }
 
     #[test]
     fn it_suggests_indices() {

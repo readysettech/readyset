@@ -300,10 +300,6 @@ pub mod test {
             self.narrow_one::<Record>(d.into(), remember)
         }
 
-        pub fn query(&self, q: Option<&query::Query>) -> Datas {
-            self.node().query(q, &self.nodes, &self.states)
-        }
-
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
             self.nodes[self.nut.unwrap().1.as_local()].borrow()
         }

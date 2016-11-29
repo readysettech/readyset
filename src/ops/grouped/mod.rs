@@ -203,23 +203,17 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                         }
 
                         // find the current value for this group
-                        match state.get(&self.us.as_ref().unwrap().as_local()) {
-                            Some(db) => {
-                                let mut rs = db.find(&q[..]);
-                                // current value is in the last output column
-                                // or "" if there is no current group
-                                let cur = rs.next()
-                                    .map(|r| r[r.len() - 1].clone().into())
-                                    .unwrap_or(self.inner.zero());
-                                assert_eq!(rs.count(), 0, "a group had more than 1 result");
-                                cur
-                            }
-                            None => {
-                                // TODO
-                                // query ancestor (self.query?) based on self.group columns
-                                unimplemented!()
-                            }
-                        }
+                        let db = state.get(&self.us.as_ref().unwrap().as_local())
+                            .expect("grouped operators must have their own state materialized");
+                        let mut rs = db.find(&q[..]);
+
+                        // current value is in the last output column
+                        // or "" if there is no current group
+                        let cur = rs.next()
+                            .map(|r| r[r.len() - 1].clone().into())
+                            .unwrap_or(self.inner.zero());
+                        assert_eq!(rs.count(), 0, "a group had more than 1 result");
+                        cur
                     };
 
                     // new is the result of applying all diffs for the group to the current value
@@ -259,91 +253,6 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                 ops::Update::Records(out).into()
             }
         }
-    }
-
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        use std::iter;
-
-        // we're fetching everything from our parent
-        let mut params = None;
-
-        // however, if there are some conditions that filters over one of our group-bys, we should
-        // use those as parameters to speed things up.
-        if let Some(q) = q {
-            params = Some(q.having.iter().map(|c| {
-                // FIXME: we could technically support querying over the output of the operator,
-                // but we'd have to restructure this function a fair bit so that we keep that part
-                // of the query around for after we've got the results back. We'd then need to do
-                // another filtering pass over the results of query. Unclear if that's worth it.
-                assert!(c.column < self.colfix.len(),
-                        "filtering on group operation output is not supported");
-
-                shortcut::Condition{
-                    column: self.colfix[c.column],
-                    cmp: c.cmp.clone(),
-                }
-            }).collect::<Vec<_>>());
-
-            if params.as_ref().unwrap().is_empty() {
-                params = None;
-            }
-        }
-
-        // now, query our ancestor, and aggregate into groups.
-        let q = params.map(|ps| {
-            query::Query::new(&iter::repeat(true)
-                                  .take(self.cols)
-                                  .collect::<Vec<_>>(),
-                              ps)
-        });
-
-        let rx = if let Some(state) = states.get(self.src.as_local()) {
-            // parent is materialized
-            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // parent is not materialized, query into parent
-            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
-        };
-
-        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
-        // aggregated state in memory until we've seen all rows.
-        let mut consolidate = HashMap::new();
-        for rec in rx {
-            let val = self.inner.to_diff(&rec[..], true);
-            let group = rec.into_iter()
-                .enumerate()
-                .filter_map(|(i, v)| if self.group.contains(&i) {
-                    Some(v)
-                } else {
-                    None
-                })
-                .collect::<Vec<_>>();
-
-            let mut cur = consolidate.entry(group).or_insert_with(|| self.inner.zero());
-
-            // FIXME: this might turn out to be really expensive, since apply() is allowed to be an
-            // expensive operation (like for group_concat). we *could* accumulate all records into
-            // a Vec first, and then call apply() only once after all records have been read, but
-            // that would mean much higher (and potentially unnecessary) memory usage. Ideally, we
-            // would allow the GroupOperation to define its own aggregation container for this kind
-            // of use-case, but we leave that as future work for now.
-            let next = self.inner.apply(&cur, vec![val]);
-            *cur = Some(next);
-        }
-
-        consolidate.into_iter()
-            .map(|(mut group, val)| {
-                group.push(val.unwrap());
-                // TODO: respect q.select
-                group
-            })
-            .collect()
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

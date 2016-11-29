@@ -57,22 +57,6 @@ impl Ingredient for GatedIdentity {
         input.data.into()
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        if let Some(state) = states.get(self.src.as_local()) {
-            // parent is materialized
-            state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // parent is not materialized, query into parent
-            domain[self.src.as_local()].borrow().query(q, domain, states)
-        }
-    }
-
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
@@ -101,11 +85,6 @@ mod tests {
     fn setup() -> (ops::test::MockGraph, Sender<()>) {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.seed(s, vec![1.into(), 1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-        g.seed(s, vec![1.into(), 2.into(), 1.into()]);
-        g.seed(s, vec![3.into(), 3.into(), 1.into()]);
         let (i, tx) = GatedIdentity::new(s);
         g.set_op("identity", &["x", "y", "z"], i);
         (g, tx)
@@ -131,13 +110,6 @@ mod tests {
         tx.send(()).unwrap();
         child.join().unwrap();
         assert_eq!((&child_done).load(Ordering::SeqCst), true);
-    }
-
-    #[test]
-    fn it_queries() {
-        let (i, _) = setup();
-        let hits = i.query(None);
-        assert_eq!(hits.len(), 5);
     }
 
     #[test]

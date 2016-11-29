@@ -99,19 +99,8 @@ pub trait Ingredient
     fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 
-    /// Should return true if this ingredient will ever query the state of an ancestor outside of a
-    /// call to `Self::query()`.
+    /// Should return true if this ingredient will ever query the state of an ancestor.
     fn will_query(&self, materialized: bool) -> bool;
-
-    /// Called whenever this node is being queried for records, and it is not materialized. The
-    /// node should use the list of ancestor query functions to fetch relevant data from upstream,
-    /// and emit resulting records as they come in. Note that there may be no query, in which case
-    /// all records should be returned.
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &prelude::DomainNodes,
-             states: &prelude::StateMap)
-             -> ops::Datas;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>>;

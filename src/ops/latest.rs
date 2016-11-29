@@ -100,20 +100,13 @@ impl Ingredient for Latest {
 
 
                         // find the current value for this group
-                        match state.get(&self.us.as_ref().unwrap().as_local()) {
-                            Some(db) => {
-                                let mut rs = db.find(&q[..]);
-                                let cur = rs.next()
-                                    .map(|r| (r.into_iter().cloned().collect(), 0));
-                                assert_eq!(rs.count(), 0, "latest group has more than 1 record");
-                                cur
-
-                            }
-                            None => {
-                                // TODO: query ancestor (self.query?) based on self.key columns
-                                unimplemented!()
-                            }
-                        }
+                        let db = state.get(&self.us.as_ref().unwrap().as_local())
+                            .expect("latest must have its own state materialized");
+                        let mut rs = db.find(&q[..]);
+                        let cur = rs.next()
+                            .map(|r| (r.into_iter().cloned().collect(), 0));
+                        assert_eq!(rs.count(), 0, "latest group has more than 1 record");
+                        cur
                     };
 
                     // if there was a previous latest for this key, revoke old record
@@ -136,101 +129,6 @@ impl Ingredient for Latest {
                 ops::Update::Records(out).into()
             }
         }
-    }
-
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        use std::iter;
-
-        // we're fetching everything from our parent
-        let mut params = None;
-
-        // however, if there are some conditions that filter over a field present in the input (so
-        // everything except conditions on self.over), we should use those as parameters to speed
-        // things up.
-        if let Some(q) = q {
-            params = Some(q.having
-                .iter()
-                .filter_map(|c| {
-                    // non-key conditionals need to be matched against per group after to match the
-                    // semantics you'd get if the query was run against the materialized output
-                    // directly.
-                    self.key_m.get(&c.column).map(|&col| {
-                        shortcut::Condition {
-                            column: col,
-                            cmp: c.cmp.clone(),
-                        }
-
-                    })
-                })
-                .collect::<Vec<_>>());
-
-            if params.as_ref().unwrap().is_empty() {
-                params = None;
-            }
-        }
-
-        let q = params.map(|ps| {
-            query::Query::new(&iter::repeat(true)
-                                  .take(domain[self.src.as_local()].borrow().fields().len())
-                                  .collect::<Vec<_>>(),
-                              ps)
-        });
-
-        // now, query our ancestor, and aggregate into groups.
-        let rx = if let Some(state) = states.get(self.src.as_local()) {
-            // other node is materialized
-            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // other node is not materialized, query instead
-            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
-        };
-
-        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
-        // aggregated state in memory until we've seen all rows.
-        let mut consolidate = HashMap::<_, Vec<_>>::new();
-        for rec in rx {
-            use std::collections::hash_map::Entry;
-
-            let (group, rest): (Vec<_>, _) =
-                rec.into_iter().enumerate().partition(|&(ref fi, _)| self.key_m.contains_key(fi));
-            assert_eq!(group.len(), self.key.len());
-
-            let group = group.into_iter().map(|(_, v)| v).collect();
-            match consolidate.entry(group) {
-                Entry::Occupied(mut e) => {
-                    let e = e.get_mut();
-                    // TODO: only if newer
-                    e.clear();
-                    e.extend(rest.into_iter().map(|(_, v)| v));
-                }
-                Entry::Vacant(v) => {
-                    v.insert(rest.into_iter().map(|(_, v)| v).collect());
-                }
-            }
-        }
-
-        consolidate.into_iter()
-            .map(|(group, rest): (Vec<_>, Vec<_>)| {
-                let all = group.len() + rest.len();
-                let mut group = group.into_iter();
-                let mut rest = rest.into_iter();
-                let mut row = Vec::with_capacity(all);
-                for i in 0..all {
-                    if self.key_m.contains_key(&i) {
-                        row.push(group.next().unwrap());
-                    } else {
-                        row.push(rest.next().unwrap());
-                    }
-                }
-                row
-            })
-            .collect()
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
@@ -269,20 +167,6 @@ mod tests {
         } else {
             g.add_base("source", &["x", "y"])
         };
-        if big {
-            g.seed(s, vec![1.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-            g.seed(s, vec![1.into(), 2.into(), 1.into()]);
-            g.seed(s, vec![3.into(), 3.into(), 1.into()]);
-        } else {
-            g.seed(s, vec![1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into()]);
-            g.seed(s, vec![1.into(), 2.into()]);
-            g.seed(s, vec![3.into(), 3.into()]);
-        }
-        // TODO: test when last *isn't* latest!
 
         if big {
             g.set_op("latest", &["x", "y", "z"], Latest::new(s, key));
@@ -294,6 +178,8 @@ mod tests {
         }
         g
     }
+
+    // TODO: test when last *isn't* latest!
 
     #[test]
     fn it_describes() {
@@ -404,121 +290,6 @@ mod tests {
         } else {
             unreachable!();
         }
-    }
-
-    #[test]
-    fn it_forwards_mkey() {
-        let mut c = setup(vec![0, 1], true);
-
-        let u = vec![1.into(), 1.into(), 1.into()];
-        c.narrow_one_row(u, true);
-
-        // first record for a second group should also emit just a positive
-        let u = vec![1.into(), 2.into(), 2.into()];
-
-        let out = c.narrow_one_row(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 1);
-            let mut rs = rs.into_iter();
-
-            match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 2.into());
-                    assert_eq!(r[2], 2.into());
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            unreachable!();
-        }
-
-        let u = vec![1.into(), 1.into(), 2.into()];
-
-        // new record for existing group should revoke the old latest, and emit the new
-        let out = c.narrow_one_row(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 2);
-            let mut rs = rs.into_iter();
-
-            match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                    assert_eq!(r[2], 1.into());
-                }
-                _ => unreachable!(),
-            }
-            match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                    assert_eq!(r[2], 2.into());
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            unreachable!();
-        }
-
-        let u =
-            ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into(), 1.into()]),
-                                      ops::Record::Negative(vec![1.into(), 1.into(), 2.into()]),
-                                      ops::Record::Positive(vec![1.into(), 1.into(), 3.into()]),
-                                      ops::Record::Negative(vec![1.into(), 2.into(), 2.into()]),
-                                      ops::Record::Positive(vec![1.into(), 2.into(), 4.into()])]);
-
-        // negatives and positives should still result in only one new current for each group
-        let out = c.narrow_one(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 4); // one - and one + for each group
-            // group 1 lost 2 and gained 3
-            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-                r[1] == 1.into() && r[2] == 2.into()
-            } else {
-                false
-            }));
-            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-                r[1] == 1.into() && r[2] == 3.into()
-            } else {
-                false
-            }));
-            // group 2 lost 2 and gained 4
-            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-                r[1] == 2.into() && r[2] == 2.into()
-            } else {
-                false
-            }));
-            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-                r[1] == 2.into() && r[2] == 4.into()
-            } else {
-                false
-            }));
-        } else {
-            unreachable!();
-        }
-    }
-
-    #[test]
-    fn it_queries() {
-        let l = setup(vec![0], false);
-
-        let hits = l.query(None);
-        assert_eq!(hits.len(), 3);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 2.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-        assert!(hits.iter().any(|r| r[0] == 3.into() && r[1] == 3.into()));
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = l.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
     }
 
     #[test]
