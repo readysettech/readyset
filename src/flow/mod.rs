@@ -361,7 +361,20 @@ impl<'a> Migration<'a> {
         if r.is_none() {
             use shortcut;
             let cols = self.mainline.ingredients[self.readers[n.as_global()]].fields().len();
-            *r = Some(shortcut::Store::new(cols));
+            let mut state = shortcut::Store::new(cols);
+            // we're also going to add all the indices that the parent view has
+            // TODO: in the future we may want to let the user hint things to us
+            let mut idxs = self.mainline.ingredients[*n.as_global()].suggest_indexes(n);
+            if let Some(idxs) = idxs.remove(&n) {
+                for col in idxs {
+                    state.index(col, shortcut::idx::HashIndex::new());
+                }
+            } else {
+                // TODO
+                println!("warning: no indicies applied to externally visible state for {}",
+                         n);
+            }
+            *r = Some(state);
         }
 
         // cook up a function to query this materialized state
