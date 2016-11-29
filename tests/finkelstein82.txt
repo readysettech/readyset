@@ -17,7 +17,7 @@ SELECT people.name, people.experience FROM people WHERE people.experience >= 20 
 SELECT p.name, c.corpname, c.location, c.president FROM people AS p, companies AS c WHERE p.experience >= 10 AND p.employer = c.corpname AND c.location <> 'AK' AND c.earnings > 500000;
 
 # Q4
-SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location == 'NY' AND c.earnings > 500000;
+SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location = 'NY' AND c.earnings > 500000;
 
 # Q5
 SELECT p.name, s.schoolname FROM people AS p, companies AS c, schools AS s WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location = 'NY' AND c.earnings > 500000 AND p.education = s.schoolname AND s.level = 'university';
