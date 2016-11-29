@@ -6,13 +6,24 @@ use std::fmt;
 
 use std::ops::{Deref, DerefMut};
 
+use shortcut;
+use ops::Update;
+use query::DataType;
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
+
+
+#[derive(Default, Clone)]
+pub struct Reader {
+    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
+    pub state: sync::Arc<sync::RwLock<Option<shortcut::Store<DataType>>>>,
+}
 
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
     Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
+    Reader(Option<domain::Index>, Reader), // domain only known at commit time!
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
     Source,
@@ -25,6 +36,7 @@ impl Type {
             Type::Ingress(d) |
             Type::Internal(d, _) |
             Type::Egress(d, _) => Some(d),
+            Type::Reader(d, _) => d,
             _ => None,
         }
     }
@@ -103,6 +115,10 @@ impl Node {
                 // so we just make a new one with a clone of the Mutex-protected Vec
                 Type::Egress(d, txs.clone())
             }
+            Type::Reader(d, ref r) => {
+                // reader nodes can still be modified externally if txs are added
+                Type::Reader(d, r.clone())
+            }
             ref mut n @ Type::Ingress(..) => {
                 // no-one else will be using our ingress node, so we take it from the graph
                 mem::replace(n, Type::Taken(domain.unwrap()))
@@ -142,6 +158,7 @@ impl Node {
             Type::Source => write!(f, "(source)"),
             Type::Ingress(..) => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
+            Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
             Type::Unassigned(ref i) |
             Type::Internal(_, ref i) => {
                 write!(f, "{{")?;

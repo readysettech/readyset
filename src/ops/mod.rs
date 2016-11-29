@@ -255,8 +255,6 @@ pub mod test {
                                     u: Update,
                                     remember: bool)
                                     -> Option<Update> {
-            use shortcut;
-
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
@@ -275,38 +273,8 @@ pub mod test {
                 return u;
             }
 
-            let state = self.states.get_mut(self.nut.unwrap().1.as_local()).unwrap();
-            if let Some(Update::Records(ref rs)) = u {
-                for r in rs {
-                    // TODO: avoid duplication with Domain::materialize
-                    match *r {
-                        Record::Positive(ref r) => state.insert(r.clone()),
-                        Record::Negative(ref r) => {
-                            // we need a cond that will match this row.
-                            let conds = r.iter()
-                                .enumerate()
-                                .map(|(coli, v)| {
-                                    shortcut::Condition {
-                                        column: coli,
-                                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-
-                            // however, multiple rows may have the same values as this row for
-                            // every column. afaict, it is safe to delete any one of these rows. we
-                            // do this by returning true for the first invocation of the filter
-                            // function, and false for all subsequent invocations.
-                            let mut first = true;
-                            state.delete_filter(&conds[..], |_| if first {
-                                first = false;
-                                true
-                            } else {
-                                false
-                            });
-                        }
-                    }
-                }
+            if let Some(ref u) = u {
+                single::materialize(u, self.states.get_mut(self.nut.unwrap().1.as_local()));
             }
 
             u

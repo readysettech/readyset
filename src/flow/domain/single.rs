@@ -48,6 +48,31 @@ impl NodeDescriptor {
             return Some(m.data);
         }
 
+        if let flow::node::Type::Reader(_, ref r) = *self.inner {
+            {
+                let mut state = r.state.write().unwrap();
+                materialize(&m.data, state.as_mut());
+            }
+
+            let mut data = Some(m.data); // so we can .take() for last tx
+            let mut txs = r.streamers.lock().unwrap();
+            let mut left = txs.len();
+
+            // remove any channels where the receiver has hung up
+            txs.retain(|tx| {
+                left -= 1;
+                if left == 0 {
+                        tx.send(data.take().unwrap())
+                    } else {
+                        tx.send(data.clone().unwrap())
+                    }
+                    .is_ok()
+            });
+
+            // readers never have children
+            return None;
+        }
+
         if let flow::node::Type::Egress(_, ref txs) = *self.inner {
             // send any queued updates to all external children
             let mut txs = txs.lock().unwrap();
@@ -89,52 +114,7 @@ impl NodeDescriptor {
 
     fn materialize(&mut self, u: &Update, state: &mut StateMap) {
         // our output changed -- do we need to modify materialized state?
-
-        // TODO
-        // turns out, this lookup is on a serious fast-path, and the hashing is actually a
-        // bottleneck. we could probably make a Vec of Option<State> instead by fiddling around
-        // with indices, but that is a task for another day
-        let state = state.get_mut(&self.addr.as_local());
-        if state.is_none() {
-            // nope
-            return;
-        }
-
-        // yes!
-        let mut state = state.unwrap();
-        match u {
-            &ops::Update::Records(ref rs) => {
-                for r in rs {
-                    match *r {
-                        ops::Record::Positive(ref r) => state.insert(r.clone()),
-                        ops::Record::Negative(ref r) => {
-                            // we need a cond that will match this row.
-                            let conds = r.iter()
-                                .enumerate()
-                                .map(|(coli, v)| {
-                                    shortcut::Condition {
-                                        column: coli,
-                                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
-                                    }
-                                })
-                                .collect::<Vec<_>>();
-
-                            // however, multiple rows may have the same values as this row for
-                            // every column. afaict, it is safe to delete any one of these rows. we
-                            // do this by returning true for the first invocation of the filter
-                            // function, and false for all subsequent invocations.
-                            let mut first = true;
-                            state.delete_filter(&conds[..], |_| if first {
-                                first = false;
-                                true
-                            } else {
-                                false
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        materialize(u, state.get_mut(&self.addr.as_local()));
     }
 
     pub fn is_internal(&self) -> bool {
@@ -142,6 +122,50 @@ impl NodeDescriptor {
             true
         } else {
             false
+        }
+    }
+}
+
+pub fn materialize(u: &Update, state: Option<&mut State>) {
+    // our output changed -- do we need to modify materialized state?
+    if state.is_none() {
+        // nope
+        return;
+    }
+
+    // yes!
+    let mut state = state.unwrap();
+    match u {
+        &ops::Update::Records(ref rs) => {
+            for r in rs {
+                match *r {
+                    ops::Record::Positive(ref r) => state.insert(r.clone()),
+                    ops::Record::Negative(ref r) => {
+                        // we need a cond that will match this row.
+                        let conds = r.iter()
+                            .enumerate()
+                            .map(|(coli, v)| {
+                                shortcut::Condition {
+                                    column: coli,
+                                    cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        // however, multiple rows may have the same values as this row for
+                        // every column. afaict, it is safe to delete any one of these rows. we
+                        // do this by returning true for the first invocation of the filter
+                        // function, and false for all subsequent invocations.
+                        let mut first = true;
+                        state.delete_filter(&conds[..], |_| if first {
+                            first = false;
+                            true
+                        } else {
+                            false
+                        });
+                    }
+                }
+            }
         }
     }
 }

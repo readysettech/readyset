@@ -197,6 +197,7 @@ impl Blender {
             mainline: self,
             added: Default::default(),
             materialize: Default::default(),
+            readers: Default::default(),
         }
     }
 }
@@ -245,6 +246,7 @@ impl fmt::Display for Blender {
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<domain::Index>>,
+    readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
 }
 
@@ -323,6 +325,71 @@ impl<'a> Migration<'a> {
         assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
+    fn ensure_reader_for(&mut self, n: NodeAddress) {
+        if !self.readers.contains_key(n.as_global()) {
+            // make a reader
+            let r = node::Reader::default();
+            let r = node::Type::Reader(None, r);
+            let r = self.mainline.ingredients[*n.as_global()].mirror(r);
+            let r = self.mainline.ingredients.add_node(r);
+            self.mainline.ingredients.add_edge(*n.as_global(), r, false);
+            self.readers.insert(*n.as_global(), r);
+        }
+    }
+
+    fn reader_for(&self, n: NodeAddress) -> &node::Reader {
+        let ri = self.readers[n.as_global()];
+        if let node::Type::Reader(_, ref inner) = *self.mainline.ingredients[ri] {
+            &*inner
+        } else {
+            unreachable!("tried to use non-reader node as a reader")
+        }
+    }
+
+    /// Set up the given node such that its output can be efficiently queried.
+    ///
+    /// The returned function can be called with a `Query`, and any matching results will be
+    /// returned.
+    pub fn maintain(&mut self,
+                    n: NodeAddress)
+                    -> Box<Fn(Option<&query::Query>) -> ops::Datas + Send + Sync> {
+        self.ensure_reader_for(n);
+        let arc = &self.reader_for(n).state;
+
+        // tell the reader to materialize state if it wasn't alrady
+        let mut r = arc.write().unwrap();
+        if r.is_none() {
+            use shortcut;
+            let cols = self.mainline.ingredients[self.readers[n.as_global()]].fields().len();
+            *r = Some(shortcut::Store::new(cols));
+        }
+
+        // cook up a function to query this materialized state
+        let arc = arc.clone();
+        Box::new(move |q: Option<&query::Query>| -> ops::Datas {
+            let rx = arc.read().unwrap();
+            let res = rx.as_ref()
+                .unwrap()
+                .find(q.map(|q| &q.having[..]).unwrap_or(&[]))
+                .map(|r| r.iter().cloned().collect())
+                .filter_map(|r| if let Some(q) = q { q.feed(r) } else { Some(r) })
+                .collect();
+            res
+        })
+    }
+
+    /// Obtain a channel that is fed by the output stream of the given node.
+    ///
+    /// As new updates are processed by the given node, its outputs will be streamed to the
+    /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
+    /// slower than the system as a hole will accumulate a large buffer over time.
+    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<prelude::Update> {
+        self.ensure_reader_for(n);
+        let (tx, rx) = mpsc::channel();
+        self.reader_for(n).streamers.lock().unwrap().push(tx);
+        rx
+    }
+
     fn boot_domain(&mut self,
                    d: domain::Index,
                    nodes: Vec<(NodeIndex, NodeAddress)>,
@@ -337,8 +404,7 @@ impl<'a> Migration<'a> {
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(mut self)
-                  -> (HashMap<NodeAddress, Box<Fn(Vec<query::DataType>) + Send + 'static>>,
-                      HashMap<NodeAddress, Box<Fn(Option<&query::Query>) -> Vec<Vec<query::DataType>> + Send + Sync>>) {
+                  -> HashMap<NodeAddress, Box<Fn(Vec<query::DataType>) + Send + 'static>> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -366,7 +432,7 @@ impl<'a> Migration<'a> {
                 continue;
             }
             if !self.added.contains_key(&node) {
-                // not new
+                // not new, or a reader
                 continue;
             }
             topo_list.push(node);
@@ -477,6 +543,22 @@ impl<'a> Migration<'a> {
                 .collect(); // collect so we can mutate mainline.ingredients
 
             for child in children {
+                if let node::Type::Reader(ref mut rd, _) = *self.mainline.ingredients[child] {
+                    // readers are always in the same domain as their parent
+                    // they also only ever have a single parent (i.e., the node they read)
+                    // because of this, we know that we will only hit this if *exactly once*
+                    // per reader. thus, this is a perfectly fine place to initialize the reader
+                    // (which, in our case, just means adding it to the domain's list of nodes).
+                    //
+                    // XXX: this is not true if a reader was added to a node that existed before a
+                    // migration. but lots of things are broken for migration. this seems like a
+                    // minor case.
+                    *rd = Some(domain);
+                    let no = NodeAddress::make_local(domain_nodes[&domain].len());
+                    domain_nodes.get_mut(&domain).unwrap().push((child, no));
+                    continue;
+                }
+
                 let cdomain = self.mainline.ingredients[child]
                     .domain()
                     .or_else(|| self.added.get(&child).unwrap().clone());
@@ -498,8 +580,6 @@ impl<'a> Migration<'a> {
                     domain_nodes.get_mut(&domain).unwrap().push((egress, no));
                 }
             }
-
-            // TODO: what about leaf nodes?
         }
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -582,7 +662,6 @@ impl<'a> Migration<'a> {
             }
         }
 
-        // TODO: getters
-        (sources, HashMap::new())
+        sources
     }
 }

@@ -206,6 +206,11 @@ impl Domain {
         let mut u = n.process(m, states, nodes);
         drop(n);
 
+        if u.is_none() {
+            // no need to deal with our children if we're not sending them anything
+            return;
+        }
+
         let n = nodes[me.as_local()].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can

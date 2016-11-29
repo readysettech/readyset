@@ -19,8 +19,9 @@ fn it_works() {
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
     let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.maintain(c);
 
-    let (put, get) = mig.commit();
+    let put = mig.commit();
 
     // send a value on a
     put[&a](vec![1.into(), 2.into()]);
@@ -29,7 +30,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
-    assert_eq!(get[&c](None), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(cq(None), vec![vec![1.into(), 2.into()]]);
 
     // update value again
     put[&b](vec![2.into(), 4.into()]);
@@ -38,7 +39,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = get[&c](None);
+    let res = cq(None);
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
 }
@@ -56,8 +57,9 @@ fn it_works_w_mat() {
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
     let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.maintain(c);
 
-    let (put, get) = mig.commit();
+    let put = mig.commit();
 
     // send a few values on a
     put[&a](vec![1.into(), 1.into()]);
@@ -70,7 +72,7 @@ fn it_works_w_mat() {
     // send a query to c
     // we should see at least the first one, and possibly the second
     // the third won't be seen, because its timestamp hasn't been passed yet
-    let res = get[&c](None);
+    let res = cq(None);
     assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
     assert!(res.len() == 1 || res.iter().any(|r| r == &vec![1.into(), 2.into()]));
 
@@ -83,7 +85,7 @@ fn it_works_w_mat() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = get[&c](None);
+    let res = cq(None);
     assert!(res.iter().any(|r| r == &vec![1.into(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![1.into(), 3.into()]));
@@ -109,6 +111,7 @@ fn votes() {
     emits.insert(article2, vec![0, 1]);
     let u = Union::new(emits);
     let article = mig.add_ingredient("article", &["id", "title"], u);
+    let articleq = mig.maintain(article);
 
     // add vote base table
     let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
@@ -117,15 +120,17 @@ fn votes() {
     let vc = mig.add_ingredient("vc",
                                 &["id", "votes"],
                                 Aggregation::COUNT.over(vote, 0, &[1]));
+    let vcq = mig.maintain(vc);
 
     // add final join using first field from article and first from vc
     let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
         .from(article, vec![1, 0])
         .join(vc, vec![1, 0]);
     let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
+    let endq = mig.maintain(end);
 
     // start processing
-    let (put, get) = mig.commit();
+    let put = mig.commit();
 
     // make one article
     put[&article1](vec![1.into(), 2.into()]);
@@ -134,7 +139,7 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query articles to see that it was absorbed
-    assert_eq!(get[&article](None), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(articleq(None), vec![vec![1.into(), 2.into()]]);
 
     // make another article
     put[&article2](vec![2.into(), 4.into()]);
@@ -144,7 +149,7 @@ fn votes() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    let res = get[&article](None);
+    let res = articleq(None);
     assert!(res.len() == 2, "articles was {:?}", res);
     assert!(res.iter().any(|r| r == &vec![1.into(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![2.into(), 4.into()]));
@@ -155,7 +160,7 @@ fn votes() {
         thread::sleep(time::Duration::new(0, 10_000_000));
 
         // check that both articles appear in the join view with a vote count of zero
-        let res = get[&end](None);
+        let res = endq(None);
         assert!(res.len() == 2, "end was {:?}", res);
         assert!(res.iter().any(|r| r == &vec![1.into(), 2.into(), 0.into()]));
         assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
@@ -175,12 +180,12 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query vote count to see that the count was updated
-    let res = get[&vc](None);
+    let res = vcq(None);
     assert!(res.iter().all(|r| r[0] == 1.into() && (r[1] == 1.into() || r[1] == 2.into())));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = get[&end](None);
+    let res = endq(None);
     assert!(res.iter()
                 .any(|r| {
                     r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())
@@ -195,7 +200,7 @@ fn votes() {
                      column: 0,
                      cmp: val,
                  }];
-    let res = get[&end](Some(&Query::new(&[true, true, true], q)));
+    let res = endq(Some(&Query::new(&[true, true, true], q)));
     assert_eq!(res.len(), 1);
     assert!(res.iter()
         .any(|r| r[0] == 1.into() && r[1] == 2.into() && (r[2] == 1.into() || r[2] == 2.into())));
