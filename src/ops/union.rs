@@ -1,6 +1,4 @@
 use ops;
-use query;
-use shortcut;
 
 use std::collections::HashMap;
 
@@ -96,7 +94,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         // index nothing (?)
         HashMap::new()
     }
@@ -127,8 +125,6 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
     fn setup() -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
@@ -138,7 +134,8 @@ mod tests {
         let mut emits = HashMap::new();
         emits.insert(l, vec![0, 1]);
         emits.insert(r, vec![0, 2]);
-        g.set_op("union", &["u0", "u1"], Union::new(emits));
+        g.set_op("union", &["u0", "u1"], Union::new(emits), false);
+
         let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }

@@ -103,7 +103,7 @@ pub trait Ingredient
     fn will_query(&self, materialized: bool) -> bool;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
-    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>>;
+    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, usize>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
@@ -354,10 +354,8 @@ impl<'a> Migration<'a> {
             // we're also going to add all the indices that the parent view has
             // TODO: in the future we may want to let the user hint things to us
             let mut idxs = self.mainline.ingredients[*n.as_global()].suggest_indexes(n);
-            if let Some(idxs) = idxs.remove(&n) {
-                for col in idxs {
-                    state.index(col, shortcut::idx::HashIndex::new());
-                }
+            if let Some(idx) = idxs.remove(&n) {
+                state.index(idx, shortcut::idx::HashIndex::new());
             } else {
                 // TODO
                 println!("warning: no indicies applied to externally visible state for {}",

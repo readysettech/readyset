@@ -20,11 +20,11 @@ impl Extremum {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn over<'a>(self,
-                    src: NodeAddress,
-                    over: usize,
-                    group_by: &[usize])
-                    -> GroupedOperator<'a, ExtremumOperator> {
+    pub fn over(self,
+                src: NodeAddress,
+                over: usize,
+                group_by: &[usize])
+                -> GroupedOperator<ExtremumOperator> {
         assert!(!group_by.iter().any(|&i| i == over),
                 "cannot group by aggregation column");
         GroupedOperator::new(src,
@@ -154,31 +154,18 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
-    fn setup(mat: bool, wide: bool) -> ops::test::MockGraph {
+    fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
-        let s = if wide {
-            g.add_base("source", &["x", "y", "z"])
-        } else {
-            g.add_base("source", &["x", "y"])
-        };
+        let s = g.add_base("source", &["x", "y"]);
 
-        if wide {
-            g.set_op("agg", &["x", "z", "ys"], Extremum::MAX.over(s, 1, &[0, 2]));
-        } else {
-            g.set_op("agg", &["x", "ys"], Extremum::MAX.over(s, 1, &[0]));
-        }
-        if mat {
-            g.set_materialized();
-        }
+        g.set_op("agg", &["x", "ys"], Extremum::MAX.over(s, 1, &[0]), mat);
         g
     }
 
     #[test]
     fn it_forwards() {
-        let mut c = setup(true, false);
+        let mut c = setup(true);
 
         let check_first_max =
             |group, val, out: Option<ops::Update>| if let Some(ops::Update::Records(rs)) = out {
@@ -267,25 +254,21 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = NodeAddress::mock_global(1.into());
-        let c = setup(false, true);
+        let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
         assert!(idx.contains_key(&me));
 
-        // should only index on group-by columns
-        assert_eq!(idx[&me].len(), 2);
-        assert!(idx[&me].iter().any(|&i| i == 0));
-        assert!(idx[&me].iter().any(|&i| i == 1));
-        // specifically, not last column, which is output
+        // should only index on the group-by column
+        assert_eq!(idx[&me], 0);
     }
 
     #[test]
     fn it_resolves() {
-        let c = setup(false, true);
+        let c = setup(false);
         assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
-        assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 2)]));
-        assert_eq!(c.node().resolve(2), None);
+        assert_eq!(c.node().resolve(1), None);
     }
 }

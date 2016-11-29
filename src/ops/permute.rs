@@ -1,9 +1,7 @@
 use ops;
 use query;
-use shortcut;
 
 use std::collections::HashMap;
-use std::iter;
 
 use flow::prelude::*;
 
@@ -184,7 +182,7 @@ impl Ingredient for Permute {
         input.data.into()
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         // TODO
         HashMap::new()
     }
@@ -212,8 +210,6 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
     fn setup(materialized: bool, all: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -222,10 +218,8 @@ mod tests {
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         g.set_op("permute",
                  &["x", "y", "z"],
-                 Permute::new(s, &permutation[..]));
-        if materialized {
-            g.set_materialized();
-        }
+                 Permute::new(s, &permutation[..]),
+                 materialized);
         g
     }
 

@@ -1,6 +1,5 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
-use shortcut;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -84,7 +83,7 @@ impl Domain {
                         if i.should_materialize() ||
                            graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
                             .any(|e| *e.weight()) {
-                            Some((*n.addr.as_local(), shortcut::Store::new(n.inner.fields().len())))
+                            Some((*n.addr.as_local(), State::default()))
                         } else {
                             None
                         }
@@ -110,8 +109,7 @@ impl Domain {
             if let flow::node::Type::Ingress(..) = *n.inner {
                 if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
                     .any(|child| inquisitive_children.contains(&child)) {
-                    state.insert(*n.addr.as_local(),
-                                 shortcut::Store::new(n.inner.fields().len()));
+                    state.insert(*n.addr.as_local(), State::default());
                 }
             }
         }
@@ -142,8 +140,8 @@ impl Domain {
                 })
                 .flat_map(|(ni, node)| node.suggest_indexes(*ni).into_iter())
                 .filter(|&(ref node, _)| nodes.contains_key(node))
-                .fold(HashMap::new(), |mut hm, (v, idxs)| {
-                    hm.entry(v).or_insert_with(HashSet::new).extend(idxs.into_iter());
+                .fold(HashMap::new(), |mut hm, (v, idx)| {
+                    hm.entry(v).or_insert_with(HashSet::new).insert(idx);
                     hm
                 });
 
@@ -154,11 +152,11 @@ impl Domain {
                 for (v, cols) in leftover_indices.drain() {
                     if let Some(ref mut state) = state.get_mut(&v.as_local()) {
                         // this node is materialized! add the indices!
-                        for col in cols {
-                            println!("adding index on column {:?} of view {:?}", col, v);
-                            // TODO: don't re-add indices that already exist
-                            state.index(col, shortcut::idx::HashIndex::new());
-                        }
+                        // we *currently* only support keeping one materialization per node
+                        assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
+                        let col = cols.into_iter().next().unwrap();
+                        println!("adding index on column {:?} of view {:?}", col, v);
+                        state.set_pkey(col);
                     } else if let Some(ref node) = nodes.get(&v) {
                         // this node is not materialized
                         // we need to push the index up to its ancestor(s)
@@ -187,6 +185,19 @@ impl Domain {
                     }
                 }
                 leftover_indices.extend(tmp.drain());
+            }
+        }
+
+        for n in &nodes {
+            if !state.contains_key(n.addr.as_local()) {
+                continue;
+            }
+
+            if !state.get(n.addr.as_local()).unwrap().is_useful() {
+                // this materialization doesn't have any primary key,
+                // so we assume it's not in use.
+                println!("removing unnecessary materialization on {}", n.addr);
+                state.remove(n.addr.as_local());
             }
         }
 

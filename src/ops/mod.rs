@@ -150,12 +150,12 @@ pub mod test {
             let local = NodeAddress::mock_local(self.remap.len());
             remap.insert(global, local);
             self.graph.node_weight_mut(ni).unwrap().on_commit(local, &remap);
-            self.states.insert(*local.as_local(), State::new(fields.len()));
+            self.states.insert(*local.as_local(), State::default());
             self.remap.insert(global, local);
             global
         }
 
-        pub fn set_op<I>(&mut self, name: &str, fields: &[&str], i: I)
+        pub fn set_op<I>(&mut self, name: &str, fields: &[&str], i: I, materialized: bool)
             where I: Into<node::Type>
         {
             use petgraph;
@@ -170,11 +170,31 @@ pub mod test {
             let ni = self.graph.add_node(node::Node::new(name, fields, i));
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
+            if materialized {
+                self.states.insert(*local.as_local(), State::default());
+            }
             for parent in parents {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
             self.graph.node_weight_mut(ni).unwrap().on_commit(local, &self.remap);
+
+            // we need to set the indices for all the base tables so they *actually* store things.
+            let idx = self.graph[ni].suggest_indexes(local);
+            for (tbl, col) in idx {
+                if let Some(ref mut s) = self.states.get_mut(tbl.as_local()) {
+                    s.set_pkey(col);
+                }
+            }
+            // and get rid of states we don't need
+            let unused: Vec<_> = self.remap
+                .values()
+                .filter_map(|ni| self.states.get(ni.as_local()).map(move |s| (ni, !s.is_useful())))
+                .filter(|&(_, x)| x)
+                .collect();
+            for (ni, _) in unused {
+                self.states.remove(ni.as_local());
+            }
 
             // we're now committing to testing this op
             // store the id
@@ -211,6 +231,8 @@ pub mod test {
         }
 
         pub fn seed(&mut self, base: NodeAddress, data: Vec<query::DataType>) {
+            assert!(self.nut.is_some(), "seed must happen after set_op");
+
             // base here is some identifier that was returned by Self::add_base.
             // which means it's a global address (and has to be so that it will correctly refer to
             // ancestors pre on_commit). we need to translate it into a local address.
@@ -219,35 +241,25 @@ pub mod test {
             // indices in order, but global ids are prefixed by the id of the source node).
             let local = self.to_local(base);
 
-            let m = Message {
-                from: NodeAddress::mock_global(self.source),
-                to: local,
-                data: data.into(),
-            };
+            // no need to call on_input since base tables just forward anyway
 
-            let u = self.graph
-                .node_weight_mut(*base.as_global())
-                .unwrap()
-                .on_input(m, &self.nodes, &self.states);
-
-            let state = self.states.get_mut(local.as_local()).unwrap();
-            match u {
-                Some(Update::Records(rs)) => {
-                    for r in rs {
-                        match r {
-                            Record::Positive(r) => state.insert(r),
-                            Record::Negative(_) => unreachable!(),
+            // if the base node has state, keep it
+            if let Some(ref mut state) = self.states.get_mut(local.as_local()) {
+                match data.into() {
+                    Update::Records(rs) => {
+                        for r in rs {
+                            match r {
+                                Record::Positive(r) => state.insert(r),
+                                Record::Negative(_) => unreachable!(),
+                            }
                         }
                     }
                 }
-                None => unreachable!(),
+            } else {
+                assert!(false,
+                        "unnecessary seed value for {} (never used by any node)",
+                        base);
             }
-        }
-
-        pub fn set_materialized(&mut self) {
-            assert!(self.nut.is_some());
-            let fs = self.graph[self.nut.unwrap().0].fields().len();
-            self.states.insert(*self.nut.unwrap().1.as_local(), State::new(fs));
         }
 
         pub fn one<U: Into<Update>>(&mut self,

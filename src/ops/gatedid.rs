@@ -1,6 +1,3 @@
-use ops;
-use query;
-
 use std::collections::HashMap;
 
 use std::sync::mpsc::channel;
@@ -57,7 +54,7 @@ impl Ingredient for GatedIdentity {
         input.data.into()
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         // TODO
         HashMap::new()
     }
@@ -86,7 +83,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
         let (i, tx) = GatedIdentity::new(s);
-        g.set_op("identity", &["x", "y", "z"], i);
+        g.set_op("identity", &["x", "y", "z"], i, false);
         (g, tx)
     }
 

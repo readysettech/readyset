@@ -1,6 +1,5 @@
 use ops;
 use query;
-use shortcut;
 
 use std::iter;
 use std::collections::HashMap;
@@ -9,7 +8,7 @@ use flow::prelude::*;
 
 #[derive(Debug)]
 struct JoinTarget {
-    fields: Vec<(usize, usize)>,
+    on: (usize, usize),
     select: Vec<bool>,
     outer: bool,
 }
@@ -142,9 +141,10 @@ impl From<Builder> for Joiner {
                             return None;
                         }
                         // but if there are, emit the mapping we found
+                        assert_eq!(pg.len(), 1, "can only join on one key for now");
                         Some((p,
                               JoinTarget {
-                                  fields: pg,
+                                  on: pg.into_iter().next().unwrap(),
                                   outer: outer,
                                   select: Vec::new(),
                               }))
@@ -197,26 +197,9 @@ impl Joiner {
         let this = &self.join[&left.0];
         let target = &this.against[&other];
 
-        let rx: Vec<Vec<query::DataType>> = {
-            // figure out the join values for this record
-            let params = target.fields
-                .iter()
-                .map(|&(lefti, righti)| {
-                    shortcut::Condition {
-                        column: righti,
-                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(&left.1[lefti])),
-                    }
-                })
-                .collect();
-
-            // TODO: technically, we only need the columns in .join and .emit
-            let q = query::Query::new(&target.select[..], params);
-
-            // send the parameters to start the query.
-            let state = states.get(other.as_local()).expect("joins must have inputs materialized");
-            let rx = state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect();
-            rx
-        };
+        // send the parameters to start the query.
+        let state = states.get(other.as_local()).expect("joins must have inputs materialized");
+        let rx: Vec<_> = state.lookup(target.on.1, &left.1[target.on.0]).iter().cloned().collect();
 
         if rx.is_empty() && target.outer {
             return Box::new(Some(self.emit
@@ -337,7 +320,7 @@ impl Ingredient for Joiner {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
         use std::collections::HashSet;
 
         // index all join fields
@@ -348,9 +331,7 @@ impl Ingredient for Joiner {
                 // for every right
                 rs.against.iter().flat_map(move |(right, rs)| {
                     // emit both the left binding
-                    rs.fields.iter().map(move |&(li, _)| (left, li))
-                    // and the right binding
-                    .chain(rs.fields.iter().map(move |&(_, ri)| (right, ri)))
+                    vec![(left, rs.on.0), (right, rs.on.1)]
                 })
             })
             // we now have (NodeAddress, usize) for every join column.
@@ -365,7 +346,11 @@ impl Ingredient for Joiner {
                 hm
             })
             // convert HashSets into Vec
-            .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
+            .into_iter().map(|(node, cols)| {
+                let cols: Vec<_> = cols.into_iter().collect();
+                assert_eq!(cols.len(), 1, "each join target should have a primary key");
+                (node, cols.into_iter().next().unwrap())
+            }).collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
@@ -384,11 +369,9 @@ impl Ingredient for Joiner {
                 rs.against
                     .iter()
                     .filter(move |&(right, _)| left < right)
-                    .flat_map(move |(right, rs)| {
+                    .map(move |(right, rs)| {
                         let op = if rs.outer { "⋉" } else { "⋈" };
-                        rs.fields.iter().map(move |&(li, ri)| {
-                            format!("{}:{} {} {}:{}", left, li, op, right, ri)
-                        })
+                        format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
                     })
             })
             .collect::<Vec<_>>()
@@ -402,8 +385,6 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
     fn setup(left: bool) -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
@@ -419,7 +400,14 @@ mod tests {
         };
 
         let j: Joiner = b.into();
-        g.set_op("join", &["j0", "j1", "j2"], j);
+        g.set_op("join", &["j0", "j1", "j2"], j, false);
+        g.seed(l, vec![1.into(), "a".into()]);
+        g.seed(l, vec![2.into(), "b".into()]);
+        g.seed(l, vec![3.into(), "c".into()]);
+        g.seed(r, vec![1.into(), "x".into()]);
+        g.seed(r, vec![1.into(), "y".into()]);
+        g.seed(r, vec![2.into(), "z".into()]);
+
         let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
@@ -554,9 +542,9 @@ mod tests {
         use std::collections::HashMap;
         let me = NodeAddress::mock_global(2.into());
         let (j, l, r) = setup(false);
-        let hm: HashMap<_, _> = vec![(l, vec![0]), // join column for left
-                                     (r, vec![0]), // join column for right
-                                     (me, vec![0]) /* output column that is used as join column */]
+        let hm: HashMap<_, _> = vec![(l, 0) /* join column for left */,
+                                     (r, 0) /* join column for right */,
+                                     (me, 0) /* output column that is used as join column */]
             .into_iter()
             .collect();
         assert_eq!(j.node().suggest_indexes(me), hm);

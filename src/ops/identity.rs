@@ -1,6 +1,3 @@
-use ops;
-use query;
-
 use std::collections::HashMap;
 
 use flow::prelude::*;
@@ -42,7 +39,7 @@ impl Ingredient for Identity {
         input.data.into()
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         // TODO
         HashMap::new()
     }
@@ -65,10 +62,7 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("identity", &["x", "y", "z"], Identity::new(s));
-        if materialized {
-            g.set_materialized();
-        }
+        g.set_op("identity", &["x", "y", "z"], Identity::new(s), materialized);
         g
     }
 

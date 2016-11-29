@@ -1,6 +1,5 @@
 use ops;
 use query;
-use shortcut;
 
 use std::fmt;
 use std::collections::HashSet;
@@ -68,7 +67,7 @@ pub trait GroupedOperation: fmt::Debug {
 }
 
 #[derive(Debug)]
-pub struct GroupedOperator<'a, T: GroupedOperation> {
+pub struct GroupedOperator<T: GroupedOperation> {
     src: NodeAddress,
     inner: T,
 
@@ -76,28 +75,32 @@ pub struct GroupedOperator<'a, T: GroupedOperation> {
     us: Option<NodeAddress>,
     cols: usize,
 
+    pkey_in: usize, // column in our input that is our primary key
+    pkey_out: usize, // column in our output that is our primary key
+
     // precomputed datastructures
     group: HashSet<usize>,
-    cond: Vec<shortcut::Condition<'a, query::DataType>>,
     colfix: Vec<usize>,
 }
 
-impl<'a, T: GroupedOperation> GroupedOperator<'a, T> {
-    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<'a, T> {
+impl<T: GroupedOperation> GroupedOperator<T> {
+    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<T> {
         GroupedOperator {
             src: src,
             inner: op,
 
+            pkey_out: usize::max_value(),
+            pkey_in: usize::max_value(),
+
             us: None,
             cols: 0,
             group: HashSet::new(),
-            cond: Vec::new(),
             colfix: Vec::new(),
         }
     }
 }
 
-impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
+impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
@@ -119,26 +122,23 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         // group by all columns
         self.cols = srcn.fields().len();
         self.group.extend(self.inner.group_by().iter().cloned());
+        if self.group.len() != 1 {
+            unimplemented!();
+        }
+        // primary key is the first (and only) group by key
+        self.pkey_in = *self.group.iter().next().unwrap();
+        // what output column does this correspond to?
+        // well, the first one given that we currently only have one group by
+        // and that group by comes first.
+        self.pkey_out = 0;
 
-        // construct condition for querying into ourselves
-        self.cond = (0..self.group.len())
-            .into_iter()
-            .map(|col| {
-                shortcut::Condition {
-                    column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::None)),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        // the query into our own output (above) uses *output* column indices
-        // but when we try to fill it, we have *input* column indices
-        // build a translation mechanism for going from the former to the latter
+        // build a translation mechanism for going from output columns to input columns
         let colfix: Vec<_> = (0..self.cols)
             .into_iter()
             .filter_map(|col| {
                 if self.group.contains(&col) {
-                    // the next output column is this column
+                    // since the generated value goes at the end,
+                    // this is the n'th output value
                     Some(col)
                 } else {
                     // this column does not appear in output
@@ -189,31 +189,17 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                 for (group, diffs) in consolidate {
                     // find the current value for this group
                     let current = {
-                        // Construct the query we'll need to query into ourselves
-                        let mut q = self.cond.clone();
-
-                        for s in &mut q {
-                            s.cmp = shortcut::Comparison::Equal(
-                                shortcut::Value::using(
-                                    group[self.colfix[s.column]]
-                                    .as_ref()
-                                    .unwrap()
-                                )
-                            );
-                        }
-
                         // find the current value for this group
                         let db = state.get(&self.us.as_ref().unwrap().as_local())
                             .expect("grouped operators must have their own state materialized");
-                        let mut rs = db.find(&q[..]);
+                        let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
 
                         // current value is in the last output column
                         // or "" if there is no current group
-                        let cur = rs.next()
+                        rs.get(0)
                             .map(|r| r[r.len() - 1].clone().into())
-                            .unwrap_or(self.inner.zero());
-                        assert_eq!(rs.count(), 0, "a group had more than 1 result");
-                        cur
+                            .unwrap_or(self.inner.zero())
                     };
 
                     // new is the result of applying all diffs for the group to the current value
@@ -255,12 +241,9 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        // index all group by columns,
-        // which are the first self.group.len() columns of our output
-        Some((this, (0..self.group.len()).collect()))
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
+        // index by our primary key
+        Some((this, self.pkey_out)).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

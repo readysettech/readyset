@@ -44,6 +44,15 @@ impl<T> Map<T> {
     pub fn contains_key(&self, addr: &LocalNodeIndex) -> bool {
         self.things.get(addr.id()).map(|v| v.is_some()).unwrap_or(false)
     }
+
+    pub fn remove(&mut self, addr: &LocalNodeIndex) -> Option<T> {
+        let i = addr.id();
+        if i >= self.things.len() {
+            return None;
+        }
+
+        self.things[i].take()
+    }
 }
 
 impl<'a, T> Index<&'a LocalNodeIndex> for Map<T> {
@@ -78,5 +87,69 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
         }
 
         Map { things: vs }
+    }
+}
+
+use std::collections::HashMap;
+use std::collections::hash_map;
+use std::hash::Hash;
+pub struct State<T: Hash + Eq + Clone> {
+    pkey: usize,
+    state: HashMap<T, Vec<Vec<T>>>,
+}
+
+impl<T: Hash + Eq + Clone> Default for State<T> {
+    fn default() -> Self {
+        State {
+            pkey: usize::max_value(),
+            state: HashMap::default(),
+        }
+    }
+}
+
+impl<T: Hash + Eq + Clone> State<T> {
+    pub fn set_pkey(&mut self, key: usize) {
+        if self.pkey != usize::max_value() && self.pkey != key {
+            unreachable!("asked to index {} when already indexing {}", key, self.pkey);
+        }
+        self.pkey = key;
+    }
+
+    pub fn is_useful(&self) -> bool {
+        self.pkey != usize::max_value()
+    }
+
+    pub fn insert(&mut self, r: Vec<T>) {
+        let k = self.pkey;
+        // i *wish* we could use the entry API here, but it would mean an extra clone in the common
+        // case of an entry already existing for the given key...
+        if let Some(ref mut rs) = self.state.get_mut(&r[k]) {
+            rs.push(r);
+            return;
+        }
+        self.state.insert(r[k].clone(), vec![r]);
+    }
+
+    pub fn remove(&mut self, r: &[T]) {
+        let k = self.pkey;
+        if let Some(ref mut rs) = self.state.get_mut(&r[k]) {
+            rs.retain(|rsr| &rsr[..] != r);
+        }
+    }
+
+    pub fn iter(&self) -> hash_map::Values<T, Vec<Vec<T>>> {
+        self.state.values()
+    }
+
+    pub fn lookup(&self, key: usize, value: &T) -> &[Vec<T>] {
+        debug_assert_ne!(self.pkey,
+                         usize::max_value(),
+                         "lookup on uninitialized index");
+        debug_assert_eq!(key, self.pkey);
+        if let Some(rs) = self.state.get(value) {
+            rs
+        } else {
+            &[]
+        }
     }
 }

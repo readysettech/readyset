@@ -1,6 +1,4 @@
 use ops;
-use query;
-use shortcut;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -27,6 +25,9 @@ impl Latest {
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
     pub fn new(src: NodeAddress, mut keys: Vec<usize>) -> Latest {
+        assert_eq!(keys.len(),
+                   1,
+                   "only latest over a single column is supported");
         keys.sort();
         let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
         keys.reverse();
@@ -86,27 +87,12 @@ impl Ingredient for Latest {
                     let current = {
                         let r = r.rec();
 
-                        // Construct the query we'll need to query into ourselves to find current latest
-                        let q =
-                            self.key
-                                .iter()
-                                .map(|&col| {
-                                    shortcut::Condition {
-                                column: col,
-                                cmp: shortcut::Comparison::Equal(shortcut::Value::using(&r[col])),
-                            }
-                                })
-                                .collect::<Vec<_>>();
-
-
                         // find the current value for this group
                         let db = state.get(&self.us.as_ref().unwrap().as_local())
                             .expect("latest must have its own state materialized");
-                        let mut rs = db.find(&q[..]);
-                        let cur = rs.next()
-                            .map(|r| (r.into_iter().cloned().collect(), 0));
-                        assert_eq!(rs.count(), 0, "latest group has more than 1 record");
-                        cur
+                        let rs = db.lookup(self.key[0], &r[self.key[0]]);
+                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                        rs.get(0).map(|r| (r.into_iter().cloned().collect(), 0))
                     };
 
                     // if there was a previous latest for this key, revoke old record
@@ -131,9 +117,9 @@ impl Ingredient for Latest {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
         // index all key columns
-        Some((this, self.key.clone())).into_iter().collect()
+        Some((this, self.key[0])).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
@@ -155,27 +141,11 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
-    fn setup(key: Vec<usize>, mat: bool) -> ops::test::MockGraph {
+    fn setup(key: usize, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
-
-        let big = key.len() > 1;
-        let s = if big {
-            g.add_base("source", &["x", "y", "z"])
-        } else {
-            g.add_base("source", &["x", "y"])
-        };
-
-        if big {
-            g.set_op("latest", &["x", "y", "z"], Latest::new(s, key));
-        } else {
-            g.set_op("latest", &["x", "y"], Latest::new(s, key));
-        }
-        if mat {
-            g.set_materialized();
-        }
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op("latest", &["x", "y"], Latest::new(s, vec![key]), mat);
         g
     }
 
@@ -183,13 +153,13 @@ mod tests {
 
     #[test]
     fn it_describes() {
-        let c = setup(vec![0, 2], false);
-        assert_eq!(c.node().description(), "⧖ γ[2, 0]");
+        let c = setup(0, false);
+        assert_eq!(c.node().description(), "⧖ γ[0]");
     }
 
     #[test]
     fn it_forwards() {
-        let mut c = setup(vec![0], true);
+        let mut c = setup(0, true);
 
         let u = vec![1.into(), 1.into()];
 
@@ -295,23 +265,21 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let me = NodeAddress::mock_global(1.into());
-        let c = setup(vec![0, 1], false);
+        let c = setup(1, false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
         assert!(idx.contains_key(&me));
 
-        // should only index on group-by columns
-        assert_eq!(idx[&me].len(), 2);
-        assert!(idx[&me].iter().any(|&i| i == 0));
-        assert!(idx[&me].iter().any(|&i| i == 1));
+        // should only index on the group-by column
+        assert_eq!(idx[&me], 1);
     }
 
 
     #[test]
     fn it_resolves() {
-        let c = setup(vec![0, 1], false);
+        let c = setup(1, false);
         assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
         assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 1)]));
         assert_eq!(c.node().resolve(2), Some(vec![(c.narrow_base_id(), 2)]));
