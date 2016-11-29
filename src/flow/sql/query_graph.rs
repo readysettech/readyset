@@ -147,16 +147,35 @@ pub fn to_query_graph(st: &SelectStatement) -> QueryGraph {
                 *jp.left.as_ref().unwrap().as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) =
                     *jp.right.as_ref().unwrap().as_ref() {
-                    if !qg.edges
-                        .contains_key(&(l.table.clone().unwrap(), r.table.clone().unwrap())) {
-                        let e = QueryGraphEdge { join_predicates: vec![jp.clone()] };
-                        qg.edges.insert((l.table.clone().unwrap(), r.table.clone().unwrap()), e);
-                    } else {
-                        qg.edges
-                            .get_mut(&(l.table.clone().unwrap(), r.table.clone().unwrap()))
+                    qg.edges
+                        .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
+                        .or_insert(QueryGraphEdge { join_predicates: vec![] })
+                        .join_predicates
+                        .push(jp.clone());
+                    // XXX(malte): push join columns into projected column set as well. This isn't
+                    // strictly required, and eagerly pushes more columns than needed, but makes a
+                    // naive version of the graph construction work.
+                    if !qg.relations
+                        .entry(l.table.as_ref().unwrap().clone())
+                        .or_insert(new_node(l.table.as_ref().unwrap().clone(), vec![], &st))
+                        .columns
+                        .contains(&l.name) {
+                        qg.relations
+                            .get_mut(l.table.as_ref().unwrap())
                             .unwrap()
-                            .join_predicates
-                            .push(jp.clone());
+                            .columns
+                            .push(l.name.clone());
+                    }
+                    if !qg.relations
+                        .entry(r.table.as_ref().unwrap().clone())
+                        .or_insert(new_node(r.table.as_ref().unwrap().clone(), vec![], &st))
+                        .columns
+                        .contains(&r.name) {
+                        qg.relations
+                            .get_mut(r.table.as_ref().unwrap())
+                            .unwrap()
+                            .columns
+                            .push(r.name.clone());
                     }
                 }
             }
