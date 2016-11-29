@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
 use flow;
-use flow::sql::query_graph::{QueryGraphNode, to_query_graph};
+use flow::sql::query_graph::{QueryGraphEdge, QueryGraphNode, to_query_graph};
 use FlowGraph;
 use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator,
                       SqlQuery};
@@ -8,11 +8,13 @@ use nom_sql::{InsertStatement, SelectStatement};
 use ops;
 use ops::Node;
 use ops::base::Base;
+use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
 use query::{DataType, Query};
 use shortcut;
 
 use petgraph;
+use petgraph::graph::NodeIndex;
 use std::iter::FromIterator;
 use std::str;
 use std::sync::Arc;
@@ -59,8 +61,13 @@ fn to_conditions(ct: &ConditionTree, v: &V) -> Vec<shortcut::Condition<DataType>
     }
 }
 
-fn lookup_node(vn: &str, g: &mut FG) -> petgraph::graph::NodeIndex {
+fn lookup_nodeindex(vn: &str, g: &FG) -> NodeIndex {
     g.named[vn]
+}
+
+fn lookup_view_by_nodeindex<'a>(ni: NodeIndex, g: &'a FG) -> &'a V {
+    // TODO(malte): this is a bit of a monster. Maybe we can use something less ugly?
+    g.graph().0.node_weight(ni).unwrap().as_ref().unwrap().as_ref()
 }
 
 fn make_base_node(st: &InsertStatement) -> Node {
@@ -75,9 +82,8 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
     // name is already used for the base node. Maybe this is where identifiers based on query
     // prefixes come in.
-    let parent = lookup_node(&qgn.rel_name, g);
-    // TODO(malte): get rid of this monster...
-    let parent_view = g.graph().0.node_weight(parent).unwrap().as_ref().unwrap().as_ref();
+    let parent_ni = lookup_nodeindex(&qgn.rel_name, g);
+    let parent_view = lookup_view_by_nodeindex(parent_ni, g);
     let projected_columns: Vec<usize> = qgn.columns
         .iter()
         .map(|c| field_to_columnid(parent_view, &c).unwrap())
@@ -85,7 +91,7 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     let mut n = ops::new(String::from(name),
                          Vec::from_iter(qgn.columns.iter().map(String::as_str)).as_slice(),
                          true,
-                         Permute::new(parent, projected_columns.as_slice()));
+                         Permute::new(parent_ni, projected_columns.as_slice()));
     for cond in qgn.predicates.iter() {
         // convert ConditionTree to shortcut-style condition vector.
         let filter = to_conditions(cond, parent_view);
@@ -94,30 +100,107 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     n
 }
 
-fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<Node> {
-    let qg = to_query_graph(st);
-    println!("Query graph: {:#?}", qg);
+fn make_join_node(name: &str,
+                  qge: &QueryGraphEdge,
+                  left_ni: NodeIndex,
+                  right_ni: NodeIndex,
+                  g: &mut FG)
+                  -> Node {
+    let left_node = lookup_view_by_nodeindex(left_ni, g);
+    let right_node = lookup_view_by_nodeindex(right_ni, g);
+    let projected_cols_left = left_node.args();
+    let projected_cols_right = right_node.args();
 
-    let mut new_nodes = Vec::new();
-    let mut i = 0;
-    for (_, qgn) in qg.relations.iter() {
-        // add a basic filter/permute node for each query graph node
-        let n = make_filter_node(&format!("query-{}", i), qgn, g);
-        new_nodes.push(n);
-        i += 1;
+    let tuples_for_cols = |ni: NodeIndex, cols: &[String]| -> Vec<(NodeIndex, usize)> {
+        let view = lookup_view_by_nodeindex(ni, g);
+        cols.iter().map(|c| (ni, field_to_columnid(view, &c).unwrap())).collect()
+    };
+
+    // non-join columns projected are the union of the ancestor's projected columns
+    // TODO(malte): this will need revisiting when we do smart reuse
+    let mut join_proj_config = tuples_for_cols(left_ni, projected_cols_left);
+    join_proj_config.extend(tuples_for_cols(right_ni, projected_cols_right));
+    // join columns need us to generate join group configs for the operator
+    let mut left_join_group = vec![0; left_node.args().len()];
+    let mut right_join_group = vec![0; right_node.args().len()];
+    for (i, p) in qge.join_predicates.iter().enumerate() {
+        // equi-join only
+        assert_eq!(p.operator, Operator::Equal);
+        let l_col = match **p.left.as_ref().unwrap() {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        // assert_eq!(l_col.table.unwrap(), left_node.name());
+        let r_col = match **p.right.as_ref().unwrap() {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        // assert_eq!(r_col.table.unwrap(), right_node.name());
+        left_join_group[field_to_columnid(left_node, &l_col.name).unwrap()] = i + 1;
+        right_join_group[field_to_columnid(right_node, &r_col.name).unwrap()] = i + 1;
     }
-    for _edge in qg.edges.iter() {
-        // query graph edges are joins, so add a join node for each
-        // TODO(malte): implement!
-    }
-    new_nodes
+    let j = JoinBuilder::new(join_proj_config)
+        .from(left_ni, left_join_group)
+        .join(right_ni, right_join_group);
+    let n = ops::new(String::from(name),
+                     projected_cols_left.into_iter()
+                         .chain(projected_cols_right.into_iter())
+                         .map(String::as_str)
+                         .collect::<Vec<&str>>()
+                         .as_slice(),
+                     true,
+                     j);
+    n
 }
 
-fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
+fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> {
+    use std::collections::HashMap;
+
+    let qg = to_query_graph(st);
+    // println!("Query graph: {:#?}", qg);
+
+    let mut filter_nodes = HashMap::new();
+    // TODO(malte): the following ugliness is required since we need to iterate over the HashMap in
+    // a *sorted* order, as views are otherwise numbered randomly and unit tests fail. Clearly, we
+    // need a better identifier scheme...
+    let mut i = g.graph().0.node_count();
+    let mut rels = qg.relations.keys().collect::<Vec<&String>>();
+    rels.sort();
+    for rel in rels.iter() {
+        let qgn = qg.relations.get(*rel).unwrap();
+        // the following conditional is required to avoid "empty" nodes (without any projected
+        // columns) that are required as inputs to joins
+        if qgn.columns.len() > 0 || qgn.predicates.len() > 0 {
+            // add a basic filter/permute node for each query graph node if it either has:
+            // 1. projected columns, or
+            // 2. a filter condition
+            let n = make_filter_node(&format!("query-{}", i), qgn, g);
+            let ni = g.incorporate(n);
+            filter_nodes.insert(rel.clone(), ni);
+        } else {
+            // otherwise, just record the node index of the base node for the relation that is
+            // being selected from
+            filter_nodes.insert(rel.clone(), lookup_nodeindex(rel, g));
+        }
+        i += 1;
+    }
+
+    let mut join_nodes = Vec::new();
+    for (&(ref src, ref dst), edge) in qg.edges.iter() {
+        // query graph edges are joins, so add a join node for each
+        let left_ni = filter_nodes.get(src).unwrap().clone();
+        let right_ni = filter_nodes.get(dst).unwrap().clone();
+        let n = make_join_node(&format!("query-{}", i), edge, left_ni, right_ni, g);
+        let ni = g.incorporate(n);
+        join_nodes.push(ni);
+        i += 1;
+    }
+    filter_nodes.into_iter().map(|(_, n)| n).chain(join_nodes.into_iter()).collect()
+}
+
+fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<NodeIndex> {
     use flow::sql::passes::Pass;
     use flow::sql::passes::alias_removal::AliasRemoval;
-
-    println!("{:#?}", q);
 
     // first run some standard rewrite passes on the query. This makes the later work easier, as we
     // no longer have to consider complications like aliases.
@@ -125,36 +208,35 @@ fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<Node> {
     let q = ar.apply(q);
 
     match q {
-        SqlQuery::Insert(iq) => vec![make_base_node(&iq)],
+        SqlQuery::Insert(iq) => {
+            let n = make_base_node(&iq);
+            vec![g.incorporate(n)]
+        }
         SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
     }
 }
 
 trait ToFlowParts {
-    fn to_flow_parts<'a>(&self, &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String>;
+    fn to_flow_parts<'a>(&self, &mut FG) -> Result<Vec<NodeIndex>, String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
-    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String> {
+    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<NodeIndex>, String> {
         self.as_str().to_flow_parts(g)
     }
 }
 
 impl<'a> ToFlowParts for &'a str {
-    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<petgraph::graph::NodeIndex>, String> {
+    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<NodeIndex>, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
         // if ok, manufacture a node for the query structure we got
         let nodes = match parsed_query {
-            Ok(q) => nodes_for_query(q, g),
-            Err(e) => return Err(String::from(e)),
+            Ok(q) => Ok(nodes_for_query(q, g)),
+            Err(e) => Err(String::from(e)),
         };
-
-        // finally, let's hook in the node
-        Ok(nodes.into_iter()
-            .map(|n| g.incorporate(n))
-            .collect())
+        nodes
     }
 }
 
@@ -200,6 +282,54 @@ mod tests {
     }
 
     #[test]
+    fn it_incorporates_simple_join() {
+        use ops::NodeOp;
+
+        // set up graph
+        let mut g = FlowGraph::new();
+
+        // Establish a base write type for "users"
+        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut g).is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(g.graph.node_count(), 2);
+        assert_eq!(get_view(&g, "users").name(), "users");
+        assert_eq!(get_view(&g, "users").args(), &["id", "name"]);
+        assert_eq!(get_view(&g, "users").node().unwrap().operator().description(),
+                   "B");
+
+        // Establish a base write type for "articles"
+        assert!("INSERT INTO articles (id, author, title) VALUES (?, ?, ?);"
+            .to_flow_parts(&mut g)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(g.graph.node_count(), 3);
+        assert_eq!(get_view(&g, "articles").name(), "articles");
+        assert_eq!(get_view(&g, "articles").args(), &["id", "author", "title"]);
+        assert_eq!(get_view(&g, "articles").node().unwrap().operator().description(),
+                   "B");
+
+        // Try a simple equi-JOIN query
+        assert!("SELECT users.name, articles.title FROM articles, users WHERE users.id = \
+                 articles.author;"
+            .to_flow_parts(&mut g)
+            .is_ok());
+        println!("{}", g);
+        // permute node 1 (for articles)
+        let new_view1 = get_view(&g, "query-3");
+        assert_eq!(new_view1.args(), &["title", "author"]);
+        assert_eq!(new_view1.node().unwrap().operator().description(),
+                   format!("π[2, 1]"));
+        // permute node 2 (for users)
+        let new_view2 = get_view(&g, "query-4");
+        assert_eq!(new_view2.args(), &["name", "id"]);
+        assert_eq!(new_view2.node().unwrap().operator().description(),
+                   format!("π[1, 0]"));
+        // join node
+        let new_view3 = get_view(&g, "query-5");
+        assert_eq!(new_view3.args(), &["name", "id", "title", "author"]);
+    }
+
+    #[test]
     fn it_incorporates_simple_selection() {
         use ops::NodeOp;
 
@@ -219,12 +349,13 @@ mod tests {
         assert!("SELECT users.name FROM users WHERE users.id = 42;"
             .to_flow_parts(&mut g)
             .is_ok());
-        let new_view = get_view(&g, "query-0");
+        let new_view = get_view(&g, "query-2");
         assert_eq!(new_view.args(), &["name"]);
         assert_eq!(new_view.node().unwrap().operator().description(),
                    format!("π[1]"));
         println!("{}", g);
     }
+
 
     #[test]
     fn it_incorporates_finkelstein1982_naively() {
