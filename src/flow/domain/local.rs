@@ -57,6 +57,10 @@ impl<T> Map<T> {
 
         self.things[i].take()
     }
+
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
+        Box::new(self.things.iter().filter_map(|t| t.as_ref()))
+    }
 }
 
 impl<'a, T> Index<&'a LocalNodeIndex> for Map<T> {
