@@ -88,7 +88,7 @@ impl Ingredient for Latest {
                         let r = r.rec();
 
                         // find the current value for this group
-                        let db = state.get(&self.us.as_ref().unwrap().as_local())
+                        let db = state.get(self.us.as_ref().unwrap().as_local())
                             .expect("latest must have its own state materialized");
                         let rs = db.lookup(self.key[0], &r[self.key[0]]);
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");

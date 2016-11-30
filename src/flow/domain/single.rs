@@ -152,7 +152,7 @@ impl NodeDescriptor {
 
     fn materialize(&mut self, u: &Update, state: &mut StateMap) {
         // our output changed -- do we need to modify materialized state?
-        materialize(u, state.get_mut(&self.addr.as_local()));
+        materialize(u, state.get_mut(self.addr.as_local()));
     }
 
     pub fn is_internal(&self) -> bool {
@@ -173,8 +173,8 @@ pub fn materialize(u: &Update, state: Option<&mut State>) {
 
     // yes!
     let mut state = state.unwrap();
-    match u {
-        &ops::Update::Records(ref rs) => {
+    match *u {
+        ops::Update::Records(ref rs) => {
             for r in rs {
                 match *r {
                     ops::Record::Positive(ref r) => state.insert(r.clone()),

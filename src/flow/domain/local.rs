@@ -81,13 +81,13 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
         let sorted = BTreeMap::from_iter(iter.into_iter().map(|(ni, v)| (ni.id(), v)));
 
         // no entries -- fine
-        if sorted.len() == 0 {
+        if sorted.is_empty() {
             return Map::default();
         }
 
         let end = sorted.keys().last().unwrap() + 1;
         let mut vs = Vec::with_capacity(end);
-        for (i, v) in sorted.into_iter() {
+        for (i, v) in sorted {
             for _ in vs.len()..i {
                 vs.push(None);
             }

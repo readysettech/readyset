@@ -167,9 +167,8 @@ pub struct Blender {
     ndomains: usize,
 }
 
-impl Blender {
-    /// Construct a new, empty `Blender`
-    pub fn new() -> Self {
+impl Default for Blender {
+    fn default() -> Self {
         let mut g = petgraph::Graph::new();
         let source =
             g.add_node(node::Node::new("source", &["because-type-inference"], node::Type::Source));
@@ -179,9 +178,16 @@ impl Blender {
             ndomains: 0,
         }
     }
+}
+
+impl Blender {
+    /// Construct a new, empty `Blender`
+    pub fn new() -> Self {
+        Blender::default()
+    }
 
     /// Start setting up a new `Migration`.
-    pub fn start_migration<'a>(&'a mut self) -> Migration<'a> {
+    pub fn start_migration(&mut self) -> Migration {
         Migration {
             mainline: self,
             added: Default::default(),
@@ -439,7 +445,7 @@ impl<'a> Migration<'a> {
         }
 
         for node in topo_list {
-            let domain = self.added.get(&node).unwrap().unwrap_or_else(|| {
+            let domain = self.added[&node].unwrap_or_else(|| {
                 // new node that doesn't belong to a domain
                 // create a new domain just for that node
                 self.add_domain()
@@ -561,7 +567,7 @@ impl<'a> Migration<'a> {
 
                 let cdomain = self.mainline.ingredients[child]
                     .domain()
-                    .or_else(|| self.added.get(&child).unwrap().clone());
+                    .or_else(|| self.added[&child]);
                 if cdomain.is_none() || domain != cdomain.unwrap() {
                     // child is in a different domain
                     // create an egress node to handle that
