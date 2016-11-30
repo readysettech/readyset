@@ -101,9 +101,10 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
 use std::collections::hash_map;
 use fnv::FnvHashMap;
 use std::hash::Hash;
+use std::sync::Arc;
 pub struct State<T: Hash + Eq + Clone> {
     pkey: usize,
-    state: FnvHashMap<T, Vec<Vec<T>>>,
+    state: FnvHashMap<T, Vec<Arc<Vec<T>>>>,
 }
 
 impl<T: Hash + Eq + Clone> Default for State<T> {
@@ -127,7 +128,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.pkey != usize::max_value()
     }
 
-    pub fn insert(&mut self, r: Vec<T>) {
+    pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let k = self.pkey;
         // i *wish* we could use the entry API here, but it would mean an extra clone in the common
         // case of an entry already existing for the given key...
@@ -145,11 +146,11 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
-    pub fn iter(&self) -> hash_map::Values<T, Vec<Vec<T>>> {
+    pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
         self.state.values()
     }
 
-    pub fn lookup(&self, key: usize, value: &T) -> &[Vec<T>] {
+    pub fn lookup(&self, key: usize, value: &T) -> &[Arc<Vec<T>>] {
         debug_assert_ne!(self.pkey,
                          usize::max_value(),
                          "lookup on uninitialized index");

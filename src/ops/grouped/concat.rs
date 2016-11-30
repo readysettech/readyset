@@ -321,7 +321,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Record::Negative(vec![1.into(), 1.into()]);
+        let u = (vec![1.into(), 1.into()], false);
 
         // negative row for a group should emit -".1;#.2;" and +".2;"
         let out = c.narrow_one(u, true);
@@ -347,17 +347,17 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![// remove non-existing
-                                          ops::Record::Negative(vec![1.into(), 1.into()]),
-                                          // add old
-                                          ops::Record::Positive(vec![1.into(), 1.into()]),
-                                          // add duplicate
-                                          ops::Record::Positive(vec![1.into(), 2.into()]),
-                                          ops::Record::Negative(vec![2.into(), 2.into()]),
-                                          ops::Record::Positive(vec![2.into(), 3.into()]),
-                                          ops::Record::Positive(vec![2.into(), 2.into()]),
-                                          ops::Record::Positive(vec![2.into(), 1.into()]),
-                                          ops::Record::Positive(vec![3.into(), 3.into()])]);
+        let u = vec![// remove non-existing
+                     (vec![1.into(), 1.into()], false),
+                     // add old
+                     (vec![1.into(), 1.into()], true),
+                     // add duplicate
+                     (vec![1.into(), 2.into()], true),
+                     (vec![2.into(), 2.into()], false),
+                     (vec![2.into(), 3.into()], true),
+                     (vec![2.into(), 2.into()], true),
+                     (vec![2.into(), 1.into()], true),
+                     (vec![3.into(), 3.into()], true)];
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let out = c.narrow_one(u, true);

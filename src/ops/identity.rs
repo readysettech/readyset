@@ -68,14 +68,11 @@ mod tests {
 
     #[test]
     fn it_forwards() {
+        use query;
         let mut g = setup(false);
 
-        let left = ops::Record::Positive(vec![1.into(), "a".into()]);
-        match g.narrow_one(vec![left.clone()], false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![left]);
-            }
-        }
+        let left: Vec<query::DataType> = vec![1.into(), "a".into()];
+        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
     }
 
     #[test]

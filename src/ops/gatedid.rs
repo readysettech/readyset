@@ -95,11 +95,7 @@ mod tests {
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            match i.narrow_one_row(left.clone(), false).unwrap() {
-                ops::Update::Records(rs) => {
-                    assert_eq!(rs, vec![ops::Record::Positive(left)]);
-                }
-            };
+            assert_eq!(i.narrow_one_row(left.clone(), false), Some(left.into()));
             &done.store(true, Ordering::SeqCst);
         });
 

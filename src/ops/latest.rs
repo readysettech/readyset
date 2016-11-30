@@ -216,11 +216,11 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()]),
-                                          ops::Record::Negative(vec![1.into(), 2.into()]),
-                                          ops::Record::Positive(vec![1.into(), 3.into()]),
-                                          ops::Record::Negative(vec![2.into(), 2.into()]),
-                                          ops::Record::Positive(vec![2.into(), 4.into()])]);
+        let u = vec![(vec![1.into(), 1.into()], false),
+                     (vec![1.into(), 2.into()], false),
+                     (vec![1.into(), 3.into()], true),
+                     (vec![2.into(), 2.into()], false),
+                     (vec![2.into(), 4.into()], true)];
 
         // negatives and positives should still result in only one new current for each group
         let out = c.narrow_one(u, true);

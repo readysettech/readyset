@@ -1,7 +1,7 @@
 use ops;
-use query;
 
 use std::collections::HashMap;
+use std::sync;
 
 use flow::prelude::*;
 
@@ -81,7 +81,7 @@ impl Ingredient for Permute {
                         for i in e {
                             new_r.push(r[*i].clone());
                         }
-                        **r = new_r;
+                        **r = sync::Arc::new(new_r);
                     }
                 }
             }
@@ -147,12 +147,8 @@ mod tests {
         let mut p = setup(false, false);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
-        match p.narrow_one_row(rec, false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec!["c".into(), "a".into()])]);
-            }
-        }
+        assert_eq!(p.narrow_one_row(rec, false),
+                   Some(vec![vec!["c".into(), "a".into()]].into()));
     }
 
     #[test]
@@ -160,12 +156,8 @@ mod tests {
         let mut p = setup(false, true);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
-        match p.narrow_one_row(rec, false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec!["a".into(), "b".into(), "c".into()])]);
-            }
-        }
+        assert_eq!(p.narrow_one_row(rec, false),
+                   Some(vec![vec!["a".into(), "b".into(), "c".into()]].into()));
     }
 
     #[test]

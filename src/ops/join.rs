@@ -1,6 +1,7 @@
 use ops;
 use query;
 
+use std::sync;
 use std::iter;
 use std::collections::HashMap;
 
@@ -187,7 +188,7 @@ pub struct Joiner {
 
 impl Joiner {
     fn join<'a>(&'a self,
-                left: (NodeAddress, Vec<query::DataType>),
+                left: (NodeAddress, sync::Arc<Vec<query::DataType>>),
                 _: &DomainNodes,
                 states: &StateMap)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
@@ -308,9 +309,9 @@ impl Ingredient for Joiner {
                             self.join((from, r), nodes, state).map(move |res| {
                                 // return new row with appropriate sign
                                 if pos {
-                                    ops::Record::Positive(res)
+                                    ops::Record::Positive(sync::Arc::new(res))
                                 } else {
-                                    ops::Record::Negative(res)
+                                    ops::Record::Negative(sync::Arc::new(res))
                                 }
                             })
                         })
@@ -442,13 +443,9 @@ mod tests {
         // *************************************
 
         // forward b2 from left; should produce [b2*z2]
-        match j.one_row(l, l_b2.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // we're expecting to only match z2
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
-            }
-        }
+        // we're expecting to only match z2
+        assert_eq!(j.one_row(l, l_b2.clone(), false),
+                   Some(vec![vec![2.into(), "b".into(), "z".into()]].into()));
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
         match j.one_row(l, l_a1.clone(), false).unwrap() {
@@ -470,31 +467,19 @@ mod tests {
         // *************************************
 
         // forward x1 from right; should produce [a1*x1]
-        match j.one_row(r, r_x1.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "x".into()])]);
-            }
-        }
+        assert_eq!(j.one_row(r, r_x1.clone(), false),
+                   Some(vec![vec![1.into(), "a".into(), "x".into()]].into()));
 
         // forward y1 from right; should produce [a1*y1]
-        match j.one_row(r, r_y1.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![1.into(), "a".into(), "y".into()])]);
-            }
-        }
+        // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
+        assert_eq!(j.one_row(r, r_y1.clone(), false),
+                   Some(vec![vec![1.into(), "a".into(), "y".into()]].into()));
 
         // forward z2 from right; should produce [b2*z2]
-        match j.one_row(r, r_z2.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
-                // right's (b2's) timestamp will be used.
-                assert_eq!(rs,
-                           vec![ops::Record::Positive(vec![2.into(), "b".into(), "z".into()])]);
-            }
-        }
+        // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
+        // right's (b2's) timestamp will be used.
+        assert_eq!(j.one_row(r, r_z2.clone(), false),
+                   Some(vec![vec![2.into(), "b".into(), "z".into()]].into()));
     }
 
     #[test]

@@ -4,6 +4,7 @@ use query;
 use std::fmt;
 use std::collections::HashSet;
 use std::collections::HashMap;
+use std::sync;
 
 use flow::prelude::*;
 
@@ -214,7 +215,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                                 .map(|v| v.clone())
                                 .chain(Some(new.into()).into_iter())
                                 .collect();
-                            out.push(ops::Record::Positive(rec));
+                            out.push(ops::Record::Positive(sync::Arc::new(rec)));
                         }
                         Some(ref current) if new == **current => {
                             // no change
@@ -229,7 +230,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                                 // we're generating a zero row
                                 // revoke old value
                                 rec.push(current.into_owned());
-                                out.push(ops::Record::Negative(rec.clone()));
+                                out.push(ops::Record::Negative(sync::Arc::new(rec.clone())));
 
                                 // remove the old value from the end of the record
                                 rec.pop();
@@ -239,7 +240,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
 
                             // emit new value
                             rec.push(new.into());
-                            out.push(ops::Record::Positive(rec));
+                            out.push(ops::Record::Positive(sync::Arc::new(rec)));
                         }
                     }
                 }

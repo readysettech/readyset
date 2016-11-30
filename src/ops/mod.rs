@@ -10,12 +10,13 @@ pub mod gatedid;
 use query;
 
 use std::ops::{Deref, DerefMut};
+use std::sync;
 
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Record {
-    Positive(Vec<query::DataType>),
-    Negative(Vec<query::DataType>),
+    Positive(sync::Arc<Vec<query::DataType>>),
+    Negative(sync::Arc<Vec<query::DataType>>),
 }
 
 impl Record {
@@ -34,7 +35,7 @@ impl Record {
         }
     }
 
-    pub fn extract(self) -> (Vec<query::DataType>, bool) {
+    pub fn extract(self) -> (sync::Arc<Vec<query::DataType>>, bool) {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
@@ -43,7 +44,7 @@ impl Record {
 }
 
 impl Deref for Record {
-    type Target = Vec<query::DataType>;
+    type Target = sync::Arc<Vec<query::DataType>>;
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) |
@@ -61,14 +62,30 @@ impl DerefMut for Record {
     }
 }
 
-impl From<Vec<query::DataType>> for Record {
-    fn from(other: Vec<query::DataType>) -> Self {
+impl From<sync::Arc<Vec<query::DataType>>> for Record {
+    fn from(other: sync::Arc<Vec<query::DataType>>) -> Self {
         Record::Positive(other)
     }
 }
 
+impl From<Vec<query::DataType>> for Record {
+    fn from(other: Vec<query::DataType>) -> Self {
+        Record::Positive(sync::Arc::new(other))
+    }
+}
+
+impl From<(Vec<query::DataType>, bool)> for Record {
+    fn from(other: (Vec<query::DataType>, bool)) -> Self {
+        if other.1 {
+            Record::Positive(sync::Arc::new(other.0))
+        } else {
+            Record::Negative(sync::Arc::new(other.0))
+        }
+    }
+}
+
 /// Update is the smallest unit of data transmitted over edges in a data flow graph.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Update {
     /// This update holds a set of records.
     Records(Vec<Record>),
@@ -92,8 +109,20 @@ impl From<Vec<query::DataType>> for Update {
     }
 }
 
+impl From<(Vec<query::DataType>, bool)> for Update {
+    fn from(other: (Vec<query::DataType>, bool)) -> Self {
+        Update::Records(vec![other.into()])
+    }
+}
+
 impl From<Vec<Vec<query::DataType>>> for Update {
     fn from(other: Vec<Vec<query::DataType>>) -> Self {
+        Update::Records(other.into_iter().map(|r| r.into()).collect())
+    }
+}
+
+impl From<Vec<(Vec<query::DataType>, bool)>> for Update {
+    fn from(other: Vec<(Vec<query::DataType>, bool)>) -> Self {
         Update::Records(other.into_iter().map(|r| r.into()).collect())
     }
 }

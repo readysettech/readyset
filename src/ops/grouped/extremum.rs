@@ -235,14 +235,12 @@ mod tests {
         check_new_max(1.into(), 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 22.into()]),
-                                          ops::Record::Positive(vec![1.into(), 23.into()])]);
+        let u = vec![(vec![1.into(), 22.into()], false), (vec![1.into(), 23.into()], true)];
         let out = c.narrow_one(u, true);
         check_new_max(1.into(), 22.into(), 23.into(), out);
 
         // Competing positive and negative should cancel out.
-        let u = ops::Update::Records(vec![ops::Record::Positive(vec![1.into(), 24.into()]),
-                                          ops::Record::Negative(vec![1.into(), 24.into()])]);
+        let u = vec![(vec![1.into(), 24.into()], true), (vec![1.into(), 24.into()], false)];
         match c.narrow_one(u, true) {
             Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
             _ => unreachable!(),

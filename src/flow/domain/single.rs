@@ -56,7 +56,7 @@ impl NodeDescriptor {
                         ops::Update::Records(ref rs) => {
                             for r in rs {
                                 match *r {
-                                    ops::Record::Positive(ref r) => state.insert(r.clone()),
+                                    ops::Record::Positive(ref r) => state.insert(r.deref().clone()),
                                     ops::Record::Negative(ref r) => {
                                         // we need a cond that will match this row.
                                         let conds = r.iter()

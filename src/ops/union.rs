@@ -1,6 +1,7 @@
 use ops;
 
 use std::collections::HashMap;
+use std::sync;
 
 use flow::prelude::*;
 
@@ -78,14 +79,14 @@ impl Ingredient for Union {
                         let (r, pos) = rec.extract();
 
                         // yield selected columns for this source
-                        // TODO: avoid the .clone() here
+                        // TODO: if emitting all in same order then avoid clone
                         let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
 
                         // return new row with appropriate sign
                         if pos {
-                            ops::Record::Positive(res)
+                            ops::Record::Positive(sync::Arc::new(res))
                         } else {
-                            ops::Record::Negative(res)
+                            ops::Record::Negative(sync::Arc::new(res))
                         }
                     })
                     .collect();
@@ -153,19 +154,12 @@ mod tests {
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        match u.one_row(l, left.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(left)]);
-            }
-        }
+        assert_eq!(u.one_row(l, left.clone(), false), Some(vec![left].into()));
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        match u.one_row(r, right.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                assert_eq!(rs, vec![ops::Record::Positive(vec![1.into(), "x".into()])]);
-            }
-        }
+        assert_eq!(u.one_row(r, right.clone(), false),
+                   Some(vec![vec![1.into(), "x".into()]].into()));
     }
 
     #[test]

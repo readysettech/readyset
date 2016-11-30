@@ -222,7 +222,7 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Record::Negative(vec![1.into(), 1.into()]);
+        let u = (vec![1.into(), 1.into()], false);
 
         // negative row for a group should emit -2 and +1
         let out = c.narrow_one(u, true);
@@ -248,14 +248,14 @@ mod tests {
             unreachable!();
         }
 
-        let u = ops::Update::Records(vec![ops::Record::Negative(vec![1.into(), 1.into()]),
-                                          ops::Record::Positive(vec![1.into(), 1.into()]),
-                                          ops::Record::Positive(vec![1.into(), 2.into()]),
-                                          ops::Record::Negative(vec![2.into(), 2.into()]),
-                                          ops::Record::Positive(vec![2.into(), 2.into()]),
-                                          ops::Record::Positive(vec![2.into(), 3.into()]),
-                                          ops::Record::Positive(vec![2.into(), 1.into()]),
-                                          ops::Record::Positive(vec![3.into(), 3.into()])]);
+        let u = vec![(vec![1.into(), 1.into()], false),
+                     (vec![1.into(), 1.into()], true),
+                     (vec![1.into(), 2.into()], true),
+                     (vec![2.into(), 2.into()], false),
+                     (vec![2.into(), 2.into()], true),
+                     (vec![2.into(), 3.into()], true),
+                     (vec![2.into(), 1.into()], true),
+                     (vec![3.into(), 3.into()], true)];
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         // TODO: check for correct output ts'es
