@@ -94,15 +94,15 @@ impl GroupedOperation for ExtremumOperator {
         }
     }
 
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
-        if let &Some(query::DataType::Number(n)) = current {
+        if let Some(&query::DataType::Number(n)) = current {
             extreme_values.push(n);
         };
 
-        let is_extreme_value = |x: i64| if let &Some(query::DataType::Number(n)) = current {
+        let is_extreme_value = |x: i64| if let Some(&query::DataType::Number(n)) = current {
             match self.op {
                 Extremum::MAX => x >= n,
                 Extremum::MIN => x <= n,

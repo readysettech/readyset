@@ -91,8 +91,8 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
-        if let Some(query::DataType::Number(n)) = *current {
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+        if let Some(&query::DataType::Number(n)) = current {
             diffs.into_iter().fold(n, |n, d| n + d).into()
         } else {
             unreachable!();

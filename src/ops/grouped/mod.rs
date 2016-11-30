@@ -61,7 +61,7 @@ pub trait GroupedOperation: fmt::Debug {
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value. When the group is empty, current is set to the zero value.
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
 
     fn description(&self) -> String;
 }
@@ -161,7 +161,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
         debug_assert_eq!(input.from, self.src);
 
         match input.data {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(ref rs) => {
                 if rs.is_empty() {
                     return None;
                 }
@@ -171,9 +171,8 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                 // execute two queries.
                 let mut consolidate = HashMap::new();
                 for rec in rs {
-                    let (r, pos) = rec.extract();
-                    let val = self.inner.to_diff(&r[..], pos);
-                    let group = r.into_iter()
+                    let val = self.inner.to_diff(&rec[..], rec.is_positive());
+                    let group = rec.iter()
                         .enumerate()
                         .map(|(i, v)| if self.group.contains(&i) {
                             Some(v)
@@ -188,46 +187,55 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                 let mut out = Vec::with_capacity(2 * consolidate.len());
                 for (group, diffs) in consolidate {
                     // find the current value for this group
-                    let current = {
-                        // find the current value for this group
-                        let db = state.get(&self.us.as_ref().unwrap().as_local())
-                            .expect("grouped operators must have their own state materialized");
-                        let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
-                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                    let db = state.get(&self.us.as_ref().unwrap().as_local())
+                        .expect("grouped operators must have their own state materialized");
+                    let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                    let old = rs.get(0);
+
+                    let (current, new) = {
+                        use std::borrow::Cow;
 
                         // current value is in the last output column
                         // or "" if there is no current group
-                        rs.get(0)
-                            .map(|r| r[r.len() - 1].clone().into())
-                            .unwrap_or(self.inner.zero())
-                    };
+                        let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
+                            .unwrap_or(self.inner.zero().map(|z| Cow::Owned(z)));
 
-                    // new is the result of applying all diffs for the group to the current value
-                    let new = self.inner.apply(&current, diffs);
+                        // new is the result of applying all diffs for the group to the current value
+                        let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
+                        (current, new)
+                    };
 
                     match current {
                         None => {
                             // emit positive, which is group + new.
-                            let rec = group.into_iter()
+                            let rec: Vec<_> = group.into_iter()
                                 .filter_map(|v| v)
+                                .map(|v| v.clone())
                                 .chain(Some(new.into()).into_iter())
                                 .collect();
                             out.push(ops::Record::Positive(rec));
                         }
-                        Some(ref current) if &new == current => {
+                        Some(ref current) if new == **current => {
                             // no change
                         }
                         Some(current) => {
                             // construct prefix of output record used for both - and +
                             let mut rec = Vec::with_capacity(group.len() + 1);
-                            rec.extend(group.into_iter().filter_map(|v| v));
+                            rec.extend(group.into_iter().filter_map(|v| v).map(|v| v.clone()));
 
                             // revoke old value
-                            rec.push(current.into());
-                            out.push(ops::Record::Negative(rec.clone()));
+                            if old.is_none() {
+                                // we're generating a zero row
+                                // revoke old value
+                                rec.push(current.into_owned());
+                                out.push(ops::Record::Negative(rec.clone()));
 
-                            // remove the old value from the end of the record
-                            rec.pop();
+                                // remove the old value from the end of the record
+                                rec.pop();
+                            } else {
+                                out.push(ops::Record::Negative(old.unwrap().clone()));
+                            }
 
                             // emit new value
                             rec.push(new.into());

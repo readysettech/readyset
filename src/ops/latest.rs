@@ -75,7 +75,7 @@ impl Ingredient for Latest {
                 // all the -/+ pairs for each one, and keeping track of which keys we have handled.
                 // Then, we assert that there are no negatives whose key does not appear in the
                 // list of keys that have been handled.
-                let (pos, neg): (Vec<_>, _) = rs.into_iter().partition(|r| r.is_positive());
+                let (pos, _): (Vec<_>, _) = rs.into_iter().partition(|r| r.is_positive());
                 let mut handled = HashSet::new();
 
                 // buffer emitted records
@@ -84,7 +84,7 @@ impl Ingredient for Latest {
                     let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
                     handled.insert(group);
 
-                    let current = {
+                    {
                         let r = r.rec();
 
                         // find the current value for this group
@@ -92,25 +92,16 @@ impl Ingredient for Latest {
                             .expect("latest must have its own state materialized");
                         let rs = db.lookup(self.key[0], &r[self.key[0]]);
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                        rs.get(0).map(|r| (r.into_iter().cloned().collect(), 0))
-                    };
+                        if let Some(current) = rs.get(0) {
+                            out.push(ops::Record::Negative(current.clone()));
+                        }
+                    }
 
                     // if there was a previous latest for this key, revoke old record
-                    if let Some(current) = current {
-                        out.push(ops::Record::Negative(current.0));
-                    }
                     out.push(r);
                 }
 
-                // check that there aren't any standalone negatives
-                // XXX: this check actually incurs a decent performance hit, as it causes us to
-                // have to clone above, plus do this loop. maybe just kill it?
-                for r in neg {
-                    // we can swap_remove here because we know self.keys is in reverse sorted order
-                    let (mut r, _) = r.extract();
-                    let group: Vec<_> = self.key.iter().map(|&i| r.swap_remove(i)).collect();
-                    assert!(handled.contains(&group));
-                }
+                // TODO: check that there aren't any standalone negatives
 
                 ops::Update::Records(out).into()
             }

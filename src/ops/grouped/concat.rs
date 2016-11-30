@@ -146,7 +146,7 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -156,7 +156,7 @@ impl GroupedOperation for GroupConcat {
         // efficient by splitting into a BTree, which maintains sorting while
         // supporting efficient add/remove.
 
-        let current = if let Some(query::DataType::Text(ref s)) = *current {
+        let current = if let Some(&query::DataType::Text(ref s)) = current {
             s
         } else {
             unreachable!();
