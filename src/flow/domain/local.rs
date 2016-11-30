@@ -90,19 +90,19 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
     }
 }
 
-use std::collections::HashMap;
 use std::collections::hash_map;
+use fnv::FnvHashMap;
 use std::hash::Hash;
 pub struct State<T: Hash + Eq + Clone> {
     pkey: usize,
-    state: HashMap<T, Vec<Vec<T>>>,
+    state: FnvHashMap<T, Vec<Vec<T>>>,
 }
 
 impl<T: Hash + Eq + Clone> Default for State<T> {
     fn default() -> Self {
         State {
             pkey: usize::max_value(),
-            state: HashMap::default(),
+            state: FnvHashMap::default(),
         }
     }
 }
