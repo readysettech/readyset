@@ -146,7 +146,7 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -156,7 +156,7 @@ impl GroupedOperation for GroupConcat {
         // efficient by splitting into a BTree, which maintains sorting while
         // supporting efficient add/remove.
 
-        let current = if let Some(query::DataType::Text(ref s)) = *current {
+        let current = if let Some(&query::DataType::Text(ref s)) = current {
             s
         } else {
             unreachable!();
@@ -219,52 +219,29 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
-    fn setup(mat: bool, wide: bool) -> ops::test::MockGraph {
+    fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
-        let s = if wide {
-            g.add_base("source", &["x", "y", "z"])
-        } else {
-            g.add_base("source", &["x", "y"])
-        };
-        if wide {
-            g.seed(s, vec![1.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-        } else {
-            g.seed(s, vec![1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into()]);
-        }
+        let s = g.add_base("source", &["x", "y"]);
 
         let c = GroupConcat::new(s,
                                  vec![TextComponent::Literal("."),
                                       TextComponent::Column(1),
                                       TextComponent::Literal(";")],
                                  "#");
-        if wide {
-            g.set_op("concat", &["x", "z", "ys"], c);
-        } else {
-            g.set_op("concat", &["x", "ys"], c);
-        }
-        if mat {
-            g.set_materialized();
-        }
+        g.set_op("concat", &["x", "ys"], c, mat);
         g
     }
 
     #[test]
     fn it_describes() {
-        let c = setup(true, true);
-        assert_eq!(c.node().description(),
-                   "||([\".\", 1, \";\"], \"#\") γ[0, 2]");
+        let c = setup(true);
+        assert_eq!(c.node().description(), "||([\".\", 1, \";\"], \"#\") γ[0]");
     }
 
     #[test]
     fn it_forwards() {
-        let mut c = setup(true, false);
+        let mut c = setup(true);
 
         let u: ops::Record = vec![1.into(), 1.into()].into();
 
@@ -455,48 +432,23 @@ mod tests {
     }
 
     #[test]
-    fn it_queries() {
-        let c = setup(false, false);
-
-        let hits = c.query(None);
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == ".1;".into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == ".1;#.2;".into()));
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = c.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == ".1;#.2;".into()));
-    }
-
-    #[test]
     fn it_suggests_indices() {
         let me = NodeAddress::mock_global(1.into());
-        let c = setup(false, true);
+        let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
         assert!(idx.contains_key(&me));
 
-        // should only index on group-by columns
-        assert_eq!(idx[&me].len(), 2);
-        assert!(idx[&me].iter().any(|&i| i == 0));
-        assert!(idx[&me].iter().any(|&i| i == 1));
-        // specifically, not last column, which is output
+        // should only index on the group-by column
+        assert_eq!(idx[&me], 0);
     }
 
     #[test]
     fn it_resolves() {
-        let c = setup(false, true);
+        let c = setup(false);
         assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
-        assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 2)]));
-        assert_eq!(c.node().resolve(2), None);
+        assert_eq!(c.node().resolve(1), None);
     }
 }

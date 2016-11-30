@@ -1,6 +1,5 @@
 use ops;
 use query;
-use shortcut;
 
 use std::iter;
 use std::collections::HashMap;
@@ -9,7 +8,7 @@ use flow::prelude::*;
 
 #[derive(Debug)]
 struct JoinTarget {
-    fields: Vec<(usize, usize)>,
+    on: (usize, usize),
     select: Vec<bool>,
     outer: bool,
 }
@@ -142,9 +141,10 @@ impl From<Builder> for Joiner {
                             return None;
                         }
                         // but if there are, emit the mapping we found
+                        assert_eq!(pg.len(), 1, "can only join on one key for now");
                         Some((p,
                               JoinTarget {
-                                  fields: pg,
+                                  on: pg.into_iter().next().unwrap(),
                                   outer: outer,
                                   select: Vec::new(),
                               }))
@@ -188,7 +188,7 @@ pub struct Joiner {
 impl Joiner {
     fn join<'a>(&'a self,
                 left: (NodeAddress, Vec<query::DataType>),
-                domain: &DomainNodes,
+                _: &DomainNodes,
                 states: &StateMap)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
 
@@ -197,31 +197,9 @@ impl Joiner {
         let this = &self.join[&left.0];
         let target = &this.against[&other];
 
-        let rx = {
-            // figure out the join values for this record
-            let params = target.fields
-                .iter()
-                .map(|&(lefti, righti)| {
-                    shortcut::Condition {
-                        column: righti,
-                        cmp: shortcut::Comparison::Equal(shortcut::Value::using(&left.1[lefti])),
-                    }
-                })
-                .collect();
-
-            // TODO: technically, we only need the columns in .join and .emit
-            let q = query::Query::new(&target.select[..], params);
-
-            // send the parameters to start the query.
-            // TODO: avoid duplicating this exact code in every querying module
-            if let Some(state) = states.get(other.as_local()) {
-                // other node is materialized
-                state.find(&q.having[..]).map(|r| r.iter().cloned().collect()).collect()
-            } else {
-                // other node is not materialized, query instead
-                domain[other.as_local()].borrow().query(Some(&q), domain, states)
-            }
-        };
+        // send the parameters to start the query.
+        let state = states.get(other.as_local()).expect("joins must have inputs materialized");
+        let rx: Vec<_> = state.lookup(target.on.1, &left.1[target.on.0]).iter().cloned().collect();
 
         if rx.is_empty() && target.outer {
             return Box::new(Some(self.emit
@@ -342,86 +320,7 @@ impl Ingredient for Joiner {
         }
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        use std::iter;
-
-        // We're essentially doing nested for loops, where each loop yields rows from one "table".
-        // For the case of a two-way join (which is all that's supported for now), we call the two
-        // tables `left` and `right`. We're going to iterate over results from `left` in the outer
-        // loop, and query `right` inside the loop for each `left`.
-
-        // pick some view query order
-        // TODO: figure out which join order is best
-        let lefti = *self.join.keys().min().unwrap();
-        let left = &self.join[&lefti];
-
-        // Set up parameters for querying all rows in left.
-        //
-        // We find the number of parameters by looking at how many parameters the other side of the
-        // join would have used if it tried to query us.
-        let mut lparams = None;
-
-        // Avoid scanning rows that wouldn't match the query anyway. We do this by finding all
-        // conditions that filter over a field present in left, and use those as parameters.
-        if let Some(q) = q {
-            lparams = Some(q.having
-                .iter()
-                .filter_map(|c| {
-                    let (srci, coli) = self.emit[c.column];
-                    if srci != lefti {
-                        return None;
-                    }
-
-                    Some(shortcut::Condition {
-                        column: coli,
-                        cmp: c.cmp.clone(),
-                    })
-                })
-                .collect::<Vec<_>>());
-
-            if lparams.as_ref().unwrap().is_empty() {
-                lparams = None;
-            }
-        }
-
-        // produce a left * right given a left (basically the same as forward())
-        // TODO: we probably don't need to select all columns here
-        let lq = lparams.map(|ps| {
-            query::Query::new(&iter::repeat(true)
-                                  .take(domain[left.node.as_local()].borrow().fields().len())
-                                  .collect::<Vec<_>>(),
-                              ps)
-        });
-
-        let leftrx = if let Some(state) = states.get(left.node.as_local()) {
-            // other node is materialized
-            state.find(lq.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // other node is not materialized, query instead
-            domain[left.node.as_local()].borrow().query(lq.as_ref(), domain, states)
-        };
-
-        leftrx.into_iter()
-            .flat_map(move |lrec| {
-                // TODO: also add constants from q to filter used to select from right
-                // TODO: respect q.select
-                self.join((lefti, lrec), domain, states)
-            })
-            .filter_map(move |r| if let Some(q) = q {
-                q.feed(r).map(|r| r)
-            } else {
-                Some(r)
-            })
-            .collect()
-    }
-
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
         use std::collections::HashSet;
 
         // index all join fields
@@ -432,9 +331,7 @@ impl Ingredient for Joiner {
                 // for every right
                 rs.against.iter().flat_map(move |(right, rs)| {
                     // emit both the left binding
-                    rs.fields.iter().map(move |&(li, _)| (left, li))
-                    // and the right binding
-                    .chain(rs.fields.iter().map(move |&(_, ri)| (right, ri)))
+                    vec![(left, rs.on.0), (right, rs.on.1)]
                 })
             })
             // we now have (NodeAddress, usize) for every join column.
@@ -449,7 +346,11 @@ impl Ingredient for Joiner {
                 hm
             })
             // convert HashSets into Vec
-            .into_iter().map(|(node, cols)| (node, cols.into_iter().collect())).collect()
+            .into_iter().map(|(node, cols)| {
+                let cols: Vec<_> = cols.into_iter().collect();
+                assert_eq!(cols.len(), 1, "each join target should have a primary key");
+                (node, cols.into_iter().next().unwrap())
+            }).collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
@@ -468,11 +369,9 @@ impl Ingredient for Joiner {
                 rs.against
                     .iter()
                     .filter(move |&(right, _)| left < right)
-                    .flat_map(move |(right, rs)| {
+                    .map(move |(right, rs)| {
                         let op = if rs.outer { "⋉" } else { "⋈" };
-                        rs.fields.iter().map(move |&(li, ri)| {
-                            format!("{}:{} {} {}:{}", left, li, op, right, ri)
-                        })
+                        format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
                     })
             })
             .collect::<Vec<_>>()
@@ -486,20 +385,11 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
     fn setup(left: bool) -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
-
-        g.seed(l, vec![1.into(), "a".into()]);
-        g.seed(l, vec![2.into(), "b".into()]);
-        g.seed(l, vec![3.into(), "c".into()]);
-        g.seed(r, vec![1.into(), "x".into()]);
-        g.seed(r, vec![1.into(), "y".into()]);
-        g.seed(r, vec![2.into(), "z".into()]);
 
         // join on first field
         let b = Builder::new(vec![(l, 0), (l, 1), (r, 1)]).from(l, vec![1, 0]);
@@ -510,7 +400,14 @@ mod tests {
         };
 
         let j: Joiner = b.into();
-        g.set_op("join", &["j0", "j1", "j2"], j);
+        g.set_op("join", &["j0", "j1", "j2"], j, false);
+        g.seed(l, vec![1.into(), "a".into()]);
+        g.seed(l, vec![2.into(), "b".into()]);
+        g.seed(l, vec![3.into(), "c".into()]);
+        g.seed(r, vec![1.into(), "x".into()]);
+        g.seed(r, vec![1.into(), "y".into()]);
+        g.seed(r, vec![2.into(), "z".into()]);
+
         let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
@@ -641,88 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn it_queries() {
-        let (j, _, _) = setup(false);
-
-        // do a full query, which should return product of left + right:
-        // [ax, ay, bz]
-        let hits = j.query(None);
-        assert_eq!(hits.len(), 3);
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
-
-        // query using join field
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = j.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
-
-        // query using field from left
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from("a")));
-        let q = query::Query::new(&[true, true, true],
-                                  vec![shortcut::Condition {
-                                           column: 1,
-                                           cmp: val,
-                                       }]);
-
-        let hits = j.query(Some(&q));
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
-
-        // query using field from right
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from("z")));
-        let q = query::Query::new(&[true, true, true],
-                                  vec![shortcut::Condition {
-                                           column: 2,
-                                           cmp: val,
-                                       }]);
-
-        let hits = j.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
-    }
-
-    #[test]
-    fn it_queries_left() {
-        let (j, _, _) = setup(true);
-
-        // do a full query, which should return product of left + right:
-        // [ax, ay, bz, c+None]
-        let hits = j.query(None);
-        assert_eq!(hits.len(), 4);
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "x".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 1.into() && r[1] == "a".into() && r[2] == "y".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 2.into() && r[1] == "b".into() && r[2] == "z".into()));
-        assert!(hits.iter()
-            .any(|r| r[0] == 3.into() && r[1] == "c".into() && r[2] == query::DataType::None));
-    }
-
-    #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let me = NodeAddress::mock_global(2.into());
         let (j, l, r) = setup(false);
-        let hm: HashMap<_, _> = vec![(l, vec![0]), // join column for left
-                                     (r, vec![0]), // join column for right
-                                     (me, vec![0]) /* output column that is used as join column */]
+        let hm: HashMap<_, _> = vec![(l, 0) /* join column for left */,
+                                     (r, 0) /* join column for right */,
+                                     (me, 0) /* output column that is used as join column */]
             .into_iter()
             .collect();
         assert_eq!(j.node().suggest_indexes(me), hm);

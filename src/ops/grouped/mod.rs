@@ -1,6 +1,5 @@
 use ops;
 use query;
-use shortcut;
 
 use std::fmt;
 use std::collections::HashSet;
@@ -62,13 +61,13 @@ pub trait GroupedOperation: fmt::Debug {
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value. When the group is empty, current is set to the zero value.
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
 
     fn description(&self) -> String;
 }
 
 #[derive(Debug)]
-pub struct GroupedOperator<'a, T: GroupedOperation> {
+pub struct GroupedOperator<T: GroupedOperation> {
     src: NodeAddress,
     inner: T,
 
@@ -76,28 +75,32 @@ pub struct GroupedOperator<'a, T: GroupedOperation> {
     us: Option<NodeAddress>,
     cols: usize,
 
+    pkey_in: usize, // column in our input that is our primary key
+    pkey_out: usize, // column in our output that is our primary key
+
     // precomputed datastructures
     group: HashSet<usize>,
-    cond: Vec<shortcut::Condition<'a, query::DataType>>,
     colfix: Vec<usize>,
 }
 
-impl<'a, T: GroupedOperation> GroupedOperator<'a, T> {
-    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<'a, T> {
+impl<T: GroupedOperation> GroupedOperator<T> {
+    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<T> {
         GroupedOperator {
             src: src,
             inner: op,
 
+            pkey_out: usize::max_value(),
+            pkey_in: usize::max_value(),
+
             us: None,
             cols: 0,
             group: HashSet::new(),
-            cond: Vec::new(),
             colfix: Vec::new(),
         }
     }
 }
 
-impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
+impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
@@ -119,26 +122,23 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         // group by all columns
         self.cols = srcn.fields().len();
         self.group.extend(self.inner.group_by().iter().cloned());
+        if self.group.len() != 1 {
+            unimplemented!();
+        }
+        // primary key is the first (and only) group by key
+        self.pkey_in = *self.group.iter().next().unwrap();
+        // what output column does this correspond to?
+        // well, the first one given that we currently only have one group by
+        // and that group by comes first.
+        self.pkey_out = 0;
 
-        // construct condition for querying into ourselves
-        self.cond = (0..self.group.len())
-            .into_iter()
-            .map(|col| {
-                shortcut::Condition {
-                    column: col,
-                    cmp: shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::None)),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        // the query into our own output (above) uses *output* column indices
-        // but when we try to fill it, we have *input* column indices
-        // build a translation mechanism for going from the former to the latter
+        // build a translation mechanism for going from output columns to input columns
         let colfix: Vec<_> = (0..self.cols)
             .into_iter()
             .filter_map(|col| {
                 if self.group.contains(&col) {
-                    // the next output column is this column
+                    // since the generated value goes at the end,
+                    // this is the n'th output value
                     Some(col)
                 } else {
                     // this column does not appear in output
@@ -161,7 +161,7 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         debug_assert_eq!(input.from, self.src);
 
         match input.data {
-            ops::Update::Records(rs) => {
+            ops::Update::Records(ref rs) => {
                 if rs.is_empty() {
                     return None;
                 }
@@ -171,9 +171,8 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                 // execute two queries.
                 let mut consolidate = HashMap::new();
                 for rec in rs {
-                    let (r, pos) = rec.extract();
-                    let val = self.inner.to_diff(&r[..], pos);
-                    let group = r.into_iter()
+                    let val = self.inner.to_diff(&rec[..], rec.is_positive());
+                    let group = rec.iter()
                         .enumerate()
                         .map(|(i, v)| if self.group.contains(&i) {
                             Some(v)
@@ -188,66 +187,55 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
                 let mut out = Vec::with_capacity(2 * consolidate.len());
                 for (group, diffs) in consolidate {
                     // find the current value for this group
-                    let current = {
-                        // Construct the query we'll need to query into ourselves
-                        let mut q = self.cond.clone();
+                    let db = state.get(&self.us.as_ref().unwrap().as_local())
+                        .expect("grouped operators must have their own state materialized");
+                    let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                    let old = rs.get(0);
 
-                        for s in &mut q {
-                            s.cmp = shortcut::Comparison::Equal(
-                                shortcut::Value::using(
-                                    group[self.colfix[s.column]]
-                                    .as_ref()
-                                    .unwrap()
-                                )
-                            );
-                        }
+                    let (current, new) = {
+                        use std::borrow::Cow;
 
-                        // find the current value for this group
-                        match state.get(&self.us.as_ref().unwrap().as_local()) {
-                            Some(db) => {
-                                let mut rs = db.find(&q[..]);
-                                // current value is in the last output column
-                                // or "" if there is no current group
-                                let cur = rs.next()
-                                    .map(|r| r[r.len() - 1].clone().into())
-                                    .unwrap_or(self.inner.zero());
-                                assert_eq!(rs.count(), 0, "a group had more than 1 result");
-                                cur
-                            }
-                            None => {
-                                // TODO
-                                // query ancestor (self.query?) based on self.group columns
-                                unimplemented!()
-                            }
-                        }
+                        // current value is in the last output column
+                        // or "" if there is no current group
+                        let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
+                            .unwrap_or(self.inner.zero().map(|z| Cow::Owned(z)));
+
+                        // new is the result of applying all diffs for the group to the current value
+                        let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
+                        (current, new)
                     };
-
-                    // new is the result of applying all diffs for the group to the current value
-                    let new = self.inner.apply(&current, diffs);
 
                     match current {
                         None => {
                             // emit positive, which is group + new.
-                            let rec = group.into_iter()
+                            let rec: Vec<_> = group.into_iter()
                                 .filter_map(|v| v)
+                                .map(|v| v.clone())
                                 .chain(Some(new.into()).into_iter())
                                 .collect();
                             out.push(ops::Record::Positive(rec));
                         }
-                        Some(ref current) if &new == current => {
+                        Some(ref current) if new == **current => {
                             // no change
                         }
                         Some(current) => {
                             // construct prefix of output record used for both - and +
                             let mut rec = Vec::with_capacity(group.len() + 1);
-                            rec.extend(group.into_iter().filter_map(|v| v));
+                            rec.extend(group.into_iter().filter_map(|v| v).map(|v| v.clone()));
 
                             // revoke old value
-                            rec.push(current.into());
-                            out.push(ops::Record::Negative(rec.clone()));
+                            if old.is_none() {
+                                // we're generating a zero row
+                                // revoke old value
+                                rec.push(current.into_owned());
+                                out.push(ops::Record::Negative(rec.clone()));
 
-                            // remove the old value from the end of the record
-                            rec.pop();
+                                // remove the old value from the end of the record
+                                rec.pop();
+                            } else {
+                                out.push(ops::Record::Negative(old.unwrap().clone()));
+                            }
 
                             // emit new value
                             rec.push(new.into());
@@ -261,97 +249,9 @@ impl<'a, T: GroupedOperation + Send> Ingredient for GroupedOperator<'a, T> {
         }
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        use std::iter;
-
-        // we're fetching everything from our parent
-        let mut params = None;
-
-        // however, if there are some conditions that filters over one of our group-bys, we should
-        // use those as parameters to speed things up.
-        if let Some(q) = q {
-            params = Some(q.having.iter().map(|c| {
-                // FIXME: we could technically support querying over the output of the operator,
-                // but we'd have to restructure this function a fair bit so that we keep that part
-                // of the query around for after we've got the results back. We'd then need to do
-                // another filtering pass over the results of query. Unclear if that's worth it.
-                assert!(c.column < self.colfix.len(),
-                        "filtering on group operation output is not supported");
-
-                shortcut::Condition{
-                    column: self.colfix[c.column],
-                    cmp: c.cmp.clone(),
-                }
-            }).collect::<Vec<_>>());
-
-            if params.as_ref().unwrap().is_empty() {
-                params = None;
-            }
-        }
-
-        // now, query our ancestor, and aggregate into groups.
-        let q = params.map(|ps| {
-            query::Query::new(&iter::repeat(true)
-                                  .take(self.cols)
-                                  .collect::<Vec<_>>(),
-                              ps)
-        });
-
-        let rx = if let Some(state) = states.get(self.src.as_local()) {
-            // parent is materialized
-            state.find(q.as_ref().map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // parent is not materialized, query into parent
-            domain[self.src.as_local()].borrow().query(q.as_ref(), domain, states)
-        };
-
-        // FIXME: having an order by would be nice here, so that we didn't have to keep the entire
-        // aggregated state in memory until we've seen all rows.
-        let mut consolidate = HashMap::new();
-        for rec in rx {
-            let val = self.inner.to_diff(&rec[..], true);
-            let group = rec.into_iter()
-                .enumerate()
-                .filter_map(|(i, v)| if self.group.contains(&i) {
-                    Some(v)
-                } else {
-                    None
-                })
-                .collect::<Vec<_>>();
-
-            let mut cur = consolidate.entry(group).or_insert_with(|| self.inner.zero());
-
-            // FIXME: this might turn out to be really expensive, since apply() is allowed to be an
-            // expensive operation (like for group_concat). we *could* accumulate all records into
-            // a Vec first, and then call apply() only once after all records have been read, but
-            // that would mean much higher (and potentially unnecessary) memory usage. Ideally, we
-            // would allow the GroupOperation to define its own aggregation container for this kind
-            // of use-case, but we leave that as future work for now.
-            let next = self.inner.apply(&cur, vec![val]);
-            *cur = Some(next);
-        }
-
-        consolidate.into_iter()
-            .map(|(mut group, val)| {
-                group.push(val.unwrap());
-                // TODO: respect q.select
-                group
-            })
-            .collect()
-    }
-
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        // index all group by columns,
-        // which are the first self.group.len() columns of our output
-        Some((this, (0..self.group.len()).collect()))
-            .into_iter()
-            .collect()
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
+        // index by our primary key
+        Some((this, self.pkey_out)).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

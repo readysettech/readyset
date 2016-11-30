@@ -20,11 +20,11 @@ impl Aggregation {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn over<'a>(self,
-                    src: NodeAddress,
-                    over: usize,
-                    group_by: &[usize])
-                    -> GroupedOperator<'a, Aggregator> {
+    pub fn over(self,
+                src: NodeAddress,
+                over: usize,
+                group_by: &[usize])
+                -> GroupedOperator<Aggregator> {
         assert!(!group_by.iter().any(|&i| i == over),
                 "cannot group by aggregation column");
         GroupedOperator::new(src,
@@ -91,8 +91,8 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn apply(&self, current: &Option<query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
-        if let Some(query::DataType::Number(n)) = *current {
+    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+        if let Some(&query::DataType::Number(n)) = current {
             diffs.into_iter().fold(n, |n, d| n + d).into()
         } else {
             unreachable!();
@@ -118,38 +118,14 @@ mod tests {
     use super::*;
 
     use ops;
-    use query;
-    use shortcut;
 
-    fn setup(mat: bool, wide: bool) -> ops::test::MockGraph {
+    fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
-        let s = if wide {
-            g.add_base("source", &["x", "y", "z"])
-        } else {
-            g.add_base("source", &["x", "y"])
-        };
-        if wide {
-            g.seed(s, vec![1.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-        } else {
-            g.seed(s, vec![1.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 1.into()]);
-            g.seed(s, vec![2.into(), 2.into()]);
-        }
-
-        if wide {
-            g.set_op("identity",
-                     &["x", "z", "ys"],
-                     Aggregation::COUNT.over(s, 1, &[0, 2]));
-        } else {
-            g.set_op("identity",
-                     &["x", "ys"],
-                     Aggregation::COUNT.over(s, 1, &[0]));
-        }
-        if mat {
-            g.set_materialized();
-        }
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op("identity",
+                 &["x", "ys"],
+                 Aggregation::COUNT.over(s, 1, &[0]),
+                 mat);
         g
     }
 
@@ -166,7 +142,7 @@ mod tests {
 
     #[test]
     fn it_forwards() {
-        let mut c = setup(true, false);
+        let mut c = setup(true);
 
         let u: ops::Record = vec![1.into(), 1.into()].into();
 
@@ -327,65 +303,23 @@ mod tests {
     // TODO: also test SUM
 
     #[test]
-    fn it_queries() {
-        let c = setup(false, false);
-
-        let hits = c.query(None);
-        assert_eq!(hits.len(), 2);
-        assert!(hits.iter().any(|r| r[0] == 1.into() && r[1] == 1.into()));
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(2)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = c.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 2.into() && r[1] == 2.into()));
-    }
-
-    #[test]
-    #[ignore]
-    fn it_queries_zeros() {
-        let c = setup(false, false);
-
-        let val = shortcut::Comparison::Equal(shortcut::Value::new(query::DataType::from(100)));
-        let q = query::Query::new(&[true, true],
-                                  vec![shortcut::Condition {
-                                           column: 0,
-                                           cmp: val,
-                                       }]);
-
-        let hits = c.query(Some(&q));
-        assert_eq!(hits.len(), 1);
-        assert!(hits.iter().any(|r| r[0] == 100.into() && r[1] == 0.into()));
-    }
-
-    #[test]
     fn it_suggests_indices() {
         let me = NodeAddress::mock_global(1.into());
-        let c = setup(false, true);
+        let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
         // should only add index on own columns
         assert_eq!(idx.len(), 1);
         assert!(idx.contains_key(&me));
 
-        // should only index on group-by columns
-        assert_eq!(idx[&me].len(), 2);
-        assert!(idx[&me].iter().any(|&i| i == 0));
-        assert!(idx[&me].iter().any(|&i| i == 1));
-        // specifically, not last column, which is output
+        // should only index on the group-by column
+        assert_eq!(idx[&me], 0);
     }
 
     #[test]
     fn it_resolves() {
-        let c = setup(false, true);
+        let c = setup(false);
         assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
-        assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 2)]));
-        assert_eq!(c.node().resolve(2), None);
+        assert_eq!(c.node().resolve(1), None);
     }
 }

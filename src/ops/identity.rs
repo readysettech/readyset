@@ -1,6 +1,3 @@
-use ops;
-use query;
-
 use std::collections::HashMap;
 
 use flow::prelude::*;
@@ -42,23 +39,7 @@ impl Ingredient for Identity {
         input.data.into()
     }
 
-    fn query(&self,
-             q: Option<&query::Query>,
-             domain: &DomainNodes,
-             states: &StateMap)
-             -> ops::Datas {
-        if let Some(state) = states.get(self.src.as_local()) {
-            // parent is materialized
-            state.find(q.map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .collect()
-        } else {
-            // parent is not materialized, query into parent
-            domain[self.src.as_local()].borrow().query(q, domain, states)
-        }
-    }
-
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         // TODO
         HashMap::new()
     }
@@ -81,15 +62,7 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.seed(s, vec![1.into(), 1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 1.into(), 1.into()]);
-        g.seed(s, vec![2.into(), 2.into(), 1.into()]);
-        g.seed(s, vec![1.into(), 2.into(), 1.into()]);
-        g.seed(s, vec![3.into(), 3.into(), 1.into()]);
-        g.set_op("identity", &["x", "y", "z"], Identity::new(s));
-        if materialized {
-            g.set_materialized();
-        }
+        g.set_op("identity", &["x", "y", "z"], Identity::new(s), materialized);
         g
     }
 
@@ -103,14 +76,6 @@ mod tests {
                 assert_eq!(rs, vec![left]);
             }
         }
-    }
-
-    #[test]
-    fn it_queries() {
-        let g = setup(false);
-        let hits = g.query(None);
-        println!("{:?}", hits);
-        assert_eq!(hits.len(), 5);
     }
 
     #[test]

@@ -1,6 +1,3 @@
-use ops;
-use query;
-
 use std::collections::HashMap;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
@@ -32,11 +29,7 @@ impl Ingredient for Base {
         Some(input.data)
     }
 
-    fn query(&self, _: Option<&query::Query>, _: &DomainNodes, _: &StateMap) -> ops::Datas {
-        unreachable!("base nodes should never be queried directly");
-    }
-
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         HashMap::new()
     }
 
