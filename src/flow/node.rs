@@ -45,9 +45,9 @@ impl Type {
 impl Deref for Type {
     type Target = Ingredient;
     fn deref(&self) -> &Self::Target {
-        match self {
-            &Type::Internal(_, ref i) |
-            &Type::Unassigned(ref i) => i.deref(),
+        match *self {
+            Type::Internal(_, ref i) |
+            Type::Unassigned(ref i) => i.deref(),
             _ => unreachable!(),
         }
     }
@@ -55,9 +55,9 @@ impl Deref for Type {
 
 impl DerefMut for Type {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            &mut Type::Internal(_, ref mut i) |
-            &mut Type::Unassigned(ref mut i) => i.deref_mut(),
+        match *self {
+            Type::Internal(_, ref mut i) |
+            Type::Unassigned(ref mut i) => i.deref_mut(),
             _ => unreachable!(),
         }
     }
@@ -119,12 +119,10 @@ impl Node {
                 // reader nodes can still be modified externally if txs are added
                 Type::Reader(d, r.clone())
             }
-            ref mut n @ Type::Ingress(..) => {
-                // no-one else will be using our ingress node, so we take it from the graph
-                mem::replace(n, Type::Taken(domain.unwrap()))
-            }
+            ref mut n @ Type::Ingress(..) |
             ref mut n @ Type::Internal(..) => {
-                // same with internal nodes
+                // no-one else will be using our ingress or internal node,
+                // so we take it from the graph
                 mem::replace(n, Type::Taken(domain.unwrap()))
             }
             _ => unreachable!(),

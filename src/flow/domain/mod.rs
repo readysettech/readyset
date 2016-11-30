@@ -150,14 +150,14 @@ impl Domain {
             let mut tmp = HashMap::new();
             while !leftover_indices.is_empty() {
                 for (v, cols) in leftover_indices.drain() {
-                    if let Some(ref mut state) = state.get_mut(&v.as_local()) {
+                    if let Some(ref mut state) = state.get_mut(v.as_local()) {
                         // this node is materialized! add the indices!
                         // we *currently* only support keeping one materialization per node
                         assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
                         let col = cols.into_iter().next().unwrap();
                         println!("adding index on column {:?} of view {:?}", col, v);
                         state.set_pkey(col);
-                    } else if let Some(ref node) = nodes.get(&v) {
+                    } else if let Some(node) = nodes.get(&v) {
                         // this node is not materialized
                         // we need to push the index up to its ancestor(s)
                         if let flow::node::Type::Ingress(..) = *node.inner {

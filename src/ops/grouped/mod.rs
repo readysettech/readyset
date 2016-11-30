@@ -188,7 +188,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                 let mut out = Vec::with_capacity(2 * consolidate.len());
                 for (group, diffs) in consolidate {
                     // find the current value for this group
-                    let db = state.get(&self.us.as_ref().unwrap().as_local())
+                    let db = state.get(self.us.as_ref().unwrap().as_local())
                         .expect("grouped operators must have their own state materialized");
                     let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
                     debug_assert!(rs.len() <= 1, "a group had more than 1 result");
@@ -200,7 +200,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                         // current value is in the last output column
                         // or "" if there is no current group
                         let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
-                            .unwrap_or(self.inner.zero().map(|z| Cow::Owned(z)));
+                            .unwrap_or(self.inner.zero().map(Cow::Owned));
 
                         // new is the result of applying all diffs for the group to the current value
                         let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
@@ -212,7 +212,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                             // emit positive, which is group + new.
                             let rec: Vec<_> = group.into_iter()
                                 .filter_map(|v| v)
-                                .map(|v| v.clone())
+                                .cloned()
                                 .chain(Some(new.into()).into_iter())
                                 .collect();
                             out.push(ops::Record::Positive(sync::Arc::new(rec)));
@@ -223,7 +223,7 @@ impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
                         Some(current) => {
                             // construct prefix of output record used for both - and +
                             let mut rec = Vec::with_capacity(group.len() + 1);
-                            rec.extend(group.into_iter().filter_map(|v| v).map(|v| v.clone()));
+                            rec.extend(group.into_iter().filter_map(|v| v).cloned());
 
                             // revoke old value
                             if old.is_none() {
