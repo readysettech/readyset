@@ -64,10 +64,17 @@ fn build(workdir: &str) -> ExitStatus {
         .expect("Failed to execute 'cargo build'!")
 }
 
-pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> TastingResult {
+pub fn taste_commit(wsl: &Mutex<Workspace>,
+                    id: &str,
+                    msg: &str,
+                    url: &str)
+                    -> Result<TastingResult, String> {
     println!("Tasting commit {}", id);
     let ws = wsl.lock().unwrap();
-    ws.checkout_commit(id);
+    match ws.checkout_commit(id) {
+        Err(e) => return Err(e),
+        Ok(()) => (),
+    };
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();
@@ -78,7 +85,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
             match e.kind() {
                 io::ErrorKind::NotFound => {
                     println!("Skipping commit {} which doesn't have a Taster config.", id);
-                    return TastingResult {
+                    return Ok(TastingResult {
                         commit_id: String::from(id),
                         commit_msg: String::from(msg),
                         commit_url: String::from(url),
@@ -86,7 +93,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
                         test: test_success,
                         bench: false,
                         results: None,
-                    };
+                    });
                 }
                 _ => unimplemented!(),
             }
@@ -99,7 +106,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
     let bench_success = bench_out.iter().all(|x| x.0.success());
     let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
 
-    TastingResult {
+    Ok(TastingResult {
         commit_id: String::from(id),
         commit_msg: String::from(msg),
         commit_url: String::from(url),
@@ -107,7 +114,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>, id: &str, msg: &str, url: &str) -> T
         test: test_success,
         bench: bench_success,
         results: Some(bench_results),
-    }
+    })
 }
 
 fn test(workdir: &str) -> ExitStatus {

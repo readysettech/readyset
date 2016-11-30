@@ -71,13 +71,18 @@ impl Workspace {
         })
     }
 
-    pub fn checkout_commit(&self, commit_id: &str) {
+    pub fn checkout_commit(&self, commit_id: &str) -> Result<(), String> {
+        use std::error::Error;
         // N.B.: this crashes hard if the commit is invalid (e.g., because workdir contains the
         // wrong repo)
-        let c = self.repo.find_object(Oid::from_str(commit_id).unwrap(), None).unwrap();
+        let c = match self.repo.find_object(Oid::from_str(commit_id).unwrap(), None) {
+            Err(e) => return Err(String::from(e.description())),
+            Ok(o) => o,
+        };
         match self.repo.reset(&c, ResetType::Hard, None) {
             Ok(_) => println!("Checked out {}", commit_id),
             Err(e) => println!("Failed to check out {}: {}", commit_id, e.message()),
         };
+        Ok(())
     }
 }
