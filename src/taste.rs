@@ -71,10 +71,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
                     -> Result<TastingResult, String> {
     println!("Tasting commit {}", id);
     let ws = wsl.lock().unwrap();
-    match ws.checkout_commit(id) {
-        Err(e) => return Err(e),
-        Ok(()) => (),
-    };
+    ws.checkout_commit(id)?;
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();

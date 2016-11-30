@@ -196,7 +196,7 @@ pub fn main() {
                                     Ok(tr) => notify(&tr),
                                 }
                             }
-                        } else if commits.len() > 0 {
+                        } else if !commits.is_empty() {
                             println!("Skipping {} remaining commits in push!", commits.len() - 1);
                         }
                     }

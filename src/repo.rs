@@ -73,8 +73,8 @@ impl Workspace {
 
     pub fn checkout_commit(&self, commit_id: &str) -> Result<(), String> {
         use std::error::Error;
-        // N.B.: this crashes hard if the commit is invalid (e.g., because workdir contains the
-        // wrong repo)
+        // N.B.: this will turn into a no-op if the workdir contains the wrong
+        // repo, as the commit won't exist
         let c = match self.repo.find_object(Oid::from_str(commit_id).unwrap(), None) {
             Err(e) => return Err(String::from(e.description())),
             Ok(o) => o,
