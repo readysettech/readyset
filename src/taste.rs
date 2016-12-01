@@ -54,7 +54,15 @@ fn benchmark(workdir: &str,
                 let bm_name = format!("{}/{}", cfg.name, &metric);
                 if let Some(c) = value {
                     use std::str::FromStr;
-                    let val = f64::from_str(&c).unwrap();
+                    let val = match f64::from_str(&c) {
+                        Ok(f) => f,
+                        Err(_) => {
+                            println!("failed to parse value '{}' for {} into f64 number, ignoring",
+                                     c,
+                                     bm_name);
+                            continue;
+                        }
+                    };
                     let new_result = match previous_result {
                         None => BenchmarkResult::Neutral(val, 0.0),
                         Some(prev_res) => {
