@@ -159,6 +159,38 @@ mod tests {
     }
 
     #[test]
+    fn busybusybusy() {
+        use shortcut;
+        use std::thread;
+
+        let mut db = new(1);
+        db.index(0, shortcut::idx::HashIndex::new());
+
+        let n = 10000;
+        let (r, mut w) = db.commit();
+        thread::spawn(move || for i in 0..n {
+            w.add(vec![ops::Record::Positive(sync::Arc::new(vec![i.into()]))]);
+            w.swap();
+        });
+
+        let mut cmp = vec![shortcut::Condition {
+                               column: 0,
+                               cmp: shortcut::Comparison::Equal(shortcut::Value::new(0)),
+                           }];
+        for i in 0..n {
+            cmp[0].cmp = shortcut::Comparison::Equal(shortcut::Value::new(i));
+            loop {
+                let rows = r.find_and(&cmp[..], |rs| rs.len());
+                match rows {
+                    0 => continue,
+                    1 => break,
+                    i => assert_ne!(i, 1),
+                }
+            }
+        }
+    }
+
+    #[test]
     fn minimal_query() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
         let b = sync::Arc::new(vec![2.into(), "b".into()]);
