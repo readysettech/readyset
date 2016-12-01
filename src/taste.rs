@@ -92,7 +92,8 @@ fn build(workdir: &str) -> ExitStatus {
 }
 
 pub fn taste_commit(wsl: &Mutex<Workspace>,
-                    history: &mut HashMap<String, HashMap<String, BenchmarkResult<f64>>>,
+                    history: &mut HashMap<String,
+                                          HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
                     commit_ref: &str,
                     id: &str,
                     msg: &str,
@@ -129,10 +130,11 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
         }
     };
 
+    let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
     let bench_out = cfg.iter()
         .map(|b| {
-            let new_result = benchmark(&ws.path, b, history.get(&b.name));
-            history.insert(b.name.clone(), new_result.1.clone());
+            let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
+            branch_history.insert(b.name.clone(), new_result.1.clone());
             new_result
         })
         .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>();
