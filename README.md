@@ -1,6 +1,7 @@
 # Taster: automatic performance regression tests for Rust
 
-Still under development.
+Taster automatically tests commits to a project written in Rust and informs a
+configurable Slack channel of any failures or performance regressions.
 
 ## How to use
 
@@ -12,18 +13,24 @@ configure benchmarks in it:
 # that's "cargo bench"
 command = "bench"
 args = ["--bench", "bench", "--", "--some-flag", "--another-flag=42"]
-regexs = ["([0-9.]+ req/sec)", "(latency [0-9.]+ms)"]
+regexs = ["(throughput): ([0-9.]+) req/sec", "(latency): ([0-9.]+)ms"]
 
 [my-second-benchmark]
 # that's "cargo run"
 command = "run"
 args = ["--bin", "standalone_benchmark", "--", "--some-flag"]
-regexs = ["([0-9.]+ req/sec)", "(latency [0-9.]+ms)"]
+regexs = ["(throughput): ([0-9.]+) req/sec", "(latency): ([0-9.]+)ms"]
 
 ```
+Each regular expression must have one or two capture groups:
+ 1. The name of the metric being measured (a string; optional)
+ 2. The value of the benchmark result (an integer or floating point number;
+    required).
+If only one capture group is found, Taster assumes that it contains a number
+corresponding to the benchmark result.
 
-Then configure a GitHub webhook for taster that delivers notifications for push
-events, and start taster:
+Finally, configure a GitHub webhook for taster that delivers notifications for
+push events, and start taster:
 
 ```
 cargo run -- \
