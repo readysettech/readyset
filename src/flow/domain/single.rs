@@ -3,7 +3,6 @@ use petgraph::graph::NodeIndex;
 use flow::prelude::*;
 
 use ops;
-use shortcut;
 
 macro_rules! broadcast {
     ($from:expr, $handoffs:ident, $m:expr, $children:expr) => {{
@@ -48,46 +47,13 @@ impl NodeDescriptor {
             return Some(m.data);
         }
 
-        if let flow::node::Type::Reader(_, ref r) = *self.inner {
+        if let flow::node::Type::Reader(_, ref mut w, ref r) = *self.inner {
             {
-                let mut state = r.state.write().unwrap();
-                if let Some(ref mut state) = state.as_mut() {
+                if let Some(ref mut state) = *w {
                     match m.data {
-                        ops::Update::Records(ref rs) => {
-                            for r in rs {
-                                match *r {
-                                    ops::Record::Positive(ref r) => state.insert(r.deref().clone()),
-                                    ops::Record::Negative(ref r) => {
-                                        // we need a cond that will match this row.
-                                        let conds = r.iter()
-                                            .enumerate()
-                                            .map(|(coli, v)| {
-                                                shortcut::Condition {
-                                                    column: coli,
-                                                    cmp: shortcut::Comparison::Equal(
-                                                        shortcut::Value::using(v)
-                                                    ),
-                                                }
-                                            })
-                                            .collect::<Vec<_>>();
-
-                                        // however, multiple rows may have the same values as this
-                                        // row for every column. afaict, it is safe to delete any
-                                        // one of these rows. we do this by returning true for the
-                                        // first invocation of the filter function, and false for
-                                        // all subsequent invocations.
-                                        let mut first = true;
-                                        state.delete_filter(&conds[..], |_| if first {
-                                            first = false;
-                                            true
-                                        } else {
-                                            false
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                        ops::Update::Records(ref rs) => state.add(rs.iter().cloned()),
                     }
+                    state.swap();
                 }
 
             }

@@ -6,24 +6,23 @@ use std::fmt;
 
 use std::ops::{Deref, DerefMut};
 
-use shortcut;
 use ops::Update;
-use query::DataType;
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
 
+use backlog;
 
 #[derive(Default, Clone)]
 pub struct Reader {
     pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
-    pub state: sync::Arc<sync::RwLock<Option<shortcut::Store<DataType>>>>,
+    pub state: Option<backlog::BufferedStore>,
 }
 
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
     Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
-    Reader(Option<domain::Index>, Reader), // domain only known at commit time!
+    Reader(Option<domain::Index>, Option<backlog::WriteHandle>, Reader), /* domain only known at commit time! */
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
     Source,
@@ -36,7 +35,7 @@ impl Type {
             Type::Ingress(d) |
             Type::Internal(d, _) |
             Type::Egress(d, _) => Some(d),
-            Type::Reader(d, _) => d,
+            Type::Reader(d, _, _) => d,
             _ => None,
         }
     }
@@ -115,9 +114,9 @@ impl Node {
                 // so we just make a new one with a clone of the Mutex-protected Vec
                 Type::Egress(d, txs.clone())
             }
-            Type::Reader(d, ref r) => {
+            Type::Reader(d, ref mut w, ref r) => {
                 // reader nodes can still be modified externally if txs are added
-                Type::Reader(d, r.clone())
+                Type::Reader(d, w.take(), r.clone())
             }
             ref mut n @ Type::Ingress(..) |
             ref mut n @ Type::Internal(..) => {

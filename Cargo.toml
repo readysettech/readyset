@@ -8,12 +8,13 @@ web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcache"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_netsoup = ["tarpc", "serde", "serde_derive"]
-rtm = ['no_strings']
+rtm = ['no_strings', 'no_domains']
 no_strings = []
+no_domains = []
 
 [dependencies]
 petgraph = "0.4"
-shortcut = "4.0"
+shortcut = "4.1"
 clocked-dispatch = "4.0"
 regex = "0.1"
 fnv = "1.0"

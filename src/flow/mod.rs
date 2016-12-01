@@ -324,7 +324,7 @@ impl<'a> Migration<'a> {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
             let r = node::Reader::default();
-            let r = node::Type::Reader(None, r);
+            let r = node::Type::Reader(None, None, r);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
@@ -334,7 +334,7 @@ impl<'a> Migration<'a> {
 
     fn reader_for(&self, n: NodeAddress) -> &node::Reader {
         let ri = self.readers[n.as_global()];
-        if let node::Type::Reader(_, ref inner) = *self.mainline.ingredients[ri] {
+        if let node::Type::Reader(_, _, ref inner) = *self.mainline.ingredients[ri] {
             &*inner
         } else {
             unreachable!("tried to use non-reader node as a reader")
@@ -349,39 +349,47 @@ impl<'a> Migration<'a> {
                     n: NodeAddress)
                     -> Box<Fn(Option<&query::Query>) -> ops::Datas + Send + Sync> {
         self.ensure_reader_for(n);
-        let arc = &self.reader_for(n).state;
 
-        // tell the reader to materialize state if it wasn't alrady
-        let mut r = arc.write().unwrap();
-        if r.is_none() {
-            use shortcut;
-            let cols = self.mainline.ingredients[self.readers[n.as_global()]].fields().len();
-            let mut state = shortcut::Store::new(cols);
-            // we're also going to add all the indices that the parent view has
-            // TODO: in the future we may want to let the user hint things to us
-            let mut idxs = self.mainline.ingredients[*n.as_global()].suggest_indexes(n);
-            if let Some(idx) = idxs.remove(&n) {
-                state.index(idx, shortcut::idx::HashIndex::new());
-            } else {
-                // TODO
-                println!("warning: no indicies applied to externally visible state for {}",
-                         n);
+        let ri = self.readers[n.as_global()];
+
+        // we need to do these here because we'll mutably borrow self.mainline in the if let
+        let cols = self.mainline.ingredients[ri].fields().len();
+        let mut idxs = self.mainline.ingredients[*n.as_global()].suggest_indexes(n);
+
+        if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
+            if inner.state.is_none() {
+                use backlog;
+                let mut state = backlog::new(cols);
+                // we're also going to add all the indices that the parent view has
+                // TODO: in the future we may want to let the user hint things to us
+                if let Some(idx) = idxs.remove(&n) {
+                    state.index(idx, backlog::index::FnvHashIndex::new());
+                } else {
+                    // TODO
+                    println!("warning: no indicies applied to externally visible state for {}",
+                             n);
+                }
+                let (r, w) = state.commit();
+                inner.state = Some(r);
+                *wh = Some(w);
             }
-            *r = Some(state);
-        }
 
-        // cook up a function to query this materialized state
-        let arc = arc.clone();
-        Box::new(move |q: Option<&query::Query>| -> ops::Datas {
-            let rx = arc.read().unwrap();
-            let res = rx.as_ref()
-                .unwrap()
-                .find(q.map(|q| &q.having[..]).unwrap_or(&[]))
-                .map(|r| r.iter().cloned().collect())
-                .filter_map(|r| if let Some(q) = q { q.feed(r) } else { Some(r) })
-                .collect();
-            res
-        })
+            // cook up a function to query this materialized state
+            let arc = inner.state.as_ref().unwrap().clone();
+            Box::new(move |q: Option<&query::Query>| -> ops::Datas {
+                let res = arc.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]), |rs| {
+                        // without projection, we wouldn't need to clone here
+                        // because we wouldn't need the "feed" below
+                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                    })
+                    .into_iter()
+                    .filter_map(|r| if let Some(q) = q { q.feed(r) } else { Some(r) })
+                    .collect();
+                res
+            })
+        } else {
+            unreachable!("tried to use non-reader node as a reader")
+        }
     }
 
     /// Obtain a channel that is fed by the output stream of the given node.
@@ -549,7 +557,7 @@ impl<'a> Migration<'a> {
                 .collect(); // collect so we can mutate mainline.ingredients
 
             for child in children {
-                if let node::Type::Reader(ref mut rd, _) = *self.mainline.ingredients[child] {
+                if let node::Type::Reader(ref mut rd, _, _) = *self.mainline.ingredients[child] {
                     // readers are always in the same domain as their parent
                     // they also only ever have a single parent (i.e., the node they read)
                     // because of this, we know that we will only hit this if *exactly once*

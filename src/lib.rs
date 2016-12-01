@@ -354,6 +354,7 @@
 //!
 #![feature(optin_builtin_traits)]
 #![feature(proc_macro)]
+#![feature(ptr_eq)]
 #![deny(missing_docs)]
 
 #[cfg(feature="b_netsoup")]
@@ -381,6 +382,7 @@ extern crate tarpc;
 mod flow;
 mod query;
 mod ops;
+mod backlog;
 
 pub use flow::{Blender, Migration};
 pub use ops::base::Base;
