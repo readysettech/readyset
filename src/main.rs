@@ -125,7 +125,7 @@ pub fn main() {
         } else {
             String::from(taste_commit.unwrap())
         };
-        let res = taste::taste_commit(&wsl, &cid, &cid, "");
+        let res = taste::taste_commit(&wsl, "", &cid, &cid, "");
         match res {
             Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
             Ok(tr) => {
@@ -149,7 +149,7 @@ pub fn main() {
     let mut hub = Hub::new();
     hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
         match delivery.payload {
-            Event::Push { ref commits, ref head_commit, ref pusher, .. } => {
+            Event::Push { ref _ref, ref commits, ref head_commit, ref pusher, .. } => {
                 let notify = |res: &taste::TastingResult| {
                     // email notification
                     if en.is_some() {
@@ -169,6 +169,7 @@ pub fn main() {
                 }
                 // First state the head commit
                 let head_res = taste::taste_commit(&wsl,
+                                                   &_ref,
                                                    &head_commit.id,
                                                    &head_commit.message,
                                                    &head_commit.url);
@@ -188,7 +189,8 @@ pub fn main() {
                                     continue;
                                 }
                                 // taste
-                                let res = taste::taste_commit(&wsl, &c.id, &c.message, &c.url);
+                                let res =
+                                    taste::taste_commit(&wsl, &_ref, &c.id, &c.message, &c.url);
                                 match res {
                                     Err(e) => {
                                         println!("ERROR: failed to taste commit {}: {}", c.id, e)

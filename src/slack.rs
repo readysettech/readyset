@@ -21,9 +21,9 @@ impl SlackNotifier {
     pub fn notify(&self, res: &TastingResult) -> Result<(), String> {
         let payload = PayloadBuilder::new()
             .text(vec![Text("I've tasted commit _".into()),
-                       Text(format!("\"{}\"_ -- ", res.commit_msg.lines().next().unwrap())
-                           .into()),
-                       Link(SlackLink::new(&res.commit_url, &res.commit_id[0..6]))]
+                       Text(format!("\"{}\"_ (", res.commit_msg.lines().next().unwrap()).into()),
+                       Link(SlackLink::new(&res.commit_url, &res.commit_id[0..6])),
+                       Text(format!(") from branch *{}*", res.branch).into())]
                 .as_slice())
             .attachments(result_to_attachments(&res))
             .channel(self.channel.clone())

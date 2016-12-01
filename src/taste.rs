@@ -18,6 +18,7 @@ pub enum BenchmarkResult<T> {
 
 #[derive(Debug, Clone)]
 pub struct TastingResult {
+    pub branch: String,
     pub commit_id: String,
     pub commit_msg: String,
     pub commit_url: String,
@@ -65,6 +66,7 @@ fn build(workdir: &str) -> ExitStatus {
 }
 
 pub fn taste_commit(wsl: &Mutex<Workspace>,
+                    commit_ref: &str,
                     id: &str,
                     msg: &str,
                     url: &str)
@@ -72,6 +74,8 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
     println!("Tasting commit {}", id);
     let ws = wsl.lock().unwrap();
     ws.checkout_commit(id)?;
+
+    let branch = String::from(&commit_ref[commit_ref.rfind("/").unwrap() + 1..]);
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();
@@ -83,6 +87,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
                 io::ErrorKind::NotFound => {
                     println!("Skipping commit {} which doesn't have a Taster config.", id);
                     return Ok(TastingResult {
+                        branch: branch,
                         commit_id: String::from(id),
                         commit_msg: String::from(msg),
                         commit_url: String::from(url),
@@ -104,6 +109,7 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
     let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
 
     Ok(TastingResult {
+        branch: branch,
         commit_id: String::from(id),
         commit_msg: String::from(msg),
         commit_url: String::from(url),
