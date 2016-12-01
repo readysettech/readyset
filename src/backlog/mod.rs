@@ -177,6 +177,8 @@ impl BufferedStore {
     }
 }
 
+pub mod index;
+
 #[cfg(test)]
 mod tests {
     use super::*;

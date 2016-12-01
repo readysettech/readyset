@@ -358,13 +358,12 @@ impl<'a> Migration<'a> {
 
         if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
-                use shortcut;
                 use backlog;
                 let mut state = backlog::new(cols);
                 // we're also going to add all the indices that the parent view has
                 // TODO: in the future we may want to let the user hint things to us
                 if let Some(idx) = idxs.remove(&n) {
-                    state.index(idx, shortcut::idx::HashIndex::new());
+                    state.index(idx, backlog::index::FnvHashIndex::new());
                 } else {
                     // TODO
                     println!("warning: no indicies applied to externally visible state for {}",
