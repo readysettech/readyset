@@ -157,7 +157,6 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
     use std::collections::HashMap;
 
     let qg = to_query_graph(st);
-    // println!("Query graph: {:#?}", qg);
 
     let mut filter_nodes = HashMap::new();
     // TODO(malte): the following ugliness is required since we need to iterate over the HashMap in
@@ -353,7 +352,6 @@ mod tests {
         assert_eq!(new_view.args(), &["name"]);
         assert_eq!(new_view.node().unwrap().operator().description(),
                    format!("π[1]"));
-        println!("{}", g);
     }
 
 
