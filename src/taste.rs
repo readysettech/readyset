@@ -72,9 +72,9 @@ fn benchmark(workdir: &str,
                                 BenchmarkResult::Neutral(v, _) => v,
                             };
                             let new_result = if val >= old_val {
-                                BenchmarkResult::Regression(val, (val / old_val) - 1.0)
-                            } else if val < old_val * 0.9 {
                                 BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                            } else if val < old_val * 0.9 {
+                                BenchmarkResult::Regression(val, (val / old_val) - 1.0)
                             } else {
                                 BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
                             };
