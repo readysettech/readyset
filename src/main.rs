@@ -36,7 +36,7 @@ pub fn main() {
 
     let args = App::new("taster")
         .version("0.0.1")
-        .about("Tastes Soup commits.")
+        .about("Tastes GitHub commits.")
         .arg(Arg::with_name("listen_addr")
             .short("l")
             .long("listen_addr")
