@@ -381,6 +381,7 @@ extern crate tarpc;
 mod flow;
 mod query;
 mod ops;
+mod backlog;
 
 pub use flow::{Blender, Migration};
 pub use ops::base::Base;
