@@ -86,26 +86,48 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
         .unwrap();
     attachments.push(build_att);
 
+    let is_regression = |(_, v): (_, &BenchmarkResult<f64>)| match *v {
+        BenchmarkResult::Regression(_, _) => true,
+        _ => false,
+    };
+
     match res.results {
         None => (),
         Some(ref r) => {
             for res in r {
                 let mut nv = res.iter()
                     .map(|(k, v)| {
-                        let val = match v {
-                            &BenchmarkResult::Neutral(ref s, _) => s,
-                            _ => unimplemented!(),
+                        let val = match *v {
+                            BenchmarkResult::Improvement(ref s, ref p) => (s, p),
+                            BenchmarkResult::Neutral(ref s, ref p) => (s, p),
+                            BenchmarkResult::Regression(ref s, ref p) => (s, p),
+                        };
+                        let icon = if *val.1 > 0.1 {
+                            ":chart_with_upwards_trend:"
+                        } else if *val.1 < -0.1 {
+                            ":chart_with_downwards_trend:"
+                        } else {
+                            ""
                         };
                         Field {
                             title: k.clone(),
-                            value: SlackText::new(val.clone()),
+                            value: SlackText::new(format!("{} {} ({:+.2}%)", icon, val.0, val.1)),
                             short: Some(true),
                         }
                     })
                     .collect::<Vec<_>>();
                 nv.sort_by(|a, b| b.title.cmp(&a.title));
+
+                let col = if res.iter().all(&is_regression) {
+                    "danger"
+                } else if res.iter().any(&is_regression) {
+                    "warning"
+                } else {
+                    "good"
+                };
+
                 let att = AttachmentBuilder::new("")
-                    .color(color)
+                    .color(col)
                     .fields(nv)
                     .build()
                     .unwrap();

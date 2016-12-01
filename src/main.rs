@@ -20,8 +20,9 @@ mod taste;
 
 use afterparty::{Delivery, Event, Hub};
 use hyper::Server;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const TASTER_USAGE: &'static str = "\
@@ -104,6 +105,8 @@ pub fn main() {
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
+    let history = HashMap::new();
+    let hl = Arc::new(Mutex::new(history));
     let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
     let en = if let Some(addr) = email_notification_addr {
         Some(email::EmailNotifier::new(addr, repo))
@@ -125,7 +128,8 @@ pub fn main() {
         } else {
             String::from(taste_commit.unwrap())
         };
-        let res = taste::taste_commit(&wsl, "", &cid, &cid, "");
+        let mut hist = hl.lock().unwrap();
+        let res = taste::taste_commit(&wsl, &mut hist, "", &cid, &cid, "");
         match res {
             Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
             Ok(tr) => {
@@ -167,39 +171,50 @@ pub fn main() {
                     let ws = wsl.lock().unwrap();
                     ws.fetch().unwrap();
                 }
-                // First state the head commit
-                let head_res = taste::taste_commit(&wsl,
-                                                   &_ref,
-                                                   &head_commit.id,
-                                                   &head_commit.message,
-                                                   &head_commit.url);
-                match head_res {
-                    Err(e) => {
-                        println!("ERROR: failed to taste HEAD commit {}: {}",
-                                 head_commit.id,
-                                 e)
-                    }
-                    Ok(tr) => {
-                        notify(&tr);
-                        // Taste others if needed
-                        if !taste_head_only || !tr.build || !tr.bench {
-                            for c in commits.iter() {
-                                if c.id == head_commit.id {
-                                    // skip HEAD as we've already tested it
-                                    continue;
-                                }
-                                // taste
-                                let res =
-                                    taste::taste_commit(&wsl, &_ref, &c.id, &c.message, &c.url);
-                                match res {
-                                    Err(e) => {
-                                        println!("ERROR: failed to taste commit {}: {}", c.id, e)
+                {
+                    let mut history = hl.lock().unwrap();
+                    // First state the head commit
+                    let head_res = taste::taste_commit(&wsl,
+                                                       &mut history,
+                                                       &_ref,
+                                                       &head_commit.id,
+                                                       &head_commit.message,
+                                                       &head_commit.url);
+                    match head_res {
+                        Err(e) => {
+                            println!("ERROR: failed to taste HEAD commit {}: {}",
+                                     head_commit.id,
+                                     e)
+                        }
+                        Ok(tr) => {
+                            notify(&tr);
+                            // Taste others if needed
+                            if !taste_head_only || !tr.build || !tr.bench {
+                                for c in commits.iter() {
+                                    if c.id == head_commit.id {
+                                        // skip HEAD as we've already tested it
+                                        continue;
                                     }
-                                    Ok(tr) => notify(&tr),
+                                    // taste
+                                    let res = taste::taste_commit(&wsl,
+                                                                  &mut history,
+                                                                  &_ref,
+                                                                  &c.id,
+                                                                  &c.message,
+                                                                  &c.url);
+                                    match res {
+                                        Err(e) => {
+                                            println!("ERROR: failed to taste commit {}: {}",
+                                                     c.id,
+                                                     e)
+                                        }
+                                        Ok(tr) => notify(&tr),
+                                    }
                                 }
+                            } else if !commits.is_empty() {
+                                println!("Skipping {} remaining commits in push!",
+                                         commits.len() - 1);
                             }
-                        } else if !commits.is_empty() {
-                            println!("Skipping {} remaining commits in push!", commits.len() - 1);
                         }
                     }
                 }

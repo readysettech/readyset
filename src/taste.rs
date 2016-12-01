@@ -11,9 +11,9 @@ use std::sync::Mutex;
 /// `(val, percentage_change)`
 #[derive(Debug, Clone)]
 pub enum BenchmarkResult<T> {
-    Improvement(T, i64),
-    Regression(T, i64),
-    Neutral(T, i64),
+    Improvement(T, f64),
+    Regression(T, f64),
+    Neutral(T, f64),
 }
 
 #[derive(Debug, Clone)]
@@ -25,12 +25,13 @@ pub struct TastingResult {
     pub build: bool,
     pub test: bool,
     pub bench: bool,
-    pub results: Option<Vec<HashMap<String, BenchmarkResult<String>>>>,
+    pub results: Option<Vec<HashMap<String, BenchmarkResult<f64>>>>,
 }
 
 fn benchmark(workdir: &str,
-             cfg: &Benchmark)
-             -> (ExitStatus, HashMap<String, BenchmarkResult<String>>) {
+             cfg: &Benchmark,
+             previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>)
+             -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(workdir)
         .env("RUST_BACKTRACE", "1")
@@ -45,9 +46,34 @@ fn benchmark(workdir: &str,
     for l in lines {
         for (i, regex) in cfg.result_expr.iter().enumerate() {
             for cap in regex.captures_iter(l) {
-                for c in cap.iter() {
-                    res.insert(format!("{}/{}", cfg.name, i),
-                               BenchmarkResult::Neutral(String::from(c.unwrap()), 0));
+                let (metric, value) = if cap.len() > 2 {
+                    (String::from(cap.at(1).unwrap()), cap.at(2))
+                } else {
+                    (format!("{}", i), cap.at(1))
+                };
+                let bm_name = format!("{}/{}", cfg.name, &metric);
+                if let Some(c) = value {
+                    use std::str::FromStr;
+                    let val = f64::from_str(&c).unwrap();
+                    let new_result = match previous_result {
+                        None => BenchmarkResult::Neutral(val, 0.0),
+                        Some(prev_res) => {
+                            let old_val = match *prev_res.get(&bm_name).unwrap() {
+                                BenchmarkResult::Improvement(v, _) => v,
+                                BenchmarkResult::Regression(v, _) => v,
+                                BenchmarkResult::Neutral(v, _) => v,
+                            };
+                            let new_result = if val >= old_val {
+                                BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                            } else if val < old_val * 0.9 {
+                                BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                            } else {
+                                BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                            };
+                            new_result
+                        }
+                    };
+                    res.insert(bm_name, new_result);
                 }
             }
         }
@@ -66,6 +92,7 @@ fn build(workdir: &str) -> ExitStatus {
 }
 
 pub fn taste_commit(wsl: &Mutex<Workspace>,
+                    history: &mut HashMap<String, HashMap<String, BenchmarkResult<f64>>>,
                     commit_ref: &str,
                     id: &str,
                     msg: &str,
@@ -103,8 +130,12 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
     };
 
     let bench_out = cfg.iter()
-        .map(|b| benchmark(&ws.path, b))
-        .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<String>>)>>();
+        .map(|b| {
+            let new_result = benchmark(&ws.path, b, history.get(&b.name));
+            history.insert(b.name.clone(), new_result.1.clone());
+            new_result
+        })
+        .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>();
     let bench_success = bench_out.iter().all(|x| x.0.success());
     let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
 
