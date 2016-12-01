@@ -354,6 +354,7 @@
 //!
 #![feature(optin_builtin_traits)]
 #![feature(proc_macro)]
+#![feature(ptr_eq)]
 #![deny(missing_docs)]
 
 #[cfg(feature="b_netsoup")]

@@ -43,7 +43,7 @@ impl WriteHandle {
         let w_store: *mut sync::Arc<S> = Box::into_raw(w_store);
 
         // swap in our w_store, and get r_store in return
-        let r_store = self.bs.0.swap(w_store, atomic::Ordering::AcqRel);
+        let r_store = self.bs.0.swap(w_store, atomic::Ordering::SeqCst);
         self.w_store = Some(unsafe { Box::from_raw(r_store) });
 
         // let readers go so they will be done with the old read Arc
@@ -57,7 +57,9 @@ impl WriteHandle {
                 // some poor reader could have *read* the pointer right before we swapped it,
                 // *but not yet cloned the Arc*. we then check that there's only one strong
                 // reference, *which there is*. *then* that reader upgrades their Arc => Uh-oh.
-                // TODO XXX TODO XXX XXX TODO XXX XXX TODO XXX XXX TODO XXX XXX TODO XXX
+                // *however*, because of the second pointer read in readers, we know that a reader
+                // will detect this case, and simply refuse to use the Arc it cloned. therefore, it
+                // is safe for us to start mutating here
 
                 // put in all the updates the read store hasn't seen
                 for r in self.w_log.drain(..) {
@@ -82,9 +84,24 @@ impl WriteHandle {
             // apply to the current write set
             {
                 let arc: &mut sync::Arc<_> = &mut *self.w_store.as_mut().unwrap();
-                let s: &mut S = sync::Arc::get_mut(arc)
-                    .expect("writer should always be sole owner outside of swap");
-                Self::apply(s, Cow::Borrowed(&r));
+                loop {
+                    if let Some(s) = sync::Arc::get_mut(arc) {
+                        Self::apply(s, Cow::Borrowed(&r));
+                        break;
+                    } else {
+                        // writer should always be sole owner outside of swap
+                        // *however*, there may have been a reader who read the arc pointer before
+                        // the atomic pointer swap, and cloned *after* the Arc::get_mut call in
+                        // swap(), so we could still end up here. we know that the reader will
+                        // detect its mistake and drop that Arc (without using it), so we
+                        // eventually end up with a unique Arc. In fact, because we know the reader
+                        // will never use the Arc in that case, we *could* just start mutating
+                        // straight away, but unfortunately Arc doesn't provide an API to force
+                        // this.
+                        use std::thread;
+                        thread::yield_now();
+                    }
+                }
             }
             // and also log it to later apply to the reads
             self.w_log.push(r);
@@ -169,10 +186,58 @@ impl BufferedStore {
         where F: FnOnce(Vec<&sync::Arc<Vec<query::DataType>>>) -> T
     {
         use std::mem;
-        let r_store = unsafe { Box::from_raw(self.0.load(atomic::Ordering::Acquire)) };
+        let r_store = unsafe { Box::from_raw(self.0.load(atomic::Ordering::SeqCst)) };
         let rs: sync::Arc<_> = (&*r_store).clone();
+
+        let r_store_again = unsafe { Box::from_raw(self.0.load(atomic::Ordering::SeqCst)) };
+        let res = if !sync::Arc::ptr_eq(&*r_store, &*r_store_again) {
+            // a swap happened under us.
+            //
+            // let's first figure out where the writer can possibly be at this point. since we *do*
+            // have a clone of an Arc, and a pointer swap has happened, we must be in one of the
+            // following cases:
+            //
+            //  (a) we read and cloned, *then* a writer swapped, checked for uniqueness, and blocks
+            //  (b) we read, then a writer swapped, checked for uniqueness, and continued
+            //
+            // in (a), we know that the writer that did the pointer swap is waiting on our Arc (rs)
+            // we also know that we *ought* to be using a clone of the *new* pointer to read from.
+            // since the writer won't do anything until we release rs, we can just do a new clone,
+            // and *then* release the old Arc.
+            //
+            // in (b), we know that there is a writer that thinks it owns rs, and so it is not safe
+            // to use rs. how about Arc(r_store_again)? the only way that would be unsafe to use
+            // would be if a writer has gone all the way through the pointer swap and Arc
+            // uniqueness test *after* we read r_store_again. can that have happened? no. if a
+            // second writer came along after we read r_store_again, and wanted to swap, it would
+            // get r_store from its atomic pointer swap. since we're still holding an Arc(r_store),
+            // it would fail the uniqueness test, and therefore block at that point. thus, we know
+            // that no writer is currently modifying r_store_again (and won't be for as long as we
+            // hold rs).
+            let rs2: sync::Arc<_> = (&*r_store_again).clone();
+            let res = then(rs2.find(q).collect());
+            drop(rs2);
+            drop(rs);
+            res
+        } else {
+            // are we actually safe in this case? could there not have been two swaps in a row,
+            // making the value r_store -> r_store_again -> r_store? well, there could, but that
+            // implies that r_store is safe to use. why? well, for this to have happened, we must
+            // have read the pointer, then a writer went runs swap() (potentially multiple times).
+            // then, at some point, we cloned(). then, we read r_store_again to be
+            // equal to r_store.
+            //
+            // the moment we clone, we immediately prevent any writer from taking ownership of
+            // r_store. however, what if the current writer thinks that it owns r_store? well, we
+            // read r_store_again == r_store, which means that at some point *after the clone*, a
+            // writer made r_store read owned. since no writer can take ownership of r_store after
+            // we cloned it, we know that r_store must still be owned by readers.
+            let res = then(rs.find(q).collect());
+            drop(rs);
+            res
+        };
         mem::forget(r_store); // don't free the Box!
-        let res = then(rs.find(q).collect());
+        mem::forget(r_store_again); // don't free the Box!
         res
     }
 }
