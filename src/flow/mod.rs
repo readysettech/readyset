@@ -378,8 +378,11 @@ impl<'a> Migration<'a> {
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
             Box::new(move |q: Option<&query::Query>| -> ops::Datas {
-                let res = arc.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]),
-                              |rs| rs.into_iter().map(|v| Vec::from(v)).collect::<Vec<_>>())
+                let res = arc.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]), |rs| {
+                        // without projection, we wouldn't need to clone here
+                        // because we wouldn't need the "feed" below
+                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                    })
                     .into_iter()
                     .filter_map(|r| if let Some(q) = q { q.feed(r) } else { Some(r) })
                     .collect();

@@ -6,19 +6,19 @@ use std::sync;
 use std::sync::atomic;
 use std::sync::atomic::AtomicPtr;
 
-type S = sync::Arc<shortcut::Store<query::DataType>>;
+type S = shortcut::Store<query::DataType, sync::Arc<Vec<query::DataType>>>;
 pub struct WriteHandle {
-    w_store: Box<S>,
+    w_store: Box<sync::Arc<S>>,
     w_log: Vec<ops::Record>,
     bs: BufferedStore,
 }
 
 #[derive(Clone)]
-pub struct BufferedStore(sync::Arc<AtomicPtr<S>>);
+pub struct BufferedStore(sync::Arc<AtomicPtr<sync::Arc<S>>>);
 
 pub struct BufferedStoreBuilder {
-    r_store: shortcut::Store<query::DataType>,
-    w_store: shortcut::Store<query::DataType>,
+    r_store: S,
+    w_store: S,
 }
 
 impl WriteHandle {
@@ -40,10 +40,7 @@ impl WriteHandle {
         // put in all the updates the read store hasn't seen
         for u in self.w_log.drain(..) {
             match u {
-                ops::Record::Positive(r) => {
-                    // TODO: once shortcut supports Arc<Vec<_>> rows, this deep clone can go away
-                    w_store.insert((&*r).clone())
-                }
+                ops::Record::Positive(r) => w_store.insert(r.clone()),
                 ops::Record::Negative(ref r) => {
                     // we need a cond that will match this row.
                     let conds = r.iter()
@@ -124,7 +121,7 @@ impl BufferedStore {
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
     pub fn find_and<F, T>(&self, q: &[shortcut::cmp::Condition<query::DataType>], then: F) -> T
-        where F: FnOnce(Vec<&[query::DataType]>) -> T
+        where F: FnOnce(Vec<&sync::Arc<Vec<query::DataType>>>) -> T
     {
         let rs: sync::Arc<_> = (unsafe { &*self.0.load(atomic::Ordering::Acquire) }).clone();
         let res = then(rs.find(q).collect());
