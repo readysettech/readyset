@@ -2,13 +2,14 @@ use ops;
 use query;
 use shortcut;
 
+use std::borrow::Cow;
 use std::sync;
 use std::sync::atomic;
 use std::sync::atomic::AtomicPtr;
 
 type S = shortcut::Store<query::DataType, sync::Arc<Vec<query::DataType>>>;
 pub struct WriteHandle {
-    w_store: Box<sync::Arc<S>>,
+    w_store: Option<Box<sync::Arc<S>>>,
     w_log: Vec<ops::Record>,
     bs: BufferedStore,
 }
@@ -23,52 +24,52 @@ pub struct BufferedStoreBuilder {
 
 impl WriteHandle {
     pub fn swap(&mut self) {
-        use std::mem;
+        use std::thread;
 
-        // first, take the existing store
-        self.bs.0.swap(unsafe { mem::transmute(&mut *self.w_store) },
-                       atomic::Ordering::AcqRel);
+        // at this point, we have exclusive access to w_store, and it is up-to-date with all writes
+        // r_store is accessed by readers through a sync::Weak upgrade, and has old data
+        // w_log contains all the changes that are in w_store, but not in r_store
+        //
+        // we're going to do the following:
+        //
+        //  - atomically swap in a weak pointer to the current w_store into the BufferedStore,
+        //    letting readers see new and updated state
+        //  - store r_store as our new w_store
+        //  - wait until we have exclusive access to this new w_store
+        //  - replay w_log onto w_store
+
+        // prepare w_store
+        let w_store = self.w_store.take().unwrap();
+        let w_store: *mut sync::Arc<S> = Box::into_raw(w_store);
+
+        // swap in our w_store, and get r_store in return
+        let r_store = self.bs.0.swap(w_store, atomic::Ordering::AcqRel);
+        self.w_store = Some(unsafe { Box::from_raw(r_store) });
+
+        // let readers go so they will be done with the old read Arc
+        thread::yield_now();
 
         // now, wait for all existing readers to go away
-        while sync::Arc::get_mut(&mut *self.w_store).is_none() {
-            // TODO: be nice while waiting
-        }
+        loop {
+            if let Some(w_store) = sync::Arc::get_mut(&mut *self.w_store.as_mut().unwrap()) {
+                // they're all gone
+                // OR ARE THEY?
+                // some poor reader could have *read* the pointer right before we swapped it,
+                // *but not yet cloned the Arc*. we then check that there's only one strong
+                // reference, *which there is*. *then* that reader upgrades their Arc => Uh-oh.
+                // TODO XXX TODO XXX XXX TODO XXX XXX TODO XXX XXX TODO XXX XXX TODO XXX
 
-        // they're all gone
-        let mut w_store = sync::Arc::get_mut(&mut *self.w_store).unwrap();
-
-        // put in all the updates the read store hasn't seen
-        for u in self.w_log.drain(..) {
-            match u {
-                ops::Record::Positive(r) => w_store.insert(r.clone()),
-                ops::Record::Negative(ref r) => {
-                    // we need a cond that will match this row.
-                    let conds = r.iter()
-                        .enumerate()
-                        .map(|(coli, v)| {
-                            shortcut::Condition {
-                                column: coli,
-                                cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    // however, multiple rows may have the same values as this row for every
-                    // column. afaict, it is safe to delete any one of these rows. we do this
-                    // by returning true for the first invocation of the filter function, and
-                    // false for all subsequent invocations.
-                    let mut first = true;
-                    w_store.delete_filter(&conds[..], |_| if first {
-                        first = false;
-                        true
-                    } else {
-                        false
-                    });
+                // put in all the updates the read store hasn't seen
+                for r in self.w_log.drain(..) {
+                    Self::apply(w_store, Cow::Owned(r));
                 }
+
+                // w_store (the old r_store) is now fully up to date!
+                break;
+            } else {
+                thread::yield_now();
             }
         }
-
-        // w_store (the old r_store) is now fully up to date!
     }
 
     /// Add a new set of records to the backlog.
@@ -78,7 +79,51 @@ impl WriteHandle {
         where I: IntoIterator<Item = ops::Record>
     {
         for r in rs {
+            // apply to the current write set
+            {
+                let arc: &mut sync::Arc<_> = &mut *self.w_store.as_mut().unwrap();
+                let s: &mut S = sync::Arc::get_mut(arc)
+                    .expect("writer should always be sole owner outside of swap");
+                Self::apply(s, Cow::Borrowed(&r));
+            }
+            // and also log it to later apply to the reads
             self.w_log.push(r);
+        }
+    }
+
+    fn apply(store: &mut S, r: Cow<ops::Record>) {
+        if let ops::Record::Positive(..) = *r {
+            let (r, _) = r.into_owned().extract();
+            store.insert(r);
+            return;
+        }
+
+        match *r {
+            ops::Record::Negative(ref r) => {
+                // we need a cond that will match this row.
+                let conds = r.iter()
+                    .enumerate()
+                    .map(|(coli, v)| {
+                        shortcut::Condition {
+                            column: coli,
+                            cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                // however, multiple rows may have the same values as this row for
+                // every column. afaict, it is safe to delete any one of these rows. we
+                // do this by returning true for the first invocation of the filter
+                // function, and false for all subsequent invocations.
+                let mut first = true;
+                store.delete_filter(&conds[..], |_| if first {
+                    first = false;
+                    true
+                } else {
+                    false
+                });
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -105,7 +150,7 @@ impl BufferedStoreBuilder {
         let r =
             BufferedStore(sync::Arc::new(AtomicPtr::new(Box::into_raw(Box::new(sync::Arc::new(self.r_store))))));
         let w = WriteHandle {
-            w_store: Box::new(sync::Arc::new(self.w_store)),
+            w_store: Some(Box::new(sync::Arc::new(self.w_store))),
             w_log: Vec::new(),
             bs: r.clone(),
         };
@@ -123,7 +168,10 @@ impl BufferedStore {
     pub fn find_and<F, T>(&self, q: &[shortcut::cmp::Condition<query::DataType>], then: F) -> T
         where F: FnOnce(Vec<&sync::Arc<Vec<query::DataType>>>) -> T
     {
-        let rs: sync::Arc<_> = (unsafe { &*self.0.load(atomic::Ordering::Acquire) }).clone();
+        use std::mem;
+        let r_store = unsafe { Box::from_raw(self.0.load(atomic::Ordering::Acquire)) };
+        let rs: sync::Arc<_> = (&*r_store).clone();
+        mem::forget(r_store); // don't free the Box!
         let res = then(rs.find(q).collect());
         res
     }
