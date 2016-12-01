@@ -158,13 +158,15 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
 
     let qg = to_query_graph(st);
 
-    let mut filter_nodes = HashMap::new();
     // TODO(malte): the following ugliness is required since we need to iterate over the HashMap in
     // a *sorted* order, as views are otherwise numbered randomly and unit tests fail. Clearly, we
     // need a better identifier scheme...
     let mut i = g.graph().0.node_count();
     let mut rels = qg.relations.keys().collect::<Vec<&String>>();
     rels.sort();
+
+    // 1. Generate a filter node for each relation node in the query graph.
+    let mut filter_nodes = HashMap::new();
     for rel in rels.iter() {
         let qgn = qg.relations.get(*rel).unwrap();
         // the following conditional is required to avoid "empty" nodes (without any projected
@@ -184,6 +186,8 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
         i += 1;
     }
 
+    // 2. Direct joins between filter nodes on base tables: this generates one join per join
+    //    edge in the query graph.
     let mut join_nodes = Vec::new();
     for (&(ref src, ref dst), edge) in qg.edges.iter() {
         // query graph edges are joins, so add a join node for each
@@ -194,6 +198,11 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
         join_nodes.push(ni);
         i += 1;
     }
+    // 3. Nested joins: if a query contains > 1 join condition, we need to chain several joins
+    //    nodes together.
+    // TODO(malte): implement this
+
+    // finally, we output all the nodes we generated
     filter_nodes.into_iter().map(|(_, n)| n).chain(join_nodes.into_iter()).collect()
 }
 
