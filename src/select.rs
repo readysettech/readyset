@@ -46,15 +46,15 @@ pub struct SelectStatement {
 /// Parse LIMIT clause
 named!(limit_clause<&[u8], LimitClause>,
     complete!(chain!(
-        space? ~
+        multispace? ~
         caseless_tag!("limit") ~
-        space ~
+        multispace ~
         limit_val: unsigned_number ~
         offset_val: opt!(
             complete!(chain!(
-                space? ~
+                multispace? ~
                 caseless_tag!("offset") ~
-                space ~
+                multispace ~
                 val: unsigned_number,
                 || { val }
             ))
@@ -113,9 +113,9 @@ named!(where_clause<&[u8], ConditionExpression>,
 named!(pub selection<&[u8], SelectStatement>,
     chain!(
         caseless_tag!("select") ~
-        space ~
+        multispace ~
         distinct: opt!(caseless_tag!("distinct")) ~
-        space? ~
+        multispace? ~
         fields: field_expr ~
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~

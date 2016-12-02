@@ -216,9 +216,9 @@ named!(pub table_reference<&[u8], Table>,
         table: map_res!(sql_identifier, str::from_utf8) ~
         alias: opt!(
             complete!(chain!(
-                space ~
+                multispace ~
                 caseless_tag!("as") ~
-                space ~
+                multispace ~
                 alias: map_res!(sql_identifier, str::from_utf8),
                 || { String::from(alias) }
             ))
