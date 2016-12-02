@@ -97,8 +97,8 @@ named!(pub statement_terminator,
 /// Parse binary comparison operators
 named!(pub binary_comparison_operator<&[u8], Operator>,
     alt_complete!(
-           map!(caseless_tag!("like"), |_| Operator::Like)
-         | map!(caseless_tag!("not_like"), |_| Operator::NotLike)
+           map!(caseless_tag!("not_like"), |_| Operator::NotLike)
+         | map!(caseless_tag!("like"), |_| Operator::Like)
          | map!(caseless_tag!("<>"), |_| Operator::NotEqual)
          | map!(caseless_tag!(">="), |_| Operator::GreaterOrEqual)
          | map!(caseless_tag!("<="), |_| Operator::LessOrEqual)
