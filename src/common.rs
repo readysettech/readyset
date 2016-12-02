@@ -1,4 +1,4 @@
-use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace, space};
+use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace};
 use nom::{IResult, Err, ErrorKind, Needed};
 use parser::{Column, Table};
 use std::str;

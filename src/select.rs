@@ -1,4 +1,4 @@
-use nom::{multispace, space};
+use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
