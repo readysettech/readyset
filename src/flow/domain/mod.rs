@@ -6,8 +6,12 @@ use std::collections::HashSet;
 use std::sync::mpsc;
 use std::cell;
 
+use std::collections::hash_map::Entry;
+
 use flow;
 use flow::prelude::*;
+
+use ops;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -31,6 +35,13 @@ pub struct Domain {
     domain: Index,
     nodes: DomainNodes,
     state: StateMap,
+
+    /// Map from timestamp to vector of messages buffered for that timestamp.
+    buffered_transactions: HashMap<i64, Vec<Message>>,
+    /// Number of ingress nodes in the domain.
+    num_ingress: usize,
+    /// Timestamp domain has seen all transactions up to.
+    ts: i64,
 }
 
 impl Domain {
@@ -230,17 +241,23 @@ impl Domain {
             }
         }
 
-        let nodes =
+        let nodes: DomainNodes =
             nodes.into_iter().map(|n| (*n.addr.as_local(), cell::RefCell::new(n))).collect();
+        let num_ingress = nodes.iter().filter(|n| n.borrow().is_ingress()).count();
         Domain {
             domain: domain,
             nodes: nodes,
             state: state,
+            buffered_transactions: HashMap::new(),
+            num_ingress: num_ingress,
+            ts: -1,
         }
     }
 
-    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes) {
+    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes, enable_egress: bool) -> HashMap<NodeAddress, Vec<ops::Record>> {
         let me = m.to;
+        let ts = m.ts.clone();
+        let mut egress_messages = HashMap::new();
 
         let mut n = nodes[me.as_local()].borrow_mut();
         let mut u = n.process(m, states, nodes);
@@ -248,36 +265,116 @@ impl Domain {
 
         if u.is_none() {
             // no need to deal with our children if we're not sending them anything
-            return;
+            return egress_messages;
         }
 
         let n = nodes[me.as_local()].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can
             let data = if i == n.children.len() - 1 {
-                u.take()
+                u.take().unwrap()
             } else {
-                u.clone()
+                u.clone().unwrap()
+            };
+
+            if enable_egress || !nodes[n.children[i].as_local()].borrow().is_egress() {
+                let m = Message {
+                    from: me,
+                    to: n.children[i],
+                    data: data,
+                    ts: ts,
+                };
+
+                for (k,v) in Self::dispatch(m, states, nodes, enable_egress).into_iter() {
+                    egress_messages.insert(k, v);
+                }
+            } else {
+                let ops::Update::Records(mut data) = data;
+                match egress_messages.entry(n.children[i]) {
+                    Entry::Occupied(entry) => {
+                        entry.into_mut().append(&mut data);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(data);
+                    },
+                };
+            }
+        }
+
+        egress_messages
+    }
+
+    pub fn transactional_dispatch(&mut self, messages: Vec<Message>) {
+        if messages.len() == 0 {
+            return;
+        }
+
+        let mut egress_messages = HashMap::new();
+        let ts = messages.iter().next().unwrap().ts;
+
+        for m in messages {
+            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false).into_iter();
+
+            for (key, value) in new_messages.into_iter() {
+                egress_messages.insert(key, value);
+            }
+        }
+
+        for n in self.nodes.iter().filter(|n| n.borrow().is_egress()) {
+            let data = match egress_messages.entry(n.borrow().addr) {
+                Entry::Occupied(entry) => Update::Records(entry.remove()),
+                _ => Update::Records(vec![]),
             };
 
             let m = Message {
-                from: me,
-                to: n.children[i],
-                data: data.unwrap(),
+                from: n.borrow().addr, // TODO: message should be from actual parent, not self.
+                to: n.borrow().addr,
+                data: data,
+                ts: ts,
             };
 
-            Self::dispatch(m, states, nodes)
+            self.nodes[m.to.as_local()].borrow_mut().process(m, &mut self.state, &self.nodes);
+            assert_eq!(n.borrow().children.len(), 0);
         }
     }
 
-    pub fn boot(self, rx: mpsc::Receiver<Message>) {
+    pub fn buffer_transaction(&mut self, m: Message) {
+        let ts = m.ts.unwrap();
+
+        let num_received = match self.buffered_transactions.entry(ts) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().push(m);
+                entry.get().len()
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(vec![m]);
+                1
+            }
+        };
+
+        if ts == self.ts + 1 && num_received == self.num_ingress {
+            if let Some(messages) = self.buffered_transactions.remove(&ts) {
+                self.transactional_dispatch(messages);
+                self.ts += 1;
+            } else {
+                unreachable!();
+            }
+        }
+    }
+
+    pub fn boot(mut self, rx: mpsc::Receiver<Message>) {
         use std::thread;
 
         thread::spawn(move || {
-            let mut states = self.state;
-            let nodes = self.nodes;
             for m in rx {
-                Self::dispatch(m, &mut states, &nodes);
+                match m.ts {
+                    None => {
+                        Self::dispatch(m, &mut self.state, &self.nodes, true);
+                    }
+                    Some(_) => {
+                        self.buffer_transaction(m);
+                    }
+                }
             }
         });
     }

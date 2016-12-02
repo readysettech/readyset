@@ -89,12 +89,14 @@ impl NodeDescriptor {
                             from: NodeAddress::make_global(self.index), // the ingress node knows where it should go
                             to: dst,
                             data: u.take().unwrap(),
+                            ts: m.ts.clone(),
                         })
                     } else {
                         tx.send(Message {
                             from: NodeAddress::make_global(self.index),
                             to: dst,
                             data: u.clone().unwrap(),
+                            ts: m.ts.clone(),
                         })
                     }
                     .unwrap();
@@ -121,8 +123,24 @@ impl NodeDescriptor {
         materialize(u, state.get_mut(self.addr.as_local()));
     }
 
+    pub fn is_ingress(&self) -> bool {
+        if let flow::node::Type::Ingress(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_internal(&self) -> bool {
         if let flow::node::Type::Internal(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_egress(&self) -> bool {
+        if let flow::node::Type::Egress(..) = *self.inner {
             true
         } else {
             false

@@ -24,6 +24,7 @@ pub struct Message {
     pub from: NodeAddress,
     pub to: NodeAddress,
     pub data: U,
+    pub ts: Option<i64>,
 }
 
 /// A domain-local node identifier.
@@ -679,6 +680,7 @@ impl<'a> Migration<'a> {
                                 from: src,
                                 to: no,
                                 data: u.into(),
+                                ts: None,
                             })
                             .unwrap()
 
