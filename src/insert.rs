@@ -23,7 +23,9 @@ named!(pub insertion<&[u8], InsertStatement>,
         multispace ~
         fields: opt!(chain!(
                 tag!("(") ~
+                multispace? ~
                 fields: field_list ~
+                multispace? ~
                 tag!(")") ~
                 multispace,
                 || { fields }
