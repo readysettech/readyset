@@ -254,10 +254,10 @@ impl Domain {
         }
     }
 
-    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes, enable_egress: bool) -> HashMap<NodeAddress, Vec<ops::Record>> {
+    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes, enable_output: bool) -> HashMap<NodeAddress, Vec<ops::Record>> {
         let me = m.to;
         let ts = m.ts.clone();
-        let mut egress_messages = HashMap::new();
+        let mut output_messages = HashMap::new();
 
         let mut n = nodes[me.as_local()].borrow_mut();
         let mut u = n.process(m, states, nodes);
@@ -265,7 +265,7 @@ impl Domain {
 
         if u.is_none() {
             // no need to deal with our children if we're not sending them anything
-            return egress_messages;
+            return output_messages;
         }
 
         let n = nodes[me.as_local()].borrow();
@@ -277,7 +277,7 @@ impl Domain {
                 u.clone().unwrap()
             };
 
-            if enable_egress || !nodes[n.children[i].as_local()].borrow().is_egress() {
+            if enable_output || !nodes[n.children[i].as_local()].borrow().is_output() {
                 let m = Message {
                     from: me,
                     to: n.children[i],
@@ -285,12 +285,12 @@ impl Domain {
                     ts: ts,
                 };
 
-                for (k,v) in Self::dispatch(m, states, nodes, enable_egress).into_iter() {
-                    egress_messages.insert(k, v);
+                for (k,v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
+                    output_messages.insert(k, v);
                 }
             } else {
                 let ops::Update::Records(mut data) = data;
-                match egress_messages.entry(n.children[i]) {
+                match output_messages.entry(n.children[i]) {
                     Entry::Occupied(entry) => {
                         entry.into_mut().append(&mut data);
                     }
@@ -301,7 +301,7 @@ impl Domain {
             }
         }
 
-        egress_messages
+        output_messages
     }
 
     pub fn transactional_dispatch(&mut self, messages: Vec<Message>) {
@@ -320,7 +320,7 @@ impl Domain {
             }
         }
 
-        for n in self.nodes.iter().filter(|n| n.borrow().is_egress()) {
+        for n in self.nodes.iter().filter(|n| n.borrow().is_output()) {
             let data = match egress_messages.entry(n.borrow().addr) {
                 Entry::Occupied(entry) => Update::Records(entry.remove()),
                 _ => Update::Records(vec![]),

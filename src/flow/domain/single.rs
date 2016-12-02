@@ -139,11 +139,12 @@ impl NodeDescriptor {
         }
     }
 
-    pub fn is_egress(&self) -> bool {
-        if let flow::node::Type::Egress(..) = *self.inner {
-            true
-        } else {
-            false
+    /// A node is considered to be an output node if changes to its state are visible outside of its domain.
+    pub fn is_output(&self) -> bool {
+        match *self.inner {
+            flow::node::Type::Egress(_,_) => true,
+            flow::node::Type::Reader(_,_) => true,
+            _ => false,
         }
     }
 }
