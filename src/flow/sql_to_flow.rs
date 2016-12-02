@@ -157,7 +157,10 @@ fn make_join_node(name: &str,
 fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> {
     use std::collections::HashMap;
 
-    let qg = to_query_graph(st);
+    let qg = match to_query_graph(st) {
+        Ok(qg) => qg,
+        Err(e) => panic!(e),
+    };
 
     // TODO(malte): the following ugliness is required since we need to iterate over the HashMap in
     // a *sorted* order, as views are otherwise numbered randomly and unit tests fail. Clearly, we
