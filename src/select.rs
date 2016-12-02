@@ -339,7 +339,6 @@ mod tests {
             right: right_comp,
             operator: Operator::And,
         }));
-        println!("res: {:#?}", res);
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperStorage")],
