@@ -5,4 +5,4 @@
 An incomplete Rust SQL parser written using [nom](https://github.com/Geal/nom).
 
 This parser is a work in progress; it currently supports a subsect of simple
-SELECT queries only.
+SELECT and INSERT queries only.
