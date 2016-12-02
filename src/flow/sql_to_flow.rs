@@ -15,6 +15,7 @@ use shortcut;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
+use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::str;
 use std::sync::Arc;
@@ -186,21 +187,38 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
         i += 1;
     }
 
-    // 2. Direct joins between filter nodes on base tables: this generates one join per join
-    //    edge in the query graph.
+    // 2. Generate join nodes for the query. This starts out by joining two of the filter nodes
+    //    corresponding to relations in the first join predicate, and then continues to join the
+    //    result against previously unseen tables from the remaining predicates.
+    //    Note that no (src, dst) pair ever occurs twice, since we've already previously moved all
+    //    predicates pertaining to src/dst joins onto a single edge.
     let mut join_nodes = Vec::new();
-    for (&(ref src, ref dst), edge) in qg.edges.iter() {
-        // query graph edges are joins, so add a join node for each
-        let left_ni = filter_nodes.get(src).unwrap().clone();
-        let right_ni = filter_nodes.get(dst).unwrap().clone();
+    let mut joined_tables = HashSet::new();
+    let mut edge_iter = qg.edges.iter();
+    let mut prev_ni = None;
+    while let Some((&(ref src, ref dst), edge)) = edge_iter.next() {
+        let left_ni = match prev_ni {
+            None => {
+                joined_tables.insert(src);
+                filter_nodes.get(src).unwrap().clone()
+            }
+            Some(ni) => ni,
+        };
+        let right_ni = if joined_tables.contains(src) {
+            joined_tables.insert(dst);
+            filter_nodes.get(dst).unwrap().clone()
+        } else if joined_tables.contains(dst) {
+            joined_tables.insert(src);
+            filter_nodes.get(src).unwrap().clone()
+        } else {
+            unimplemented!();
+        };
         let n = make_join_node(&format!("query-{}", i), edge, left_ni, right_ni, g);
         let ni = g.incorporate(n);
         join_nodes.push(ni);
         i += 1;
+        prev_ni = Some(ni);
     }
-    // 3. Nested joins: if a query contains > 1 join condition, we need to chain several joins
-    //    nodes together.
-    // TODO(malte): implement this
 
     // finally, we output all the nodes we generated
     filter_nodes.into_iter().map(|(_, n)| n).chain(join_nodes.into_iter()).collect()
