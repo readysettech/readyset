@@ -14,7 +14,7 @@ pub struct InsertStatement {
 /// Parse rule for a SQL insert query.
 /// TODO(malte): support REPLACE, multiple parens expr, nested selection, DEFAULT VALUES
 named!(pub insertion<&[u8], InsertStatement>,
-    chain!(
+    complete!(chain!(
         caseless_tag!("insert") ~
         multispace ~
         caseless_tag!("into") ~
@@ -56,7 +56,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 },
             }
         }
-    )
+    ))
 );
 
 #[cfg(test)]
