@@ -142,12 +142,12 @@ named!(pub field_list<&[u8], Vec<Column> >,
            chain!(
                fieldname: column_identifier ~
                opt!(
-                   chain!(
+                   complete!(chain!(
                        multispace? ~
                        tag!(",") ~
                        multispace?,
                        ||{}
-                   )
+                   ))
                ),
                || { fieldname }
            )
@@ -170,12 +170,12 @@ named!(pub table_list<&[u8], Vec<Table> >,
            chain!(
                table: table_reference ~
                opt!(
-                   chain!(
+                   complete!(chain!(
                        multispace? ~
                        tag!(",") ~
                        multispace?,
                        || {}
-                   )
+                   ))
                ),
                || { table }
            )
@@ -195,12 +195,12 @@ named!(pub value_list<&[u8], Vec<&str> >,
                        | fp_number
                    ) ~
                    opt!(
-                       chain!(
+                       complete!(chain!(
                            multispace? ~
                            tag!(",") ~
                            multispace?,
                            ||{}
-                       )
+                       ))
                    ),
                    || { val }
                ),
@@ -215,13 +215,13 @@ named!(pub table_reference<&[u8], Table>,
     chain!(
         table: map_res!(sql_identifier, str::from_utf8) ~
         alias: opt!(
-            chain!(
+            complete!(chain!(
                 space ~
                 caseless_tag!("as") ~
                 space ~
                 alias: map_res!(sql_identifier, str::from_utf8),
                 || { String::from(alias) }
-            )
+            ))
         ),
         || {
             Table {

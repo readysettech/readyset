@@ -45,18 +45,19 @@ pub struct SelectStatement {
 
 /// Parse LIMIT clause
 named!(limit_clause<&[u8], LimitClause>,
-    chain!(
-        space ~
+    complete!(chain!(
+        space? ~
         caseless_tag!("limit") ~
         space ~
         limit_val: unsigned_number ~
-        space? ~
-        offset_val: opt!(chain!(
+        offset_val: opt!(
+            complete!(chain!(
+                space? ~
                 caseless_tag!("offset") ~
                 space ~
                 val: unsigned_number,
                 || { val }
-            )
+            ))
         ),
     || {
         LimitClause {
@@ -66,20 +67,24 @@ named!(limit_clause<&[u8], LimitClause>,
                 Some(v) => v,
             },
         }
-    })
+    }))
 );
 
 named!(order_clause<&[u8], OrderClause>,
-    chain!(
+    complete!(chain!(
         multispace? ~
         caseless_tag!("order by") ~
         multispace ~
         order_expr: field_list ~
         ordering: opt!(
-            alt_complete!(
-                  map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
-                | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
-            )
+            complete!(chain!(
+                multispace? ~
+                ordering: alt_complete!(
+                      map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
+                    | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
+                ),
+                || { ordering }
+            ))
         ),
     || {
         OrderClause {
@@ -89,18 +94,18 @@ named!(order_clause<&[u8], OrderClause>,
                 Some(ref o) => o.clone(),
             },
         }
-    })
+    }))
 );
 
 /// Parse WHERE clause of a selection
 named!(where_clause<&[u8], ConditionExpression>,
-    chain!(
+    complete!(chain!(
         multispace? ~
         caseless_tag!("where") ~
         multispace ~
         cond: condition_expr,
         || { cond }
-    )
+    ))
 );
 
 /// Parse rule for a SQL selection query.
@@ -197,8 +202,9 @@ mod tests {
         let qstring_sem = "select id, name from users;";
         let qstring_linebreak = "select id, name from users\n";
 
-        assert_eq!(selection(qstring_sem.as_bytes()).unwrap(),
-                   selection(qstring_linebreak.as_bytes()).unwrap());
+        let r1 = selection(qstring_sem.as_bytes()).unwrap();
+        let r2 = selection(qstring_linebreak.as_bytes()).unwrap();
+        assert_eq!(r1, r2);
     }
 
     #[test]
