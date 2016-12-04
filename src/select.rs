@@ -13,7 +13,7 @@ use condition::*;
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupByClause {
     columns: Vec<Column>,
-    having: String, // XXX(malte): should this be an arbitrary expr?
+    having: Option<ConditionExpression>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +44,30 @@ pub struct SelectStatement {
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
 }
+
+/// Parse GROUP BY clause
+named!(group_by_clause<&[u8], GroupByClause>,
+    complete!(chain!(
+        multispace? ~
+        caseless_tag!("group by") ~
+        multispace ~
+        group_columns: field_list ~
+        having_clause: opt!(
+            complete!(chain!(
+                multispace? ~
+                caseless_tag!("having") ~
+                multispace? ~
+                ce: condition_expr,
+                || { ce }
+            ))
+        ),
+    || {
+        GroupByClause {
+            columns: group_columns,
+            having: having_clause,
+        }
+    }))
+);
 
 /// Parse LIMIT clause
 named!(limit_clause<&[u8], LimitClause>,
@@ -122,6 +146,7 @@ named!(pub selection<&[u8], SelectStatement>,
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~
         cond: opt!(where_clause) ~
+        group_by: opt!(group_by_clause) ~
         order: opt!(order_clause) ~
         limit: opt!(limit_clause) ~
         statement_terminator,
@@ -131,7 +156,7 @@ named!(pub selection<&[u8], SelectStatement>,
                 distinct: distinct.is_some(),
                 fields: fields,
                 where_clause: cond,
-                group_by: None,
+                group_by: group_by,
                 order: order,
                 limit: limit,
             }
@@ -142,7 +167,7 @@ named!(pub selection<&[u8], SelectStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use column::Column;
+    use column::{AggregationExpression, Column};
     use common::{FieldExpression, Operator};
     use parser::{ConditionBase, ConditionExpression, ConditionTree};
     use table::Table;
@@ -374,6 +399,25 @@ mod tests {
                        fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        limit: expected_lim,
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn aggregation_column() {
+        let qstring = "SELECT max(addr_id) FROM address;";
+
+        let res = selection(qstring.as_bytes());
+        let agg_expr =
+            AggregationExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]));
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("address")],
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("max"),
+                                                             table: None,
+                                                             aggregation: Some(agg_expr),
+                                                         }]),
                        ..Default::default()
                    });
     }

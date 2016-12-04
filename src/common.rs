@@ -3,7 +3,7 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 use std::str::FromStr;
 
-use column::Column;
+use column::{AggregationExpression, Column};
 use table::Table;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,24 +54,38 @@ named!(pub fp_number<&[u8], &[u8]>,
 
 /// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier<&[u8], Column>,
-    chain!(
-        table: opt!(
-            chain!(
-                tbl_name: map_res!(sql_identifier, str::from_utf8) ~
-                tag!("."),
-                || { tbl_name }
-            )
-        ) ~
-        column: map_res!(sql_identifier, str::from_utf8),
-        || {
-            Column {
-                name: String::from(column),
-                table: match table {
-                    None => None,
-                    Some(t) => Some(String::from(t)),
-                },
+    alt_complete!(
+        chain!(
+            function: map_res!(alphanumeric, str::from_utf8) ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                Column {
+                    name: String::from(function),
+                    table: None,
+                    aggregation: Some(AggregationExpression::Max(columns)),
+                }
             }
-        }
+        )
+        | chain!(
+            table: opt!(
+                chain!(
+                    tbl_name: map_res!(sql_identifier, str::from_utf8) ~
+                    tag!("."),
+                    || { tbl_name }
+                )
+            ) ~
+            column: map_res!(sql_identifier, str::from_utf8),
+            || {
+                Column {
+                    name: String::from(column),
+                    table: match table {
+                        None => None,
+                        Some(t) => Some(String::from(t)),
+                    },
+                    aggregation: None,
+                }
+            }
+        )
     )
 );
 
@@ -249,5 +263,13 @@ mod tests {
         assert!(sql_identifier(id2).is_done());
         assert!(sql_identifier(id3).is_done());
         assert!(sql_identifier(id4).is_err());
+    }
+
+    #[test]
+    fn simple_aggregation_column() {
+        let qs = b"max(addr_id)";
+
+        let res = column_identifier(qs);
+        println!("{:#?}", res);
     }
 }
