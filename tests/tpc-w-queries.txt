@@ -32,8 +32,9 @@ SELECT J.i_id,J.i_thumbnail from item I, item J where (I.i_related1 = J.i_id or 
 # adminUpdate
 UPDATE item SET i_cost = ?, i_image = ?, i_thumbnail = ?, i_pub_date = CURRENT_DATE WHERE i_id = ?;
 # adminUpdate.related
-SELECT ol_i_id FROM orders, order_line WHERE orders.o_id = order_line.ol_o_id AND NOT (order_line.ol_i_id = ?) AND orders.o_c_id IN (SELECT o_c_id FROM orders, order_line WHERE orders.o_id = order_line.ol_o_id AND orders.o_id > (SELECT MAX(o_id)-10000 FROM orders) AND order_line.ol_i_id = ?) GROUP BY ol_i_id ORDER BY SUM(ol_qty) DESC limit 5
-sql.adminUpdate.related1="UPDATE item SET i_related1 = ?, i_related2 = ?, i_related3 = ?, i_related4 = ?, i_related5 = ? WHERE i_id = ?;
+SELECT ol_i_id FROM orders, order_line WHERE orders.o_id = order_line.ol_o_id AND NOT (order_line.ol_i_id = ?) AND orders.o_c_id IN (SELECT o_c_id FROM orders, order_line WHERE orders.o_id = order_line.ol_o_id AND orders.o_id > (SELECT MAX(o_id)-10000 FROM orders) AND order_line.ol_i_id = ?) GROUP BY ol_i_id ORDER BY SUM(ol_qty) DESC limit 5;
+# adminUpdate.related1
+UPDATE item SET i_related1 = ?, i_related2 = ?, i_related3 = ?, i_related4 = ?, i_related5 = ? WHERE i_id = ?;
 
 # getUserName
 SELECT c_uname FROM customer WHERE c_id = ?;
@@ -53,7 +54,7 @@ SELECT orders.*, customer.*, cc_xacts.cx_type, ship.addr_street1 AS ship_addr_st
 SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
 
 # createEmptyCart
-SELECT COUNT(*) FROM shopping_cart
+SELECT COUNT(*) FROM shopping_cart;
 # createEmptyCart.insert
 INSERT into shopping_cart (sc_id, sc_time) VALUES ((SELECT COUNT(*) FROM shopping_cart), CURRENT_TIMESTAMP);
 # createEmptyCart.insert.v2
