@@ -105,9 +105,8 @@ pub fn main() {
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
 
-    let history = HashMap::new();
-    let hl = Arc::new(Mutex::new(history));
-    let wsl = Mutex::new(repo::Workspace::new(repo, workdir));
+    let mut history = HashMap::new();
+    let ws = repo::Workspace::new(repo, workdir);
     let en = if let Some(addr) = email_notification_addr {
         Some(email::EmailNotifier::new(addr, repo))
     } else {
@@ -121,15 +120,12 @@ pub fn main() {
 
     if taste_commit.is_some() {
         let cid = if let Some("HEAD") = taste_commit {
-            let ws = wsl.lock().unwrap();
-            // yuck
             let cid = ws.repo.head().unwrap().target().unwrap().clone();
             format!("{}", cid)
         } else {
             String::from(taste_commit.unwrap())
         };
-        let mut hist = hl.lock().unwrap();
-        let res = taste::taste_commit(&wsl, &mut hist, "", &cid, &cid, "");
+        let res = taste::taste_commit(&ws, &mut history, "", &cid, &cid, "");
         match res {
             Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
             Ok(tr) => {
@@ -141,14 +137,37 @@ pub fn main() {
                 if sn.is_some() {
                     sn.as_ref().unwrap().notify(&tr).unwrap();
                 }
+                // We're done
                 return;
             }
         }
     }
 
+    // If we get here, we must be running in continuous mode
     if let None = secret {
         panic!("--secret must be set when in continuous webhook handler mode");
     }
+
+    // Initialize history by tasting the HEAD commit of each branch
+    {
+        let branches = ws.branch_heads();
+        for (b, c) in branches.iter() {
+            println!("tasting HEAD of {}: {} / {}",
+                     b,
+                     c.id(),
+                     c.message().unwrap());
+            let res = taste::taste_commit(&ws,
+                                          &mut history,
+                                          &b,
+                                          &format!("{}", c.id()),
+                                          c.message().unwrap(),
+                                          "");
+            assert!(res.is_ok());
+        }
+    }
+
+    let hl = Arc::new(Mutex::new(history));
+    let wsl = Mutex::new(ws);
 
     let mut hub = Hub::new();
     hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
@@ -169,12 +188,10 @@ pub fn main() {
                          pusher.name);
                 {
                     let ws = wsl.lock().unwrap();
-                    ws.fetch().unwrap();
-                }
-                {
                     let mut history = hl.lock().unwrap();
-                    // First state the head commit
-                    let head_res = taste::taste_commit(&wsl,
+                    // First taste the head commit
+                    ws.fetch().unwrap();
+                    let head_res = taste::taste_commit(&ws,
                                                        &mut history,
                                                        &_ref,
                                                        &head_commit.id,
@@ -196,7 +213,7 @@ pub fn main() {
                                         continue;
                                     }
                                     // taste
-                                    let res = taste::taste_commit(&wsl,
+                                    let res = taste::taste_commit(&ws,
                                                                   &mut history,
                                                                   &_ref,
                                                                   &c.id,

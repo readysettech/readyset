@@ -99,7 +99,7 @@ fn build(workdir: &str) -> ExitStatus {
         .expect("Failed to execute 'cargo build'!")
 }
 
-pub fn taste_commit(wsl: &Mutex<Workspace>,
+pub fn taste_commit(ws: &Workspace,
                     history: &mut HashMap<String,
                                           HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
                     commit_ref: &str,
@@ -108,7 +108,6 @@ pub fn taste_commit(wsl: &Mutex<Workspace>,
                     url: &str)
                     -> Result<TastingResult, String> {
     println!("Tasting commit {}", id);
-    let ws = wsl.lock().unwrap();
     ws.checkout_commit(id)?;
 
     let branch = String::from(&commit_ref[commit_ref.rfind("/").unwrap() + 1..]);
