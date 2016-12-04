@@ -6,7 +6,6 @@ use std::io;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
 use std::str;
-use std::sync::Mutex;
 
 /// `(val, percentage_change)`
 #[derive(Debug, Clone)]
