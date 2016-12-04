@@ -111,7 +111,10 @@ fn result_to_attachments(res: &TastingResult) -> Vec<Attachment> {
                         };
                         Field {
                             title: k.clone(),
-                            value: SlackText::new(format!("{} {} ({:+.2}%)", icon, val.0, val.1 * 100.0)),
+                            value: SlackText::new(format!("{} {} ({:+.2}%)",
+                                                          icon,
+                                                          val.0,
+                                                          val.1 * 100.0)),
                             short: Some(true),
                         }
                     })
