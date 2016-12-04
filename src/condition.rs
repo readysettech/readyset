@@ -135,8 +135,9 @@ named!(predicate<&[u8], ConditionExpression>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use column::Column;
     use common::Operator;
-    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree};
+    use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
     fn flat_condition_tree(op: Operator,
                            l: ConditionBase,

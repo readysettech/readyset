@@ -1,8 +1,10 @@
 use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace};
 use nom::{IResult, Err, ErrorKind, Needed};
-use parser::{Column, Table};
 use std::str;
 use std::str::FromStr;
+
+use column::Column;
+use table::Table;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operator {

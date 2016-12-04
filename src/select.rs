@@ -2,9 +2,11 @@ use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
+use column::Column;
 use common::FieldExpression;
 use common::{field_expr, field_list, unsigned_number, statement_terminator, table_list};
-use parser::{Column, ConditionExpression, Table};
+use parser::ConditionExpression;
+use table::Table;
 
 use condition::*;
 
@@ -140,8 +142,10 @@ named!(pub selection<&[u8], SelectStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use column::Column;
     use common::{FieldExpression, Operator};
-    use parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Table};
+    use parser::{ConditionBase, ConditionExpression, ConditionTree};
+    use table::Table;
 
     fn columns(cols: &[&str]) -> Vec<Column> {
         cols.iter()

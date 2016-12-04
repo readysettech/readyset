@@ -2,38 +2,14 @@ use nom::IResult;
 use std::str;
 
 pub use common::{FieldExpression, Operator};
-use select::*;
+use column::Column;
 use insert::*;
+use select::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SqlQuery {
     Insert(InsertStatement),
     Select(SelectStatement),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Column {
-    pub name: String,
-    pub table: Option<String>,
-}
-
-impl<'a> From<&'a str> for Column {
-    fn from(c: &str) -> Column {
-        match c.find(".") {
-            None => {
-                Column {
-                    name: String::from(c),
-                    table: None,
-                }
-            }
-            Some(i) => {
-                Column {
-                    name: String::from(&c[i + 1..]),
-                    table: Some(String::from(&c[0..i])),
-                }
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,21 +31,6 @@ pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),
     Base(ConditionBase),
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Table {
-    pub name: String,
-    pub alias: Option<String>,
-}
-
-impl<'a> From<&'a str> for Table {
-    fn from(t: &str) -> Table {
-        Table {
-            name: String::from(t),
-            alias: None,
-        }
-    }
 }
 
 /// Parse sequence of SQL statements, divided by semicolons or newlines
@@ -94,21 +55,4 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     };
 
     Err("failed to parse query")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn column_from_str() {
-        let s = "table.col";
-        let c = Column::from(s);
-
-        assert_eq!(c,
-                   Column {
-                       name: String::from("col"),
-                       table: Some(String::from("table")),
-                   });
-    }
 }

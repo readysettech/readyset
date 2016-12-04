@@ -3,7 +3,8 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 use common::{field_list, statement_terminator, table_reference, value_list};
-use parser::{Column, Table};
+use column::Column;
+use table::Table;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStatement {
@@ -64,7 +65,8 @@ named!(pub insertion<&[u8], InsertStatement>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parser::{Column, Table};
+    use column::Column;
+    use table::Table;
 
     #[test]
     fn simple_insert() {
