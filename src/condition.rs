@@ -1,9 +1,30 @@
 use nom::{alphanumeric, digit, multispace};
 use std::str;
 
+use column::Column;
 use common::{binary_comparison_operator, binary_logical_operator, column_identifier,
              unary_negation_operator, Operator};
-use parser::{ConditionBase, ConditionExpression, ConditionTree};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConditionBase {
+    Field(Column),
+    Literal(String),
+    Placeholder,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConditionTree {
+    pub operator: Operator,
+    pub left: Option<Box<ConditionExpression>>,
+    pub right: Option<Box<ConditionExpression>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConditionExpression {
+    ComparisonOp(ConditionTree),
+    LogicalOp(ConditionTree),
+    Base(ConditionBase),
+}
 
 fn fold_cond_exprs(initial: ConditionExpression,
                    remainder: Vec<(Operator, ConditionExpression)>)
@@ -137,7 +158,6 @@ mod tests {
     use super::*;
     use column::Column;
     use common::Operator;
-    use parser::{ConditionBase, ConditionExpression, ConditionTree};
 
     fn flat_condition_tree(op: Operator,
                            l: ConditionBase,

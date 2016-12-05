@@ -2,7 +2,6 @@ use nom::IResult;
 use std::str;
 
 pub use common::{FieldExpression, Operator};
-use column::Column;
 use insert::*;
 use select::*;
 
@@ -10,27 +9,6 @@ use select::*;
 pub enum SqlQuery {
     Insert(InsertStatement),
     Select(SelectStatement),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ConditionBase {
-    Field(Column),
-    Literal(String),
-    Placeholder,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ConditionTree {
-    pub operator: Operator,
-    pub left: Option<Box<ConditionExpression>>,
-    pub right: Option<Box<ConditionExpression>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ConditionExpression {
-    ComparisonOp(ConditionTree),
-    LogicalOp(ConditionTree),
-    Base(ConditionBase),
 }
 
 /// Parse sequence of SQL statements, divided by semicolons or newlines

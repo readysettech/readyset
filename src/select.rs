@@ -5,10 +5,8 @@ use std::str;
 use column::Column;
 use common::FieldExpression;
 use common::{field_expr, field_list, unsigned_number, statement_terminator, table_list};
-use parser::ConditionExpression;
+use condition::{condition_expr, ConditionExpression};
 use table::Table;
-
-use condition::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupByClause {
@@ -169,7 +167,7 @@ mod tests {
     use super::*;
     use column::{AggregationExpression, Column};
     use common::{FieldExpression, Operator};
-    use parser::{ConditionBase, ConditionExpression, ConditionTree};
+    use condition::{ConditionBase, ConditionExpression, ConditionTree};
     use table::Table;
 
     fn columns(cols: &[&str]) -> Vec<Column> {

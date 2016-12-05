@@ -2,6 +2,7 @@
 extern crate nom;
 
 pub use self::column::Column;
+pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::insert::InsertStatement;
 pub use self::parser::*;
 pub use self::select::SelectStatement;
