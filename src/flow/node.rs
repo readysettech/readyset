@@ -22,6 +22,8 @@ pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
     Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
+    TimestampIngress(domain::Index),
+    TimestampEgress(domain::Index),
     Reader(Option<domain::Index>, Option<backlog::WriteHandle>, Reader), /* domain only known at commit time! */
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
@@ -118,6 +120,8 @@ impl Node {
                 // reader nodes can still be modified externally if txs are added
                 Type::Reader(d, w.take(), r.clone())
             }
+            Type::TimestampIngress(d) => Type::TimestampIngress(d),
+            Type::TimestampEgress(d) => Type::TimestampEgress(d),
             ref mut n @ Type::Ingress(..) |
             ref mut n @ Type::Internal(..) => {
                 // no-one else will be using our ingress or internal node,
@@ -155,6 +159,8 @@ impl Node {
             Type::Source => write!(f, "(source)"),
             Type::Ingress(..) => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
+            Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
+            Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
             Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
             Type::Unassigned(ref i) |
             Type::Internal(_, ref i) => {

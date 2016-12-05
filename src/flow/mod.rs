@@ -473,6 +473,9 @@ impl<'a> Migration<'a> {
             topo_list.push(node);
         }
 
+        // Map from base node index to the index of the associated timestamp egress node.
+        let mut time_egress_nodes : HashMap<NodeIndex, NodeIndex> = HashMap::new();
+
         for node in topo_list {
             let domain = self.added[&node].unwrap_or_else(|| {
                 // new node that doesn't belong to a domain
@@ -614,6 +617,52 @@ impl<'a> Migration<'a> {
                     let no = NodeAddress::make_local(domain_nodes[&domain].len());
                     domain_nodes.get_mut(&domain).unwrap().push((egress, no));
                 }
+            }
+
+            // Determine if this node is a base node, and if so add a TimestampEgress node below it.
+            let is_base = if let node::Type::Internal(_, ref ingredient) = *self.mainline.ingredients[node] {
+                ingredient.is_base()
+            } else {
+                false
+            };
+
+            if is_base {
+                let proxy = self.mainline.ingredients[node]
+                    .mirror(node::Type::TimestampEgress(domain));
+                let time_egress = self.mainline.ingredients.add_node(proxy);
+
+                // we need to hook that node
+                self.mainline.ingredients.add_edge(node, time_egress, false);
+                // that egress node also needs to run
+                let no = NodeAddress::make_local(domain_nodes[&domain].len());
+                domain_nodes.get_mut(&domain).unwrap().push((time_egress, no));
+
+                time_egress_nodes.insert(node, time_egress);
+            }
+        }
+
+        // Create a timestamp ingress node for each domain, and connect it to each of the timestamp
+        // egress nodes associated with a base node that does not (perhaps transitively) send
+        // updates to the domain.
+        for (domain, mut nodes) in domain_nodes.iter_mut() {
+            // TODO: set proper name for new node.
+            let proxy = node::Node::new::<_,Vec<String>,_>("ts-ingress-node", vec![],
+                                                           node::Type::TimestampIngress(*domain));
+            let time_ingress = self.mainline.ingredients.add_node(proxy);
+
+            // Place the new node into domain_nodes.
+            let no = NodeAddress::make_local(nodes.len());
+            nodes.push((time_ingress, no));
+
+            for (base, time_egress) in time_egress_nodes.iter() {
+                let path_exists = nodes.iter().any(|&(node, _)| {
+                    petgraph::algo::has_path_connecting(&self.mainline.ingredients, *base, node, None)
+                });
+
+                if !path_exists {
+                    self.mainline.ingredients.add_edge(*time_egress, time_ingress, false);
+                }
+
             }
         }
 
