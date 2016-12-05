@@ -341,24 +341,43 @@ impl Domain {
     pub fn buffer_transaction(&mut self, m: Message) {
         let ts = m.ts.unwrap();
 
-        let num_received = match self.buffered_transactions.entry(ts) {
+        // Insert message into buffer.
+        match self.buffered_transactions.entry(ts) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().push(m);
-                entry.get().len()
             }
             Entry::Vacant(entry) => {
                 entry.insert(vec![m]);
-                1
             }
         };
 
-        if ts == self.ts + 1 && num_received == self.num_ingress {
-            if let Some(messages) = self.buffered_transactions.remove(&ts) {
-                self.transactional_dispatch(messages);
-                self.ts += 1;
-            } else {
-                unreachable!();
+        // If the message wasn't from the timestep we're waiting on, then don't bother checking if
+        // we can deliver anything.
+        if ts != self.ts + 1 {
+            return
+        }
+
+        while !self.buffered_transactions.is_empty() {
+            // Extract a complete set of messages for timestep (self.ts+1) if one exists.
+            let messages = match self.buffered_transactions.entry(self.ts + 1) {
+                Entry::Occupied(entry) => {
+                    if entry.get().len() == self.num_ingress {
+                        Some(entry.remove())
+                    } else {
+                        None
+                    }
+                },
+                Entry::Vacant(_) => None,
+            };
+
+            // Stop once a timestep without a full message set is found.
+            if messages.is_none() {
+                break;
             }
+
+            // Process messages and advance to the next timestep.
+            self.transactional_dispatch(messages.unwrap());
+            self.ts += 1;
         }
     }
 
