@@ -21,7 +21,7 @@ pub struct ConditionTree {
 }
 
 impl<'a> ConditionTree {
-    fn contained_columns(&'a self) -> HashSet<&'a Column> {
+    pub fn contained_columns(&'a self) -> HashSet<&'a Column> {
         let mut s = HashSet::new();
         let mut q = VecDeque::<&'a ConditionTree>::new();
         q.push_back(self);
