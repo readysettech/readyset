@@ -1,4 +1,4 @@
-use nom_sql::parser::{ConditionBase, ConditionExpression, ConditionTree, FieldExpression, Operator};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression, Operator};
 use nom_sql::SelectStatement;
 
 use std::collections::HashMap;

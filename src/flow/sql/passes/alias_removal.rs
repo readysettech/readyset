@@ -1,6 +1,5 @@
 use flow::sql::passes::Pass;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-                      SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression, SqlQuery};
 
 use std::collections::HashMap;
 
@@ -23,6 +22,7 @@ impl AliasRemoval {
                         } else {
                             Some(t)
                         },
+                        aggregation: None,
                     }
                 }
             };
@@ -114,6 +114,7 @@ impl Pass for AliasRemoval {
                                             } else {
                                                 Some(t)
                                             },
+                                            aggregation: None,
                                         }
                                     }
                                 }
@@ -137,12 +138,12 @@ impl Pass for AliasRemoval {
 mod tests {
     use flow::sql::passes::Pass;
     use nom_sql::SelectStatement;
-    use nom_sql::parser::{Column, FieldExpression, SqlQuery, Table};
+    use nom_sql::{Column, FieldExpression, SqlQuery, Table};
     use super::AliasRemoval;
 
     #[test]
     fn it_removes_aliases() {
-        use nom_sql::parser::{ConditionBase, ConditionExpression, ConditionTree, Operator};
+        use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
 
         let q = SelectStatement {
             tables: vec![Table {

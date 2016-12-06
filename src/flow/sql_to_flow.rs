@@ -2,8 +2,7 @@ use nom_sql::parser as sql_parser;
 use flow;
 use flow::sql::query_graph::{QueryGraphEdge, QueryGraphNode, to_query_graph};
 use FlowGraph;
-use nom_sql::parser::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator,
-                      SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use ops;
 use ops::Node;
