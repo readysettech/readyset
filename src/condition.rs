@@ -1,4 +1,5 @@
 use nom::{alphanumeric, digit, multispace};
+use std::collections::{HashSet, VecDeque};
 use std::str;
 
 use column::Column;
@@ -17,6 +18,25 @@ pub struct ConditionTree {
     pub operator: Operator,
     pub left: Option<Box<ConditionExpression>>,
     pub right: Option<Box<ConditionExpression>>,
+}
+
+impl<'a> ConditionTree {
+    fn contained_columns(&self) -> HashSet<&'a Column> {
+        let mut s = HashSet::new();
+        let mut q = VecDeque::<&ConditionTree>::new();
+        q.push_back(self);
+        while let Some(ref ct) = q.pop_front() {
+            match **ct.left.as_ref().unwrap() {
+                ConditionExpression::Base(ConditionBase::Field(ref c)) => {
+                    s.insert(c);
+                }
+                ConditionExpression::LogicalOp(ref ct) |
+                ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
+                _ => (),
+            }
+        }
+        s
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -168,6 +188,23 @@ mod tests {
             left: Some(Box::new(ConditionExpression::Base(l))),
             right: Some(Box::new(ConditionExpression::Base(r))),
         })
+    }
+
+    #[test]
+    fn ct_contained_columns() {
+        use std::collections::HashSet;
+
+        let cond = "a.foo = ? and b.bar = 42";
+
+        let res = condition_expr(cond.as_bytes());
+        let expected_cols = HashSet::new();
+        expected_cols.insert(&Column::from("a.foo"));
+        expected_cols.insert(&Column::from("b.bar"));
+        let cols = match res.unwrap().1 {
+            ConditionExpression::LogicalOp(ref ct) => ct.contained_columns(),
+            _ => panic!(),
+        };
+        assert_eq!(cols, expected_cols);
     }
 
     #[test]

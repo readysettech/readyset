@@ -2,7 +2,7 @@ use std::str;
 
 use common::FieldExpression;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AggregationExpression {
     Avg(FieldExpression),
     Count(FieldExpression),
@@ -12,7 +12,7 @@ pub enum AggregationExpression {
     GroupConcat(FieldExpression),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Column {
     pub name: String,
     pub table: Option<String>,

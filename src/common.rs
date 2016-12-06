@@ -21,7 +21,7 @@ pub enum Operator {
     LessOrEqual,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum FieldExpression {
     All,
     Seq(Vec<Column>),
