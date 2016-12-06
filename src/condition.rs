@@ -21,12 +21,20 @@ pub struct ConditionTree {
 }
 
 impl<'a> ConditionTree {
-    fn contained_columns(&self) -> HashSet<&'a Column> {
+    fn contained_columns(&'a self) -> HashSet<&'a Column> {
         let mut s = HashSet::new();
-        let mut q = VecDeque::<&ConditionTree>::new();
+        let mut q = VecDeque::<&'a ConditionTree>::new();
         q.push_back(self);
         while let Some(ref ct) = q.pop_front() {
             match **ct.left.as_ref().unwrap() {
+                ConditionExpression::Base(ConditionBase::Field(ref c)) => {
+                    s.insert(c);
+                }
+                ConditionExpression::LogicalOp(ref ct) |
+                ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
+                _ => (),
+            }
+            match **ct.right.as_ref().unwrap() {
                 ConditionExpression::Base(ConditionBase::Field(ref c)) => {
                     s.insert(c);
                 }
@@ -197,14 +205,17 @@ mod tests {
         let cond = "a.foo = ? and b.bar = 42";
 
         let res = condition_expr(cond.as_bytes());
-        let expected_cols = HashSet::new();
-        expected_cols.insert(&Column::from("a.foo"));
-        expected_cols.insert(&Column::from("b.bar"));
-        let cols = match res.unwrap().1 {
-            ConditionExpression::LogicalOp(ref ct) => ct.contained_columns(),
+        let c1 = Column::from("a.foo");
+        let c2 = Column::from("b.bar");
+        let mut expected_cols = HashSet::new();
+        expected_cols.insert(&c1);
+        expected_cols.insert(&c2);
+        match res.unwrap().1 {
+            ConditionExpression::LogicalOp(ct) => {
+                assert_eq!(ct.contained_columns(), expected_cols);
+            }
             _ => panic!(),
-        };
-        assert_eq!(cols, expected_cols);
+        }
     }
 
     #[test]
