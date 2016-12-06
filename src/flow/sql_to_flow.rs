@@ -213,7 +213,10 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
             joined_tables.insert(src);
             filter_nodes.get(src).unwrap().clone()
         } else {
-            unimplemented!();
+            // We have already handled *both* tables that are part of the join. This should never
+            // occur, because their join predicates must be associated with the same query graph
+            // edge.
+            unreachable!();
         };
         let n = make_join_node(&format!("query-{}", i), edge, left_ni, right_ni, g);
         let ni = g.incorporate(n);
