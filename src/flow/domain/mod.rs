@@ -38,15 +38,17 @@ pub struct Domain {
 
     /// Map from timestamp to vector of messages buffered for that timestamp.
     buffered_transactions: HashMap<i64, (NodeIndex, Vec<Message>)>,
-    /// Number of ingress nodes in the domain.
-    num_ingress: usize,
-    /// Timestamp domain has seen all transactions up to.
+    /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
+    /// that are only connected by timestamp ingress nodes are not included.
+    ingress_from_base: HashMap<NodeIndex, usize>,
+    /// Timestamp that the domain has seen all transactions up to.
     ts: i64,
 }
 
 impl Domain {
     pub fn from_graph(domain: Index,
                       nodes: Vec<(NodeIndex, NodeAddress)>,
+                      base_nodes: &Vec<NodeIndex>,
                       graph: &mut Graph)
                       -> Self {
         let ni2na: HashMap<NodeIndex, NodeAddress> = nodes.iter().cloned().collect();
@@ -243,13 +245,23 @@ impl Domain {
 
         let nodes: DomainNodes =
             nodes.into_iter().map(|n| (*n.addr.as_local(), cell::RefCell::new(n))).collect();
-        let num_ingress = nodes.iter().filter(|n| n.borrow().is_ingress()).count();
+
+        let ingress_nodes: Vec<NodeIndex> =
+            nodes.iter().filter(|n| n.borrow().is_ingress()).map(|n| n.borrow().index).collect();
+
+        let ingress_from_base = base_nodes.iter().map(|base|{
+            let num_paths = ingress_nodes.iter().filter(|ingress| {
+                petgraph::algo::has_path_connecting(&*graph, *base, **ingress, None)
+            }).count();
+            (*base, num_paths)
+        }).collect();
+
         Domain {
             domain: domain,
             nodes: nodes,
             state: state,
             buffered_transactions: HashMap::new(),
-            num_ingress: num_ingress,
+            ingress_from_base: ingress_from_base,
             ts: -1,
         }
     }
@@ -361,22 +373,29 @@ impl Domain {
             // Extract a complete set of messages for timestep (self.ts+1) if one exists.
             let messages = match self.buffered_transactions.entry(self.ts + 1) {
                 Entry::Occupied(entry) => {
-                    if entry.get().1.len() == self.num_ingress {
-                        Some(entry.remove().1)
-                    } else {
-                        None
+                    let messages_needed = self.ingress_from_base.get(&entry.get().0);
+
+                    // If the base node that send this update is not in ingress_from_base, then skip
+                    // this timestamp and advance to the next one.
+                    if messages_needed.is_none() {
+                        entry.remove();
+                        self.ts += 1;
+                        continue;
                     }
+
+                    // If we don't have all the messages for this timestamp, then stop.
+                    if entry.get().1.len() < *messages_needed.unwrap() {
+                        break;
+                    }
+
+                    // Otherwise, extract this set of messages.
+                    entry.remove().1
                 },
-                Entry::Vacant(_) => None,
+                Entry::Vacant(_) => break,
             };
 
-            // Stop once a timestep without a full message set is found.
-            if messages.is_none() {
-                break;
-            }
-
             // Process messages and advance to the next timestep.
-            self.transactional_dispatch(messages.unwrap());
+            self.transactional_dispatch(messages);
             self.ts += 1;
         }
     }

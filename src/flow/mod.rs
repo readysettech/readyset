@@ -428,8 +428,9 @@ impl<'a> Migration<'a> {
     fn boot_domain(&mut self,
                    d: domain::Index,
                    nodes: Vec<(NodeIndex, NodeAddress)>,
+                   base_nodes: &Vec<NodeIndex>,
                    rx: mpsc::Receiver<Message>) {
-        let d = domain::Domain::from_graph(d, nodes, &mut self.mainline.ingredients);
+        let d = domain::Domain::from_graph(d, nodes, base_nodes, &mut self.mainline.ingredients);
         d.boot(rx);
     }
 
@@ -474,7 +475,8 @@ impl<'a> Migration<'a> {
         }
 
         // Map from base node index to the index of the associated timestamp egress node.
-        let mut time_egress_nodes : HashMap<NodeIndex, NodeIndex> = HashMap::new();
+        let mut time_egress_nodes: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+        let mut base_nodes: Vec<NodeIndex> = Vec::new();
 
         for node in topo_list {
             let domain = self.added[&node].unwrap_or_else(|| {
@@ -627,6 +629,8 @@ impl<'a> Migration<'a> {
             };
 
             if is_base {
+                base_nodes.push(node);
+
                 let proxy = self.mainline.ingredients[node]
                     .mirror(node::Type::TimestampEgress(domain));
                 let time_egress = self.mainline.ingredients.add_node(proxy);
@@ -688,7 +692,7 @@ impl<'a> Migration<'a> {
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
-            self.boot_domain(domain, nodes, rxs.remove(&domain).unwrap());
+            self.boot_domain(domain, nodes, &base_nodes, rxs.remove(&domain).unwrap());
         }
         drop(rxs);
         drop(txs); // all necessary copies are in targets
