@@ -295,6 +295,7 @@ impl Domain {
                     to: n.children[i],
                     data: data,
                     ts: ts,
+                    token: None,
                 };
 
                 for (k,v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
@@ -343,6 +344,7 @@ impl Domain {
                 to: n.borrow().addr,
                 data: data,
                 ts: ts,
+                token: None,
             };
 
             self.nodes[m.to.as_local()].borrow_mut().process(m, &mut self.state, &self.nodes);
@@ -354,14 +356,7 @@ impl Domain {
         let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
-        match self.buffered_transactions.entry(ts) {
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().1.push(m);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert((base, vec![m]));
-            }
-        };
+        self.buffered_transactions.entry(ts).or_insert((base,vec![])).1.push(m);
 
         // If the message wasn't from the timestep we're waiting on, then don't bother checking if
         // we can deliver anything.

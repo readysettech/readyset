@@ -24,7 +24,7 @@ fn it_works() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a](vec![id.clone(), 2.into()]);
+    put[&a].0(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -33,7 +33,7 @@ fn it_works() {
     assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
 
     // update value again
-    put[&b](vec![id.clone(), 4.into()]);
+    put[&b].0(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -63,9 +63,9 @@ fn it_works_w_mat() {
     let put = mig.commit();
 
     // send a few values on a
-    put[&a](vec![id.clone(), 1.into()]);
-    put[&a](vec![id.clone(), 2.into()]);
-    put[&a](vec![id.clone(), 3.into()]);
+    put[&a].0(vec![id.clone(), 1.into()]);
+    put[&a].0(vec![id.clone(), 2.into()]);
+    put[&a].0(vec![id.clone(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -79,9 +79,9 @@ fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b](vec![id.clone(), 4.into()]);
-    put[&b](vec![id.clone(), 5.into()]);
-    put[&b](vec![id.clone(), 6.into()]);
+    put[&b].0(vec![id.clone(), 4.into()]);
+    put[&b].0(vec![id.clone(), 5.into()]);
+    put[&b].0(vec![id.clone(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -140,7 +140,7 @@ fn votes() {
     let put = mig.commit();
 
     // make one article
-    put[&article1](vec![a1.clone(), 2.into()]);
+    put[&article1].0(vec![a1.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -149,7 +149,7 @@ fn votes() {
     assert_eq!(articleq(&a1), vec![vec![a1.clone(), 2.into()]]);
 
     // make another article
-    put[&article2](vec![a2.clone(), 4.into()]);
+    put[&article2].0(vec![a2.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -160,7 +160,7 @@ fn votes() {
     assert_eq!(articleq(&a2), vec![vec![a2.clone(), 4.into()]]);
 
     // create a vote (user 1 votes for article 1)
-    put[&vote](vec![1.into(), a1.clone()]);
+    put[&vote].0(vec![1.into(), a1.clone()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));

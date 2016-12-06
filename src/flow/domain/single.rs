@@ -90,6 +90,7 @@ impl NodeDescriptor {
                             to: dst,
                             data: u.take().unwrap(),
                             ts: m.ts.clone(),
+                            token: None,
                         })
                     } else {
                         tx.send(Message {
@@ -97,6 +98,7 @@ impl NodeDescriptor {
                             to: dst,
                             data: u.clone().unwrap(),
                             ts: m.ts.clone(),
+                            token: None,
                         })
                     }
                     .unwrap();

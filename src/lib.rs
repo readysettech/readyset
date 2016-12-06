@@ -378,6 +378,7 @@ extern crate rustful;
 #[cfg(feature="b_netsoup")]
 extern crate tarpc;
 
+mod checktable;
 mod flow;
 mod query;
 mod ops;

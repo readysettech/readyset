@@ -2,13 +2,14 @@ use petgraph;
 use petgraph::graph::NodeIndex;
 use query;
 use ops;
+use checktable;
 
 use std::sync::mpsc;
 use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-
+use std::sync::mpsc::channel;
 use std::fmt;
 
 pub mod domain;
@@ -25,6 +26,7 @@ pub struct Message {
     pub to: NodeAddress,
     pub data: U,
     pub ts: Option<(i64, NodeIndex)>,
+    pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>
 }
 
 /// A domain-local node identifier.
@@ -269,6 +271,16 @@ impl fmt::Display for Blender {
     }
 }
 
+
+/// A FnTX is a function with which a transactional write can be submitted.
+pub type FnTX = Box<Fn(Vec<query::DataType>, checktable::Token) ->
+                    checktable::TransactionResult + Send + 'static>;
+
+// A FnNTX is a function with which a non-transactional write can be submitted.
+pub type FnNTX = Box<Fn(Vec<query::DataType>) + Send + 'static>;
+
+
+
 /// A `Migration` encapsulates a number of changes to the Soup data flow graph.
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
@@ -439,8 +451,7 @@ impl<'a> Migration<'a> {
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
-    pub fn commit(mut self)
-                  -> HashMap<NodeAddress, Box<Fn(Vec<query::DataType>) + Send + 'static>> {
+    pub fn commit(mut self) -> HashMap<NodeAddress, (FnNTX, FnTX)> {
         // the user wants us to commit to the changes contained within this Migration. this is
         // where all the magic happens.
 
@@ -665,8 +676,8 @@ impl<'a> Migration<'a> {
 
                 if !path_exists {
                     self.mainline.ingredients.add_edge(*time_egress, time_ingress, false);
+                    // TODO: connect channels here.
                 }
-
             }
         }
 
@@ -727,17 +738,31 @@ impl<'a> Migration<'a> {
 
                     // we want to avoid forcing the end-user to cook up Messages
                     // they should instead just make Us
-                    sources.insert(NodeAddress::make_global(idx),
-                                   Box::new(move |u: Vec<query::DataType>| {
-                        tx.send(Message {
-                                from: src,
-                                to: no,
-                                data: u.into(),
-                                ts: None,
-                            })
-                            .unwrap()
+                    let tx2 = tx.clone();
+                    let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
+                        Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
+                        let (send, recv) = mpsc::channel();
 
-                    }) as Box<Fn(_) + Send>);
+                        tx.send(Message {
+                            from: src,
+                            to: no,
+                            data: u.into(),
+                            ts: None,
+                            token: Some((t, send)),
+                        }).unwrap();
+                        recv.recv().unwrap()
+                    });
+
+                    let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
+                        tx2.send(Message {
+                            from: src,
+                            to: no,
+                            data: u.into(),
+                            ts: None,
+                            token: None,
+                        }).unwrap()
+                    });
+                    sources.insert(NodeAddress::make_global(idx), (fntx, ftx));
                     break;
                 }
 
