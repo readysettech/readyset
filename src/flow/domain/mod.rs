@@ -37,7 +37,7 @@ pub struct Domain {
     state: StateMap,
 
     /// Map from timestamp to vector of messages buffered for that timestamp.
-    buffered_transactions: HashMap<i64, Vec<Message>>,
+    buffered_transactions: HashMap<i64, (NodeIndex, Vec<Message>)>,
     /// Number of ingress nodes in the domain.
     num_ingress: usize,
     /// Timestamp domain has seen all transactions up to.
@@ -339,15 +339,15 @@ impl Domain {
     }
 
     pub fn buffer_transaction(&mut self, m: Message) {
-        let ts = m.ts.unwrap();
+        let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
         match self.buffered_transactions.entry(ts) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().push(m);
+                entry.get_mut().1.push(m);
             }
             Entry::Vacant(entry) => {
-                entry.insert(vec![m]);
+                entry.insert((base, vec![m]));
             }
         };
 
@@ -361,8 +361,8 @@ impl Domain {
             // Extract a complete set of messages for timestep (self.ts+1) if one exists.
             let messages = match self.buffered_transactions.entry(self.ts + 1) {
                 Entry::Occupied(entry) => {
-                    if entry.get().len() == self.num_ingress {
-                        Some(entry.remove())
+                    if entry.get().1.len() == self.num_ingress {
+                        Some(entry.remove().1)
                     } else {
                         None
                     }

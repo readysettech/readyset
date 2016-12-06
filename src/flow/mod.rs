@@ -24,7 +24,7 @@ pub struct Message {
     pub from: NodeAddress,
     pub to: NodeAddress,
     pub data: U,
-    pub ts: Option<i64>,
+    pub ts: Option<(i64, NodeIndex)>,
 }
 
 /// A domain-local node identifier.
