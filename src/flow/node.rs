@@ -6,6 +6,8 @@ use std::fmt;
 
 use std::ops::{Deref, DerefMut};
 
+use checktable;
+
 use ops::Update;
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
@@ -16,6 +18,7 @@ use backlog;
 pub struct Reader {
     pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
     pub state: Option<backlog::BufferedStore>,
+    pub token_generator: Option<checktable::TokenGenerator>,
 }
 
 pub enum Type {
@@ -36,9 +39,12 @@ impl Type {
             Type::Taken(d) |
             Type::Ingress(d) |
             Type::Internal(d, _) |
+            Type::TimestampIngress(d) |
+            Type::TimestampEgress(d) |
             Type::Egress(d, _) => Some(d),
             Type::Reader(d, _, _) => d,
-            _ => None,
+            Type::Unassigned(_) |
+            Type::Source => None,
         }
     }
 }
@@ -128,7 +134,9 @@ impl Node {
                 // so we take it from the graph
                 mem::replace(n, Type::Taken(domain.unwrap()))
             }
-            _ => unreachable!(),
+            Type::Taken(_) |
+            Type::Unassigned(_) |
+            Type::Source => unreachable!(),
         };
 
         self.mirror(inner)

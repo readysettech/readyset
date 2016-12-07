@@ -34,17 +34,20 @@ impl NodeDescriptor {
                    m: Message,
                    state: &mut StateMap,
                    nodes: &DomainNodes)
-                   -> Option<Update> {
+                   -> Option<(Update, Option<(i64, NodeIndex)>)> {
 
         match *self.inner {
             flow::node::Type::Ingress(..) => {
                 materialize(&m.data, state.get_mut(self.addr.as_local()));
-                Some(m.data)
+                Some((m.data, m.ts))
             }
             flow::node::Type::Reader(_, ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     match m.data {
                         ops::Update::Records(ref rs) => state.add(rs.iter().cloned()),
+                    }
+                    if m.ts.is_some() {
+                        state.update_ts(m.ts.unwrap().0);
                     }
                     state.swap();
                 }
@@ -72,6 +75,7 @@ impl NodeDescriptor {
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
 
+                let ts = m.ts;
                 let mut u = Some(m.data); // so we can use .take()
                 for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
                     if txi == txn && self.children.is_empty() {
@@ -95,16 +99,21 @@ impl NodeDescriptor {
                 }
 
                 debug_assert!(u.is_some() || self.children.is_empty());
-                u
+                u.map(|update| (update, ts))
             }
             flow::node::Type::Internal(_, ref mut i) => {
+                let ts = m.ts;
                 let u = i.on_input(m, nodes, state);
                 if let Some(ref u) = u {
                     materialize(u, state.get_mut(self.addr.as_local()));
                 }
-                u
+                u.map(|update| (update, ts))
             }
-            _ => unreachable!(),
+            flow::node::Type::TimestampEgress(_) |
+            flow::node::Type::TimestampIngress(_) => Some((m.data, m.ts)),
+            flow::node::Type::Unassigned(..) |
+            flow::node::Type::Taken(..) |
+            flow::node::Type::Source => unreachable!(),
         }
     }
 

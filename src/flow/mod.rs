@@ -9,7 +9,6 @@ use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::mpsc::channel;
 use std::fmt;
 
 pub mod domain;
@@ -26,7 +25,7 @@ pub struct Message {
     pub to: NodeAddress,
     pub data: U,
     pub ts: Option<(i64, NodeIndex)>,
-    pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>
+    pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>,
 }
 
 /// A domain-local node identifier.
@@ -415,11 +414,60 @@ impl<'a> Migration<'a> {
             let arc = inner.state.as_ref().unwrap().clone();
             Box::new(move |q: &query::DataType| -> ops::Datas {
                 arc.find_and(q, |rs| {
+                        // without projection, we wouldn't need to clone here
+                        // because we wouldn't need the "feed" below
+                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                    })
+                    .0
+            })
+        } else {
+            unreachable!("tried to use non-reader node as a reader")
+        }
+    }
+
+    /// Set up the given node such that its output can be efficiently queried, and the results can
+    /// be used in transactions.
+    ///
+    /// The returned function can be called with a `Query`, and any matching results will be
+    /// returned, along with a token.
+    pub fn transactional_maintain
+        (&mut self,
+         n: NodeAddress,
+         key: usize)
+         -> Option<Box<Fn(&query::DataType) -> (ops::Datas, checktable::Token) + Send + Sync>> {
+        self.ensure_reader_for(n);
+        let ri = self.readers[n.as_global()];
+
+        // we need to do these here because we'll mutably borrow self.mainline in the if let
+        let cols = self.mainline.ingredients[ri].fields().len();
+
+        if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
+            if inner.state.is_none() {
+                use backlog;
+                let (r, w) = backlog::new(cols, key).commit();
+                inner.state = Some(r);
+                *wh = Some(w);
+            }
+
+            let mut g = &inner.token_generator;
+            if g.is_none() {
+                // TODO: Create a token generator if possible.
+
+                return None;
+            }
+
+            // cook up a function to query this materialized state
+            let arc = inner.state.as_ref().unwrap().clone();
+            let generator = g.clone().unwrap();
+            let f = Box::new(move |q: &query::DataType| -> (ops::Datas, checktable::Token) {
+                let (res, ts) = arc.find_and(q, |rs| {
                     // without projection, we wouldn't need to clone here
                     // because we wouldn't need the "feed" below
                     rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
-                })
-            })
+                });
+                (res, generator.generate(ts))
+            });
+            Some(f)
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -633,7 +681,8 @@ impl<'a> Migration<'a> {
             }
 
             // Determine if this node is a base node, and if so add a TimestampEgress node below it.
-            let is_base = if let node::Type::Internal(_, ref ingredient) = *self.mainline.ingredients[node] {
+            let is_base = if let node::Type::Internal(_, ref ingredient) =
+                *self.mainline.ingredients[node] {
                 ingredient.is_base()
             } else {
                 false
@@ -661,8 +710,9 @@ impl<'a> Migration<'a> {
         // updates to the domain.
         for (domain, mut nodes) in domain_nodes.iter_mut() {
             // TODO: set proper name for new node.
-            let proxy = node::Node::new::<_,Vec<String>,_>("ts-ingress-node", vec![],
-                                                           node::Type::TimestampIngress(*domain));
+            let proxy = node::Node::new::<_, Vec<String>, _>("ts-ingress-node",
+                                                             vec![],
+                                                             node::Type::TimestampIngress(*domain));
             let time_ingress = self.mainline.ingredients.add_node(proxy);
 
             // Place the new node into domain_nodes.
@@ -671,7 +721,10 @@ impl<'a> Migration<'a> {
 
             for (base, time_egress) in time_egress_nodes.iter() {
                 let path_exists = nodes.iter().any(|&(node, _)| {
-                    petgraph::algo::has_path_connecting(&self.mainline.ingredients, *base, node, None)
+                    petgraph::algo::has_path_connecting(&self.mainline.ingredients,
+                                                        *base,
+                                                        node,
+                                                        None)
                 });
 
                 if !path_exists {
@@ -741,26 +794,28 @@ impl<'a> Migration<'a> {
                     let tx2 = tx.clone();
                     let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
                         Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
-                        let (send, recv) = mpsc::channel();
+                            let (send, recv) = mpsc::channel();
 
-                        tx.send(Message {
-                            from: src,
-                            to: no,
-                            data: u.into(),
-                            ts: None,
-                            token: Some((t, send)),
-                        }).unwrap();
-                        recv.recv().unwrap()
-                    });
+                            tx.send(Message {
+                                    from: src,
+                                    to: no,
+                                    data: u.into(),
+                                    ts: None,
+                                    token: Some((t, send)),
+                                })
+                                .unwrap();
+                            recv.recv().unwrap()
+                        });
 
                     let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
                         tx2.send(Message {
-                            from: src,
-                            to: no,
-                            data: u.into(),
-                            ts: None,
-                            token: None,
-                        }).unwrap()
+                                from: src,
+                                to: no,
+                                data: u.into(),
+                                ts: None,
+                                token: None,
+                            })
+                            .unwrap()
                     });
                     sources.insert(NodeAddress::make_global(idx), (fntx, ftx));
                     break;

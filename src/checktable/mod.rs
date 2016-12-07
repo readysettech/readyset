@@ -21,10 +21,9 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(ts: i64, conflicts: Vec<NodeIndex>) -> Token {
-        Token {
-            conflicts: conflicts.into_iter().map(|n| (Conflict::BaseTable(n), ts)).collect(),
-        }
+    /// Reduce the size of the token, potentially increasing the amount of things it conflicts with.
+    fn compact(&mut self) {
+
     }
 
     /// Combine two tokens into a single token conflicting with everything in either token's
@@ -36,16 +35,31 @@ impl Token {
                     let v = cmp::max(ts, entry.get().clone());
                     entry.insert(v);
                 }
-                Entry::Vacant(mut entry) => {
+                Entry::Vacant(entry) => {
                     entry.insert(ts);
                 }
             }
         }
+        self.compact();
+    }
+}
+
+#[derive(Clone)]
+pub struct TokenGenerator {
+    conflicts: Vec<Conflict>,
+}
+
+impl TokenGenerator {
+    pub fn new(base_parents: Vec<NodeIndex>) -> Self {
+        TokenGenerator {
+            conflicts: base_parents.into_iter().map(|p| Conflict::BaseTable(p)).collect(),
+        }
     }
 
-    /// Reduce the size of the token, potentially increasing the amount of things it conflicts with.
-    pub fn compact(&mut self) {
-
+    pub fn generate(&self, ts: i64) -> Token {
+        Token {
+            conflicts: self.conflicts.iter().map(|c| (c.clone(), ts)).collect(),
+        }
     }
 }
 

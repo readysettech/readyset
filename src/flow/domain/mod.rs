@@ -249,12 +249,16 @@ impl Domain {
         let ingress_nodes: Vec<NodeIndex> =
             nodes.iter().filter(|n| n.borrow().is_ingress()).map(|n| n.borrow().index).collect();
 
-        let ingress_from_base = base_nodes.iter().map(|base|{
-            let num_paths = ingress_nodes.iter().filter(|ingress| {
-                petgraph::algo::has_path_connecting(&*graph, *base, **ingress, None)
-            }).count();
-            (*base, num_paths)
-        }).collect();
+        let ingress_from_base = base_nodes.iter()
+            .map(|base| {
+                let num_paths = ingress_nodes.iter()
+                    .filter(|ingress| {
+                        petgraph::algo::has_path_connecting(&*graph, *base, **ingress, None)
+                    })
+                    .count();
+                (*base, num_paths)
+            })
+            .collect();
 
         Domain {
             domain: domain,
@@ -266,9 +270,12 @@ impl Domain {
         }
     }
 
-    pub fn dispatch(m: Message, states: &mut StateMap, nodes: &DomainNodes, enable_output: bool) -> HashMap<NodeAddress, Vec<ops::Record>> {
+    pub fn dispatch(m: Message,
+                    states: &mut StateMap,
+                    nodes: &DomainNodes,
+                    enable_output: bool)
+                    -> HashMap<NodeAddress, Vec<ops::Record>> {
         let me = m.to;
-        let ts = m.ts.clone();
         let mut output_messages = HashMap::new();
 
         let mut n = nodes[me.as_local()].borrow_mut();
@@ -283,7 +290,7 @@ impl Domain {
         let n = nodes[me.as_local()].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can
-            let data = if i == n.children.len() - 1 {
+            let (data, ts) = if i == n.children.len() - 1 {
                 u.take().unwrap()
             } else {
                 u.clone().unwrap()
@@ -298,7 +305,7 @@ impl Domain {
                     token: None,
                 };
 
-                for (k,v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
+                for (k, v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
                     output_messages.insert(k, v);
                 }
             } else {
@@ -309,7 +316,7 @@ impl Domain {
                     }
                     Entry::Vacant(entry) => {
                         entry.insert(data);
-                    },
+                    }
                 };
             }
         }
@@ -356,12 +363,12 @@ impl Domain {
         let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
-        self.buffered_transactions.entry(ts).or_insert((base,vec![])).1.push(m);
+        self.buffered_transactions.entry(ts).or_insert((base, vec![])).1.push(m);
 
         // If the message wasn't from the timestep we're waiting on, then don't bother checking if
         // we can deliver anything.
         if ts != self.ts + 1 {
-            return
+            return;
         }
 
         while !self.buffered_transactions.is_empty() {
@@ -385,7 +392,7 @@ impl Domain {
 
                     // Otherwise, extract this set of messages.
                     entry.remove().1
-                },
+                }
                 Entry::Vacant(_) => break,
             };
 
@@ -398,15 +405,13 @@ impl Domain {
     pub fn boot(mut self, rx: mpsc::Receiver<Message>) {
         use std::thread;
 
-        thread::spawn(move || {
-            for m in rx {
-                match m.ts {
-                    None => {
-                        Self::dispatch(m, &mut self.state, &self.nodes, true);
-                    }
-                    Some(_) => {
-                        self.buffer_transaction(m);
-                    }
+        thread::spawn(move || for m in rx {
+            match m.ts {
+                None => {
+                    Self::dispatch(m, &mut self.state, &self.nodes, true);
+                }
+                Some(_) => {
+                    self.buffer_transaction(m);
                 }
             }
         });
