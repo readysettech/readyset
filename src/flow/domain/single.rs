@@ -36,19 +36,12 @@ impl NodeDescriptor {
                    nodes: &DomainNodes)
                    -> Option<Update> {
 
-        // i wish we could use match here, but unfortunately the borrow checker isn't quite
-        // sophisticated enough to deal with match and DerefMut in a way that lets us do it
-        //
-        //   https://github.com/rust-lang/rust/issues/37949
-        //
-        // so, instead, we have to do it in two parts
-        if let flow::node::Type::Ingress(..) = *self.inner {
-            self.materialize(&m.data, state);
-            return Some(m.data);
-        }
-
-        if let flow::node::Type::Reader(_, ref mut w, ref r) = *self.inner {
-            {
+        match *self.inner {
+            flow::node::Type::Ingress(..) => {
+                materialize(&m.data, state.get_mut(self.addr.as_local()));
+                Some(m.data)
+            }
+            flow::node::Type::Reader(_, ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     match m.data {
                         ops::Update::Records(ref rs) => state.add(rs.iter().cloned()),
@@ -56,35 +49,32 @@ impl NodeDescriptor {
                     state.swap();
                 }
 
+                let mut data = Some(m.data); // so we can .take() for last tx
+                let mut txs = r.streamers.lock().unwrap();
+                let mut left = txs.len();
+
+                // remove any channels where the receiver has hung up
+                txs.retain(|tx| {
+                    left -= 1;
+                    if left == 0 {
+                            tx.send(data.take().unwrap())
+                        } else {
+                            tx.send(data.clone().unwrap())
+                        }
+                        .is_ok()
+                });
+
+                // readers never have children
+                None
             }
+            flow::node::Type::Egress(_, ref txs) => {
+                // send any queued updates to all external children
+                let mut txs = txs.lock().unwrap();
+                let txn = txs.len() - 1;
 
-            let mut data = Some(m.data); // so we can .take() for last tx
-            let mut txs = r.streamers.lock().unwrap();
-            let mut left = txs.len();
-
-            // remove any channels where the receiver has hung up
-            txs.retain(|tx| {
-                left -= 1;
-                if left == 0 {
-                        tx.send(data.take().unwrap())
-                    } else {
-                        tx.send(data.clone().unwrap())
-                    }
-                    .is_ok()
-            });
-
-            // readers never have children
-            return None;
-        }
-
-        if let flow::node::Type::Egress(_, ref txs) = *self.inner {
-            // send any queued updates to all external children
-            let mut txs = txs.lock().unwrap();
-            let txn = txs.len() - 1;
-
-            let mut u = Some(m.data); // so we can use .take()
-            for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
-                if txi == txn && self.children.is_empty() {
+                let mut u = Some(m.data); // so we can use .take()
+                for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
+                    if txi == txn && self.children.is_empty() {
                         tx.send(Message {
                             from: NodeAddress::make_global(self.index), // the ingress node knows where it should go
                             to: dst,
@@ -102,27 +92,20 @@ impl NodeDescriptor {
                         })
                     }
                     .unwrap();
+                }
+
+                debug_assert!(u.is_some() || self.children.is_empty());
+                u
             }
-
-            debug_assert!(u.is_some() || self.children.is_empty());
-            return u;
+            flow::node::Type::Internal(_, ref mut i) => {
+                let u = i.on_input(m, nodes, state);
+                if let Some(ref u) = u {
+                    materialize(u, state.get_mut(self.addr.as_local()));
+                }
+                u
+            }
+            _ => unreachable!(),
         }
-
-        let u = if let flow::node::Type::Internal(_, ref mut i) = *self.inner {
-            i.on_input(m, nodes, state)
-        } else {
-            unreachable!();
-        };
-
-        if let Some(ref u) = u {
-            self.materialize(u, state);
-        }
-        u
-    }
-
-    fn materialize(&mut self, u: &Update, state: &mut StateMap) {
-        // our output changed -- do we need to modify materialized state?
-        materialize(u, state.get_mut(self.addr.as_local()));
     }
 
     pub fn is_ingress(&self) -> bool {
@@ -144,8 +127,8 @@ impl NodeDescriptor {
     /// A node is considered to be an output node if changes to its state are visible outside of its domain.
     pub fn is_output(&self) -> bool {
         match *self.inner {
-            flow::node::Type::Egress(_,_) => true,
-            flow::node::Type::Reader(_,_) => true,
+            flow::node::Type::Egress(_, _) => true,
+            flow::node::Type::Reader(..) => true,
             _ => false,
         }
     }
