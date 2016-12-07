@@ -5,7 +5,7 @@ use ops;
 use checktable;
 
 use std::sync::mpsc;
-use std::sync;
+use std::sync::{Arc, Mutex};
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -161,12 +161,11 @@ pub trait Ingredient
         false
     }
 
-    fn query_through<'a>
-        (&self,
-         _column: usize,
-         _value: &'a query::DataType,
-         _states: &'a prelude::StateMap)
-         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
+    fn query_through<'a>(&self,
+                         _column: usize,
+                         _value: &'a query::DataType,
+                         _states: &'a prelude::StateMap)
+                         -> Option<Box<Iterator<Item = &'a Arc<Vec<query::DataType>>> + 'a>> {
         None
     }
 
@@ -180,7 +179,7 @@ pub trait Ingredient
                   value: &'a query::DataType,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
-                  -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
+                  -> Option<Box<Iterator<Item = &'a Arc<Vec<query::DataType>>> + 'a>> {
         states.get(parent.as_local())
             .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
             .or_else(|| {
@@ -201,6 +200,7 @@ pub struct Blender {
     ingredients: petgraph::Graph<node::Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
+    checktable: Arc<Mutex<checktable::CheckTable>>,
 }
 
 impl Default for Blender {
@@ -212,6 +212,7 @@ impl Default for Blender {
             ingredients: g,
             source: source,
             ndomains: 0,
+            checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
         }
     }
 }
@@ -490,7 +491,11 @@ impl<'a> Migration<'a> {
                    nodes: Vec<(NodeIndex, NodeAddress)>,
                    base_nodes: &Vec<NodeIndex>,
                    rx: mpsc::Receiver<Message>) {
-        let d = domain::Domain::from_graph(d, nodes, base_nodes, &mut self.mainline.ingredients);
+        let d = domain::Domain::from_graph(d,
+                                           nodes,
+                                           self.mainline.checktable.clone(),
+                                           base_nodes,
+                                           &mut self.mainline.ingredients);
         d.boot(rx);
     }
 

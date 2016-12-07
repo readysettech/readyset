@@ -68,38 +68,36 @@ pub enum TransactionResult {
     Aborted,
 }
 
-pub struct CheckTableSet {
+pub struct CheckTable {
     next_timestamp: i64,
 
     // Holds the last time each base node was written to.
     toplevel: HashMap<NodeIndex, i64>,
 }
 
-impl CheckTableSet {
-    pub fn new(base_nodes: Vec<NodeIndex>) -> CheckTableSet {
-        CheckTableSet {
+impl CheckTable {
+    pub fn new() -> Self {
+        CheckTable {
             next_timestamp: 0,
-            toplevel: base_nodes.into_iter().map(|n| (n, -1)).collect(),
+            toplevel: HashMap::new(),
         }
-    }
-
-    pub fn add_base_node(&mut self, index: NodeIndex) {
-        self.toplevel.insert(index, self.next_timestamp - 1);
     }
 
     /// Return whether a transaction with this Token should commit.
     fn validate_token(&self, token: &Token) -> bool{
         return token.conflicts.iter().all(|(conflict,ts)| match conflict {
-            &Conflict::BaseTable(node) => ts >= self.toplevel.get(&node).unwrap(),
+            &Conflict::BaseTable(node) => ts >= self.toplevel.get(&node).unwrap_or(&-1),
         });
     }
 
-    pub fn claim_timestamp(&mut self, token: &Token) -> Option<i64> {
+    pub fn claim_timestamp(&mut self, token: &Token, base: NodeIndex) -> TransactionResult {
         if self.validate_token(token) {
+            let ts = self.next_timestamp;
             self.next_timestamp += 1;
-            Some(self.next_timestamp - 1)
+            *self.toplevel.get_mut(&base).unwrap() = ts;
+            TransactionResult::Committed(ts)
         } else {
-            None
+            TransactionResult::Aborted
         }
     }
 }

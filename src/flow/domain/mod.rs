@@ -3,6 +3,7 @@ use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::cell;
 
@@ -12,6 +13,7 @@ use flow;
 use flow::prelude::*;
 
 use ops;
+use checktable;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -43,11 +45,14 @@ pub struct Domain {
     ingress_from_base: HashMap<NodeIndex, usize>,
     /// Timestamp that the domain has seen all transactions up to.
     ts: i64,
+
+    checktable: Arc<Mutex<checktable::CheckTable>>,
 }
 
 impl Domain {
     pub fn from_graph(domain: Index,
                       nodes: Vec<(NodeIndex, NodeAddress)>,
+                      checktable: Arc<Mutex<checktable::CheckTable>>,
                       base_nodes: &Vec<NodeIndex>,
                       graph: &mut Graph)
                       -> Self {
@@ -267,20 +272,29 @@ impl Domain {
             buffered_transactions: HashMap::new(),
             ingress_from_base: ingress_from_base,
             ts: -1,
+            checktable: checktable.clone(),
         }
     }
 
     pub fn dispatch(m: Message,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
-                    enable_output: bool)
+                    enable_output: bool,
+                    checktable: &Arc<Mutex<checktable::CheckTable>>)
                     -> HashMap<NodeAddress, Vec<ops::Record>> {
         let me = m.to;
+        let ts = m.ts;
         let mut output_messages = HashMap::new();
 
         let mut n = nodes[me.as_local()].borrow_mut();
-        let mut u = n.process(m, states, nodes);
+        let mut u = n.process(m, states, nodes, checktable);
         drop(n);
+
+        if ts.is_some() {
+            // Any message with a timestamp (ie part of a transaction) must flow through the entire
+            // graph, even if there are no updates associated with it.
+            u = u.or(Some((Update::Records(vec![]), ts)));
+        }
 
         if u.is_none() {
             // no need to deal with our children if we're not sending them anything
@@ -305,7 +319,8 @@ impl Domain {
                     token: None,
                 };
 
-                for (k, v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
+                for (k, v) in Self::dispatch(m, states, nodes, enable_output, checktable)
+                    .into_iter() {
                     output_messages.insert(k, v);
                 }
             } else {
@@ -333,7 +348,9 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false).into_iter();
+            let new_messages =
+                Self::dispatch(m, &mut self.state, &self.nodes, false, &self.checktable)
+                    .into_iter();
 
             for (key, value) in new_messages.into_iter() {
                 egress_messages.insert(key, value);
@@ -354,7 +371,9 @@ impl Domain {
                 token: None,
             };
 
-            self.nodes[m.to.as_local()].borrow_mut().process(m, &mut self.state, &self.nodes);
+            self.nodes[m.to.as_local()]
+                .borrow_mut()
+                .process(m, &mut self.state, &self.nodes, &self.checktable);
             assert_eq!(n.borrow().children.len(), 0);
         }
     }
@@ -408,7 +427,7 @@ impl Domain {
         thread::spawn(move || for m in rx {
             match m.ts {
                 None => {
-                    Self::dispatch(m, &mut self.state, &self.nodes, true);
+                    Self::dispatch(m, &mut self.state, &self.nodes, true, &self.checktable);
                 }
                 Some(_) => {
                     self.buffer_transaction(m);

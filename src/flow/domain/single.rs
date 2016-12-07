@@ -3,6 +3,9 @@ use petgraph::graph::NodeIndex;
 use flow::prelude::*;
 
 use ops;
+use checktable;
+
+use std::sync;
 
 macro_rules! broadcast {
     ($from:expr, $handoffs:ident, $m:expr, $children:expr) => {{
@@ -33,7 +36,8 @@ impl NodeDescriptor {
     pub fn process(&mut self,
                    m: Message,
                    state: &mut StateMap,
-                   nodes: &DomainNodes)
+                   nodes: &DomainNodes,
+                   checktable: &sync::Arc<sync::Mutex<checktable::CheckTable>>)
                    -> Option<(Update, Option<(i64, NodeIndex)>)> {
 
         match *self.inner {
@@ -102,7 +106,25 @@ impl NodeDescriptor {
                 u.map(|update| (update, ts))
             }
             flow::node::Type::Internal(_, ref mut i) => {
-                let ts = m.ts;
+                let mut ts = m.ts;
+
+                if i.is_base() && m.token.is_some() {
+                    if let Some((ref token, ref send)) = m.token {
+                        let result = checktable.lock().unwrap().claim_timestamp(&token, self.index);
+
+                        match result {
+                            checktable::TransactionResult::Committed(i) => {
+                                ts = Some((i, self.index));
+                                let _ = send.send(result);
+                            }
+                            checktable::TransactionResult::Aborted => {
+                                let _ = send.send(result);
+                                return None;
+                            }
+                        }
+                    }
+                }
+
                 let u = i.on_input(m, nodes, state);
                 if let Some(ref u) = u {
                     materialize(u, state.get_mut(self.addr.as_local()));
