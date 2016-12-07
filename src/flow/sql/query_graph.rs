@@ -1,7 +1,7 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression, Operator};
 use nom_sql::SelectStatement;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::string::String;
 use std::vec::Vec;
 
@@ -23,11 +23,70 @@ pub struct QueryGraph {
     pub edges: HashMap<(String, String), QueryGraphEdge>,
 }
 
+#[derive(Clone, Debug)]
+pub struct QuerySignature<'a> {
+    pub relations: HashSet<&'a str>,
+    pub attributes: HashSet<&'a Column>,
+    pub hash: u64,
+}
+
 impl QueryGraph {
     fn new() -> QueryGraph {
         QueryGraph {
             relations: HashMap::new(),
             edges: HashMap::new(),
+        }
+    }
+
+    /// Used to get a concise signature for a query graph. The `hash` member can be used to check
+    /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
+    /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
+    pub fn signature(&self) -> QuerySignature {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        let mut hasher = DefaultHasher::new();
+        let rels = self.relations
+            .keys()
+            .map(|r| String::as_str(r))
+            .collect();
+
+        // Compute relations part of hash
+        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
+        r_vec.sort();
+        for r in r_vec.iter() {
+            r.hash(&mut hasher);
+        }
+
+        let mut attrs = HashSet::<&Column>::new();
+        let mut attrs_vec = Vec::<&Column>::new();
+        for (_, n) in self.relations.iter() {
+            for p in n.predicates.iter() {
+                for c in p.contained_columns().iter() {
+                    attrs_vec.push(c.clone());
+                    attrs.insert(c);
+                }
+            }
+        }
+        for (_, e) in self.edges.iter() {
+            for p in e.join_predicates.iter() {
+                for c in p.contained_columns().iter() {
+                    attrs_vec.push(c.clone());
+                    attrs.insert(c);
+                }
+            }
+        }
+
+        // Compute attributes part of hash
+        attrs_vec.sort();
+        for a in attrs_vec.iter() {
+            a.hash(&mut hasher);
+        }
+
+        QuerySignature {
+            relations: rels,
+            attributes: attrs,
+            hash: hasher.finish(),
         }
     }
 }
