@@ -232,13 +232,11 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
 }
 
 fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<NodeIndex> {
-    use flow::sql::passes::Pass;
     use flow::sql::passes::alias_removal::AliasRemoval;
 
     // first run some standard rewrite passes on the query. This makes the later work easier, as we
     // no longer have to consider complications like aliases.
-    let mut ar = AliasRemoval::new();
-    let q = ar.apply(q);
+    let q = q.expand_table_aliases();
 
     match q {
         SqlQuery::Insert(iq) => {
@@ -432,7 +430,7 @@ mod tests {
 
         // Add them one by one
         for q in lines.iter() {
-            q.to_flow_parts(&mut g);
+            println!("{:?}", q.to_flow_parts(&mut g));
         }
 
         println!("{}", g);
