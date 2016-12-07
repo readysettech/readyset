@@ -12,7 +12,6 @@ use ops::permute::Permute;
 use query::{DataType, Query};
 use shortcut;
 
-use petgraph;
 use petgraph::graph::NodeIndex;
 use std::collections::HashSet;
 use std::iter::FromIterator;
