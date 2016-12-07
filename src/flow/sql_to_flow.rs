@@ -160,16 +160,15 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
         Err(e) => panic!(e),
     };
 
-    // TODO(malte): the following ugliness is required since we need to iterate over the HashMap in
-    // a *sorted* order, as views are otherwise numbered randomly and unit tests fail. Clearly, we
-    // need a better identifier scheme...
-    let mut i = g.graph().0.node_count();
-    let mut rels = qg.relations.keys().collect::<Vec<&String>>();
-    rels.sort();
-
+    let mut i = 0;
     // 1. Generate a filter node for each relation node in the query graph.
     let mut filter_nodes = HashMap::new();
-    for rel in rels.iter() {
+    // Need to iterate over relations in a deterministic order, as otherwise nodes will be added in
+    // a different order every time, which will yield different node identifiers and make it
+    // difficult for applications to check what's going on.
+    let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
+    sorted_rels.sort();
+    for rel in sorted_rels.iter() {
         let qgn = qg.relations.get(*rel).unwrap();
         // the following conditional is required to avoid "empty" nodes (without any projected
         // columns) that are required as inputs to joins
@@ -177,7 +176,7 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
             // add a basic filter/permute node for each query graph node if it either has:
             // 1. projected columns, or
             // 2. a filter condition
-            let n = make_filter_node(&format!("query-{}", i), qgn, g);
+            let n = make_filter_node(&format!("query-{}:{}", qg.signature().hash, i), qgn, g);
             let ni = g.incorporate(n);
             filter_nodes.insert(rel.clone(), ni);
         } else {
@@ -217,7 +216,11 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
             // edge.
             unreachable!();
         };
-        let n = make_join_node(&format!("query-{}", i), edge, left_ni, right_ni, g);
+        let n = make_join_node(&format!("query-{}:{}", qg.signature().hash, i),
+                               edge,
+                               left_ni,
+                               right_ni,
+                               g);
         let ni = g.incorporate(n);
         join_nodes.push(ni);
         i += 1;
@@ -273,6 +276,7 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use FlowGraph;
+    use nom_sql::Column;
     use ops;
     use ops::new;
     use ops::base::Base;
@@ -288,6 +292,23 @@ mod tests {
     /// TODO(malte): maybe this should be available in FlowGraph?
     fn get_view<'a>(g: &'a FG, vn: &str) -> &'a V {
         &**(g.graph[g.named[vn]].as_ref().unwrap())
+    }
+
+    /// Helper to compute a query ID hash via the same method as in `QueryGraph::signature()`.
+    /// Note that the argument slices must be ordered in the same way as &str and &Column are
+    /// ordered by `Ord`.
+    fn query_id_hash(tables: &[&str], columns: &[&Column]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        let mut hasher = DefaultHasher::new();
+        for t in tables.iter() {
+            t.hash(&mut hasher);
+        }
+        for c in columns.iter() {
+            c.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     #[test]
@@ -344,18 +365,20 @@ mod tests {
             .to_flow_parts(&mut g)
             .is_ok());
         println!("{}", g);
+        let qid = query_id_hash(&["articles", "users"],
+                                &[&Column::from("articles.author"), &Column::from("users.id")]);
         // permute node 1 (for articles)
-        let new_view1 = get_view(&g, "query-3");
+        let new_view1 = get_view(&g, &format!("query-{}:0", qid));
         assert_eq!(new_view1.args(), &["title", "author"]);
         assert_eq!(new_view1.node().unwrap().operator().description(),
                    format!("π[2, 1]"));
         // permute node 2 (for users)
-        let new_view2 = get_view(&g, "query-4");
+        let new_view2 = get_view(&g, &format!("query-{}:1", qid));
         assert_eq!(new_view2.args(), &["name", "id"]);
         assert_eq!(new_view2.node().unwrap().operator().description(),
                    format!("π[1, 0]"));
         // join node
-        let new_view3 = get_view(&g, "query-5");
+        let new_view3 = get_view(&g, &format!("query-{}:2", qid));
         assert_eq!(new_view3.args(), &["name", "id", "title", "author"]);
     }
 
@@ -376,10 +399,10 @@ mod tests {
                    "B");
 
         // Try a simple query
-        assert!("SELECT users.name FROM users WHERE users.id = 42;"
-            .to_flow_parts(&mut g)
-            .is_ok());
-        let new_view = get_view(&g, "query-2");
+        let res = "SELECT users.name FROM users WHERE users.id = 42;".to_flow_parts(&mut g);
+        assert!(res.is_ok());
+        let qid = query_id_hash(&["users"], &[&Column::from("users.id")]);
+        let new_view = get_view(&g, &format!("query-{}:0", qid));
         assert_eq!(new_view.args(), &["name"]);
         assert_eq!(new_view.node().unwrap().operator().description(),
                    format!("π[1]"));
