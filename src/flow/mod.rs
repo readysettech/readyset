@@ -4,6 +4,7 @@ use query;
 use ops;
 
 use std::sync::mpsc;
+use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -153,6 +154,19 @@ pub trait Ingredient
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
                 -> Option<U>;
+
+    /// Process a single incoming message, optionally producing an update to be propagated to
+    /// children.
+    ///
+    /// Only addresses of the type `NodeAddress::Local` may be used in this function.
+    fn lookup<'a>(&self,
+                  ancestor: prelude::NodeAddress,
+                  column: usize,
+                  value: &query::DataType,
+                  states: &'a prelude::StateMap)
+                  -> Option<&'a [sync::Arc<Vec<query::DataType>>]> {
+        states.get(ancestor.as_local()).map(move |state| state.lookup(column, value))
+    }
 }
 
 /// `Blender` is the core component of the alternate Soup implementation.
