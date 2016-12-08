@@ -91,9 +91,9 @@ impl SlackNotifier {
             BenchmarkResult::Regression(_, _) => true,
             _ => false,
         };
-        let is_not_neutral = |(_, v): (_, &BenchmarkResult<f64>)| match *v {
-            BenchmarkResult::Neutral(_, _) => false,
-            _ => true,
+        let is_neutral = |(_, v): (_, &BenchmarkResult<f64>)| match *v {
+            BenchmarkResult::Neutral(_, _) => true,
+            _ => false,
         };
 
         match res.results {
@@ -127,14 +127,20 @@ impl SlackNotifier {
                     nv.sort_by(|a, b| b.title.cmp(&a.title));
 
                     let col = if res.iter().all(&is_regression) {
+                        // red
                         "danger"
                     } else if res.iter().any(&is_regression) {
+                        // amber
                         "warning"
+                    } else if res.iter().all(&is_neutral) {
+                        // default, gray
+                        ""
                     } else {
+                        // green
                         "good"
                     };
 
-                    if self.verbose || res.iter().any(&is_not_neutral) {
+                    if self.verbose || !res.iter().all(&is_neutral) {
                         let att = AttachmentBuilder::new("")
                             .color(col)
                             .fields(nv)
