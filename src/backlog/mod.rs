@@ -1,25 +1,32 @@
 use ops;
 use query;
-use shortcut;
+use fnv::FnvHashMap;
 
 use std::borrow::Cow;
 use std::sync;
 use std::sync::atomic;
 use std::sync::atomic::AtomicPtr;
 
-type S = shortcut::Store<query::DataType, sync::Arc<Vec<query::DataType>>>;
+type S = FnvHashMap<query::DataType, Vec<sync::Arc<Vec<query::DataType>>>>;
 pub struct WriteHandle {
     w_store: Option<Box<sync::Arc<S>>>,
     w_log: Vec<ops::Record>,
     bs: BufferedStore,
+    cols: usize,
+    key: usize,
 }
 
 #[derive(Clone)]
-pub struct BufferedStore(sync::Arc<AtomicPtr<sync::Arc<S>>>);
+pub struct BufferedStore {
+    store: sync::Arc<AtomicPtr<sync::Arc<S>>>,
+    key: usize,
+}
 
 pub struct BufferedStoreBuilder {
     r_store: S,
     w_store: S,
+    key: usize,
+    cols: usize,
 }
 
 impl WriteHandle {
@@ -43,7 +50,7 @@ impl WriteHandle {
         let w_store: *mut sync::Arc<S> = Box::into_raw(w_store);
 
         // swap in our w_store, and get r_store in return
-        let r_store = self.bs.0.swap(w_store, atomic::Ordering::SeqCst);
+        let r_store = self.bs.store.swap(w_store, atomic::Ordering::SeqCst);
         self.w_store = Some(unsafe { Box::from_raw(r_store) });
 
         // let readers go so they will be done with the old read Arc
@@ -63,7 +70,7 @@ impl WriteHandle {
 
                 // put in all the updates the read store hasn't seen
                 for r in self.w_log.drain(..) {
-                    Self::apply(w_store, Cow::Owned(r));
+                    Self::apply(w_store, self.key, Cow::Owned(r));
                 }
 
                 // w_store (the old r_store) is now fully up to date!
@@ -82,11 +89,12 @@ impl WriteHandle {
     {
         for r in rs {
             // apply to the current write set
+            debug_assert_eq!(r.len(), self.cols);
             {
                 let arc: &mut sync::Arc<_> = &mut *self.w_store.as_mut().unwrap();
                 loop {
                     if let Some(s) = sync::Arc::get_mut(arc) {
-                        Self::apply(s, Cow::Borrowed(&r));
+                        Self::apply(s, self.key, Cow::Borrowed(&r));
                         break;
                     } else {
                         // writer should always be sole owner outside of swap
@@ -108,37 +116,28 @@ impl WriteHandle {
         }
     }
 
-    fn apply(store: &mut S, r: Cow<ops::Record>) {
+    fn apply(store: &mut S, key: usize, r: Cow<ops::Record>) {
+        debug_assert!(!r[key].is_none());
         if let ops::Record::Positive(..) = *r {
             let (r, _) = r.into_owned().extract();
-            store.insert(r);
+            store.entry(r[key].clone()).or_insert_with(Vec::new).push(r);
             return;
         }
 
         match *r {
             ops::Record::Negative(ref r) => {
-                // we need a cond that will match this row.
-                let conds = r.iter()
-                    .enumerate()
-                    .map(|(coli, v)| {
-                        shortcut::Condition {
-                            column: coli,
-                            cmp: shortcut::Comparison::Equal(shortcut::Value::using(v)),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                // however, multiple rows may have the same values as this row for
-                // every column. afaict, it is safe to delete any one of these rows. we
-                // do this by returning true for the first invocation of the filter
-                // function, and false for all subsequent invocations.
-                let mut first = true;
-                store.delete_filter(&conds[..], |_| if first {
-                    first = false;
-                    true
-                } else {
-                    false
-                });
+                let mut now_empty = false;
+                if let Some(mut e) = store.get_mut(&r[key]) {
+                    // find the first entry that matches all fields
+                    if let Some(i) = e.iter().position(|er| er == r) {
+                        e.swap_remove(i);
+                        now_empty = e.is_empty();
+                    }
+                }
+                if now_empty {
+                    // no more entries for this key -- free up some space in the map
+                    store.remove(&r[key]);
+                }
             }
             _ => unreachable!(),
         }
@@ -146,30 +145,28 @@ impl WriteHandle {
 }
 
 /// Allocate a new buffered `Store`.
-pub fn new(cols: usize) -> BufferedStoreBuilder {
+pub fn new(cols: usize, key: usize) -> BufferedStoreBuilder {
     BufferedStoreBuilder {
-        w_store: shortcut::Store::new(cols),
-        r_store: shortcut::Store::new(cols),
+        key: key,
+        cols: cols,
+        w_store: FnvHashMap::default(),
+        r_store: FnvHashMap::default(),
     }
 }
 
 impl BufferedStoreBuilder {
-    pub fn index<I>(&mut self, column: usize, indexer: I)
-        where I: Clone + Into<shortcut::Index<query::DataType>>
-    {
-        let i1 = indexer.clone();
-        let i2 = indexer;
-        self.w_store.index(column, i1);
-        self.r_store.index(column, i2);
-    }
-
     pub fn commit(self) -> (BufferedStore, WriteHandle) {
         let r =
-            BufferedStore(sync::Arc::new(AtomicPtr::new(Box::into_raw(Box::new(sync::Arc::new(self.r_store))))));
+            BufferedStore{
+                store: sync::Arc::new(AtomicPtr::new(Box::into_raw(Box::new(sync::Arc::new(self.r_store))))),
+                key: self.key,
+            };
         let w = WriteHandle {
             w_store: Some(Box::new(sync::Arc::new(self.w_store))),
             w_log: Vec::new(),
             bs: r.clone(),
+            cols: self.cols,
+            key: self.key,
         };
         (r, w)
     }
@@ -182,14 +179,14 @@ impl BufferedStore {
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
-    pub fn find_and<F, T>(&self, q: &[shortcut::cmp::Condition<query::DataType>], then: F) -> T
-        where F: FnOnce(Vec<&sync::Arc<Vec<query::DataType>>>) -> T
+    pub fn find_and<F, T>(&self, key: &query::DataType, then: F) -> T
+        where F: FnOnce(&[sync::Arc<Vec<query::DataType>>]) -> T
     {
         use std::mem;
-        let r_store = unsafe { Box::from_raw(self.0.load(atomic::Ordering::SeqCst)) };
+        let r_store = unsafe { Box::from_raw(self.store.load(atomic::Ordering::SeqCst)) };
         let rs: sync::Arc<_> = (&*r_store).clone();
 
-        let r_store_again = unsafe { Box::from_raw(self.0.load(atomic::Ordering::SeqCst)) };
+        let r_store_again = unsafe { Box::from_raw(self.store.load(atomic::Ordering::SeqCst)) };
         let res = if !sync::Arc::ptr_eq(&*r_store, &*r_store_again) {
             // a swap happened under us.
             //
@@ -215,7 +212,7 @@ impl BufferedStore {
             // that no writer is currently modifying r_store_again (and won't be for as long as we
             // hold rs).
             let rs2: sync::Arc<_> = (&*r_store_again).clone();
-            let res = then(rs2.find(q).collect());
+            let res = then(rs2.get(key).map(|v| &**v).unwrap_or(&[]));
             drop(rs2);
             drop(rs);
             res
@@ -232,7 +229,7 @@ impl BufferedStore {
             // read r_store_again == r_store, which means that at some point *after the clone*, a
             // writer made r_store read owned. since no writer can take ownership of r_store after
             // we cloned it, we know that r_store must still be owned by readers.
-            let res = then(rs.find(q).collect());
+            let res = then(rs.get(key).map(|v| &**v).unwrap_or(&[]));
             drop(rs);
             res
         };
@@ -241,8 +238,6 @@ impl BufferedStore {
         res
     }
 }
-
-pub mod index;
 
 #[cfg(test)]
 mod tests {
@@ -253,46 +248,38 @@ mod tests {
     fn store_works() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
 
         // nothing there initially
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 0);
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 0);
 
         w.add(vec![ops::Record::Positive(a.clone())]);
 
         // not even after an add (we haven't swapped yet)
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 0);
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 0);
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 1);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 1);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
     }
 
     #[test]
     fn busybusybusy() {
-        use shortcut;
         use std::thread;
 
-        let mut db = new(1);
-        db.index(0, shortcut::idx::HashIndex::new());
-
         let n = 10000;
-        let (r, mut w) = db.commit();
+        let (r, mut w) = new(1, 0).commit();
         thread::spawn(move || for i in 0..n {
             w.add(vec![ops::Record::Positive(sync::Arc::new(vec![i.into()]))]);
             w.swap();
         });
 
-        let mut cmp = vec![shortcut::Condition {
-                               column: 0,
-                               cmp: shortcut::Comparison::Equal(shortcut::Value::new(0)),
-                           }];
         for i in 0..n {
-            cmp[0].cmp = shortcut::Comparison::Equal(shortcut::Value::new(i));
+            let i = i.into();
             loop {
-                let rows = r.find_and(&cmp[..], |rs| rs.len());
+                let rows = r.find_and(&i, |rs| rs.len());
                 match rows {
                     0 => continue,
                     1 => break,
@@ -305,85 +292,85 @@ mod tests {
     #[test]
     fn minimal_query() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
-        let b = sync::Arc::new(vec![2.into(), "b".into()]);
+        let b = sync::Arc::new(vec![1.into(), "b".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
         w.add(vec![ops::Record::Positive(a.clone())]);
         w.swap();
         w.add(vec![ops::Record::Positive(b.clone())]);
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 1);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 1);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
     }
 
     #[test]
     fn non_minimal_query() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
-        let b = sync::Arc::new(vec![2.into(), "b".into()]);
-        let c = sync::Arc::new(vec![3.into(), "c".into()]);
+        let b = sync::Arc::new(vec![1.into(), "b".into()]);
+        let c = sync::Arc::new(vec![1.into(), "c".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
         w.add(vec![ops::Record::Positive(a.clone())]);
         w.add(vec![ops::Record::Positive(b.clone())]);
         w.swap();
         w.add(vec![ops::Record::Positive(c.clone())]);
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 2);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 2);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
     }
 
     #[test]
     fn absorb_negative_immediate() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
-        let b = sync::Arc::new(vec![2.into(), "b".into()]);
+        let b = sync::Arc::new(vec![1.into(), "b".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
         w.add(vec![ops::Record::Positive(a.clone())]);
         w.add(vec![ops::Record::Positive(b.clone())]);
         w.add(vec![ops::Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 1);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 1);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
     }
 
     #[test]
     fn absorb_negative_later() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
-        let b = sync::Arc::new(vec![2.into(), "b".into()]);
+        let b = sync::Arc::new(vec![1.into(), "b".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
         w.add(vec![ops::Record::Positive(a.clone())]);
         w.add(vec![ops::Record::Positive(b.clone())]);
         w.swap();
         w.add(vec![ops::Record::Negative(a.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 1);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 1);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
     }
 
     #[test]
     fn absorb_multi() {
         let a = sync::Arc::new(vec![1.into(), "a".into()]);
-        let b = sync::Arc::new(vec![2.into(), "b".into()]);
-        let c = sync::Arc::new(vec![3.into(), "c".into()]);
+        let b = sync::Arc::new(vec![1.into(), "b".into()]);
+        let c = sync::Arc::new(vec![1.into(), "c".into()]);
 
-        let (r, mut w) = new(2).commit();
+        let (r, mut w) = new(2, 0).commit();
         w.add(vec![ops::Record::Positive(a.clone()), ops::Record::Positive(b.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 2);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 2);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1])));
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
 
         w.add(vec![ops::Record::Negative(a.clone()),
                    ops::Record::Positive(c.clone()),
                    ops::Record::Negative(c.clone())]);
         w.swap();
 
-        assert_eq!(r.find_and(&[], |rs| rs.len()), 1);
-        assert!(r.find_and(&[], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), 1);
+        assert!(r.find_and(&a[0], |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1])));
     }
 }

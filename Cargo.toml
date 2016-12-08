@@ -14,7 +14,6 @@ no_domains = []
 
 [dependencies]
 petgraph = "0.4"
-shortcut = "4.1"
 clocked-dispatch = "4.0"
 regex = "0.1"
 fnv = "1.0"

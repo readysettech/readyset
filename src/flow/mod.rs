@@ -346,46 +346,32 @@ impl<'a> Migration<'a> {
     /// The returned function can be called with a `Query`, and any matching results will be
     /// returned.
     pub fn maintain(&mut self,
-                    n: NodeAddress)
-                    -> Box<Fn(Option<&query::Query>) -> ops::Datas + Send + Sync> {
+                    n: NodeAddress,
+                    key: usize)
+                    -> Box<Fn(&query::DataType) -> ops::Datas + Send + Sync> {
         self.ensure_reader_for(n);
 
         let ri = self.readers[n.as_global()];
 
         // we need to do these here because we'll mutably borrow self.mainline in the if let
         let cols = self.mainline.ingredients[ri].fields().len();
-        let mut idxs = self.mainline.ingredients[*n.as_global()].suggest_indexes(n);
 
         if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
                 use backlog;
-                let mut state = backlog::new(cols);
-                // we're also going to add all the indices that the parent view has
-                // TODO: in the future we may want to let the user hint things to us
-                if let Some(idx) = idxs.remove(&n) {
-                    state.index(idx, backlog::index::FnvHashIndex::new());
-                } else {
-                    // TODO
-                    println!("warning: no indicies applied to externally visible state for {}",
-                             n);
-                }
-                let (r, w) = state.commit();
+                let (r, w) = backlog::new(cols, key).commit();
                 inner.state = Some(r);
                 *wh = Some(w);
             }
 
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
-            Box::new(move |q: Option<&query::Query>| -> ops::Datas {
-                let res = arc.find_and(q.map(|q| &q.having[..]).unwrap_or(&[]), |rs| {
-                        // without projection, we wouldn't need to clone here
-                        // because we wouldn't need the "feed" below
-                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
-                    })
-                    .into_iter()
-                    .filter_map(|r| if let Some(q) = q { q.feed(r) } else { Some(r) })
-                    .collect();
-                res
+            Box::new(move |q: &query::DataType| -> ops::Datas {
+                arc.find_and(q, |rs| {
+                    // without projection, we wouldn't need to clone here
+                    // because we wouldn't need the "feed" below
+                    rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                })
             })
         } else {
             unreachable!("tried to use non-reader node as a reader")
