@@ -393,6 +393,7 @@ pub use ops::permute::Permute;
 pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
+pub use ops::filter::Filter;
 pub use query::DataType;
 
 #[cfg(feature="web")]
