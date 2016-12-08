@@ -249,11 +249,14 @@ impl<'a> SqlIncorporator<'a> {
 
     fn nodes_for_query(&mut self, q: SqlQuery) -> Vec<NodeIndex> {
         use flow::sql::passes::alias_removal::AliasRemoval;
+        use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
         // first run some standard rewrite passes on the query. This makes the later work easier, as we
         // no longer have to consider complications like aliases.
-        let q = q.expand_table_aliases().expand_stars(&self.write_schemas);
+        let q = q.expand_table_aliases()
+            .expand_stars(&self.write_schemas)
+            .expand_implied_tables(&self.write_schemas);
 
         match q {
             SqlQuery::Insert(iq) => {
