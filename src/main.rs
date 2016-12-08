@@ -85,6 +85,11 @@ pub fn main() {
             .long("taste_head_only")
             .required(false)
             .help("When multiple commits are pushed, taste the head commit only"))
+        .arg(Arg::with_name("verbose_notifications")
+            .long("verbose_notifications")
+            .required(false)
+            .help("List all benchmarks in notifications even if the results have not changed \
+                   significantly"))
         .arg(Arg::with_name("workdir")
             .short("w")
             .long("workdir")
@@ -104,6 +109,7 @@ pub fn main() {
     let taste_commit = args.value_of("taste_commit");
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
+    let verbose_notify = args.is_present("verbose_notifications");
 
     let mut history = HashMap::new();
     let ws = repo::Workspace::new(repo, workdir);
@@ -113,7 +119,7 @@ pub fn main() {
         None
     };
     let sn = if let Some(url) = slack_hook_url {
-        Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo))
+        Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo, verbose_notify))
     } else {
         None
     };
