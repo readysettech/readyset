@@ -155,17 +155,32 @@ pub trait Ingredient
                 states: &prelude::StateMap)
                 -> Option<U>;
 
+    fn query_through<'a>(&self,
+                         _column: usize,
+                         _value: &'a query::DataType,
+                         _states: &'a prelude::StateMap)
+                         -> Option<&'a [sync::Arc<Vec<query::DataType>>]> {
+        None
+    }
+
     /// Process a single incoming message, optionally producing an update to be propagated to
     /// children.
     ///
     /// Only addresses of the type `NodeAddress::Local` may be used in this function.
     fn lookup<'a>(&self,
-                  ancestor: prelude::NodeAddress,
+                  parent: prelude::NodeAddress,
                   column: usize,
-                  value: &query::DataType,
+                  value: &'a query::DataType,
+                  domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
                   -> Option<&'a [sync::Arc<Vec<query::DataType>>]> {
-        states.get(ancestor.as_local()).map(move |state| state.lookup(column, value))
+        states.get(parent.as_local())
+            .map(move |state| state.lookup(column, value))
+            .or_else(|| {
+                // this is a long-shot.
+                // if our ancestor can be queried *through*, then we just use that state instead
+                domain.get(parent.as_local()).unwrap().borrow().query_through(column, value, states)
+            })
     }
 }
 

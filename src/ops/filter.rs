@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync;
 
 use flow::prelude::*;
 use query::DataType;
@@ -78,6 +79,17 @@ impl Ingredient for Filter {
 
     fn description(&self) -> String {
         "σ".into()
+    }
+
+    fn query_through<'a>(&self,
+                         column: usize,
+                         value: &'a DataType,
+                         states: &'a StateMap)
+                         -> Option<&'a [sync::Arc<Vec<DataType>>]> {
+        states.get(self.src.as_local()).map(|state| {
+            // TODO actually filter
+            state.lookup(column, value)
+        })
     }
 }
 

@@ -189,7 +189,7 @@ pub struct Joiner {
 impl Joiner {
     fn join<'a>(&'a self,
                 left: (NodeAddress, sync::Arc<Vec<query::DataType>>),
-                _: &DomainNodes,
+                domain: &DomainNodes,
                 states: &StateMap)
                 -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
 
@@ -199,7 +199,7 @@ impl Joiner {
         let target = &this.against[&other];
 
         // send the parameters to start the query.
-        let rx: Vec<_> = self.lookup(other, target.on.1, &left.1[target.on.0], states)
+        let rx: Vec<_> = self.lookup(other, target.on.1, &left.1[target.on.0], domain, states)
             .expect("joins must have inputs materialized")
             .iter()
             .cloned()
