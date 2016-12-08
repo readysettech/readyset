@@ -338,11 +338,10 @@ mod tests {
     fn it_parses() {
         // set up graph
         let mut g = FlowGraph::new();
-        // Must have a base node for type inference to work, so make one manually
-        let _ = g.incorporate(new("users", &["id", "username"], true, Base {}));
-
-        // Now let's use SQL queries
         let mut inc = SqlIncorporator::new(&mut g);
+
+        // Must have a base node for type inference to work, so make one manually
+        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut inc).is_ok());
 
         // Should have two nodes: source and "users" base table
         assert_eq!(inc.graph.graph.node_count(), 2);
