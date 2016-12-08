@@ -13,7 +13,7 @@ use query::{DataType, Query};
 use shortcut;
 
 use petgraph::graph::NodeIndex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::str;
 use std::sync::Arc;
@@ -231,40 +231,64 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
     filter_nodes.into_iter().map(|(_, n)| n).chain(join_nodes.into_iter()).collect()
 }
 
-fn nodes_for_query(q: SqlQuery, g: &mut FG) -> Vec<NodeIndex> {
-    use flow::sql::passes::alias_removal::AliasRemoval;
+/// Long-lived struct that holds information about the SQL queries that have been incorporated into
+/// the Soup graph `grap`.
+/// The incorporator shares the lifetime of the flow graph it is associated with.
+struct SqlIncorporator<'a> {
+    write_schemas: HashMap<String, Vec<String>>,
+    pub graph: &'a mut FG,
+}
 
-    // first run some standard rewrite passes on the query. This makes the later work easier, as we
-    // no longer have to consider complications like aliases.
-    let q = q.expand_table_aliases();
-
-    match q {
-        SqlQuery::Insert(iq) => {
-            let n = make_base_node(&iq);
-            vec![g.incorporate(n)]
+impl<'a> SqlIncorporator<'a> {
+    fn new(g: &'a mut FG) -> SqlIncorporator {
+        SqlIncorporator {
+            write_schemas: HashMap::new(),
+            graph: g,
         }
-        SqlQuery::Select(sq) => make_nodes_for_selection(&sq, g),
+    }
+
+    fn nodes_for_query(&mut self, q: SqlQuery) -> Vec<NodeIndex> {
+        use flow::sql::passes::alias_removal::AliasRemoval;
+        use flow::sql::passes::star_expansion::StarExpansion;
+
+        // first run some standard rewrite passes on the query. This makes the later work easier, as we
+        // no longer have to consider complications like aliases.
+        let q = q.expand_table_aliases().expand_stars(&self.write_schemas);
+
+        match q {
+            SqlQuery::Insert(iq) => {
+                let n = make_base_node(&iq);
+                assert!(!self.write_schemas.contains_key(&iq.table.name));
+                self.write_schemas.insert(iq.table.name,
+                                          iq.fields
+                                              .iter()
+                                              .map(|&(ref c, _)| c.name.clone())
+                                              .collect());
+                vec![self.graph.incorporate(n)]
+            }
+            SqlQuery::Select(sq) => make_nodes_for_selection(&sq, self.graph),
+        }
     }
 }
 
 trait ToFlowParts {
-    fn to_flow_parts<'a>(&self, &mut FG) -> Result<Vec<NodeIndex>, String>;
+    fn to_flow_parts<'a>(&self, &mut SqlIncorporator) -> Result<Vec<NodeIndex>, String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
-    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<NodeIndex>, String> {
-        self.as_str().to_flow_parts(g)
+    fn to_flow_parts(&self, inc: &mut SqlIncorporator) -> Result<Vec<NodeIndex>, String> {
+        self.as_str().to_flow_parts(inc)
     }
 }
 
 impl<'a> ToFlowParts for &'a str {
-    fn to_flow_parts(&self, g: &mut FG) -> Result<Vec<NodeIndex>, String> {
+    fn to_flow_parts(&self, inc: &mut SqlIncorporator) -> Result<Vec<NodeIndex>, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
         // if ok, manufacture a node for the query structure we got
         let nodes = match parsed_query {
-            Ok(q) => Ok(nodes_for_query(q, g)),
+            Ok(q) => Ok(inc.nodes_for_query(q)),
             Err(e) => Err(String::from(e)),
         };
         nodes
@@ -279,7 +303,7 @@ mod tests {
     use ops::new;
     use ops::base::Base;
     use query::DataType;
-    use super::{FG, ToFlowParts, V};
+    use super::{FG, SqlIncorporator, ToFlowParts, V};
     use std::io::Read;
     use std::fs::File;
 
@@ -313,21 +337,25 @@ mod tests {
     fn it_parses() {
         // set up graph
         let mut g = FlowGraph::new();
-
         // Must have a base node for type inference to work, so make one manually
         let _ = g.incorporate(new("users", &["id", "username"], true, Base {}));
-        // Should have two nodes: source and "users" base table
-        assert_eq!(g.graph.node_count(), 2);
-        assert_eq!(get_view(&g, "users").name(), "users");
 
-        assert!("SELECT users.id from users;".to_flow_parts(&mut g).is_ok());
+        // Now let's use SQL queries
+        let mut inc = SqlIncorporator::new(&mut g);
+
+        // Should have two nodes: source and "users" base table
+        assert_eq!(inc.graph.graph.node_count(), 2);
+        assert_eq!(get_view(&inc.graph, "users").name(), "users");
+
+
+        assert!("SELECT users.id from users;".to_flow_parts(&mut inc).is_ok());
         // Should now have source, "users" and the new selection
-        assert_eq!(g.graph.node_count(), 3);
+        assert_eq!(inc.graph.graph.node_count(), 3);
 
         // Invalid query should fail parsing and add no nodes
-        assert!("foo bar from whatever;".to_flow_parts(&mut g).is_err());
+        assert!("foo bar from whatever;".to_flow_parts(&mut inc).is_err());
         // Should still only have source, "users" and the new selection
-        assert_eq!(g.graph.node_count(), 3);
+        assert_eq!(inc.graph.graph.node_count(), 3);
     }
 
     #[test]
@@ -336,47 +364,49 @@ mod tests {
 
         // set up graph
         let mut g = FlowGraph::new();
+        let mut inc = SqlIncorporator::new(&mut g);
 
         // Establish a base write type for "users"
-        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut g).is_ok());
+        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut inc).is_ok());
         // Should have source and "users" base table node
-        assert_eq!(g.graph.node_count(), 2);
-        assert_eq!(get_view(&g, "users").name(), "users");
-        assert_eq!(get_view(&g, "users").args(), &["id", "name"]);
-        assert_eq!(get_view(&g, "users").node().unwrap().operator().description(),
+        assert_eq!(inc.graph.graph.node_count(), 2);
+        assert_eq!(get_view(&inc.graph, "users").name(), "users");
+        assert_eq!(get_view(&inc.graph, "users").args(), &["id", "name"]);
+        assert_eq!(get_view(&inc.graph, "users").node().unwrap().operator().description(),
                    "B");
 
         // Establish a base write type for "articles"
         assert!("INSERT INTO articles (id, author, title) VALUES (?, ?, ?);"
-            .to_flow_parts(&mut g)
+            .to_flow_parts(&mut inc)
             .is_ok());
         // Should have source and "users" base table node
-        assert_eq!(g.graph.node_count(), 3);
-        assert_eq!(get_view(&g, "articles").name(), "articles");
-        assert_eq!(get_view(&g, "articles").args(), &["id", "author", "title"]);
-        assert_eq!(get_view(&g, "articles").node().unwrap().operator().description(),
+        assert_eq!(inc.graph.graph.node_count(), 3);
+        assert_eq!(get_view(&inc.graph, "articles").name(), "articles");
+        assert_eq!(get_view(&inc.graph, "articles").args(),
+                   &["id", "author", "title"]);
+        assert_eq!(get_view(&inc.graph, "articles").node().unwrap().operator().description(),
                    "B");
 
         // Try a simple equi-JOIN query
         assert!("SELECT users.name, articles.title FROM articles, users WHERE users.id = \
                  articles.author;"
-            .to_flow_parts(&mut g)
+            .to_flow_parts(&mut inc)
             .is_ok());
-        println!("{}", g);
+        println!("{}", inc.graph);
         let qid = query_id_hash(&["articles", "users"],
                                 &[&Column::from("articles.author"), &Column::from("users.id")]);
         // permute node 1 (for articles)
-        let new_view1 = get_view(&g, &format!("query-{}:0", qid));
+        let new_view1 = get_view(&inc.graph, &format!("query-{}:0", qid));
         assert_eq!(new_view1.args(), &["title", "author"]);
         assert_eq!(new_view1.node().unwrap().operator().description(),
                    format!("π[2, 1]"));
         // permute node 2 (for users)
-        let new_view2 = get_view(&g, &format!("query-{}:1", qid));
+        let new_view2 = get_view(&inc.graph, &format!("query-{}:1", qid));
         assert_eq!(new_view2.args(), &["name", "id"]);
         assert_eq!(new_view2.node().unwrap().operator().description(),
                    format!("π[1, 0]"));
         // join node
-        let new_view3 = get_view(&g, &format!("query-{}:2", qid));
+        let new_view3 = get_view(&inc.graph, &format!("query-{}:2", qid));
         assert_eq!(new_view3.args(), &["name", "id", "title", "author"]);
     }
 
@@ -386,21 +416,22 @@ mod tests {
 
         // set up graph
         let mut g = FlowGraph::new();
+        let mut inc = SqlIncorporator::new(&mut g);
 
         // Establish a base write type
-        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut g).is_ok());
+        assert!("INSERT INTO users (id, name) VALUES (?, ?);".to_flow_parts(&mut inc).is_ok());
         // Should have source and "users" base table node
-        assert_eq!(g.graph.node_count(), 2);
-        assert_eq!(get_view(&g, "users").name(), "users");
-        assert_eq!(get_view(&g, "users").args(), &["id", "name"]);
-        assert_eq!(get_view(&g, "users").node().unwrap().operator().description(),
+        assert_eq!(inc.graph.graph.node_count(), 2);
+        assert_eq!(get_view(&inc.graph, "users").name(), "users");
+        assert_eq!(get_view(&inc.graph, "users").args(), &["id", "name"]);
+        assert_eq!(get_view(&inc.graph, "users").node().unwrap().operator().description(),
                    "B");
 
         // Try a simple query
-        let res = "SELECT users.name FROM users WHERE users.id = 42;".to_flow_parts(&mut g);
+        let res = "SELECT users.name FROM users WHERE users.id = 42;".to_flow_parts(&mut inc);
         assert!(res.is_ok());
         let qid = query_id_hash(&["users"], &[&Column::from("users.id")]);
-        let new_view = get_view(&g, &format!("query-{}:0", qid));
+        let new_view = get_view(&inc.graph, &format!("query-{}:0", qid));
         assert_eq!(new_view.args(), &["name"]);
         assert_eq!(new_view.node().unwrap().operator().description(),
                    format!("π[1]"));
@@ -411,6 +442,7 @@ mod tests {
     fn it_incorporates_finkelstein1982_naively() {
         // set up graph
         let mut g = FlowGraph::new();
+        let mut inc = SqlIncorporator::new(&mut g);
 
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
         let mut s = String::new();
@@ -430,9 +462,9 @@ mod tests {
 
         // Add them one by one
         for q in lines.iter() {
-            println!("{:?}", q.to_flow_parts(&mut g));
+            println!("{:?}", q.to_flow_parts(&mut inc));
         }
 
-        println!("{}", g);
+        println!("{}", inc.graph);
     }
 }
