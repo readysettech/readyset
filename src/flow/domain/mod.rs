@@ -114,6 +114,8 @@ impl Domain {
             }
         }
 
+        // TODO: don't materialize join input if it's a filter whose parent is already materialized
+
         // Now let's talk indices.
         //
         // We need to query all our nodes for what indices they believe should be maintained, and

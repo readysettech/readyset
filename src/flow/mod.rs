@@ -155,11 +155,12 @@ pub trait Ingredient
                 states: &prelude::StateMap)
                 -> Option<U>;
 
-    fn query_through<'a>(&self,
-                         _column: usize,
-                         _value: &'a query::DataType,
-                         _states: &'a prelude::StateMap)
-                         -> Option<&'a [sync::Arc<Vec<query::DataType>>]> {
+    fn query_through<'a>
+        (&self,
+         _column: usize,
+         _value: &'a query::DataType,
+         _states: &'a prelude::StateMap)
+         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
         None
     }
 
@@ -173,9 +174,9 @@ pub trait Ingredient
                   value: &'a query::DataType,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
-                  -> Option<&'a [sync::Arc<Vec<query::DataType>>]> {
+                  -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
         states.get(parent.as_local())
-            .map(move |state| state.lookup(column, value))
+            .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead

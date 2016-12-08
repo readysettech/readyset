@@ -8,7 +8,7 @@ use query::DataType;
 #[derive(Debug)]
 pub struct Filter {
     src: NodeAddress,
-    filter: Vec<Option<DataType>>,
+    filter: sync::Arc<Vec<Option<DataType>>>,
 }
 
 impl Filter {
@@ -16,7 +16,7 @@ impl Filter {
     pub fn new(src: NodeAddress, filter: &[Option<DataType>]) -> Filter {
         Filter {
             src: src,
-            filter: Vec::from(filter),
+            filter: sync::Arc::new(Vec::from(filter)),
         }
     }
 }
@@ -85,10 +85,20 @@ impl Ingredient for Filter {
                          column: usize,
                          value: &'a DataType,
                          states: &'a StateMap)
-                         -> Option<&'a [sync::Arc<Vec<DataType>>]> {
+                         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>> {
         states.get(self.src.as_local()).map(|state| {
-            // TODO actually filter
-            state.lookup(column, value)
+            let f = self.filter.clone();
+            Box::new(state.lookup(column, value).iter().filter(move |r| {
+                r.iter().enumerate().all(|(i, d)| {
+                    // check if this filter matches
+                    if let Some(ref f) = f[i] {
+                        f == d
+                    } else {
+                        // everything matches no condition
+                        true
+                    }
+                })
+            })) as Box<_>
         })
     }
 }
