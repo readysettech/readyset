@@ -9,7 +9,7 @@ pub trait ImpliedTableExpansion {
 fn rewrite_conditional<F>(translate_column: &F, ce: ConditionExpression) -> ConditionExpression
     where F: Fn(Column) -> Column
 {
-    let mut translate_ct_arm =
+    let translate_ct_arm =
         |i: Option<Box<ConditionExpression>>| -> Option<Box<ConditionExpression>> {
             match i {
                 Some(bce) => {
@@ -99,10 +99,6 @@ impl ImpliedTableExpansion for SqlQuery {
                         panic!("Must apply StarExpansion pass before ImpliedTableExpansion")
                     }
                     FieldExpression::Seq(fs) => {
-                        let write_schemas = sq.tables
-                            .iter()
-                            .map(|ref t| (t.name.clone(), write_schemas.get(&t.name).unwrap()))
-                            .collect::<Vec<(String, &Vec<String>)>>();
                         FieldExpression::Seq(fs.into_iter()
                             .map(&translate_column)
                             .collect())

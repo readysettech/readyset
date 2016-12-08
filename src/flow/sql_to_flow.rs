@@ -303,8 +303,6 @@ mod tests {
     use FlowGraph;
     use nom_sql::Column;
     use ops;
-    use ops::new;
-    use ops::base::Base;
     use query::DataType;
     use super::{FG, SqlIncorporator, ToFlowParts, V};
     use std::io::Read;
