@@ -38,12 +38,15 @@ impl NodeDescriptor {
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    checktable: &sync::Arc<sync::Mutex<checktable::CheckTable>>)
-                   -> Option<(Update, Option<(i64, NodeIndex)>)> {
+                   -> Option<(Update,
+                              Option<(i64, NodeIndex)>,
+                              Option<(checktable::Token,
+                                      sync::mpsc::Sender<checktable::TransactionResult>)>)> {
 
         match *self.inner {
             flow::node::Type::Ingress(..) => {
                 materialize(&m.data, state.get_mut(self.addr.as_local()));
-                Some((m.data, m.ts))
+                Some((m.data, m.ts, m.token))
             }
             flow::node::Type::Reader(_, ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
@@ -103,7 +106,7 @@ impl NodeDescriptor {
                 }
 
                 debug_assert!(u.is_some() || self.children.is_empty());
-                u.map(|update| (update, ts))
+                u.map(|update| (update, ts, None))
             }
             flow::node::Type::Internal(_, ref mut i) => {
                 let mut ts = m.ts;
@@ -129,10 +132,18 @@ impl NodeDescriptor {
                 if let Some(ref u) = u {
                     materialize(u, state.get_mut(self.addr.as_local()));
                 }
-                u.map(|update| (update, ts))
+                u.map(|update| (update, ts, None))
             }
-            flow::node::Type::TimestampEgress(_) |
-            flow::node::Type::TimestampIngress(_) => Some((m.data, m.ts)),
+            flow::node::Type::TimestampEgress(_, ref txs) => {
+                if let Some((ts, _)) = m.ts {
+                    let txs = txs.lock().unwrap();
+                    for tx in txs.iter() {
+                        tx.send(ts).unwrap();
+                    }
+                }
+                None
+            }
+            flow::node::Type::TimestampIngress(..) |
             flow::node::Type::Unassigned(..) |
             flow::node::Type::Taken(..) |
             flow::node::Type::Source => unreachable!(),

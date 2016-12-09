@@ -68,6 +68,16 @@ pub enum TransactionResult {
     Aborted,
 }
 
+impl TransactionResult {
+    pub fn ok(&self) -> bool {
+        if let &TransactionResult::Committed(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub struct CheckTable {
     next_timestamp: i64,
 
@@ -94,7 +104,7 @@ impl CheckTable {
         if self.validate_token(token) {
             let ts = self.next_timestamp;
             self.next_timestamp += 1;
-            *self.toplevel.get_mut(&base).unwrap() = ts;
+            self.toplevel.insert(base, ts);
             TransactionResult::Committed(ts)
         } else {
             TransactionResult::Aborted

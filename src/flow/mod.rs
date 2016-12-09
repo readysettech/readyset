@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 
+use std::sync;
+
 pub mod domain;
 pub mod prelude;
 pub mod node;
@@ -370,7 +372,25 @@ impl<'a> Migration<'a> {
     fn ensure_reader_for(&mut self, n: NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let r = node::Reader::default();
+            let base_parents: Vec<_> = self.mainline
+                .ingredients
+                .neighbors_directed(self.mainline.source, petgraph::EdgeDirection::Outgoing)
+                .map(|ingress| {
+                    self.mainline
+                        .ingredients
+                        .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+                        .next()
+                        .unwrap()
+                })
+                .filter(|b| {
+                    petgraph::algo::has_path_connecting(&self.mainline.ingredients,
+                                                        *b,
+                                                        *n.as_global(),
+                                                        None)
+                })
+                .collect();
+
+            let r = node::Reader::new(checktable::TokenGenerator::new(base_parents));
             let r = node::Type::Reader(None, None, r);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
@@ -435,7 +455,7 @@ impl<'a> Migration<'a> {
         (&mut self,
          n: NodeAddress,
          key: usize)
-         -> Option<Box<Fn(&query::DataType) -> (ops::Datas, checktable::Token) + Send + Sync>> {
+         -> Box<Fn(&query::DataType) -> (ops::Datas, checktable::Token) + Send + Sync> {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -450,25 +470,17 @@ impl<'a> Migration<'a> {
                 *wh = Some(w);
             }
 
-            let mut g = &inner.token_generator;
-            if g.is_none() {
-                // TODO: Create a token generator if possible.
-
-                return None;
-            }
-
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
-            let generator = g.clone().unwrap();
-            let f = Box::new(move |q: &query::DataType| -> (ops::Datas, checktable::Token) {
+            let generator = inner.token_generator.clone();
+            Box::new(move |q: &query::DataType| -> (ops::Datas, checktable::Token) {
                 let (res, ts) = arc.find_and(q, |rs| {
                     // without projection, we wouldn't need to clone here
                     // because we wouldn't need the "feed" below
                     rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
                 });
                 (res, generator.generate(ts))
-            });
-            Some(f)
+            })
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -490,13 +502,14 @@ impl<'a> Migration<'a> {
                    d: domain::Index,
                    nodes: Vec<(NodeIndex, NodeAddress)>,
                    base_nodes: &Vec<NodeIndex>,
-                   rx: mpsc::Receiver<Message>) {
+                   rx: mpsc::Receiver<Message>,
+                   timestamp_rx: mpsc::Receiver<i64>) {
         let d = domain::Domain::from_graph(d,
                                            nodes,
                                            self.mainline.checktable.clone(),
                                            base_nodes,
                                            &mut self.mainline.ingredients);
-        d.boot(rx);
+        d.boot(rx, timestamp_rx);
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -516,6 +529,7 @@ impl<'a> Migration<'a> {
         // domain trying to send to it know where to send.
         let mut txs = HashMap::new();
         let mut rxs = HashMap::new();
+        let mut timestamp_rxs = HashMap::new();
         let mut targets = HashMap::new();
 
         // keep track of the nodes assigned to each domain.
@@ -697,7 +711,8 @@ impl<'a> Migration<'a> {
                 base_nodes.push(node);
 
                 let proxy = self.mainline.ingredients[node]
-                    .mirror(node::Type::TimestampEgress(domain));
+                    .mirror(node::Type::TimestampEgress(domain,
+                                                        sync::Arc::new(sync::Mutex::new(vec![]))));
                 let time_egress = self.mainline.ingredients.add_node(proxy);
 
                 // we need to hook that node
@@ -715,9 +730,10 @@ impl<'a> Migration<'a> {
         // updates to the domain.
         for (domain, mut nodes) in domain_nodes.iter_mut() {
             // TODO: set proper name for new node.
-            let proxy = node::Node::new::<_, Vec<String>, _>("ts-ingress-node",
-                                                             vec![],
-                                                             node::Type::TimestampIngress(*domain));
+            let (tx, rx) = sync::mpsc::sync_channel(16);
+            timestamp_rxs.insert(*domain, rx);
+            let t = node::Type::TimestampIngress(*domain, Arc::new(Mutex::new(tx.clone())));
+            let proxy = node::Node::new::<_, Vec<String>, _>("ts-ingress-node", vec![], t);
             let time_ingress = self.mainline.ingredients.add_node(proxy);
 
             // Place the new node into domain_nodes.
@@ -734,9 +750,13 @@ impl<'a> Migration<'a> {
 
                 if !path_exists {
                     self.mainline.ingredients.add_edge(*time_egress, time_ingress, false);
-                    // TODO: connect channels here.
+                    if let node::Type::TimestampEgress(_, ref mut arc) =
+                        *self.mainline.ingredients[*time_egress] {
+                        arc.lock().unwrap().push(tx.clone());
+                    }
                 }
             }
+
         }
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -761,7 +781,11 @@ impl<'a> Migration<'a> {
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
-            self.boot_domain(domain, nodes, &base_nodes, rxs.remove(&domain).unwrap());
+            self.boot_domain(domain,
+                             nodes,
+                             &base_nodes,
+                             rxs.remove(&domain).unwrap(),
+                             timestamp_rxs.remove(&domain).unwrap());
         }
         drop(rxs);
         drop(txs); // all necessary copies are in targets
@@ -800,7 +824,6 @@ impl<'a> Migration<'a> {
                     let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
                         Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
                             let (send, recv) = mpsc::channel();
-
                             tx.send(Message {
                                     from: src,
                                     to: no,

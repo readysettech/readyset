@@ -14,19 +14,29 @@ use flow::{Message, Ingredient, NodeAddress};
 
 use backlog;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Reader {
     pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
     pub state: Option<backlog::BufferedStore>,
-    pub token_generator: Option<checktable::TokenGenerator>,
+    pub token_generator: checktable::TokenGenerator,
+}
+
+impl Reader {
+    pub fn new(token_generator: checktable::TokenGenerator) -> Self {
+        Reader {
+            streamers: sync::Arc::default(),
+            state: None,
+            token_generator: token_generator,
+        }
+    }
 }
 
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
     Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
-    TimestampIngress(domain::Index),
-    TimestampEgress(domain::Index),
+    TimestampIngress(domain::Index, sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
+    TimestampEgress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
     Reader(Option<domain::Index>, Option<backlog::WriteHandle>, Reader), /* domain only known at commit time! */
     Unassigned(Box<Ingredient>),
     Taken(domain::Index),
@@ -39,8 +49,8 @@ impl Type {
             Type::Taken(d) |
             Type::Ingress(d) |
             Type::Internal(d, _) |
-            Type::TimestampIngress(d) |
-            Type::TimestampEgress(d) |
+            Type::TimestampIngress(d, _) |
+            Type::TimestampEgress(d, _) |
             Type::Egress(d, _) => Some(d),
             Type::Reader(d, _, _) => d,
             Type::Unassigned(_) |
@@ -126,8 +136,8 @@ impl Node {
                 // reader nodes can still be modified externally if txs are added
                 Type::Reader(d, w.take(), r.clone())
             }
-            Type::TimestampIngress(d) => Type::TimestampIngress(d),
-            Type::TimestampEgress(d) => Type::TimestampEgress(d),
+            Type::TimestampEgress(d, ref arc) => Type::TimestampEgress(d, arc.clone()),
+            Type::TimestampIngress(d, ref arc) => Type::TimestampIngress(d, arc.clone()),
             ref mut n @ Type::Ingress(..) |
             ref mut n @ Type::Internal(..) => {
                 // no-one else will be using our ingress or internal node,

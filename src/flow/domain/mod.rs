@@ -38,8 +38,10 @@ pub struct Domain {
     nodes: DomainNodes,
     state: StateMap,
 
-    /// Map from timestamp to vector of messages buffered for that timestamp.
-    buffered_transactions: HashMap<i64, (NodeIndex, Vec<Message>)>,
+    /// Map from timestamp to vector of messages buffered for that timestamp. None in place of
+    /// NodeIndex means that the timestamp will be skipped (because it is from a base node that
+    /// never sends updates to this domain).
+    buffered_transactions: HashMap<i64, (Option<NodeIndex>, Vec<Message>)>,
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
     /// that are only connected by timestamp ingress nodes are not included.
     ingress_from_base: HashMap<NodeIndex, usize>,
@@ -293,7 +295,7 @@ impl Domain {
         if ts.is_some() {
             // Any message with a timestamp (ie part of a transaction) must flow through the entire
             // graph, even if there are no updates associated with it.
-            u = u.or(Some((Update::Records(vec![]), ts)));
+            u = u.or(Some((Update::Records(vec![]), ts, None)));
         }
 
         if u.is_none() {
@@ -304,7 +306,7 @@ impl Domain {
         let n = nodes[me.as_local()].borrow();
         for i in 0..n.children.len() {
             // avoid cloning if we can
-            let (data, ts) = if i == n.children.len() - 1 {
+            let (data, ts, token) = if i == n.children.len() - 1 {
                 u.take().unwrap()
             } else {
                 u.clone().unwrap()
@@ -316,7 +318,7 @@ impl Domain {
                     to: n.children[i],
                     data: data,
                     ts: ts,
-                    token: None,
+                    token: token,
                 };
 
                 for (k, v) in Self::dispatch(m, states, nodes, enable_output, checktable)
@@ -378,39 +380,30 @@ impl Domain {
         }
     }
 
-    pub fn buffer_transaction(&mut self, m: Message) {
-        let (ts, base) = m.ts.unwrap();
-
-        // Insert message into buffer.
-        self.buffered_transactions.entry(ts).or_insert((base, vec![])).1.push(m);
-
-        // If the message wasn't from the timestep we're waiting on, then don't bother checking if
-        // we can deliver anything.
-        if ts != self.ts + 1 {
-            return;
-        }
-
+    fn apply_transactions(&mut self) {
         while !self.buffered_transactions.is_empty() {
             // Extract a complete set of messages for timestep (self.ts+1) if one exists.
             let messages = match self.buffered_transactions.entry(self.ts + 1) {
                 Entry::Occupied(entry) => {
-                    let messages_needed = self.ingress_from_base.get(&entry.get().0);
+                    match entry.get().0 {
+                        Some(base) => {
+                            let messages_needed = self.ingress_from_base.get(&base).unwrap();
+                            // If we don't have all the messages for this timestamp, then stop.
+                            if entry.get().1.len() < *messages_needed {
+                                break;
+                            }
 
-                    // If the base node that send this update is not in ingress_from_base, then skip
-                    // this timestamp and advance to the next one.
-                    if messages_needed.is_none() {
-                        entry.remove();
-                        self.ts += 1;
-                        continue;
+                            // Otherwise, extract this set of messages.
+                            entry.remove().1
+                        }
+                        None => {
+                            // If we learned about this timestamp from our timestamp ingress node,
+                            // then skip it and move on to the next.
+                            entry.remove();
+                            self.ts += 1;
+                            continue;
+                        }
                     }
-
-                    // If we don't have all the messages for this timestamp, then stop.
-                    if entry.get().1.len() < *messages_needed.unwrap() {
-                        break;
-                    }
-
-                    // Otherwise, extract this set of messages.
-                    entry.remove().1
                 }
                 Entry::Vacant(_) => break,
             };
@@ -421,16 +414,56 @@ impl Domain {
         }
     }
 
-    pub fn boot(mut self, rx: mpsc::Receiver<Message>) {
+    fn buffer_transaction(&mut self, m: Message) {
+        let (ts, base) = m.ts.unwrap();
+
+        // Insert message into buffer.
+        self.buffered_transactions.entry(ts).or_insert((Some(base), vec![])).1.push(m);
+
+        if ts == self.ts + 1 {
+            self.apply_transactions();
+        }
+    }
+
+    pub fn boot(mut self, rx: mpsc::Receiver<Message>, timestamp_rx: mpsc::Receiver<i64>) {
         use std::thread;
 
-        thread::spawn(move || for m in rx {
-            match m.ts {
-                None => {
-                    Self::dispatch(m, &mut self.state, &self.nodes, true, &self.checktable);
-                }
-                Some(_) => {
-                    self.buffer_transaction(m);
+        thread::spawn(move || {
+            let sel = mpsc::Select::new();
+            let mut rx_handle = sel.handle(&rx);
+            let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
+
+            unsafe {
+                rx_handle.add();
+                timestamp_rx_handle.add();
+            }
+
+            loop {
+                let id = sel.wait();
+                if id == timestamp_rx_handle.id() {
+                    let ts = timestamp_rx_handle.recv();
+                    if ts.is_err() {
+                        return;
+                    }
+                    let ts = ts.unwrap();
+
+                    self.buffered_transactions.insert(ts, (None, vec![]));
+                    self.apply_transactions();
+                } else if id == rx_handle.id() {
+                    let m = rx_handle.recv();
+                    if m.is_err() {
+                        return;
+                    }
+                    let m = m.unwrap();
+
+                    match m.ts {
+                        None => {
+                            Self::dispatch(m, &mut self.state, &self.nodes, true, &self.checktable);
+                        }
+                        Some(_) => {
+                            self.buffer_transaction(m);
+                        }
+                    }
                 }
             }
         });
