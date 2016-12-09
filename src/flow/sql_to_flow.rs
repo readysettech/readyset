@@ -406,7 +406,7 @@ mod tests {
                    format!("π[1, 0]"));
         // join node
         let new_view3 = get_view(&inc.graph, &format!("query-{}:2", qid));
-        assert_eq!(new_view3.args(), &["name", "id", "title", "author"]);
+        assert_eq!(new_view3.args(), &["title", "author", "name", "id"]);
     }
 
     #[test]
