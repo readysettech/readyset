@@ -78,9 +78,6 @@ fn make_base_node(st: &InsertStatement) -> Node {
 }
 
 fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
-    // XXX(malte): we need a custom name/identifier scheme for filter nodes, since the table
-    // name is already used for the base node. Maybe this is where identifiers based on query
-    // prefixes come in.
     let parent_ni = lookup_nodeindex(&qgn.rel_name, g);
     let parent_view = lookup_view_by_nodeindex(parent_ni, g);
     let projected_columns: Vec<usize> = qgn.columns
