@@ -194,9 +194,11 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
     //    predicates pertaining to src/dst joins onto a single edge.
     let mut join_nodes = Vec::new();
     let mut joined_tables = HashSet::new();
-    let mut edge_iter = qg.edges.iter();
+    let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> = qg.edges.iter().collect();
+    sorted_edges.sort_by_key(|ref k| &(k.0).0);
+    let mut edge_iter = sorted_edges.iter();
     let mut prev_ni = None;
-    while let Some((&(ref src, ref dst), edge)) = edge_iter.next() {
+    while let Some(&(&(ref src, ref dst), edge)) = edge_iter.next() {
         let left_ni = match prev_ni {
             None => {
                 joined_tables.insert(src);

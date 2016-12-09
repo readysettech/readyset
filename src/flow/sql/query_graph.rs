@@ -101,6 +101,8 @@ fn classify_conditionals(ce: &ConditionExpression,
                          mut local: &mut HashMap<String, Vec<ConditionTree>>,
                          mut join: &mut Vec<ConditionTree>,
                          mut global: &mut Vec<ConditionTree>) {
+    use std::cmp::Ordering;
+
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
             // conjunction, check both sides (which must be selection predicates or
@@ -119,12 +121,21 @@ fn classify_conditionals(ce: &ConditionExpression,
             if let ConditionExpression::Base(ref l) = *ct.left.as_ref().unwrap().as_ref() {
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref().unwrap().as_ref() {
                     match *r {
-                        ConditionBase::Field(_) => {
+                        ConditionBase::Field(ref fr) => {
                             // column/column comparison
-                            if let ConditionBase::Field(_) = *l {
+                            if let ConditionBase::Field(ref fl) = *l {
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
-                                    join.push(ct.clone());
+                                    let mut join_ct = ct.clone();
+                                    match fr.table.as_ref().cmp(&fl.table.as_ref()) {
+                                        Ordering::Less => {
+                                            let tmp = join_ct.left;
+                                            join_ct.left = join_ct.right;
+                                            join_ct.right = tmp;
+                                        }
+                                        _ => (),
+                                    }
+                                    join.push(join_ct);
                                 } else {
                                     // non-equi-join?
                                     unimplemented!();
