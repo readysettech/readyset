@@ -109,12 +109,39 @@ impl Domain {
             if let flow::node::Type::Ingress(..) = *n.inner {
                 if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
                     .any(|child| inquisitive_children.contains(&child)) {
+                    // we have children that may query us, so our output should be materialized
                     state.insert(*n.addr.as_local(), State::default());
                 }
             }
         }
 
-        // TODO: don't materialize join input if it's a filter whose parent is already materialized
+        // find all nodes that can be queried through, and where any of its outgoing edges are
+        // materialized. for those nodes, we should instead materialize the input to that node.
+        for n in &nodes {
+            if let flow::node::Type::Internal(..) = *n.inner {
+                if !n.can_query_through() {
+                    continue;
+                }
+
+                if !state.contains_key(n.addr.as_local()) {
+                    // we're not materialized, so no materialization shifting necessary
+                    continue;
+                }
+
+                if graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
+                    .any(|e| *e.weight()) {
+                    // our output is materialized! what a waste. instead, materialize our input.
+                    state.remove(n.addr.as_local());
+                    println!("hoisting materialization past {}", n.addr);
+
+                    // TODO: unclear if we need *all* our parents to be materialized. it's
+                    // certainly the case for filter, which is our only use-case for now...
+                    for p in graph.neighbors_directed(n.index, petgraph::EdgeDirection::Incoming) {
+                        state.insert(*ni2na[&p].as_local(), State::default());
+                    }
+                }
+            }
+        }
 
         // Now let's talk indices.
         //

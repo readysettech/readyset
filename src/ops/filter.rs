@@ -81,6 +81,10 @@ impl Ingredient for Filter {
         "σ".into()
     }
 
+    fn can_query_through(&self) -> bool {
+        true
+    }
+
     fn query_through<'a>(&self,
                          column: usize,
                          value: &'a DataType,

@@ -155,6 +155,10 @@ pub trait Ingredient
                 states: &prelude::StateMap)
                 -> Option<U>;
 
+    fn can_query_through(&self) -> bool {
+        false
+    }
+
     fn query_through<'a>
         (&self,
          _column: usize,
