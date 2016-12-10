@@ -412,10 +412,51 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("address")],
                        fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("max"),
+                                                             name: String::from("anon_agg"),
                                                              table: None,
                                                              aggregation: Some(agg_expr),
                                                          }]),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn aggregation_column_with_alias() {
+        let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
+
+        let res = selection(qstring.as_bytes());
+        let agg_expr =
+            AggregationExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]));
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("address")],
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("max_addr"),
+                                                             table: None,
+                                                             aggregation: Some(agg_expr),
+                                                         }]),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn count_all() {
+        let qstring = "SELECT COUNT(*) FROM votes GROUP BY aid;";
+
+        let res = selection(qstring.as_bytes());
+        let agg_expr = AggregationExpression::Count(FieldExpression::All);
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("votes")],
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("anon_agg"),
+                                                             table: None,
+                                                             aggregation: Some(agg_expr),
+                                                         }]),
+                       group_by: Some(GroupByClause {
+                           columns: vec![Column::from("aid")],
+                           having: None,
+                       }),
                        ..Default::default()
                    });
     }
