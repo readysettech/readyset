@@ -52,17 +52,73 @@ named!(pub fp_number<&[u8], &[u8]>,
     take_while1!(is_fp_number)
 );
 
+named!(pub aggregation_function<&[u8], AggregationExpression>,
+    alt_complete!(
+        chain!(
+            caseless_tag!("count") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::Count(columns)
+            }
+        )
+    |   chain!(
+            caseless_tag!("sum") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::Sum(columns)
+            }
+        )
+    |   chain!(
+            caseless_tag!("avg") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::Avg(columns)
+            }
+        )
+    |   chain!(
+            caseless_tag!("max") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::Max(columns)
+            }
+        )
+    |   chain!(
+            caseless_tag!("min") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::Min(columns)
+            }
+        )
+    |   chain!(
+            caseless_tag!("group_concat") ~
+            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            || {
+                AggregationExpression::GroupConcat(columns)
+            }
+        )
+    )
+);
+
 /// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier<&[u8], Column>,
     alt_complete!(
         chain!(
-            function: map_res!(alphanumeric, str::from_utf8) ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            function: aggregation_function ~
+            alias: opt!(chain!(
+                multispace ~
+                caseless_tag!("as") ~
+                multispace ~
+                alias: map_res!(sql_identifier, str::from_utf8),
+                || { alias }
+            )),
             || {
                 Column {
-                    name: String::from(function),
+                    name: match alias {
+                        Some(a) => String::from(a),
+                        None => String::from("anon_agg"),
+                    },
                     table: None,
-                    aggregation: Some(AggregationExpression::Max(columns)),
+                    aggregation: Some(function),
                 }
             }
         )
