@@ -3,7 +3,7 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 use std::str::FromStr;
 
-use column::{AggregationExpression, Column};
+use column::{Column, FunctionExpression};
 use table::Table;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,48 +52,48 @@ named!(pub fp_number<&[u8], &[u8]>,
     take_while1!(is_fp_number)
 );
 
-named!(pub aggregation_function<&[u8], AggregationExpression>,
+named!(pub column_function<&[u8], FunctionExpression>,
     alt_complete!(
         chain!(
             caseless_tag!("count") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::Count(columns)
+                FunctionExpression::Count(columns)
             }
         )
     |   chain!(
             caseless_tag!("sum") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::Sum(columns)
+                FunctionExpression::Sum(columns)
             }
         )
     |   chain!(
             caseless_tag!("avg") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::Avg(columns)
+                FunctionExpression::Avg(columns)
             }
         )
     |   chain!(
             caseless_tag!("max") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::Max(columns)
+                FunctionExpression::Max(columns)
             }
         )
     |   chain!(
             caseless_tag!("min") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::Min(columns)
+                FunctionExpression::Min(columns)
             }
         )
     |   chain!(
             caseless_tag!("group_concat") ~
             columns: delimited!(tag!("("), field_expr, tag!(")")),
             || {
-                AggregationExpression::GroupConcat(columns)
+                FunctionExpression::GroupConcat(columns)
             }
         )
     )
@@ -103,7 +103,7 @@ named!(pub aggregation_function<&[u8], AggregationExpression>,
 named!(pub column_identifier<&[u8], Column>,
     alt_complete!(
         chain!(
-            function: aggregation_function ~
+            function: column_function ~
             alias: opt!(chain!(
                 multispace ~
                 caseless_tag!("as") ~
@@ -115,10 +115,10 @@ named!(pub column_identifier<&[u8], Column>,
                 Column {
                     name: match alias {
                         Some(a) => String::from(a),
-                        None => String::from("anon_agg"),
+                        None => String::from("anon_fn"),
                     },
                     table: None,
-                    aggregation: Some(function),
+                    function: Some(function),
                 }
             }
         )
@@ -138,7 +138,7 @@ named!(pub column_identifier<&[u8], Column>,
                         None => None,
                         Some(t) => Some(String::from(t)),
                     },
-                    aggregation: None,
+                    function: None,
                 }
             }
         )
@@ -322,10 +322,14 @@ mod tests {
     }
 
     #[test]
-    fn simple_aggregation_column() {
+    fn simple_column_function() {
         let qs = b"max(addr_id)";
 
         let res = column_identifier(qs);
-        println!("{:#?}", res);
+        assert_eq!(res.unwrap().1, Column {
+            name: String::from("anon_fn"),
+            table: None,
+            function: Some(FunctionExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]))),
+        });
     }
 }

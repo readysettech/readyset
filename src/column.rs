@@ -4,7 +4,7 @@ use std::str;
 use common::FieldExpression;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum AggregationExpression {
+pub enum FunctionExpression {
     Avg(FieldExpression),
     Count(FieldExpression),
     Sum(FieldExpression),
@@ -17,7 +17,7 @@ pub enum AggregationExpression {
 pub struct Column {
     pub name: String,
     pub table: Option<String>,
-    pub aggregation: Option<AggregationExpression>,
+    pub function: Option<FunctionExpression>,
 }
 
 impl<'a> From<&'a str> for Column {
@@ -27,14 +27,14 @@ impl<'a> From<&'a str> for Column {
                 Column {
                     name: String::from(c),
                     table: None,
-                    aggregation: None,
+                    function: None,
                 }
             }
             Some(i) => {
                 Column {
                     name: String::from(&c[i + 1..]),
                     table: Some(String::from(&c[0..i])),
-                    aggregation: None,
+                    function: None,
                 }
             }
         }
@@ -82,7 +82,7 @@ mod tests {
                    Column {
                        name: String::from("col"),
                        table: Some(String::from("table")),
-                       aggregation: None,
+                       function: None,
                    });
     }
 }
