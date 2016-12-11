@@ -173,28 +173,38 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: String,
-                    preds: Vec<ConditionTree>,
-                    st: &SelectStatement|
-                    -> QueryGraphNode {
-        QueryGraphNode {
-            rel_name: rel.clone(),
-            predicates: preds,
-            columns: match st.fields {
-                FieldExpression::All => unimplemented!(),
-                FieldExpression::Seq(ref s) => {
-                    s.iter()
-                        .cloned()
-                        .filter(|c| match c.table.as_ref() {
-                            None => panic!("No table name set for column {} on {}", c.name, rel),
-                            Some(t) => *t == rel,
-                        })
-                        .map(|c| c.name)
-                        .collect()
-                }
-            },
-        }
-    };
+    let new_node =
+        |rel: String, preds: Vec<ConditionTree>, st: &SelectStatement| -> QueryGraphNode {
+            QueryGraphNode {
+                rel_name: rel.clone(),
+                predicates: preds,
+                columns: match st.fields {
+                    FieldExpression::All => unimplemented!(),
+                    FieldExpression::Seq(ref s) => {
+                        s.iter()
+                            .cloned()
+                            .filter(|c| {
+                                match c.table.as_ref() {
+                                    None => {
+                                        match c.function {
+                                            // XXX(malte): don't drop aggregation columns
+                                            Some(_) => false,
+                                            None => {
+                                                panic!("No table name set for column {} on {}",
+                                                       c.name,
+                                                       rel)
+                                            }
+                                        }
+                                    }
+                                    Some(t) => *t == rel,
+                                }
+                            })
+                            .map(|c| c.name)
+                            .collect()
+                    }
+                },
+            }
+        };
 
     if let Some(ref cond) = st.where_clause {
         let mut join_predicates = Vec::new();

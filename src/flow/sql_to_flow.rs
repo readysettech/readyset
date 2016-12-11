@@ -259,14 +259,20 @@ impl<'a> SqlIncorporator<'a> {
 
         match q {
             SqlQuery::Insert(iq) => {
-                let n = make_base_node(&iq);
-                assert!(!self.write_schemas.contains_key(&iq.table.name));
-                self.write_schemas.insert(iq.table.name,
-                                          iq.fields
-                                              .iter()
-                                              .map(|&(ref c, _)| c.name.clone())
-                                              .collect());
-                vec![self.graph.incorporate(n)]
+                if self.write_schemas.contains_key(&iq.table.name) {
+                    println!("WARNING: base table for write typye {} already exists: ignoring \
+                              query.",
+                             iq.table.name);
+                    vec![]
+                } else {
+                    let n = make_base_node(&iq);
+                    self.write_schemas.insert(iq.table.name,
+                                              iq.fields
+                                                  .iter()
+                                                  .map(|&(ref c, _)| c.name.clone())
+                                                  .collect());
+                    vec![self.graph.incorporate(n)]
+                }
             }
             SqlQuery::Select(sq) => make_nodes_for_selection(&sq, self.graph),
         }

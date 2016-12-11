@@ -60,28 +60,33 @@ impl ImpliedTableExpansion for SqlQuery {
         let translate_column = |mut f: Column| -> Column {
             f.table = match f.table {
                 None => {
-                    let mut matches = write_schemas.iter()
-                        .filter_map(|(ref t, ref ws)| {
-                            let num_matching = ws.iter()
-                                .filter(|c| **c == f.name)
-                                .count();
-                            assert!(num_matching <= 1);
-                            if num_matching == 1 {
-                                Some((*t).clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<String>>();
-                    if matches.len() > 1 {
-                        panic!("Ambiguous column {} specified. Matching tables: {:?}",
-                               f.name,
-                               matches);
-                    } else if matches.is_empty() {
-                        panic!("Failed to resolve table for column named {}", f.name);
+                    if let Some(_) = f.function {
+                        // There is no implied table (other than "self") for anonymous function columns
+                        None
                     } else {
-                        // exactly one match
-                        Some(matches.pop().unwrap())
+                        let mut matches = write_schemas.iter()
+                            .filter_map(|(ref t, ref ws)| {
+                                let num_matching = ws.iter()
+                                    .filter(|c| **c == f.name)
+                                    .count();
+                                assert!(num_matching <= 1);
+                                if num_matching == 1 {
+                                    Some((*t).clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<String>>();
+                        if matches.len() > 1 {
+                            panic!("Ambiguous column {} specified. Matching tables: {:?}",
+                                   f.name,
+                                   matches);
+                        } else if matches.is_empty() {
+                            panic!("Failed to resolve table for column named {}", f.name);
+                        } else {
+                            // exactly one match
+                            Some(matches.pop().unwrap())
+                        }
                     }
                 }
                 Some(x) => Some(x),

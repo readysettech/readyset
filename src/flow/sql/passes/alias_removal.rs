@@ -21,7 +21,7 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
                     } else {
                         Some(t)
                     },
-                    aggregation: None,
+                    function: None,
                 }
             }
         };
@@ -111,7 +111,7 @@ impl AliasRemoval for SqlQuery {
                                             } else {
                                                 Some(t)
                                             },
-                                            aggregation: None,
+                                            function: None,
                                         }
                                     }
                                 }
