@@ -375,13 +375,6 @@ impl<'a> Migration<'a> {
             let base_parents: Vec<_> = self.mainline
                 .ingredients
                 .neighbors_directed(self.mainline.source, petgraph::EdgeDirection::Outgoing)
-                .map(|ingress| {
-                    self.mainline
-                        .ingredients
-                        .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-                        .next()
-                        .unwrap()
-                })
                 .filter(|b| {
                     petgraph::algo::has_path_connecting(&self.mainline.ingredients,
                                                         *b,
