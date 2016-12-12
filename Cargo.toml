@@ -53,5 +53,9 @@ name = "web"
 path = "src/web/main.rs"
 
 [[bin]]
+name = "bank"
+path = "benchmarks/bank.rs"
+
+[[bin]]
 name = "vote"
 path = "benchmarks/vote.rs"
