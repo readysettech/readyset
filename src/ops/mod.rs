@@ -6,6 +6,7 @@ pub mod permute;
 pub mod union;
 pub mod identity;
 pub mod gatedid;
+pub mod filter;
 
 use query;
 

@@ -4,6 +4,7 @@ use query;
 use ops;
 
 use std::sync::mpsc;
+use std::sync;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -153,6 +154,39 @@ pub trait Ingredient
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
                 -> Option<U>;
+
+    fn can_query_through(&self) -> bool {
+        false
+    }
+
+    fn query_through<'a>
+        (&self,
+         _column: usize,
+         _value: &'a query::DataType,
+         _states: &'a prelude::StateMap)
+         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
+        None
+    }
+
+    /// Process a single incoming message, optionally producing an update to be propagated to
+    /// children.
+    ///
+    /// Only addresses of the type `NodeAddress::Local` may be used in this function.
+    fn lookup<'a>(&self,
+                  parent: prelude::NodeAddress,
+                  column: usize,
+                  value: &'a query::DataType,
+                  domain: &prelude::DomainNodes,
+                  states: &'a prelude::StateMap)
+                  -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<query::DataType>>> + 'a>> {
+        states.get(parent.as_local())
+            .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
+            .or_else(|| {
+                // this is a long-shot.
+                // if our ancestor can be queried *through*, then we just use that state instead
+                domain.get(parent.as_local()).unwrap().borrow().query_through(column, value, states)
+            })
+    }
 }
 
 /// `Blender` is the core component of the alternate Soup implementation.
