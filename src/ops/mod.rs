@@ -304,6 +304,8 @@ pub mod test {
                 from: src,
                 to: self.nut.unwrap().1,
                 data: u.into(),
+                ts: None,
+                token: None,
             };
 
             let u = self.nodes[self.nut.unwrap().1.as_local()]

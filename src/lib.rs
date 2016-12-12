@@ -355,6 +355,7 @@
 #![feature(optin_builtin_traits)]
 #![feature(proc_macro)]
 #![feature(ptr_eq)]
+#![feature(mpsc_select)]
 #![deny(missing_docs)]
 
 #[cfg(feature="b_netsoup")]
@@ -378,11 +379,13 @@ extern crate rustful;
 #[cfg(feature="b_netsoup")]
 extern crate tarpc;
 
+mod checktable;
 mod flow;
 mod query;
 mod ops;
 mod backlog;
 
+pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration};
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
