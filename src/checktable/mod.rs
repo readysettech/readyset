@@ -15,6 +15,7 @@ enum Conflict {
     BaseTable(NodeIndex),
 }
 
+/// TODO: add docs
 #[derive(Clone)]
 pub struct Token {
     conflicts: HashMap<Conflict, i64>,
@@ -63,12 +64,16 @@ impl TokenGenerator {
     }
 }
 
+/// Represents the result of a transaction
 pub enum TransactionResult {
+    /// The transaction committed at a given timestamp
     Committed(i64),
+    /// The transaction aborted
     Aborted,
 }
 
 impl TransactionResult {
+    /// Checks if a transaction committed.
     pub fn ok(&self) -> bool {
         if let &TransactionResult::Committed(_) = self {
             true

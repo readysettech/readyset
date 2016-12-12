@@ -385,6 +385,7 @@ mod query;
 mod ops;
 mod backlog;
 
+pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration};
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
