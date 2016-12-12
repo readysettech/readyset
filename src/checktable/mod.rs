@@ -9,8 +9,10 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::cmp;
+use std::fmt;
+use std::fmt::Debug;
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Conflict {
     BaseTable(NodeIndex),
 }
@@ -42,6 +44,18 @@ impl Token {
             }
         }
         self.compact();
+    }
+}
+
+impl Debug for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (c, ts) in self.conflicts.iter() {
+            match write!(f, "{:?} @ {}", c, ts) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
     }
 }
 
