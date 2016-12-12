@@ -996,7 +996,7 @@ impl<Q, U, D> Display for FlowGraph<Q, U, D>
                            escape(&n.node().unwrap().operator().description()))?;
 
                     // Output node outputs. Second row.
-                    write!(f, " | {}", n.args().join(", "))?;
+                    write!(f, " | {}", n.args().join(",\\n "))?;
 
                     // Maybe output node's HAVING conditions. Optional third row.
                     if let Some(conds) = n.node().unwrap().having_conditions() {

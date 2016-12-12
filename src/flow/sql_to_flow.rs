@@ -173,7 +173,7 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
             // add a basic filter/permute node for each query graph node if it either has:
             // 1. projected columns, or
             // 2. a filter condition
-            let n = make_filter_node(&format!("query-{}:{}", qg.signature().hash, i), qgn, g);
+            let n = make_filter_node(&format!("query-{:x}:{}", qg.signature().hash, i), qgn, g);
             let ni = g.incorporate(n);
             filter_nodes.insert(rel.clone(), ni);
         } else {
@@ -215,7 +215,7 @@ fn make_nodes_for_selection(st: &SelectStatement, g: &mut FG) -> Vec<NodeIndex> 
             // edge.
             unreachable!();
         };
-        let n = make_join_node(&format!("query-{}:{}", qg.signature().hash, i),
+        let n = make_join_node(&format!("query-{:x}:{}", qg.signature().hash, i),
                                edge,
                                left_ni,
                                right_ni,
