@@ -383,6 +383,7 @@ mod ops;
 mod backlog;
 
 pub use flow::{FlowGraph, NodeIndex, FreshnessProbe};
+pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use ops::new;
 pub use ops::NodeType;
 pub use ops::base::Base;

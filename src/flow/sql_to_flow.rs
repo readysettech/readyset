@@ -275,14 +275,17 @@ fn make_nodes_for_selection(st: &SelectStatement,
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
-struct SqlIncorporator<'a> {
+pub struct SqlIncorporator<'a> {
     write_schemas: HashMap<String, Vec<String>>,
-    pub graph: &'a mut FG,
+    graph: &'a mut FG,
     num_queries: usize,
 }
 
 impl<'a> SqlIncorporator<'a> {
-    fn new(g: &'a mut FG) -> SqlIncorporator {
+    /// Creates a new `SqlIncorporator` for the flow graph `g` (of which it takes and stores a
+    /// mutable borrow). Use this to add SQL queries to a Soup graph, but note that once you have
+    /// started using a `SqlIncorporator`, you can't manually add nodes any more (deliberately so).
+    pub fn new(g: &'a mut FG) -> SqlIncorporator {
         SqlIncorporator {
             write_schemas: HashMap::new(),
             graph: g,
@@ -340,7 +343,11 @@ impl<'a> SqlIncorporator<'a> {
     }
 }
 
+/// Enables incorporation of a textual SQL query into a Soup graph.
 pub trait ToFlowParts {
+    /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
+    /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
+    /// string in the `Option<String>` in the third argument.
     fn to_flow_parts<'a>(&self,
                          &mut SqlIncorporator,
                          Option<String>)
