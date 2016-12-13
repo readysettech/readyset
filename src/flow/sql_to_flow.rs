@@ -278,6 +278,7 @@ fn make_nodes_for_selection(st: &SelectStatement,
 struct SqlIncorporator<'a> {
     write_schemas: HashMap<String, Vec<String>>,
     pub graph: &'a mut FG,
+    num_queries: usize,
 }
 
 impl<'a> SqlIncorporator<'a> {
@@ -285,14 +286,16 @@ impl<'a> SqlIncorporator<'a> {
         SqlIncorporator {
             write_schemas: HashMap::new(),
             graph: g,
+            num_queries: 0,
         }
     }
 
     fn nodes_for_query(&mut self, q: SqlQuery) -> (String, Vec<NodeIndex>) {
         let name = match q {
             SqlQuery::Insert(ref iq) => iq.table.name.clone(),
-            SqlQuery::Select(_) => format!("q_{}", self.query_graphs.len()),
+            SqlQuery::Select(_) => format!("q_{}", self.num_queries),
         };
+        self.num_queries += 1;
         self.nodes_for_named_query(q, name)
     }
 
@@ -330,8 +333,6 @@ impl<'a> SqlIncorporator<'a> {
             }
             SqlQuery::Select(sq) => {
                 let (qg, nodes) = make_nodes_for_selection(&sq, &query_name, self.graph);
-                // Store the query graph for later reference
-                self.query_graphs.push(qg);
                 // Return new nodes
                 (query_name, nodes)
             }
@@ -548,7 +549,7 @@ mod tests {
 
         // Add them one by one
         for q in lines.iter() {
-            println!("{:?}", q.to_flow_parts(&mut inc));
+            println!("{:?}", q.to_flow_parts(&mut inc, None));
         }
 
         println!("{}", inc.graph);
