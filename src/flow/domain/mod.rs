@@ -281,15 +281,14 @@ impl Domain {
     pub fn dispatch(m: Message,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
-                    enable_output: bool,
-                    checktable: &Arc<Mutex<checktable::CheckTable>>)
+                    enable_output: bool)
                     -> HashMap<NodeAddress, Vec<ops::Record>> {
         let me = m.to;
         let ts = m.ts;
         let mut output_messages = HashMap::new();
 
         let mut n = nodes[me.as_local()].borrow_mut();
-        let mut u = n.process(m, states, nodes, checktable);
+        let mut u = n.process(m, states, nodes);
         drop(n);
 
         if ts.is_some() {
@@ -321,7 +320,7 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, v) in Self::dispatch(m, states, nodes, enable_output, checktable)
+                for (k, v) in Self::dispatch(m, states, nodes, enable_output)
                     .into_iter() {
                     output_messages.insert(k, v);
                 }
@@ -351,7 +350,7 @@ impl Domain {
 
         for m in messages {
             let new_messages =
-                Self::dispatch(m, &mut self.state, &self.nodes, false, &self.checktable)
+                Self::dispatch(m, &mut self.state, &self.nodes, false)
                     .into_iter();
 
             for (key, value) in new_messages.into_iter() {
@@ -375,7 +374,7 @@ impl Domain {
 
             self.nodes[m.to.as_local()]
                 .borrow_mut()
-                .process(m, &mut self.state, &self.nodes, &self.checktable);
+                .process(m, &mut self.state, &self.nodes);
             assert_eq!(n.borrow().children.len(), 0);
         }
     }
@@ -454,11 +453,28 @@ impl Domain {
                     if m.is_err() {
                         return;
                     }
-                    let m = m.unwrap();
+                    let mut m = m.unwrap();
+
+                    if let Some((token, send)) = m.token.take() {
+                        let ingress  = self.nodes[m.to.as_local()].borrow();
+                        let base_node = self.nodes[ingress.children[0].as_local()].borrow().index; // TODO: is this the correct node?
+                        let result = self.checktable.lock().unwrap().claim_timestamp(&token, base_node);
+                        match result {
+                            checktable::TransactionResult::Committed(i) => {
+                                m.ts = Some((i, base_node));
+                                m.token = None;
+                                let _ = send.send(result);
+                            }
+                            checktable::TransactionResult::Aborted => {
+                                let _ = send.send(result);
+                                continue;
+                            }
+                        }
+                    }
 
                     match m.ts {
                         None => {
-                            Self::dispatch(m, &mut self.state, &self.nodes, true, &self.checktable);
+                            Self::dispatch(m, &mut self.state, &self.nodes, true);
                         }
                         Some(_) => {
                             self.buffer_transaction(m);
