@@ -61,6 +61,9 @@ fn to_conditions(ct: &ConditionTree, v: &V) -> Vec<shortcut::Condition<DataType>
 }
 
 fn lookup_nodeindex(vn: &str, g: &FG) -> NodeIndex {
+    if !g.named.contains_key(vn) {
+        panic!("Failed to resolve view named \"{}\" in graph!", vn);
+    }
     g.named[vn]
 }
 
