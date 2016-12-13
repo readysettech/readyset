@@ -128,6 +128,7 @@ impl From<Vec<(Vec<query::DataType>, bool)>> for Update {
     }
 }
 
+/// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<query::DataType>>;
 
 #[cfg(test)]

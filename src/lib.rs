@@ -387,6 +387,7 @@ mod backlog;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration};
+pub use ops::Datas;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
