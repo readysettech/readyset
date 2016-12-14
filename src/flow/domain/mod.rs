@@ -320,8 +320,7 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, v) in Self::dispatch(m, states, nodes, enable_output)
-                    .into_iter() {
+                for (k, v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
                     output_messages.insert(k, v);
                 }
             } else {
@@ -349,9 +348,7 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages =
-                Self::dispatch(m, &mut self.state, &self.nodes, false)
-                    .into_iter();
+            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false).into_iter();
 
             for (key, value) in new_messages.into_iter() {
                 egress_messages.insert(key, value);
@@ -456,9 +453,10 @@ impl Domain {
                     let mut m = m.unwrap();
 
                     if let Some((token, send)) = m.token.take() {
-                        let ingress  = self.nodes[m.to.as_local()].borrow();
+                        let ingress = self.nodes[m.to.as_local()].borrow();
                         let base_node = self.nodes[ingress.children[0].as_local()].borrow().index; // TODO: is this the correct node?
-                        let result = self.checktable.lock().unwrap().claim_timestamp(&token, base_node);
+                        let result =
+                            self.checktable.lock().unwrap().claim_timestamp(&token, base_node);
                         match result {
                             checktable::TransactionResult::Committed(i) => {
                                 m.ts = Some((i, base_node));

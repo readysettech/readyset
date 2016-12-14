@@ -25,9 +25,7 @@ pub struct Token {
 
 impl Token {
     /// Reduce the size of the token, potentially increasing the amount of things it conflicts with.
-    fn compact(&mut self) {
-
-    }
+    fn compact(&mut self) {}
 
     /// Combine two tokens into a single token conflicting with everything in either token's
     /// conflict set.
@@ -72,9 +70,7 @@ impl TokenGenerator {
     }
 
     pub fn generate(&self, ts: i64) -> Token {
-        Token {
-            conflicts: self.conflicts.iter().map(|c| (c.clone(), ts)).collect(),
-        }
+        Token { conflicts: self.conflicts.iter().map(|c| (c.clone(), ts)).collect() }
     }
 }
 
@@ -113,8 +109,8 @@ impl CheckTable {
     }
 
     /// Return whether a transaction with this Token should commit.
-    fn validate_token(&self, token: &Token) -> bool{
-        return token.conflicts.iter().all(|(conflict,ts)| match conflict {
+    fn validate_token(&self, token: &Token) -> bool {
+        return token.conflicts.iter().all(|(conflict, ts)| match conflict {
             &Conflict::BaseTable(node) => ts >= self.toplevel.get(&node).unwrap_or(&-1),
         });
     }
