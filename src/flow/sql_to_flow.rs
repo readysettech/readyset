@@ -100,7 +100,7 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
 }
 
 fn make_join_node(name: &str,
-                  qge: &QueryGraphEdge,
+                  jps: &Vec<ConditionTree>,
                   left_ni: NodeIndex,
                   right_ni: NodeIndex,
                   g: &mut FG)
@@ -122,7 +122,7 @@ fn make_join_node(name: &str,
     // join columns need us to generate join group configs for the operator
     let mut left_join_group = vec![0; left_node.args().len()];
     let mut right_join_group = vec![0; right_node.args().len()];
-    for (i, p) in qge.join_predicates.iter().enumerate() {
+    for (i, p) in jps.iter().enumerate() {
         // equi-join only
         assert_eq!(p.operator, Operator::Equal);
         let l_col = match **p.left.as_ref().unwrap() {
@@ -224,8 +224,12 @@ fn make_nodes_for_selection(st: &SelectStatement,
                 // edge.
                 unreachable!();
             };
+            let jps = match *edge {
+                QueryGraphEdge::Join(ref jps) => jps,
+                _ => unimplemented!(),
+            };
             let n = make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
-                                   edge,
+                                   jps,
                                    left_ni,
                                    right_ni,
                                    g);

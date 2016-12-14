@@ -13,8 +13,9 @@ pub struct QueryGraphNode {
 }
 
 #[derive(Clone, Debug)]
-pub struct QueryGraphEdge {
-    pub join_predicates: Vec<ConditionTree>,
+pub enum QueryGraphEdge {
+    Join(Vec<ConditionTree>),
+    GroupBy(Vec<String>),
 }
 
 #[derive(Clone, Debug)]
@@ -69,11 +70,16 @@ impl QueryGraph {
             }
         }
         for (_, e) in self.edges.iter() {
-            for p in e.join_predicates.iter() {
-                for c in p.contained_columns().iter() {
-                    attrs_vec.push(c.clone());
-                    attrs.insert(c);
+            match *e {
+                QueryGraphEdge::Join(ref join_predicates) => {
+                    for p in join_predicates.iter() {
+                        for c in p.contained_columns().iter() {
+                            attrs_vec.push(c.clone());
+                            attrs.insert(c);
+                        }
+                    }
                 }
+                QueryGraphEdge::GroupBy(_) => unimplemented!(),
             }
         }
 
@@ -232,11 +238,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 *jp.left.as_ref().unwrap().as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) =
                     *jp.right.as_ref().unwrap().as_ref() {
-                    qg.edges
+                    let mut e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
-                        .or_insert(QueryGraphEdge { join_predicates: vec![] })
-                        .join_predicates
-                        .push(jp.clone());
+                        .or_insert(QueryGraphEdge::Join(vec![]));
+                    match *e {
+                        QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
+                        _ => panic!("Expected join edge for join condition {:#?}", jp),
+                    };
                     // XXX(malte): push join columns into projected column set as well. This isn't
                     // strictly required, and eagerly pushes more columns than needed, but makes a
                     // naive version of the graph construction work.
