@@ -427,11 +427,8 @@ impl<'a> Migration<'a> {
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
             Box::new(move |q: &query::DataType| -> ops::Datas {
-                arc.find_and(q, |rs| {
-                        // without projection, we wouldn't need to clone here
-                        // because we wouldn't need the "feed" below
-                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
-                    })
+                arc.find_and(q,
+                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
                     .0
             })
         } else {
@@ -468,8 +465,6 @@ impl<'a> Migration<'a> {
             let generator = inner.token_generator.clone();
             Box::new(move |q: &query::DataType| -> (ops::Datas, checktable::Token) {
                 let (res, ts) = arc.find_and(q, |rs| {
-                    // without projection, we wouldn't need to clone here
-                    // because we wouldn't need the "feed" below
                     rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
                 });
                 (res, generator.generate(ts))
