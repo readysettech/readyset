@@ -10,14 +10,14 @@ use table::Table;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupByClause {
-    columns: Vec<Column>,
-    having: Option<ConditionExpression>,
+    pub columns: Vec<Column>,
+    pub having: Option<ConditionExpression>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LimitClause {
-    limit: u64,
-    offset: u64,
+    pub limit: u64,
+    pub offset: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,8 +28,8 @@ pub enum OrderType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderClause {
-    cols: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
-    order: OrderType,
+    pub cols: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
+    pub order: OrderType,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
