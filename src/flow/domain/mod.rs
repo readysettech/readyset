@@ -320,8 +320,8 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
-                    output_messages.insert(k, v);
+                for (k, mut v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
+                    output_messages.entry(k).or_insert(vec![]).append(&mut v);
                 }
             } else {
                 let ops::Update::Records(mut data) = data;
@@ -348,10 +348,10 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false).into_iter();
+            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false);
 
-            for (key, value) in new_messages.into_iter() {
-                egress_messages.insert(key, value);
+            for (key, mut value) in new_messages.into_iter() {
+                egress_messages.entry(key).or_insert(vec![]).append(&mut value);
             }
         }
 
