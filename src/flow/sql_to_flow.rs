@@ -277,6 +277,7 @@ fn make_nodes_for_selection(st: &SelectStatement,
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 pub struct SqlIncorporator<'a> {
     write_schemas: HashMap<String, Vec<String>>,
+    query_graphs: Vec<QueryGraph>,
     graph: &'a mut FG,
     num_queries: usize,
 }
@@ -288,6 +289,7 @@ impl<'a> SqlIncorporator<'a> {
     pub fn new(g: &'a mut FG) -> SqlIncorporator {
         SqlIncorporator {
             write_schemas: HashMap::new(),
+            query_graphs: Vec::new(),
             graph: g,
             num_queries: 0,
         }
@@ -336,6 +338,8 @@ impl<'a> SqlIncorporator<'a> {
             }
             SqlQuery::Select(sq) => {
                 let (qg, nodes) = make_nodes_for_selection(&sq, &query_name, self.graph);
+                // Store the query graph for later reference
+                self.query_graphs.push(qg);
                 // Return new nodes
                 (query_name, nodes)
             }
