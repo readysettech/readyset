@@ -117,7 +117,7 @@ impl CheckTable {
     }
 
     /// Return whether a transaction with this Token should commit.
-    fn validate_token(&self, token: &Token) -> bool {
+    pub fn validate_token(&self, token: &Token) -> bool {
         return token.conflicts.iter().all(|(conflict, ts)| match conflict {
             &Conflict::BaseTable(node) => ts >= self.toplevel.get(&node).unwrap_or(&-1),
         });

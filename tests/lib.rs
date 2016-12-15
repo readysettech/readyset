@@ -188,6 +188,7 @@ fn transactional_vote() {
 
     // set up graph
     let mut g = distributary::Blender::new();
+    let validate = g.get_validator();
     let mut mig = g.start_migration();
 
     // add article base nodes (we use two so we can exercise unions too)
@@ -244,10 +245,14 @@ fn transactional_vote() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    let (res, _) = articleq(&a1);
+    let (res, mut token) = articleq(&a1);
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
-    let (res, token) = articleq(&a2);
+    let (res, token2) = articleq(&a2);
     assert_eq!(res, vec![vec![a2.clone(), 4.into()]]);
+
+    // Check that the two reads happened transactionally.
+    token.merge(token2);
+    assert!(validate(&token));
 
     // create a vote (user 1 votes for article 1)
     assert!(put[&vote].1(vec![1.into(), a1.clone()], token).ok());

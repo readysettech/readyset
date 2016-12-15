@@ -234,6 +234,14 @@ impl Blender {
             readers: Default::default(),
         }
     }
+
+    /// Get a boxed function which can be used to validate tokens.
+    pub fn get_validator(&self) -> Box<Fn(&checktable::Token)->bool> {
+        let checktable = self.checktable.clone();
+        return Box::new(move |ref t: &checktable::Token| {
+            checktable.lock().unwrap().validate_token(&t)
+        });
+    }
 }
 
 impl fmt::Display for Blender {
