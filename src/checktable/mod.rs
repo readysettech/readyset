@@ -47,9 +47,7 @@ impl Token {
     /// Generate an empty token that conflicts with nothing. Such a token can be used to do a
     /// transaction that has no read set.
     pub fn empty() -> Self {
-        Token {
-            conflicts: HashMap::new(),
-        }
+        Token { conflicts: HashMap::new() }
     }
 }
 
