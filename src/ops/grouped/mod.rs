@@ -162,96 +162,97 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         self.us = Some(us);
     }
 
-    fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
-        debug_assert_eq!(input.from, self.src);
+    fn on_input(&mut self,
+                from: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                state: &StateMap)
+                -> Records {
+        debug_assert_eq!(from, self.src);
 
-        match input.data {
-            ops::Update::Records(ref rs) => {
-                if rs.is_empty() {
-                    return None;
+        if rs.is_empty() {
+            return rs;
+        }
+
+        // First, we want to be smart about multiple added/removed rows with same group.
+        // For example, if we get a -, then a +, for the same group, we don't want to
+        // execute two queries.
+        let mut consolidate = HashMap::new();
+        for rec in rs.iter() {
+            let val = self.inner.to_diff(&rec[..], rec.is_positive());
+            let group = rec.iter()
+                .enumerate()
+                .map(|(i, v)| if self.group.contains(&i) {
+                    Some(v)
+                } else {
+                    None
+                })
+                .collect::<Vec<_>>();
+
+            consolidate.entry(group).or_insert_with(Vec::new).push(val);
+        }
+
+        let mut out = Vec::with_capacity(2 * consolidate.len());
+        for (group, diffs) in consolidate {
+            // find the current value for this group
+            let db = state.get(self.us.as_ref().unwrap().as_local())
+                .expect("grouped operators must have their own state materialized");
+            let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+            debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+            let old = rs.get(0);
+
+            let (current, new) = {
+                use std::borrow::Cow;
+
+                // current value is in the last output column
+                // or "" if there is no current group
+                let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
+                    .unwrap_or(self.inner.zero().map(Cow::Owned));
+
+                // new is the result of applying all diffs for the group to the current value
+                let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
+                (current, new)
+            };
+
+            match current {
+                None => {
+                    // emit positive, which is group + new.
+                    let rec: Vec<_> = group.into_iter()
+                        .filter_map(|v| v)
+                        .cloned()
+                        .chain(Some(new.into()).into_iter())
+                        .collect();
+                    out.push(ops::Record::Positive(sync::Arc::new(rec)));
                 }
-
-                // First, we want to be smart about multiple added/removed rows with same group.
-                // For example, if we get a -, then a +, for the same group, we don't want to
-                // execute two queries.
-                let mut consolidate = HashMap::new();
-                for rec in rs {
-                    let val = self.inner.to_diff(&rec[..], rec.is_positive());
-                    let group = rec.iter()
-                        .enumerate()
-                        .map(|(i, v)| if self.group.contains(&i) {
-                            Some(v)
-                        } else {
-                            None
-                        })
-                        .collect::<Vec<_>>();
-
-                    consolidate.entry(group).or_insert_with(Vec::new).push(val);
+                Some(ref current) if new == **current => {
+                    // no change
                 }
+                Some(current) => {
+                    // construct prefix of output record used for both - and +
+                    let mut rec = Vec::with_capacity(group.len() + 1);
+                    rec.extend(group.into_iter().filter_map(|v| v).cloned());
 
-                let mut out = Vec::with_capacity(2 * consolidate.len());
-                for (group, diffs) in consolidate {
-                    // find the current value for this group
-                    let db = state.get(self.us.as_ref().unwrap().as_local())
-                        .expect("grouped operators must have their own state materialized");
-                    let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
-                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                    let old = rs.get(0);
+                    // revoke old value
+                    if old.is_none() {
+                        // we're generating a zero row
+                        // revoke old value
+                        rec.push(current.into_owned());
+                        out.push(ops::Record::Negative(sync::Arc::new(rec.clone())));
 
-                    let (current, new) = {
-                        use std::borrow::Cow;
-
-                        // current value is in the last output column
-                        // or "" if there is no current group
-                        let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
-                            .unwrap_or(self.inner.zero().map(Cow::Owned));
-
-                        // new is the result of applying all diffs for the group to the current value
-                        let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
-                        (current, new)
-                    };
-
-                    match current {
-                        None => {
-                            // emit positive, which is group + new.
-                            let rec: Vec<_> = group.into_iter()
-                                .filter_map(|v| v)
-                                .cloned()
-                                .chain(Some(new.into()).into_iter())
-                                .collect();
-                            out.push(ops::Record::Positive(sync::Arc::new(rec)));
-                        }
-                        Some(ref current) if new == **current => {
-                            // no change
-                        }
-                        Some(current) => {
-                            // construct prefix of output record used for both - and +
-                            let mut rec = Vec::with_capacity(group.len() + 1);
-                            rec.extend(group.into_iter().filter_map(|v| v).cloned());
-
-                            // revoke old value
-                            if old.is_none() {
-                                // we're generating a zero row
-                                // revoke old value
-                                rec.push(current.into_owned());
-                                out.push(ops::Record::Negative(sync::Arc::new(rec.clone())));
-
-                                // remove the old value from the end of the record
-                                rec.pop();
-                            } else {
-                                out.push(ops::Record::Negative(old.unwrap().clone()));
-                            }
-
-                            // emit new value
-                            rec.push(new.into());
-                            out.push(ops::Record::Positive(sync::Arc::new(rec)));
-                        }
+                        // remove the old value from the end of the record
+                        rec.pop();
+                    } else {
+                        out.push(ops::Record::Negative(old.unwrap().clone()));
                     }
-                }
 
-                ops::Update::Records(out).into()
+                    // emit new value
+                    rec.push(new.into());
+                    out.push(ops::Record::Positive(sync::Arc::new(rec)));
+                }
             }
         }
+
+        out.into()
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {

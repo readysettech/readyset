@@ -58,9 +58,9 @@ impl Ingredient for GatedIdentity {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
         self.rx.lock().unwrap().recv().unwrap();
-        input.data.into()
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -104,7 +104,7 @@ mod tests {
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            assert_eq!(i.narrow_one_row(left.clone(), false), Some(left.into()));
+            assert_eq!(i.narrow_one_row(left.clone(), false), vec![left].into());
             &done.store(true, Ordering::SeqCst);
         });
 

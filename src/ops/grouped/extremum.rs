@@ -167,42 +167,35 @@ mod tests {
     fn it_forwards() {
         let mut c = setup(true);
 
-        let check_first_max =
-            |group, val, out: Option<ops::Update>| if let Some(ops::Update::Records(rs)) = out {
-                assert_eq!(rs.len(), 1);
+        let check_first_max = |group, val, rs: ops::Records| {
+            assert_eq!(rs.len(), 1);
 
-                match rs.into_iter().next().unwrap() {
-                    ops::Record::Positive(r) => {
-                        assert_eq!(r[0], group);
-                        assert_eq!(r[1], val);
-                    }
-                    _ => unreachable!(),
+            match rs.into_iter().next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], group);
+                    assert_eq!(r[1], val);
                 }
-            } else {
-                unreachable!()
-            };
+                _ => unreachable!(),
+            }
+        };
 
-        let check_new_max = |group, old, new, out: Option<ops::Update>| {
-            if let Some(ops::Update::Records(rs)) = out {
-                assert_eq!(rs.len(), 2);
-                let mut rs = rs.into_iter();
+        let check_new_max = |group, old, new, rs: ops::Records| {
+            assert_eq!(rs.len(), 2);
+            let mut rs = rs.into_iter();
 
-                match rs.next().unwrap() {
-                    ops::Record::Negative(r) => {
-                        assert_eq!(r[0], group);
-                        assert_eq!(r[1], old);
-                    }
-                    _ => unreachable!(),
+            match rs.next().unwrap() {
+                ops::Record::Negative(r) => {
+                    assert_eq!(r[0], group);
+                    assert_eq!(r[1], old);
                 }
-                match rs.next().unwrap() {
-                    ops::Record::Positive(r) => {
-                        assert_eq!(r[0], group);
-                        assert_eq!(r[1], new);
-                    }
-                    _ => unreachable!(),
+                _ => unreachable!(),
+            }
+            match rs.next().unwrap() {
+                ops::Record::Positive(r) => {
+                    assert_eq!(r[0], group);
+                    assert_eq!(r[1], new);
                 }
-            } else {
-                unreachable!()
+                _ => unreachable!(),
             }
         };
 
@@ -215,20 +208,16 @@ mod tests {
         check_new_max(1.into(), 4.into(), 7.into(), out);
 
         // No change if new value isn't the max.
-        match c.narrow_one_row(vec![1.into(), 2.into()], true) {
-            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
-            _ => unreachable!(),
-        }
+        let rs = c.narrow_one_row(vec![1.into(), 2.into()], true);
+        assert!(rs.is_empty());
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 3.into()], true);
         check_first_max(2.into(), 3.into(), out);
 
         // Larger than last value, but not largest in group.
-        match c.narrow_one_row(vec![1.into(), 5.into()], true) {
-            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
-            _ => unreachable!(),
-        }
+        let rs = c.narrow_one_row(vec![1.into(), 5.into()], true);
+        assert!(rs.is_empty());
 
         // One more new max.
         let out = c.narrow_one_row(vec![1.into(), 22.into()], true);
@@ -241,10 +230,8 @@ mod tests {
 
         // Competing positive and negative should cancel out.
         let u = vec![(vec![1.into(), 24.into()], true), (vec![1.into(), 24.into()], false)];
-        match c.narrow_one(u, true) {
-            Some(ops::Update::Records(rs)) => assert!(rs.is_empty()),
-            _ => unreachable!(),
-        }
+        let rs = c.narrow_one(u, true);
+        assert!(rs.is_empty());
     }
 
     // TODO: also test MIN

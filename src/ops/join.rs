@@ -294,37 +294,32 @@ impl Ingredient for Joiner {
     }
 
     fn on_input(&mut self,
-                input: Message,
+                from: NodeAddress,
+                rs: Records,
                 nodes: &DomainNodes,
                 state: &StateMap)
-                -> Option<Update> {
-        let from = input.from;
-        match input.data {
-            ops::Update::Records(rs) => {
-                // okay, so here's what's going on:
-                // the record(s) we receive are all from one side of the join. we need to query the
-                // other side(s) for records matching the incoming records on that side's join
-                // fields.
+                -> Records {
+        // okay, so here's what's going on:
+        // the record(s) we receive are all from one side of the join. we need to query the
+        // other side(s) for records matching the incoming records on that side's join
+        // fields.
 
-                // TODO: we should be clever here, and only query once per *distinct join value*,
-                // instead of once per received record.
-                ops::Update::Records(rs.into_iter()
-                        .flat_map(|rec| {
-                            let (r, pos) = rec.extract();
+        // TODO: we should be clever here, and only query once per *distinct join value*,
+        // instead of once per received record.
+        rs.into_iter()
+            .flat_map(|rec| {
+                let (r, pos) = rec.extract();
 
-                            self.join((from, r), nodes, state).map(move |res| {
-                                // return new row with appropriate sign
-                                if pos {
-                                    ops::Record::Positive(sync::Arc::new(res))
-                                } else {
-                                    ops::Record::Negative(sync::Arc::new(res))
-                                }
-                            })
-                        })
-                        .collect())
-                    .into()
-            }
-        }
+                self.join((from, r), nodes, state).map(move |res| {
+                    // return new row with appropriate sign
+                    if pos {
+                        ops::Record::Positive(sync::Arc::new(res))
+                    } else {
+                        ops::Record::Negative(sync::Arc::new(res))
+                    }
+                })
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -451,22 +446,19 @@ mod tests {
         // forward b2 from left; should produce [b2*z2]
         // we're expecting to only match z2
         assert_eq!(j.one_row(l, l_b2.clone(), false),
-                   Some(vec![vec![2.into(), "b".into(), "z".into()]].into()));
+                   vec![vec![2.into(), "b".into(), "z".into()]].into());
 
         // forward a1 from left; should produce [a1*x1, a1*y1]
-        match j.one_row(l, l_a1.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // we're expecting two results: x1 and y1
-                assert_eq!(rs.len(), 2);
-                // they should all be positive since input was positive
-                assert!(rs.iter().all(|r| r.is_positive()));
-                // they should all have the correct values from the provided left
-                assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
-                // and both join results should be present
-                assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
-                assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
-            }
-        }
+        let rs = j.one_row(l, l_a1.clone(), false);
+        // we're expecting two results: x1 and y1
+        assert_eq!(rs.len(), 2);
+        // they should all be positive since input was positive
+        assert!(rs.iter().all(|r| r.is_positive()));
+        // they should all have the correct values from the provided left
+        assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
+        // and both join results should be present
+        assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
+        assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
 
         // *************************************
         // forward from the right
@@ -474,18 +466,18 @@ mod tests {
 
         // forward x1 from right; should produce [a1*x1]
         assert_eq!(j.one_row(r, r_x1.clone(), false),
-                   Some(vec![vec![1.into(), "a".into(), "x".into()]].into()));
+                   vec![vec![1.into(), "a".into(), "x".into()]].into());
 
         // forward y1 from right; should produce [a1*y1]
         // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
         assert_eq!(j.one_row(r, r_y1.clone(), false),
-                   Some(vec![vec![1.into(), "a".into(), "y".into()]].into()));
+                   vec![vec![1.into(), "a".into(), "y".into()]].into());
 
         // forward z2 from right; should produce [b2*z2]
         // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
         // right's (b2's) timestamp will be used.
         assert_eq!(j.one_row(r, r_z2.clone(), false),
-                   Some(vec![vec![2.into(), "b".into(), "z".into()]].into()));
+                   vec![vec![2.into(), "b".into(), "z".into()]].into());
     }
 
     #[test]
@@ -494,12 +486,9 @@ mod tests {
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [] since no records in right are 3
-        match j.one_row(l, l_c3.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // right has no records with value 3
-                assert_eq!(rs.len(), 0);
-            }
-        }
+        let rs = j.one_row(l, l_c3.clone(), false);
+        // right has no records with value 3
+        assert_eq!(rs.len(), 0);
 
         forward_non_weird(j, l, r);
     }
@@ -511,19 +500,16 @@ mod tests {
         let l_c3 = vec![3.into(), "c".into()];
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        match j.one_row(l, l_c3.clone(), false).unwrap() {
-            ops::Update::Records(rs) => {
-                // right has no records with value 3, so we're expecting a single record with None
-                // for all columns output from the (non-existing) right record
-                assert_eq!(rs.len(), 1);
-                // that row should be positive
-                assert!(rs.iter().all(|r| r.is_positive()));
-                // and should have the correct values from the provided left
-                assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
-                // and None for the remaining column
-                assert!(rs.iter().any(|r| r.rec()[2] == query::DataType::None));
-            }
-        }
+        let rs = j.one_row(l, l_c3.clone(), false);
+        // right has no records with value 3, so we're expecting a single record with None
+        // for all columns output from the (non-existing) right record
+        assert_eq!(rs.len(), 1);
+        // that row should be positive
+        assert!(rs.iter().all(|r| r.is_positive()));
+        // and should have the correct values from the provided left
+        assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
+        // and None for the remaining column
+        assert!(rs.iter().any(|r| r.rec()[2] == query::DataType::None));
 
         forward_non_weird(j, l, r);
     }

@@ -17,7 +17,6 @@ pub mod domain;
 pub mod prelude;
 pub mod node;
 
-type U = ops::Update;
 pub type Edge = bool; // should the edge be materialized?
 
 /// A Message exchanged over an edge in the graph.
@@ -25,7 +24,7 @@ pub type Edge = bool; // should the edge be materialized?
 pub struct Message {
     pub from: NodeAddress,
     pub to: NodeAddress,
-    pub data: U,
+    pub data: prelude::Records,
     pub ts: Option<(i64, NodeIndex)>,
     pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>,
 }
@@ -158,10 +157,11 @@ pub trait Ingredient
     ///
     /// Only addresses of the type `NodeAddress::Local` may be used in this function.
     fn on_input(&mut self,
-                input: Message,
+                from: NodeAddress,
+                data: ops::Records,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
-                -> Option<U>;
+                -> ops::Records;
 
     fn can_query_through(&self) -> bool {
         false
@@ -492,7 +492,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
-    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<prelude::Update> {
+    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<prelude::Records> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
         self.reader_for(n).streamers.lock().unwrap().push(tx);
@@ -828,7 +828,7 @@ impl<'a> Migration<'a> {
                             tx.send(Message {
                                     from: src,
                                     to: no,
-                                    data: u.into(),
+                                    data: vec![u].into(),
                                     ts: None,
                                     token: Some((t, send)),
                                 })
@@ -840,7 +840,7 @@ impl<'a> Migration<'a> {
                         tx2.send(Message {
                                 from: src,
                                 to: no,
-                                data: u.into(),
+                                data: vec![u].into(),
                                 ts: None,
                                 token: None,
                             })

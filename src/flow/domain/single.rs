@@ -37,7 +37,7 @@ impl NodeDescriptor {
                    m: Message,
                    state: &mut StateMap,
                    nodes: &DomainNodes)
-                   -> Option<(Update,
+                   -> Option<(Records,
                               Option<(i64, NodeIndex)>,
                               Option<(checktable::Token,
                                       sync::mpsc::Sender<checktable::TransactionResult>)>)> {
@@ -49,9 +49,7 @@ impl NodeDescriptor {
             }
             flow::node::Type::Reader(_, ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
-                    match m.data {
-                        ops::Update::Records(ref rs) => state.add(rs.iter().cloned()),
-                    }
+                    state.add(m.data.iter().cloned());
                     if m.ts.is_some() {
                         state.update_ts(m.ts.unwrap().0);
                     }
@@ -109,11 +107,9 @@ impl NodeDescriptor {
             }
             flow::node::Type::Internal(_, ref mut i) => {
                 let ts = m.ts;
-                let u = i.on_input(m, nodes, state);
-                if let Some(ref u) = u {
-                    materialize(u, state.get_mut(self.addr.as_local()));
-                }
-                u.map(|update| (update, ts, None))
+                let u = i.on_input(m.from, m.data, nodes, state);
+                materialize(&u, state.get_mut(self.addr.as_local()));
+                Some((u, ts, None))
             }
             flow::node::Type::TimestampEgress(_, ref txs) => {
                 if let Some((ts, _)) = m.ts {
@@ -156,7 +152,7 @@ impl NodeDescriptor {
     }
 }
 
-pub fn materialize(u: &Update, state: Option<&mut State>) {
+pub fn materialize(rs: &Records, state: Option<&mut State>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
@@ -165,14 +161,10 @@ pub fn materialize(u: &Update, state: Option<&mut State>) {
 
     // yes!
     let mut state = state.unwrap();
-    match *u {
-        ops::Update::Records(ref rs) => {
-            for r in rs {
-                match *r {
-                    ops::Record::Positive(ref r) => state.insert(r.clone()),
-                    ops::Record::Negative(ref r) => state.remove(r),
-                }
-            }
+    for r in rs.iter() {
+        match *r {
+            ops::Record::Positive(ref r) => state.insert(r.clone()),
+            ops::Record::Negative(ref r) => state.remove(r),
         }
     }
 }

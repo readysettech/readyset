@@ -64,52 +64,52 @@ impl Ingredient for Latest {
         self.src = remap[&self.src]
     }
 
-    fn on_input(&mut self, input: Message, _: &DomainNodes, state: &StateMap) -> Option<Update> {
-        debug_assert_eq!(input.from, self.src);
+    fn on_input(&mut self,
+                from: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                state: &StateMap)
+                -> Records {
+        debug_assert_eq!(from, self.src);
+        // We don't allow standalone negatives as input to a latest. This is because it
+        // would be very computationally expensive (and currently impossible) to find what
+        // the *previous* latest was if the current latest was revoked. However, if a
+        // record is negated, and a positive for the same key is given in the same group,
+        // then we should just emit the new record as the new latest.
+        //
+        // We do this by processing in two steps. We first process all positives, emitting
+        // all the -/+ pairs for each one, and keeping track of which keys we have handled.
+        // Then, we assert that there are no negatives whose key does not appear in the
+        // list of keys that have been handled.
+        let (pos, _): (Vec<_>, _) = rs.into_iter().partition(|r| r.is_positive());
+        let mut handled = HashSet::new();
 
-        match input.data {
-            ops::Update::Records(rs) => {
-                // We don't allow standalone negatives as input to a latest. This is because it
-                // would be very computationally expensive (and currently impossible) to find what
-                // the *previous* latest was if the current latest was revoked. However, if a
-                // record is negated, and a positive for the same key is given in the same group,
-                // then we should just emit the new record as the new latest.
-                //
-                // We do this by processing in two steps. We first process all positives, emitting
-                // all the -/+ pairs for each one, and keeping track of which keys we have handled.
-                // Then, we assert that there are no negatives whose key does not appear in the
-                // list of keys that have been handled.
-                let (pos, _): (Vec<_>, _) = rs.into_iter().partition(|r| r.is_positive());
-                let mut handled = HashSet::new();
+        // buffer emitted records
+        let mut out = Vec::with_capacity(pos.len());
+        for r in pos {
+            let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
+            handled.insert(group);
 
-                // buffer emitted records
-                let mut out = Vec::with_capacity(pos.len());
-                for r in pos {
-                    let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
-                    handled.insert(group);
+            {
+                let r = r.rec();
 
-                    {
-                        let r = r.rec();
-
-                        // find the current value for this group
-                        let db = state.get(self.us.as_ref().unwrap().as_local())
-                            .expect("latest must have its own state materialized");
-                        let rs = db.lookup(self.key[0], &r[self.key[0]]);
-                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                        if let Some(current) = rs.get(0) {
-                            out.push(ops::Record::Negative(current.clone()));
-                        }
-                    }
-
-                    // if there was a previous latest for this key, revoke old record
-                    out.push(r);
+                // find the current value for this group
+                let db = state.get(self.us.as_ref().unwrap().as_local())
+                    .expect("latest must have its own state materialized");
+                let rs = db.lookup(self.key[0], &r[self.key[0]]);
+                debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                if let Some(current) = rs.get(0) {
+                    out.push(ops::Record::Negative(current.clone()));
                 }
-
-                // TODO: check that there aren't any standalone negatives
-
-                ops::Update::Records(out).into()
             }
+
+            // if there was a previous latest for this key, revoke old record
+            out.push(r);
         }
+
+        // TODO: check that there aren't any standalone negatives
+
+        out.into()
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -159,65 +159,53 @@ mod tests {
         let u = vec![1.into(), 1.into()];
 
         // first record for a group should emit just a positive
-        let out = c.narrow_one_row(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 1);
-            let mut rs = rs.into_iter();
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
 
-            match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                }
-                _ => unreachable!(),
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 1.into());
             }
-        } else {
-            unreachable!();
+            _ => unreachable!(),
         }
 
         let u = vec![2.into(), 2.into()];
 
         // first record for a second group should also emit just a positive
-        let out = c.narrow_one_row(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 1);
-            let mut rs = rs.into_iter();
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
 
-            match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
-                    assert_eq!(r[0], 2.into());
-                    assert_eq!(r[1], 2.into());
-                }
-                _ => unreachable!(),
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
             }
-        } else {
-            unreachable!();
+            _ => unreachable!(),
         }
 
         let u = vec![1.into(), 2.into()];
 
         // new record for existing group should revoke the old latest, and emit the new
-        let out = c.narrow_one_row(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 2);
-            let mut rs = rs.into_iter();
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
 
-            match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 1.into());
-                }
-                _ => unreachable!(),
+        match rs.next().unwrap() {
+            ops::Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 1.into());
             }
-            match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
-                    assert_eq!(r[0], 1.into());
-                    assert_eq!(r[1], 2.into());
-                }
-                _ => unreachable!(),
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
             }
-        } else {
-            unreachable!();
+            _ => unreachable!(),
         }
 
         let u = vec![(vec![1.into(), 1.into()], false),
@@ -227,34 +215,30 @@ mod tests {
                      (vec![2.into(), 4.into()], true)];
 
         // negatives and positives should still result in only one new current for each group
-        let out = c.narrow_one(u, true);
-        if let Some(ops::Update::Records(rs)) = out {
-            assert_eq!(rs.len(), 4); // one - and one + for each group
-            // group 1 lost 2 and gained 3
-            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-                r[0] == 1.into() && r[1] == 2.into()
-            } else {
-                false
-            }));
-            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-                r[0] == 1.into() && r[1] == 3.into()
-            } else {
-                false
-            }));
-            // group 2 lost 2 and gained 4
-            assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-                r[0] == 2.into() && r[1] == 2.into()
-            } else {
-                false
-            }));
-            assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-                r[0] == 2.into() && r[1] == 4.into()
-            } else {
-                false
-            }));
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 4); // one - and one + for each group
+        // group 1 lost 2 and gained 3
+        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
+            r[0] == 1.into() && r[1] == 2.into()
         } else {
-            unreachable!();
-        }
+            false
+        }));
+        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
+            r[0] == 1.into() && r[1] == 3.into()
+        } else {
+            false
+        }));
+        // group 2 lost 2 and gained 4
+        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
+            r[0] == 2.into() && r[1] == 2.into()
+        } else {
+            false
+        }));
+        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
+            r[0] == 2.into() && r[1] == 4.into()
+        } else {
+            false
+        }));
     }
 
     #[test]

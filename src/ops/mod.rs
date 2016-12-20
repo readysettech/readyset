@@ -85,51 +85,77 @@ impl From<(Vec<query::DataType>, bool)> for Record {
     }
 }
 
-/// Update is the smallest unit of data transmitted over edges in a data flow graph.
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum Update {
-    /// This update holds a set of records.
-    Records(Vec<Record>),
-}
-
-impl From<Vec<Record>> for Update {
-    fn from(others: Vec<Record>) -> Self {
-        Update::Records(others)
+impl Into<Vec<Record>> for Records {
+    fn into(self) -> Vec<Record> {
+        self.0
     }
 }
 
-impl From<Record> for Update {
-    fn from(other: Record) -> Self {
-        Update::Records(vec![other])
+use std::iter::FromIterator;
+impl FromIterator<Record> for Records {
+    fn from_iter<I>(iter: I) -> Self
+        where I: IntoIterator<Item = Record>
+    {
+        Records(iter.into_iter().collect())
     }
 }
 
-impl From<Vec<query::DataType>> for Update {
-    fn from(other: Vec<query::DataType>) -> Self {
-        Update::Records(vec![other.into()])
-    }
-}
-
-impl From<(Vec<query::DataType>, bool)> for Update {
-    fn from(other: (Vec<query::DataType>, bool)) -> Self {
-        Update::Records(vec![other.into()])
-    }
-}
-
-impl From<Vec<Vec<query::DataType>>> for Update {
-    fn from(other: Vec<Vec<query::DataType>>) -> Self {
-        Update::Records(other.into_iter().map(|r| r.into()).collect())
-    }
-}
-
-impl From<Vec<(Vec<query::DataType>, bool)>> for Update {
-    fn from(other: Vec<(Vec<query::DataType>, bool)>) -> Self {
-        Update::Records(other.into_iter().map(|r| r.into()).collect())
+impl IntoIterator for Records {
+    type Item = Record;
+    type IntoIter = ::std::vec::IntoIter<Record>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
 /// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<query::DataType>>;
+
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Records(Vec<Record>);
+
+impl Deref for Records {
+    type Target = Vec<Record>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Records {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Into<Records> for Record {
+    fn into(self) -> Records {
+        Records(vec![self])
+    }
+}
+
+impl Into<Records> for Vec<Record> {
+    fn into(self) -> Records {
+        Records(self)
+    }
+}
+
+impl Into<Records> for Vec<sync::Arc<Vec<query::DataType>>> {
+    fn into(self) -> Records {
+        Records(self.into_iter().map(|r| r.into()).collect())
+    }
+}
+
+impl Into<Records> for Vec<Vec<query::DataType>> {
+    fn into(self) -> Records {
+        Records(self.into_iter().map(|r| r.into()).collect())
+    }
+}
+
+impl Into<Records> for Vec<(Vec<query::DataType>, bool)> {
+    fn into(self) -> Records {
+        Records(self.into_iter().map(|r| r.into()).collect())
+    }
+}
 
 #[cfg(test)]
 pub mod test {
@@ -277,14 +303,8 @@ pub mod test {
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(local.as_local()) {
                 match data.into() {
-                    Update::Records(rs) => {
-                        for r in rs {
-                            match r {
-                                Record::Positive(r) => state.insert(r),
-                                Record::Negative(_) => unreachable!(),
-                            }
-                        }
-                    }
+                    Record::Positive(r) => state.insert(r),
+                    Record::Negative(_) => unreachable!(),
                 }
             } else {
                 assert!(false,
@@ -293,55 +313,37 @@ pub mod test {
             }
         }
 
-        pub fn one<U: Into<Update>>(&mut self,
-                                    src: NodeAddress,
-                                    u: Update,
-                                    remember: bool)
-                                    -> Option<Update> {
+        pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
-
-            let m = Message {
-                from: src,
-                to: self.nut.unwrap().1,
-                data: u.into(),
-                ts: None,
-                token: None,
-            };
 
             let u = self.nodes[self.nut.unwrap().1.as_local()]
                 .borrow_mut()
                 .inner
-                .on_input(m, &self.nodes, &self.states);
+                .on_input(src, u.into(), &self.nodes, &self.states);
 
             if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;
             }
 
-            if let Some(ref u) = u {
-                single::materialize(u, self.states.get_mut(self.nut.unwrap().1.as_local()));
-            }
-
+            single::materialize(&u, self.states.get_mut(self.nut.unwrap().1.as_local()));
             u
         }
 
-        pub fn one_row(&mut self,
-                       src: NodeAddress,
-                       d: Vec<query::DataType>,
-                       remember: bool)
-                       -> Option<Update> {
+        pub fn one_row<R: Into<Record>>(&mut self,
+                                        src: NodeAddress,
+                                        d: R,
+                                        remember: bool)
+                                        -> Records {
             self.one::<Record>(src, d.into(), remember)
         }
 
-        pub fn narrow_one<U: Into<Update>>(&mut self, u: U, remember: bool) -> Option<Update> {
+        pub fn narrow_one<U: Into<Records>>(&mut self, u: U, remember: bool) -> Records {
             let src = self.narrow_base_id();
-            self.one::<Update>(src, u.into(), remember)
+            self.one::<Records>(src, u.into(), remember)
         }
 
-        pub fn narrow_one_row(&mut self,
-                              d: Vec<query::DataType>,
-                              remember: bool)
-                              -> Option<Update> {
+        pub fn narrow_one_row<R: Into<Record>>(&mut self, d: R, remember: bool) -> Records {
             self.narrow_one::<Record>(d.into(), remember)
         }
 

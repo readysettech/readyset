@@ -39,8 +39,8 @@ impl Ingredient for Identity {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
-        input.data.into()
+    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -76,7 +76,7 @@ mod tests {
         let mut g = setup(false);
 
         let left: Vec<query::DataType> = vec![1.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
     #[test]

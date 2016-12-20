@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 
 use checktable;
 
-use ops::Update;
+use ops::Records;
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
 
@@ -16,7 +16,7 @@ use backlog;
 
 #[derive(Clone)]
 pub struct Reader {
-    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
+    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Records>>>>,
     pub state: Option<backlog::BufferedStore>,
     pub token_generator: checktable::TokenGenerator,
 }

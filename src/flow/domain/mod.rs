@@ -292,7 +292,7 @@ impl Domain {
         if ts.is_some() {
             // Any message with a timestamp (ie part of a transaction) must flow through the entire
             // graph, even if there are no updates associated with it.
-            u = u.or(Some((Update::Records(vec![]), ts, None)));
+            u = u.or(Some((Records::default(), ts, None)));
         }
 
         if u.is_none() {
@@ -322,13 +322,13 @@ impl Domain {
                     output_messages.entry(k).or_insert(vec![]).append(&mut v);
                 }
             } else {
-                let ops::Update::Records(mut data) = data;
+                let mut data = data;
                 match output_messages.entry(n.children[i]) {
                     Entry::Occupied(entry) => {
                         entry.into_mut().append(&mut data);
                     }
                     Entry::Vacant(entry) => {
-                        entry.insert(data);
+                        entry.insert(data.into());
                     }
                 };
             }
@@ -355,8 +355,8 @@ impl Domain {
 
         for n in self.nodes.iter().filter(|n| n.borrow().is_output()) {
             let data = match egress_messages.entry(n.borrow().addr) {
-                Entry::Occupied(entry) => Update::Records(entry.remove()),
-                _ => Update::Records(vec![]),
+                Entry::Occupied(entry) => entry.remove().into(),
+                _ => Records::default(),
             };
 
             let m = Message {
