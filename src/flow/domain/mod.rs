@@ -30,6 +30,9 @@ impl Into<usize> for Index {
     }
 }
 
+pub enum Control {
+}
+
 pub mod single;
 pub mod local;
 
@@ -419,22 +422,33 @@ impl Domain {
         }
     }
 
-    pub fn boot(mut self, rx: mpsc::Receiver<Message>, timestamp_rx: mpsc::Receiver<i64>) {
+    pub fn boot(mut self,
+                rx: mpsc::Receiver<Message>,
+                timestamp_rx: mpsc::Receiver<i64>,
+                control_rx: mpsc::Receiver<Control>) {
         use std::thread;
 
         thread::spawn(move || {
             let sel = mpsc::Select::new();
             let mut rx_handle = sel.handle(&rx);
             let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
+            let mut control_rx_handle = sel.handle(&control_rx);
 
             unsafe {
                 rx_handle.add();
                 timestamp_rx_handle.add();
+                control_rx_handle.add();
             }
 
             loop {
                 let id = sel.wait();
-                if id == timestamp_rx_handle.id() {
+                if id == control_rx_handle.id() {
+                    let control = control_rx_handle.recv();
+                    if control.is_err() {
+                        return;
+                    }
+                    self.handle_control(control.unwrap());
+                } else if id == timestamp_rx_handle.id() {
                     let ts = timestamp_rx_handle.recv();
                     if ts.is_err() {
                         return;
@@ -481,5 +495,10 @@ impl Domain {
                 }
             }
         });
+    }
+
+    fn handle_control(&mut self, c: Control) {
+        match c {
+        }
     }
 }

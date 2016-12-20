@@ -207,6 +207,7 @@ pub struct Blender {
     source: NodeIndex,
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
+    control_txs: HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
 }
 
 impl Default for Blender {
@@ -219,6 +220,7 @@ impl Default for Blender {
             source: source,
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
+            control_txs: HashMap::default(),
         }
     }
 }
@@ -504,13 +506,14 @@ impl<'a> Migration<'a> {
                    nodes: Vec<(NodeIndex, NodeAddress)>,
                    base_nodes: &Vec<NodeIndex>,
                    rx: mpsc::Receiver<Message>,
-                   timestamp_rx: mpsc::Receiver<i64>) {
+                   timestamp_rx: mpsc::Receiver<i64>,
+                   control_rx: mpsc::Receiver<domain::Control>) {
         let d = domain::Domain::from_graph(d,
                                            nodes,
                                            self.mainline.checktable.clone(),
                                            base_nodes,
                                            &mut self.mainline.ingredients);
-        d.boot(rx, timestamp_rx);
+        d.boot(rx, timestamp_rx, control_rx);
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -757,7 +760,6 @@ impl<'a> Migration<'a> {
                     }
                 }
             }
-
         }
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -782,11 +784,16 @@ impl<'a> Migration<'a> {
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
+            // Set up a control channel for each new domain
+            // TODO: don't boot old domains again!
+            let (tx, rx) = sync::mpsc::sync_channel(16);
+            self.mainline.control_txs.insert(domain, tx);
             self.boot_domain(domain,
                              nodes,
                              &base_nodes,
                              rxs.remove(&domain).unwrap(),
-                             timestamp_rxs.remove(&domain).unwrap());
+                             timestamp_rxs.remove(&domain).unwrap(),
+                             rx);
         }
         drop(rxs);
         drop(txs); // all necessary copies are in targets
