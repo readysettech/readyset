@@ -506,14 +506,14 @@ impl<'a> Migration<'a> {
                    nodes: Vec<(NodeIndex, NodeAddress)>,
                    base_nodes: &Vec<NodeIndex>,
                    rx: mpsc::Receiver<Message>,
-                   timestamp_rx: mpsc::Receiver<i64>,
-                   control_rx: mpsc::Receiver<domain::Control>) {
+                   timestamp_rx: mpsc::Receiver<i64>)
+                   -> mpsc::SyncSender<domain::Control> {
         let d = domain::Domain::from_graph(d,
                                            nodes,
                                            self.mainline.checktable.clone(),
                                            base_nodes,
                                            &mut self.mainline.ingredients);
-        d.boot(rx, timestamp_rx, control_rx);
+        d.boot(rx, timestamp_rx)
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -784,16 +784,20 @@ impl<'a> Migration<'a> {
 
         // first, start up all the domains
         for (domain, nodes) in domain_nodes {
-            // Set up a control channel for each new domain
-            // TODO: don't boot old domains again!
-            let (tx, rx) = sync::mpsc::sync_channel(16);
-            self.mainline.control_txs.insert(domain, tx);
-            self.boot_domain(domain,
-                             nodes,
-                             &base_nodes,
-                             rxs.remove(&domain).unwrap(),
-                             timestamp_rxs.remove(&domain).unwrap(),
-                             rx);
+            if let Some(ref mut ctx) = self.mainline.control_txs.get_mut(&domain) {
+                // Tell existing domain about new nodes
+                for node in nodes {
+                }
+                continue;
+            }
+
+            // Start up new domain
+            let ctx = self.boot_domain(domain,
+                                       nodes,
+                                       &base_nodes,
+                                       rxs.remove(&domain).unwrap(),
+                                       timestamp_rxs.remove(&domain).unwrap());
+            self.mainline.control_txs.insert(domain, ctx);
         }
         drop(rxs);
         drop(txs); // all necessary copies are in targets

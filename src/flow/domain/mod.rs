@@ -424,15 +424,17 @@ impl Domain {
 
     pub fn boot(mut self,
                 rx: mpsc::Receiver<Message>,
-                timestamp_rx: mpsc::Receiver<i64>,
-                control_rx: mpsc::Receiver<Control>) {
+                timestamp_rx: mpsc::Receiver<i64>)
+                -> mpsc::SyncSender<Control> {
         use std::thread;
+
+        let (ctx, crx) = mpsc::sync_channel(16);
 
         thread::spawn(move || {
             let sel = mpsc::Select::new();
             let mut rx_handle = sel.handle(&rx);
             let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
-            let mut control_rx_handle = sel.handle(&control_rx);
+            let mut control_rx_handle = sel.handle(&crx);
 
             unsafe {
                 rx_handle.add();
@@ -495,6 +497,8 @@ impl Domain {
                 }
             }
         });
+
+        ctx
     }
 
     fn handle_control(&mut self, c: Control) {
