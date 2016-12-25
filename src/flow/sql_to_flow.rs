@@ -2,7 +2,8 @@ use nom_sql::parser as sql_parser;
 use flow;
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use FlowGraph;
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+              FunctionExpression, Operator, SqlQuery};
 use nom_sql::{InsertStatement, SelectStatement};
 use ops;
 use ops::Node;
@@ -80,6 +81,35 @@ fn make_base_node(st: &InsertStatement) -> Node {
              Base {})
 }
 
+fn make_function_node(name: &str, func_col: &Column, group_cols: &[Column], g: &mut FG) -> Node {
+    use ops::grouped::aggregate::Aggregation;
+
+    let parent_ni;
+    let func = func_col.function.as_ref().unwrap();
+    let n = match *func {
+        FunctionExpression::Sum(FieldExpression::Seq(_)) => unimplemented!(),
+        FunctionExpression::Count(FieldExpression::Seq(ref cols)) => {
+            // No support for multi-columns counts
+            assert_eq!(cols.len(), 1);
+            let over = cols.iter().next().unwrap();
+            parent_ni = lookup_nodeindex(over.table.as_ref().unwrap(), g);
+            let over_col_indx = 0;
+            let group_col_indx = &[1];
+            let mut combined_columns = Vec::from_iter(group_cols.iter().map(|c| c.name.as_str()));
+            combined_columns.push(&func_col.name);
+            ops::new(String::from(name),
+                     combined_columns.as_slice(),
+                     true,
+                     Aggregation::COUNT.over(parent_ni, over_col_indx, group_col_indx))
+        }
+        _ => unimplemented!(),
+    };
+    // println!("func node: {:#?}, parent: {:?}",
+    //         n,
+    //         parent_ni);
+    n
+}
+
 fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     let parent_ni = lookup_nodeindex(&qgn.rel_name, g);
     let parent_view = lookup_view_by_nodeindex(parent_ni, g);
@@ -91,6 +121,7 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
                          Vec::from_iter(qgn.columns.iter().map(|c| c.name.as_str())).as_slice(),
                          true,
                          Permute::new(parent_ni, projected_columns.as_slice()));
+    // println!("added filter on {:?}: {:#?}", parent_ni, n);
     for cond in qgn.predicates.iter() {
         // convert ConditionTree to shortcut-style condition vector.
         let filter = to_conditions(cond, parent_view);
@@ -149,6 +180,7 @@ fn make_join_node(name: &str,
                          .as_slice(),
                      true,
                      j);
+    // println!("added join on {:?} and {:?}: {}", left_ni, right_ni, name);
     n
 }
 
@@ -176,19 +208,23 @@ fn make_nodes_for_selection(st: &SelectStatement,
         sorted_rels.sort();
         for rel in sorted_rels.iter() {
             let qgn = qg.relations.get(*rel).unwrap();
-            // the following conditional is required to avoid "empty" nodes (without any projected
-            // columns) that are required as inputs to joins
-            if qgn.columns.len() > 0 || qgn.predicates.len() > 0 {
-                // add a basic filter/permute node for each query graph node if it either has:
-                // 1. projected columns, or
-                // 2. a filter condition
-                let n = make_filter_node(&format!("q_{:x}_n{}", qg.signature().hash, i), qgn, g);
-                let ni = g.incorporate(n);
-                filter_nodes.insert((*rel).clone(), ni);
-            } else {
-                // otherwise, just record the node index of the base node for the relation that is
-                // being selected from
-                filter_nodes.insert((*rel).clone(), lookup_nodeindex(rel, g));
+            // we'll handle computed columns later
+            if *rel != "computed_columns" {
+                // the following conditional is required to avoid "empty" nodes (without any projected
+                // columns) that are required as inputs to joins
+                if qgn.columns.len() > 0 || qgn.predicates.len() > 0 {
+                    // add a basic filter/permute node for each query graph node if it either has:
+                    // 1. projected columns, or
+                    // 2. a filter condition
+                    let n =
+                        make_filter_node(&format!("q_{:x}_n{}", qg.signature().hash, i), qgn, g);
+                    let ni = g.incorporate(n);
+                    filter_nodes.insert((*rel).clone(), ni);
+                } else {
+                    // otherwise, just record the node index of the base node for the relation that is
+                    // being selected from
+                    filter_nodes.insert((*rel).clone(), lookup_nodeindex(rel, g));
+                }
             }
             i += 1;
         }
@@ -205,50 +241,105 @@ fn make_nodes_for_selection(st: &SelectStatement,
         let mut edge_iter = sorted_edges.iter();
         let mut prev_ni = None;
         while let Some(&(&(ref src, ref dst), edge)) = edge_iter.next() {
-            let left_ni = match prev_ni {
-                None => {
-                    joined_tables.insert(src);
-                    filter_nodes.get(src).unwrap().clone()
+            match *edge {
+                // Edge represents a JOIN
+                QueryGraphEdge::Join(ref jps) => {
+                    let left_ni = match prev_ni {
+                        None => {
+                            joined_tables.insert(src);
+                            filter_nodes.get(src).unwrap().clone()
+                        }
+                        Some(ni) => ni,
+                    };
+                    let right_ni = if joined_tables.contains(src) {
+                        joined_tables.insert(dst);
+                        filter_nodes.get(dst).unwrap().clone()
+                    } else if joined_tables.contains(dst) {
+                        joined_tables.insert(src);
+                        filter_nodes.get(src).unwrap().clone()
+                    } else {
+                        // We have already handled *both* tables that are part of the join. This should never
+                        // occur, because their join predicates must be associated with the same query graph
+                        // edge.
+                        unreachable!();
+                    };
+                    let n = make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
+                                           jps,
+                                           left_ni,
+                                           right_ni,
+                                           g);
+                    let ni = g.incorporate(n);
+                    join_nodes.push(ni);
+                    i += 1;
+                    prev_ni = Some(ni);
                 }
-                Some(ni) => ni,
-            };
-            let right_ni = if joined_tables.contains(src) {
-                joined_tables.insert(dst);
-                filter_nodes.get(dst).unwrap().clone()
-            } else if joined_tables.contains(dst) {
-                joined_tables.insert(src);
-                filter_nodes.get(src).unwrap().clone()
-            } else {
-                // We have already handled *both* tables that are part of the join. This should never
-                // occur, because their join predicates must be associated with the same query graph
-                // edge.
-                unreachable!();
-            };
-            let jps = match *edge {
-                QueryGraphEdge::Join(ref jps) => jps,
-                _ => unimplemented!(),
-            };
-            let n = make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
-                                   jps,
-                                   left_ni,
-                                   right_ni,
-                                   g);
-            let ni = g.incorporate(n);
-            join_nodes.push(ni);
-            i += 1;
-            prev_ni = Some(ni);
+                // Edge represents a GROUP BY, which we handle later
+                QueryGraphEdge::GroupBy(_) => (),
+            }
+        }
+        let mut func_nodes = Vec::new();
+        match qg.relations.get("computed_columns") {
+            None => (),
+            Some(ref computed_cols_cgn) => {
+                // Function columns with GROUP BY clause
+                for (&(_, _), e) in qg.edges.iter() {
+                    match *e {
+                        QueryGraphEdge::Join(_) => (),
+                        QueryGraphEdge::GroupBy(ref gb_cols) => {
+                            // Generate the right function nodes for all relevant columns in the "computed_columns" node
+                            // TODO(malte): I think we don't need to record the group columns with the function since
+                            // there can only be one GROUP BY in each query, but I should verify this.
+                            // TODO(malte): what about computed columns without a GROUP BY?
+                            // XXX(malte): ensure that the GROUP BY columns are all on the same (and correct) table
+                            // assert!(computed_cols_cgn.columns.all());
+                            for fn_col in computed_cols_cgn.columns.iter() {
+                                let n = make_function_node(&format!("q_{:x}_n{}",
+                                                                    qg.signature().hash,
+                                                                    i),
+                                                           fn_col,
+                                                           gb_cols,
+                                                           g);
+                                let ni = g.incorporate(n);
+                                func_nodes.push(ni);
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+                // TODO: Function columns without GROUP BY
+                for fn_col in computed_cols_cgn.columns
+                    .iter()
+                    .filter(|c| match c.function {
+                        Some(FunctionExpression::Count(FieldExpression::All)) => true,
+                        _ => false,
+                    })
+                    .collect::<Vec<_>>() {
+                    let n = make_function_node(&format!("1_{:x}_n{}", qg.signature().hash, i),
+                                               fn_col,
+                                               &[],
+                                               g);
+                    let ni = g.incorporate(n);
+                    func_nodes.push(ni);
+                    i += 1;
+                }
+
+            }
         }
 
         // 3. Generate leaf views that expose the query result
         let n;
         {
-            let final_join_ni = if !join_nodes.is_empty() {
+            let final_ni = if !join_nodes.is_empty() {
                 join_nodes.last().unwrap()
+            } else if !func_nodes.is_empty() {
+                // XXX(malte): This won't work if (a) there are multiple function nodes in the
+                // query, or (b) computed columns are used within JOIN clauses
+                func_nodes.last().unwrap()
             } else {
                 assert!(filter_nodes.len() == 1);
                 filter_nodes.iter().next().as_ref().unwrap().1
             };
-            let final_join_view = lookup_view_by_nodeindex(*final_join_ni, g);
+            let final_view = lookup_view_by_nodeindex(*final_ni, g);
             let projected_columns: Vec<Column> = qg.relations
                 .iter()
                 .fold(Vec::new(), |mut v, (_, qgn)| {
@@ -256,7 +347,7 @@ fn make_nodes_for_selection(st: &SelectStatement,
                     v
                 });
             let projected_column_ids: Vec<usize> = projected_columns.iter()
-                .map(|c| field_to_columnid(final_join_view, &c.name).unwrap())
+                .map(|c| field_to_columnid(final_view, &c.name).unwrap())
                 .collect();
             n = ops::new(String::from(name),
                          projected_columns.iter()
@@ -264,14 +355,17 @@ fn make_nodes_for_selection(st: &SelectStatement,
                              .collect::<Vec<&str>>()
                              .as_slice(),
                          true,
-                         Permute::new(*final_join_ni, projected_column_ids.as_slice()));
+                         Permute::new(*final_ni, projected_column_ids.as_slice()));
         }
         let ni = g.incorporate(n);
         filter_nodes.insert(String::from(name), ni);
 
         // finally, we output all the nodes we generated
-        nodes_added =
-            filter_nodes.into_iter().map(|(_, n)| n).chain(join_nodes.into_iter()).collect();
+        nodes_added = filter_nodes.into_iter()
+            .map(|(_, n)| n)
+            .chain(join_nodes.into_iter())
+            .chain(func_nodes.into_iter())
+            .collect();
     }
     (qg, nodes_added)
 }
@@ -539,6 +633,48 @@ mod tests {
                    format!("π[1]"));
     }
 
+    #[test]
+    fn it_incorporates_aggregation() {
+        use ops::NodeOp;
+
+        // set up graph
+        let mut g = FlowGraph::new();
+        let mut inc = SqlIncorporator::new(&mut g);
+
+        // Establish a base write types
+        assert!("INSERT INTO votes (aid, userid) VALUES (?, ?);"
+            .to_flow_parts(&mut inc, None)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(inc.graph.graph.node_count(), 2);
+        assert_eq!(get_view(&inc.graph, "votes").name(), "votes");
+        assert_eq!(get_view(&inc.graph, "votes").args(), &["aid", "userid"]);
+        assert_eq!(get_view(&inc.graph, "votes").node().unwrap().operator().description(),
+                   "B");
+        assert!("INSERT INTO users (uid, name, email) VALUES (?, ?, ?);"
+            .to_flow_parts(&mut inc, None)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(inc.graph.graph.node_count(), 3);
+        assert_eq!(get_view(&inc.graph, "users").name(), "users");
+        assert_eq!(get_view(&inc.graph, "users").args(),
+                   &["uid", "name", "email"]);
+        assert_eq!(get_view(&inc.graph, "users").node().unwrap().operator().description(),
+                   "B");
+        println!("{}", inc.graph);
+
+        // Try a simple COUNT function
+        let res = "SELECT COUNT(users.userid) AS votes FROM votes GROUP BY users.aid;"
+            .to_flow_parts(&mut inc, None);
+        assert!(res.is_ok());
+        // added the aggregation and the edge view
+        assert_eq!(inc.graph.graph.node_count(), 5);
+        // check edge view
+        let edge_view = get_view(&inc.graph, "q_2");
+        assert_eq!(edge_view.args(), &["votes"]);
+        assert_eq!(edge_view.node().unwrap().operator().description(),
+                   format!("π[1]"));
+    }
 
     #[test]
     fn it_incorporates_finkelstein1982_naively() {

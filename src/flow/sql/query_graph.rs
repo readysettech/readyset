@@ -79,7 +79,12 @@ impl QueryGraph {
                         }
                     }
                 }
-                QueryGraphEdge::GroupBy(_) => unimplemented!(),
+                QueryGraphEdge::GroupBy(ref cols) => {
+                    for c in cols {
+                        attrs_vec.push(&c);
+                        attrs.insert(&c);
+                    }
+                }
             }
         }
 
@@ -275,6 +280,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             }
         }
     }
+
     // 3. Add any relations mentioned in the query but not in any conditionals.
     // This is also needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
@@ -282,6 +288,44 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         if !qg.relations.contains_key(table.name.as_str()) {
             qg.relations.insert(table.name.clone(),
                                 new_node(table.name.clone(), Vec::new(), &st));
+        }
+    }
+
+    // 4. Add query graph nodes for any computed columns, which won't be represented in the
+    //    nodes corresponding to individual relations.
+    match st.fields {
+        FieldExpression::All => panic!("Stars should have been expanded by now!"),
+        FieldExpression::Seq(ref fields) => {
+            for column in fields.iter() {
+                match column.function {
+                    None => (),  // we've already dealt with this column as part of some relation
+                    Some(_) => {
+                        // add a special node representing the computed columns
+                        // TODO(malte): the predicates here should probably reflect HAVING conditions, if
+                        // any are present
+                        let mut n = new_node(String::from("computed_columns"), vec![], &st);
+                        n.columns.push(column.clone());
+                        qg.relations.insert(String::from("computed_columns"), n);
+                    }
+                }
+            }
+        }
+    }
+    match st.group_by {
+        None => (),
+        Some(ref clause) => {
+            println!("{:#?}", clause);
+            for column in clause.columns.iter() {
+                // add an edge for each relation whose columns appear in the GROUP BY clause
+                let mut e = qg.edges
+                    .entry((String::from("computed_columns"),
+                            column.table.as_ref().unwrap().clone()))
+                    .or_insert(QueryGraphEdge::GroupBy(vec![]));
+                match *e {
+                    QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
+                    _ => unreachable!(),
+                }
+            }
         }
     }
 
