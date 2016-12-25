@@ -9,13 +9,13 @@ use std::vec::Vec;
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionTree>,
-    pub columns: Vec<String>,
+    pub columns: Vec<Column>,
 }
 
 #[derive(Clone, Debug)]
 pub enum QueryGraphEdge {
     Join(Vec<ConditionTree>),
-    GroupBy(Vec<String>),
+    GroupBy(Vec<Column>),
 }
 
 #[derive(Clone, Debug)]
@@ -205,7 +205,6 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     Some(t) => *t == rel,
                                 }
                             })
-                            .map(|c| c.name)
                             .collect()
                     }
                 },
@@ -252,23 +251,25 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         .entry(l.table.as_ref().unwrap().clone())
                         .or_insert(new_node(l.table.as_ref().unwrap().clone(), vec![], &st))
                         .columns
-                        .contains(&l.name) {
+                        .iter()
+                        .any(|c| c.name == l.name) {
                         qg.relations
                             .get_mut(l.table.as_ref().unwrap())
                             .unwrap()
                             .columns
-                            .push(l.name.clone());
+                            .push(l.clone());
                     }
                     if !qg.relations
                         .entry(r.table.as_ref().unwrap().clone())
                         .or_insert(new_node(r.table.as_ref().unwrap().clone(), vec![], &st))
                         .columns
-                        .contains(&r.name) {
+                        .iter()
+                        .any(|c| c.name == r.name) {
                         qg.relations
                             .get_mut(r.table.as_ref().unwrap())
                             .unwrap()
                             .columns
-                            .push(r.name.clone());
+                            .push(r.clone());
                     }
                 }
             }

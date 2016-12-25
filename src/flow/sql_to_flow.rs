@@ -85,10 +85,10 @@ fn make_filter_node(name: &str, qgn: &QueryGraphNode, g: &mut FG) -> Node {
     let parent_view = lookup_view_by_nodeindex(parent_ni, g);
     let projected_columns: Vec<usize> = qgn.columns
         .iter()
-        .map(|c| field_to_columnid(parent_view, &c).unwrap())
+        .map(|c| field_to_columnid(parent_view, &c.name).unwrap())
         .collect();
     let mut n = ops::new(String::from(name),
-                         Vec::from_iter(qgn.columns.iter().map(String::as_str)).as_slice(),
+                         Vec::from_iter(qgn.columns.iter().map(|c| c.name.as_str())).as_slice(),
                          true,
                          Permute::new(parent_ni, projected_columns.as_slice()));
     for cond in qgn.predicates.iter() {
@@ -249,18 +249,18 @@ fn make_nodes_for_selection(st: &SelectStatement,
                 filter_nodes.iter().next().as_ref().unwrap().1
             };
             let final_join_view = lookup_view_by_nodeindex(*final_join_ni, g);
-            let projected_columns: Vec<String> = qg.relations
+            let projected_columns: Vec<Column> = qg.relations
                 .iter()
                 .fold(Vec::new(), |mut v, (_, qgn)| {
                     v.extend(qgn.columns.clone().into_iter());
                     v
                 });
             let projected_column_ids: Vec<usize> = projected_columns.iter()
-                .map(|c| field_to_columnid(final_join_view, &c).unwrap())
+                .map(|c| field_to_columnid(final_join_view, &c.name).unwrap())
                 .collect();
             n = ops::new(String::from(name),
                          projected_columns.iter()
-                             .map(String::as_ref)
+                             .map(|c| c.name.as_str())
                              .collect::<Vec<&str>>()
                              .as_slice(),
                          true,
