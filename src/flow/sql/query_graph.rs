@@ -314,7 +314,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     match st.group_by {
         None => (),
         Some(ref clause) => {
-            println!("{:#?}", clause);
+            // println!("{:#?}", clause);
             for column in clause.columns.iter() {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
                 let mut e = qg.edges

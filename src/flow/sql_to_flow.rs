@@ -494,8 +494,6 @@ mod tests {
     use ops;
     use query::DataType;
     use super::{FG, SqlIncorporator, ToFlowParts, V};
-    use std::io::Read;
-    use std::fs::File;
 
     type Update = ops::Update;
     type Data = Vec<DataType>;
@@ -661,7 +659,6 @@ mod tests {
                    &["uid", "name", "email"]);
         assert_eq!(get_view(&inc.graph, "users").node().unwrap().operator().description(),
                    "B");
-        println!("{}", inc.graph);
 
         // Try a simple COUNT function
         let res = "SELECT COUNT(users.userid) AS votes FROM votes GROUP BY users.aid;"
@@ -685,6 +682,9 @@ mod tests {
 
     #[test]
     fn it_incorporates_finkelstein1982_naively() {
+        use std::io::Read;
+        use std::fs::File;
+
         // set up graph
         let mut g = FlowGraph::new();
         let mut inc = SqlIncorporator::new(&mut g);
@@ -706,10 +706,13 @@ mod tests {
             .collect();
 
         // Add them one by one
-        for q in lines.iter() {
-            println!("{:?}", q.to_flow_parts(&mut inc, None));
+        for (i, q) in lines.iter().enumerate() {
+            if let Ok((name, _)) = q.to_flow_parts(&mut inc, None) {
+                println!("{}: {}\n", name, q);
+            } else {
+                println!("Failed to parse: {}\n", q);
+            };
+            // println!("{}", inc.graph);
         }
-
-        println!("{}", inc.graph);
     }
 }
