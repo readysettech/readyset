@@ -669,6 +669,13 @@ mod tests {
         assert!(res.is_ok());
         // added the aggregation and the edge view
         assert_eq!(inc.graph.graph.node_count(), 5);
+        // check aggregation view
+        let qid = query_id_hash(&["computed_columns", "votes"],
+                                &[&Column::from("users.aid")]);
+        let agg_view = get_view(&inc.graph, &format!("q_{:x}_n2", qid));
+        assert_eq!(agg_view.args(), &["aid", "votes"]);
+        assert_eq!(agg_view.node().unwrap().operator().description(),
+                   format!("|*| γ[1]"));
         // check edge view
         let edge_view = get_view(&inc.graph, "q_2");
         assert_eq!(edge_view.args(), &["votes"]);
