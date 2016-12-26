@@ -300,3 +300,38 @@ fn votes() {
         assert!(res.iter().any(|r| r == &vec![2.into(), 4.into(), 0.into()]));
     }
 }
+
+#[test]
+#[ignore]
+fn tpc_w() {
+    use std::io::Read;
+    use std::fs::File;
+    use distributary::ToFlowParts;
+
+    // set up graph
+    let mut g = distributary::FlowGraph::new();
+    let mut inc = distributary::SqlIncorporator::new(&mut g);
+
+    let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
+    let mut s = String::new();
+
+    // Load queries
+    f.read_to_string(&mut s).unwrap();
+    let lines: Vec<String> = s.lines()
+        .filter(|l| !l.is_empty() && !l.starts_with("#"))
+        .map(|l| {
+            if !(l.ends_with("\n") || l.ends_with(";")) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            }
+        })
+        .collect();
+
+    // Add them one by one
+    for (i, q) in lines.iter().enumerate() {
+        println!("{}: {}", i, q);
+        println!("{:?}", q.to_flow_parts(&mut inc, None));
+        // println!("{}", inc.graph);
+    }
+}
