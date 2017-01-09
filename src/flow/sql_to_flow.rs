@@ -81,32 +81,64 @@ fn make_base_node(st: &InsertStatement) -> Node {
              Base {})
 }
 
+fn make_aggregation_node(name: &str,
+                         computed_col_name: &str,
+                         over: &Column,
+                         group_by: &[Column],
+                         agg: ops::grouped::aggregate::Aggregation,
+                         g: &FG)
+                         -> Node {
+    let parent_ni = lookup_nodeindex(over.table.as_ref().unwrap(), g);
+    let parent_view = lookup_view_by_nodeindex(parent_ni, g);
+
+    // Resolve column IDs in parent
+    let over_col_indx = parent_view.args().iter().position(|ref s| **s == over.name).unwrap();
+    let group_col_indx = group_by.iter()
+        .map(|ref c| parent_view.args().iter().position(|ref s| **s == c.name).unwrap())
+        .collect::<Vec<_>>();
+
+    // The function node's set of output columns is the group columns plus the function
+    // column
+    let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| c.name.as_str()));
+    combined_columns.push(computed_col_name);
+
+    // Create operator
+    let n = ops::new(String::from(name),
+                     combined_columns.as_slice(),
+                     true,
+                     agg.over(parent_ni, over_col_indx, group_col_indx.as_slice()));
+    // println!("agg node: {:#?}, parent: {:?}", n, parent_ni);
+    n
+}
+
 fn make_function_node(name: &str, func_col: &Column, group_cols: &[Column], g: &mut FG) -> Node {
     use ops::grouped::aggregate::Aggregation;
 
-    let parent_ni;
     let func = func_col.function.as_ref().unwrap();
     let n = match *func {
-        FunctionExpression::Sum(FieldExpression::Seq(_)) => unimplemented!(),
+        FunctionExpression::Sum(FieldExpression::Seq(ref cols)) => {
+            // No support for multi-columns counts
+            assert_eq!(cols.len(), 1);
+
+            // println!("SUM over {:?}", over);
+            let over = cols.iter().next().unwrap();
+            make_aggregation_node(name, &func_col.name, over, group_cols, Aggregation::SUM, g)
+        }
         FunctionExpression::Count(FieldExpression::Seq(ref cols)) => {
             // No support for multi-columns counts
             assert_eq!(cols.len(), 1);
+
+            // println!("COUNT over {:?}", over);
             let over = cols.iter().next().unwrap();
-            parent_ni = lookup_nodeindex(over.table.as_ref().unwrap(), g);
-            let over_col_indx = 0;
-            let group_col_indx = &[1];
-            let mut combined_columns = Vec::from_iter(group_cols.iter().map(|c| c.name.as_str()));
-            combined_columns.push(&func_col.name);
-            ops::new(String::from(name),
-                     combined_columns.as_slice(),
-                     true,
-                     Aggregation::COUNT.over(parent_ni, over_col_indx, group_col_indx))
+            make_aggregation_node(name,
+                                  &func_col.name,
+                                  over,
+                                  group_cols,
+                                  Aggregation::COUNT,
+                                  g)
         }
         _ => unimplemented!(),
     };
-    // println!("func node: {:#?}, parent: {:?}",
-    //         n,
-    //         parent_ni);
     n
 }
 
@@ -340,9 +372,9 @@ fn make_nodes_for_selection(st: &SelectStatement,
                 filter_nodes.iter().next().as_ref().unwrap().1
             };
             let final_view = lookup_view_by_nodeindex(*final_ni, g);
-            let projected_columns: Vec<Column> = qg.relations
-                .iter()
-                .fold(Vec::new(), |mut v, (_, qgn)| {
+            let projected_columns: Vec<Column> = sorted_rels.iter()
+                .fold(Vec::new(), |mut v, s| {
+                    let qgn = qg.relations.get(*s).unwrap();
                     v.extend(qgn.columns.clone().into_iter());
                     v
                 });
@@ -654,32 +686,22 @@ mod tests {
         assert_eq!(get_view(&inc.graph, "votes").args(), &["aid", "userid"]);
         assert_eq!(get_view(&inc.graph, "votes").node().unwrap().operator().description(),
                    "B");
-        assert!("INSERT INTO users (uid, name, email) VALUES (?, ?, ?);"
-            .to_flow_parts(&mut inc, None)
-            .is_ok());
-        // Should have source and "users" base table node
-        assert_eq!(inc.graph.graph.node_count(), 3);
-        assert_eq!(get_view(&inc.graph, "users").name(), "users");
-        assert_eq!(get_view(&inc.graph, "users").args(),
-                   &["uid", "name", "email"]);
-        assert_eq!(get_view(&inc.graph, "users").node().unwrap().operator().description(),
-                   "B");
 
         // Try a simple COUNT function
-        let res = "SELECT COUNT(users.userid) AS votes FROM votes GROUP BY users.aid;"
+        let res = "SELECT COUNT(votes.userid) AS votes FROM votes GROUP BY votes.aid;"
             .to_flow_parts(&mut inc, None);
         assert!(res.is_ok());
         // added the aggregation and the edge view
-        assert_eq!(inc.graph.graph.node_count(), 5);
+        assert_eq!(inc.graph.graph.node_count(), 4);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[&Column::from("users.aid")]);
+                                &[&Column::from("votes.aid")]);
         let agg_view = get_view(&inc.graph, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.args(), &["aid", "votes"]);
         assert_eq!(agg_view.node().unwrap().operator().description(),
-                   format!("|*| γ[1]"));
+                   format!("|*| γ[0]"));
         // check edge view
-        let edge_view = get_view(&inc.graph, "q_2");
+        let edge_view = get_view(&inc.graph, "q_1");
         assert_eq!(edge_view.args(), &["votes"]);
         assert_eq!(edge_view.node().unwrap().operator().description(),
                    format!("π[1]"));
