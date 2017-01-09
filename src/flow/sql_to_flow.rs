@@ -37,7 +37,7 @@ fn field_to_columnid(v: &flow::View<Query, Update = ops::Update, Data = Vec<Data
 /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
 /// vector of conditions that `shortcut` understands.
 fn to_conditions(ct: &ConditionTree, v: &V) -> Vec<shortcut::Condition<DataType>> {
-    // TODO(malte): fix this once nom-sql has better operator representations
+    // TODO(malte): support other types of operators
     if ct.operator != Operator::Equal {
         println!("Conditionals with {:?} are not supported in shortcut yet, so ignoring {:?}",
                  ct.operator,
