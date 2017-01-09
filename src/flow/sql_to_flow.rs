@@ -314,7 +314,7 @@ fn make_nodes_for_selection(st: &SelectStatement,
                         _ => false,
                     })
                     .collect::<Vec<_>>() {
-                    let n = make_function_node(&format!("1_{:x}_n{}", qg.signature().hash, i),
+                    let n = make_function_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
                                                fn_col,
                                                &[],
                                                g);
