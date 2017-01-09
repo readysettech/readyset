@@ -29,7 +29,7 @@ fn main() {
             .unwrap();
 
         // add vote count
-        let vc = "SELECT vote.id, COUNT(vote.user) AS votes FROM vote;"
+        let vc = "SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;"
             .to_flow_parts(&mut inc, Some("vc".into()))
             .unwrap();
 
@@ -40,7 +40,7 @@ fn main() {
             .unwrap();
 
         // add user karma
-        let _karma = "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc;"
+        let _karma = "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY awvc.user;"
             .to_flow_parts(&mut inc, Some("karma".into()))
             .unwrap();
     }
