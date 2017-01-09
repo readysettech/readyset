@@ -393,6 +393,11 @@ impl<'a> SqlIncorporator<'a> {
         }
     }
 
+    /// Returns a reference to the `FlowGraph` wrapped by this `SqlIncorporator`
+    pub fn graph(&self) -> &FG {
+        self.graph
+    }
+
     fn nodes_for_query(&mut self, q: SqlQuery) -> (String, Vec<NodeIndex>) {
         let name = match q {
             SqlQuery::Insert(ref iq) => iq.table.name.clone(),
