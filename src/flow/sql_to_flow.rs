@@ -137,6 +137,12 @@ fn make_function_node(name: &str, func_col: &Column, group_cols: &[Column], g: &
                                   Aggregation::COUNT,
                                   g)
         }
+        FunctionExpression::Count(FieldExpression::All) => {
+            // XXX(malte): we will need a special operator here, since COUNT(*) refers to all rows
+            // in the group (if we have a GROUP BY) or table/view (if we don't). As such, there is
+            // no "over" column, but our aggregation operators' API requires one to be specified.
+            unimplemented!()
+        }
         _ => unimplemented!(),
     };
     n
@@ -719,6 +725,44 @@ mod tests {
         assert_eq!(edge_view.args(), &["votes"]);
         assert_eq!(edge_view.node().unwrap().operator().description(),
                    format!("π[1]"));
+    }
+
+    #[test]
+    // Activate when we have support for COUNT(*)
+    #[ignore]
+    fn it_incorporates_aggregation_no_group_by() {
+        use ops::NodeOp;
+
+        // set up graph
+        let mut g = FlowGraph::new();
+        let mut inc = SqlIncorporator::new(&mut g);
+
+        // Establish a base write type
+        assert!("INSERT INTO votes (aid, userid) VALUES (?, ?);"
+            .to_flow_parts(&mut inc, None)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(inc.graph.graph.node_count(), 2);
+        assert_eq!(get_view(&inc.graph, "votes").name(), "votes");
+        assert_eq!(get_view(&inc.graph, "votes").args(), &["aid", "userid"]);
+        assert_eq!(get_view(&inc.graph, "votes").node().unwrap().operator().description(),
+                   "B");
+        // Try a simple COUNT function without a GROUP BY clause
+        let res = "SELECT COUNT(*) AS count FROM votes;".to_flow_parts(&mut inc, None);
+        assert!(res.is_ok());
+        // added the aggregation and the edge view
+        assert_eq!(inc.graph.graph.node_count(), 4);
+        // check aggregation view
+        let qid = query_id_hash(&["computed_columns", "votes"], &[]);
+        let agg_view = get_view(&inc.graph, &format!("q_{:x}_n2", qid));
+        assert_eq!(agg_view.args(), &["count"]);
+        assert_eq!(agg_view.node().unwrap().operator().description(),
+                   format!("|*| γ[1]"));
+        // check edge view
+        let edge_view = get_view(&inc.graph, "q_2");
+        assert_eq!(edge_view.args(), &["count"]);
+        assert_eq!(edge_view.node().unwrap().operator().description(),
+                   format!("π[0]"));
     }
 
     #[test]
