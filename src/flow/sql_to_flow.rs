@@ -425,6 +425,20 @@ impl<'a> SqlIncorporator<'a> {
         }
     }
 
+    /// Incorporates a single query into the underlying `FlowGraph`. The `query` argument is a
+    /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
+    /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
+    /// queries, and a deterministic, unique name is generated and returned otherwise.
+    ///
+    /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
+    /// of `NodeIndex`es representing the nodes added to support the query.
+    pub fn add_query(&mut self,
+                     query: &str,
+                     name: Option<String>)
+                     -> Result<(String, Vec<NodeIndex>), String> {
+        query.to_flow_parts(self, name)
+    }
+
     /// Returns a reference to the `FlowGraph` wrapped by this `SqlIncorporator`
     pub fn graph(&self) -> &FG {
         self.graph

@@ -14,39 +14,44 @@ fn main() {
         let mut inc = SqlIncorporator::new(&mut g);
 
         // add article base node
-        let _article = "INSERT INTO article (id, user, title, url) VALUES (?, ?, ?, ?);"
-            .to_flow_parts(&mut inc, None)
-            .unwrap();
+        let _article =
+            inc.add_query("INSERT INTO article (id, user, title, url) VALUES (?, ?, ?, ?);",
+                           None)
+                .unwrap();
 
         // add vote base table
-        let _vote = "INSERT INTO vote (user, id) VALUES (?, ?);"
-            .to_flow_parts(&mut inc, None)
+        let _vote = inc.add_query("INSERT INTO vote (user, id) VALUES (?, ?);", None)
             .unwrap();
 
         // add a user account base table
-        let _user = "INSERT INTO user (id, username, hash) VALUES (?, ?, ?);"
-            .to_flow_parts(&mut inc, None)
+        let _user = inc.add_query("INSERT INTO user (id, username, hash) VALUES (?, ?, ?);",
+                       None)
             .unwrap();
 
         // add vote count
-        let vc = "SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;"
-            .to_flow_parts(&mut inc, Some("vc".into()))
-            .unwrap();
+        let vc =
+            inc.add_query("SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
+                           Some("vc".into()))
+                .unwrap();
 
         // add final join -- joins on first field of each input
-        let awvc = "SELECT article.id, article.user, title, url, vc.votes FROM article, vc WHERE \
-                    article.id = vc.id;"
-            .to_flow_parts(&mut inc, Some("awvc".into()))
-            .unwrap();
+        let awvc =
+            inc.add_query("SELECT article.id, article.user, title, url, vc.votes FROM article, \
+                            vc WHERE article.id = vc.id;",
+                           Some("awvc".into()))
+                .unwrap();
 
         // add user karma
-        let _karma = "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY awvc.user;"
-            .to_flow_parts(&mut inc, Some("karma".into()))
-            .unwrap();
+        let _karma =
+            inc.add_query("SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
+                            awvc.user;",
+                           Some("karma".into()))
+                .unwrap();
+
+        println!("{}", inc.graph());
     }
 
     // run the application
-    println!("now running!");
     web::run(g).unwrap();
 }
 
