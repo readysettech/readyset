@@ -456,7 +456,7 @@ impl Domain {
                         let ingress = self.nodes[m.to.as_local()].borrow();
                         let base_node = self.nodes[ingress.children[0].as_local()].borrow().index; // TODO: is this the correct node?
                         let result =
-                            self.checktable.lock().unwrap().claim_timestamp(&token, base_node);
+                            self.checktable.lock().unwrap().claim_timestamp(&token, base_node, &m.data);
                         match result {
                             checktable::TransactionResult::Committed(i) => {
                                 m.ts = Some((i, base_node));

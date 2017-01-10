@@ -391,7 +391,7 @@ impl<'a> Migration<'a> {
                 })
                 .collect();
 
-            let r = node::Reader::new(checktable::TokenGenerator::new(base_parents));
+            let r = node::Reader::new(checktable::TokenGenerator::new(base_parents, vec![]));
             let r = node::Type::Reader(None, None, r);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
@@ -475,7 +475,8 @@ impl<'a> Migration<'a> {
                 let (res, ts) = arc.find_and(q, |rs| {
                     rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
                 });
-                (res, generator.generate(ts))
+                let token = generator.generate(ts, q.clone());
+                (res, token)
             })
         } else {
             unreachable!("tried to use non-reader node as a reader")

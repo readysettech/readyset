@@ -7,20 +7,27 @@
 use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::cmp;
 use std::fmt;
 use std::fmt::Debug;
 
+use query::DataType;
+use ops;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Conflict {
+    /// This conflict should trigger an abort if the given base table has seen a write after the given time.
     BaseTable(NodeIndex),
+    /// This conflict should trigger an abort if the given base table has seen a write to the
+    /// specified column that had a given value after the time indicated.
+    BaseColumn(NodeIndex, usize),
 }
 
-/// TODO: add docs
+/// Tokens are used to perform transactions. Any transactional write will include a token indicating
+/// the universe of other writes that it could conflict with. A transaction's token is considered
+/// invalid (and will therefore cause it to abort) if any of the contained conflicts are triggered.
 #[derive(Clone)]
 pub struct Token {
-    conflicts: HashMap<Conflict, i64>,
+    conflicts: Vec<(i64, DataType, Vec<Conflict>)>,
 }
 
 impl Token {
@@ -30,31 +37,24 @@ impl Token {
     /// Combine two tokens into a single token conflicting with everything in either token's
     /// conflict set.
     pub fn merge(&mut self, other: Token) {
-        for (conflict, ts) in other.conflicts.into_iter() {
-            match self.conflicts.entry(conflict) {
-                Entry::Occupied(mut entry) => {
-                    let v = cmp::max(ts, entry.get().clone());
-                    entry.insert(v);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(ts);
-                }
-            }
-        }
+        let mut other_conflicts = other.conflicts;
+        self.conflicts.append(&mut other_conflicts);
         self.compact();
     }
 
     /// Generate an empty token that conflicts with nothing. Such a token can be used to do a
     /// transaction that has no read set.
     pub fn empty() -> Self {
-        Token { conflicts: HashMap::new() }
+        Token {
+            conflicts: Vec::new(),
+        }
     }
 }
 
 impl Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (c, ts) in self.conflicts.iter() {
-            match write!(f, "{:?} @ {}", c, ts) {
+        for &(ts, ref key, ref c) in self.conflicts.iter() {
+            match write!(f, "{:?} @ ts={}, key={:?}", c, ts, key) {
                 Ok(_) => (),
                 Err(e) => return Err(e),
             }
@@ -69,14 +69,21 @@ pub struct TokenGenerator {
 }
 
 impl TokenGenerator {
-    pub fn new(base_parents: Vec<NodeIndex>) -> Self {
+    pub fn new(base_table_conflicts: Vec<NodeIndex>, base_column_conflicts: Vec<(NodeIndex, usize)>) -> Self {
         TokenGenerator {
-            conflicts: base_parents.into_iter().map(|p| Conflict::BaseTable(p)).collect(),
+            conflicts: base_table_conflicts
+                .into_iter()
+                .map(|n| Conflict::BaseTable(n)).
+                chain(base_column_conflicts
+                      .into_iter()
+                      .map(|(n,c)| Conflict::BaseColumn(n, c)))
+                .collect(),
         }
     }
 
-    pub fn generate(&self, ts: i64) -> Token {
-        Token { conflicts: self.conflicts.iter().map(|c| (c.clone(), ts)).collect() }
+    // Generate a token that conflicts with any write that could modify a row with the given key.
+    pub fn generate(&self, ts: i64, key: DataType) -> Token {
+        Token { conflicts: vec![(ts, key, self.conflicts.clone())] }
     }
 }
 
@@ -104,6 +111,10 @@ pub struct CheckTable {
 
     // Holds the last time each base node was written to.
     toplevel: HashMap<NodeIndex, i64>,
+
+    // For each base node, holds a hash map from column number to a map from value to the last time
+    // that a row of that value was written.
+    granular: HashMap<NodeIndex, HashMap<usize, Option<HashMap<DataType, i64>>>>,
 }
 
 impl CheckTable {
@@ -111,21 +122,65 @@ impl CheckTable {
         CheckTable {
             next_timestamp: 0,
             toplevel: HashMap::new(),
+            granular: HashMap::new(),
+        }
+    }
+
+    // Return whether the conflict should trigger, causing the associated transaction to abort.
+    fn check_conflict(&self, ts: i64, key: &DataType, conflict: &Conflict) -> bool {
+        match conflict {
+            &Conflict::BaseTable(node) => ts < *self.toplevel.get(&node).unwrap_or(&-1),
+            &Conflict::BaseColumn(node, column) => {
+                let t = self.granular.get(&node);
+                if t.is_none() {
+                    // If the base node has never seen a write, then don't trigger.
+                    return false;
+                }
+
+                let r = None;
+                let t = t.unwrap().get(&column).unwrap_or(&r);
+                if let &Some(ref t) = t {
+                    // Column is being tracked.
+                    let t = t.get(key);
+                    if t.is_none() {
+                        // If the column is being tracked, and a token has been generated for a given
+                        // value, then the value must be present in the checktable.
+                        unreachable!();
+                    }
+
+                    ts < *t.unwrap()
+                } else {
+                    // If this column is not being tracked, then trigger only if there has been any
+                    // write to the base node.
+                    ts < *self.toplevel.get(&node).unwrap_or(&-1)
+                }
+            },
         }
     }
 
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
-        return token.conflicts.iter().all(|(conflict, ts)| match conflict {
-            &Conflict::BaseTable(node) => ts >= self.toplevel.get(&node).unwrap_or(&-1),
-        });
+        !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
+            conflicts.iter().any(|ref c| self.check_conflict(ts, &key, c))
+        })
     }
 
-    pub fn claim_timestamp(&mut self, token: &Token, base: NodeIndex) -> TransactionResult {
+    pub fn claim_timestamp(&mut self, token: &Token, base: NodeIndex, rows: &ops::Update) -> TransactionResult {
         if self.validate_token(token) {
             let ts = self.next_timestamp;
             self.next_timestamp += 1;
             self.toplevel.insert(base, ts);
+
+            let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
+            let &ops::Update::Records(ref rs) = rows;
+            for record in rs {
+                for (i, value) in record.iter().enumerate() {
+                    if let &mut Some(ref mut m) = t.entry(i).or_insert(None) {
+                        *m.entry(value.clone()).or_insert(0) = ts;
+                    }
+                }
+            }
+
             TransactionResult::Committed(ts)
         } else {
             TransactionResult::Aborted
