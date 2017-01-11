@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use flow::prelude::*;
 
 /// Designator for what a given position in a group concat output should contain.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TextComponent {
     /// Emit a literal string.
     Literal(&'static str),
@@ -40,7 +40,7 @@ pub enum Modify {
 /// is the primary reason for the "separator as sentinel" behavior mentioned above, and may be made
 /// optional in the future such that more efficient incremental updating and relaxed separator
 /// semantics can be implemented.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroupConcat {
     components: Vec<TextComponent>,
     separator: &'static str,

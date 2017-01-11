@@ -45,9 +45,7 @@ impl Token {
     /// Generate an empty token that conflicts with nothing. Such a token can be used to do a
     /// transaction that has no read set.
     pub fn empty() -> Self {
-        Token {
-            conflicts: Vec::new(),
-        }
+        Token { conflicts: Vec::new() }
     }
 }
 
@@ -69,14 +67,14 @@ pub struct TokenGenerator {
 }
 
 impl TokenGenerator {
-    pub fn new(base_table_conflicts: Vec<NodeIndex>, base_column_conflicts: Vec<(NodeIndex, usize)>) -> Self {
+    pub fn new(base_table_conflicts: Vec<NodeIndex>,
+               base_column_conflicts: Vec<(NodeIndex, usize)>)
+               -> Self {
         TokenGenerator {
-            conflicts: base_table_conflicts
-                .into_iter()
-                .map(|n| Conflict::BaseTable(n)).
-                chain(base_column_conflicts
-                      .into_iter()
-                      .map(|(n,c)| Conflict::BaseColumn(n, c)))
+            conflicts: base_table_conflicts.into_iter()
+                .map(|n| Conflict::BaseTable(n))
+                .chain(base_column_conflicts.into_iter()
+                    .map(|(n, c)| Conflict::BaseColumn(n, c)))
                 .collect(),
         }
     }
@@ -154,7 +152,7 @@ impl CheckTable {
                     // write to the base node.
                     ts < *self.toplevel.get(&node).unwrap_or(&-1)
                 }
-            },
+            }
         }
     }
 
@@ -165,7 +163,11 @@ impl CheckTable {
         })
     }
 
-    pub fn claim_timestamp(&mut self, token: &Token, base: NodeIndex, rows: &ops::Update) -> TransactionResult {
+    pub fn claim_timestamp(&mut self,
+                           token: &Token,
+                           base: NodeIndex,
+                           rows: &ops::Update)
+                           -> TransactionResult {
         if self.validate_token(token) {
             let ts = self.next_timestamp;
             self.next_timestamp += 1;

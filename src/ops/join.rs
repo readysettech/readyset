@@ -7,14 +7,14 @@ use std::collections::HashMap;
 
 use flow::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct JoinTarget {
     on: (usize, usize),
     select: Vec<bool>,
     outer: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Join {
     against: HashMap<NodeAddress, JoinTarget>,
     node: NodeAddress,
@@ -180,7 +180,7 @@ impl Into<node::Type> for Builder {
 /// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
 /// `.join` such that it can express "query this view first, then use one of its columns to query
 /// this other view".
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Joiner {
     emit: Vec<(NodeAddress, usize)>,
     join: HashMap<NodeAddress, Join>,
@@ -242,6 +242,10 @@ impl Joiner {
 }
 
 impl Ingredient for Joiner {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         self.join.keys().cloned().collect()
     }

@@ -5,7 +5,7 @@ use flow::prelude::*;
 use query::DataType;
 
 /// Filters incoming records according to some filter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Filter {
     src: NodeAddress,
     filter: sync::Arc<Vec<Option<DataType>>>,
@@ -22,6 +22,10 @@ impl Filter {
 }
 
 impl Ingredient for Filter {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }

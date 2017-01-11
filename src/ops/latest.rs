@@ -9,7 +9,7 @@ use flow::prelude::*;
 ///
 /// Whenever a new record arrives for a group, the latest operator will negative the previous
 /// latest for that group.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Latest {
     us: Option<NodeAddress>,
     src: NodeAddress,
@@ -41,6 +41,10 @@ impl Latest {
 }
 
 impl Ingredient for Latest {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }

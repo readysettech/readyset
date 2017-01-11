@@ -101,6 +101,10 @@ impl NodeAddress {
 pub trait Ingredient
     where Self: Send
 {
+    /// Construct a new node from this node that will be given to the domain running this node.
+    /// Whatever is left behind in self is what remains observable in the graph.
+    fn take(&mut self) -> Box<Ingredient>;
+
     fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 

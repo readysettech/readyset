@@ -4,7 +4,7 @@ use flow::prelude::*;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Identity {
     src: NodeAddress,
 }
@@ -17,6 +17,10 @@ impl Identity {
 }
 
 impl Ingredient for Identity {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }

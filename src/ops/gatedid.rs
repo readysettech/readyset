@@ -31,6 +31,15 @@ impl GatedIdentity {
 }
 
 impl Ingredient for GatedIdentity {
+    fn take(&mut self) -> Box<Ingredient> {
+        use std::mem;
+        // we cheat a little here because rx can't be cloned. we just construct a new GatedIdentity
+        // (with a separate channel), and leave that behind in the graph. this is fine, since that
+        // channel will never be used for anything.
+        let src = self.src;
+        Box::new(mem::replace(self, Self::new(src).0))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }

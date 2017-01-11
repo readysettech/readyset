@@ -6,7 +6,7 @@ use std::sync;
 use flow::prelude::*;
 
 /// A union of a set of views.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Union {
     emit: HashMap<NodeAddress, Vec<usize>>,
     cols: HashMap<NodeAddress, usize>,
@@ -39,6 +39,10 @@ impl Union {
 }
 
 impl Ingredient for Union {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         self.emit.keys().cloned().collect()
     }

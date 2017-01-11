@@ -31,6 +31,44 @@ impl Reader {
     }
 }
 
+enum NodeHandle {
+    Owned(Type),
+    Taken(Type),
+}
+
+impl NodeHandle {
+    pub fn mark_taken(&mut self) {
+        use std::mem;
+        match mem::replace(self, NodeHandle::Owned(Type::Source)) {
+            NodeHandle::Owned(t) => {
+                mem::replace(self, NodeHandle::Taken(t));
+            }
+            NodeHandle::Taken(_) => {
+                unreachable!("tried to take already taken value");
+            }
+        }
+    }
+}
+
+impl Deref for NodeHandle {
+    type Target = Type;
+    fn deref(&self) -> &Self::Target {
+        match *self {
+            NodeHandle::Owned(ref t) |
+            NodeHandle::Taken(ref t) => t,
+        }
+    }
+}
+
+impl DerefMut for NodeHandle {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match *self {
+            NodeHandle::Owned(ref mut t) => t,
+            NodeHandle::Taken(_) => unreachable!("cannot mutate taken node"),
+        }
+    }
+}
+
 pub enum Type {
     Ingress(domain::Index),
     Internal(domain::Index, Box<Ingredient>),
@@ -39,14 +77,12 @@ pub enum Type {
     TimestampEgress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
     Reader(Option<domain::Index>, Option<backlog::WriteHandle>, Reader), /* domain only known at commit time! */
     Unassigned(Box<Ingredient>),
-    Taken(domain::Index),
     Source,
 }
 
 impl Type {
     fn domain(&self) -> Option<domain::Index> {
         match *self {
-            Type::Taken(d) |
             Type::Ingress(d) |
             Type::Internal(d, _) |
             Type::TimestampIngress(d, _) |
@@ -55,6 +91,16 @@ impl Type {
             Type::Reader(d, _, _) => d,
             Type::Unassigned(_) |
             Type::Source => None,
+        }
+    }
+
+    fn assign(&mut self, domain: domain::Index) {
+        use std::mem;
+        match mem::replace(self, Type::Source) {
+            Type::Unassigned(inner) => {
+                mem::replace(self, Type::Internal(domain, inner));
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -89,7 +135,7 @@ impl<I> From<I> for Type
 }
 
 pub struct Node {
-    inner: Type,
+    inner: NodeHandle,
     name: String,
     fields: Vec<String>,
 }
@@ -103,7 +149,7 @@ impl Node {
         Node {
             name: name.to_string(),
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
-            inner: inner,
+            inner: NodeHandle::Owned(inner),
         }
     }
 
@@ -124,9 +170,7 @@ impl Node {
     }
 
     pub fn take(&mut self) -> Node {
-        use std::mem;
-        let domain = self.domain();
-        let inner = match self.inner {
+        let inner = match *self.inner {
             Type::Egress(d, ref txs) => {
                 // egress nodes can still be modified externally if subgraphs are added
                 // so we just make a new one with a clone of the Mutex-protected Vec
@@ -138,28 +182,18 @@ impl Node {
             }
             Type::TimestampEgress(d, ref arc) => Type::TimestampEgress(d, arc.clone()),
             Type::TimestampIngress(d, ref arc) => Type::TimestampIngress(d, arc.clone()),
-            ref mut n @ Type::Ingress(..) |
-            ref mut n @ Type::Internal(..) => {
-                // no-one else will be using our ingress or internal node,
-                // so we take it from the graph
-                mem::replace(n, Type::Taken(domain.unwrap()))
-            }
-            Type::Taken(_) |
+            Type::Ingress(d) => Type::Ingress(d),
+            Type::Internal(d, ref mut i) => Type::Internal(d, i.take()),
             Type::Unassigned(_) |
             Type::Source => unreachable!(),
         };
+        self.inner.mark_taken();
 
         self.mirror(inner)
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
-        use std::mem;
-        match mem::replace(&mut self.inner, Type::Taken(domain)) {
-            Type::Unassigned(inner) => {
-                self.inner = Type::Internal(domain, inner);
-            }
-            _ => unreachable!(),
-        }
+        self.inner.assign(domain);
     }
 
     pub fn describe(&self, f: &mut fmt::Formatter, idx: NodeIndex) -> fmt::Result {
@@ -173,7 +207,7 @@ impl Node {
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                    .unwrap_or("white".into()))?;
 
-        match self.inner {
+        match *self.inner {
             Type::Source => write!(f, "(source)"),
             Type::Ingress(..) => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
@@ -206,7 +240,6 @@ impl Node {
 
                 write!(f, " }}")
             }
-            Type::Taken(_) => write!(f, "(taken)"),
         }?;
 
         writeln!(f, "\"]")

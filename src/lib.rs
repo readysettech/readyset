@@ -321,7 +321,6 @@
 //! propagating the `Update` since there are no descendant views.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(proc_macro)]
 #![feature(ptr_eq)]
 #![feature(mpsc_select)]
 #![deny(missing_docs)]

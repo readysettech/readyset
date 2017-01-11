@@ -33,7 +33,7 @@ pub mod extremum;
 ///    ```rust,ignore
 ///    self.succ(v, rs.map(|(r, is_positive, ts)| (self.one(r, is_positive), ts)).collect())
 ///    ```
-pub trait GroupedOperation: fmt::Debug {
+pub trait GroupedOperation: fmt::Debug + Clone {
     /// The type used to represent a single
     type Diff: 'static;
 
@@ -67,7 +67,7 @@ pub trait GroupedOperation: fmt::Debug {
     fn description(&self) -> String;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroupedOperator<T: GroupedOperation> {
     src: NodeAddress,
     inner: T,
@@ -101,7 +101,11 @@ impl<T: GroupedOperation> GroupedOperator<T> {
     }
 }
 
-impl<T: GroupedOperation + Send> Ingredient for GroupedOperator<T> {
+impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }

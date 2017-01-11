@@ -34,7 +34,6 @@ pub mod single;
 pub mod local;
 
 pub struct Domain {
-    domain: Index,
     nodes: DomainNodes,
     state: StateMap,
 
@@ -268,7 +267,6 @@ impl Domain {
             .collect();
 
         Domain {
-            domain: domain,
             nodes: nodes,
             state: state,
             buffered_transactions: HashMap::new(),
@@ -455,8 +453,10 @@ impl Domain {
                     if let Some((token, send)) = m.token.take() {
                         let ingress = self.nodes[m.to.as_local()].borrow();
                         let base_node = self.nodes[ingress.children[0].as_local()].borrow().index; // TODO: is this the correct node?
-                        let result =
-                            self.checktable.lock().unwrap().claim_timestamp(&token, base_node, &m.data);
+                        let result = self.checktable
+                            .lock()
+                            .unwrap()
+                            .claim_timestamp(&token, base_node, &m.data);
                         match result {
                             checktable::TransactionResult::Committed(i) => {
                                 m.ts = Some((i, base_node));

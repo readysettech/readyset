@@ -6,7 +6,7 @@ use std::sync;
 use flow::prelude::*;
 
 /// Permutes or omits columns from its source node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Permute {
     us: Option<NodeAddress>,
     emit: Option<Vec<usize>>,
@@ -31,6 +31,10 @@ impl Permute {
 }
 
 impl Ingredient for Permute {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
     fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
