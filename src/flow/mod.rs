@@ -16,6 +16,7 @@ use std::sync;
 pub mod domain;
 pub mod prelude;
 pub mod node;
+mod migrate;
 
 pub type Edge = bool; // should the edge be materialized?
 
