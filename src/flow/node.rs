@@ -258,28 +258,3 @@ impl DerefMut for Node {
         &mut self.inner
     }
 }
-
-// TODO: what do we do about .having?
-// impl Node {
-//     /// Add an output filter to this node.
-//     ///
-//     /// Only records matching the given conditions will be output from this node. This filtering
-//     /// applies both to feed-forward and to queries. Note that adding conditions in this way does
-//     /// *not* modify a node's input, and so the node may end up performing computation whose result
-//     /// will simply be discarded.
-//     ///
-//     /// Adding a HAVING condition will not reduce the size of the node's materialized state.
-//     pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
-//         self.having = Some(query::Query::new(&[], cond));
-//         self
-//     }
-//
-//     /// Retrieve a list of this node's output filters.
-//     pub fn having_conditions(&self) -> Option<&[shortcut::Condition<query::DataType>]> {
-//         self.having.as_ref().map(|q| &q.having[..])
-//     }
-//
-//     pub fn operator(&self) -> &Type {
-//         &*self.inner
-//     }
-// }
