@@ -208,7 +208,10 @@ pub struct Blender {
     source: NodeIndex,
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
+
     control_txs: HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
+    data_txs: HashMap<domain::Index, mpsc::SyncSender<Message>>,
+    time_txs: HashMap<domain::Index, mpsc::SyncSender<i64>>,
 }
 
 impl Default for Blender {
@@ -221,7 +224,10 @@ impl Default for Blender {
             source: source,
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
+
             control_txs: HashMap::default(),
+            data_txs: HashMap::default(),
+            time_txs: HashMap::default(),
         }
     }
 }
@@ -399,7 +405,7 @@ impl<'a> Migration<'a> {
                 .collect();
 
             let r = node::Reader::new(checktable::TokenGenerator::new(base_parents, vec![]));
-            let r = node::Type::Reader(None, None, r);
+            let r = node::Type::Reader(None, r);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
@@ -409,7 +415,7 @@ impl<'a> Migration<'a> {
 
     fn reader_for(&self, n: NodeAddress) -> &node::Reader {
         let ri = self.readers[n.as_global()];
-        if let node::Type::Reader(_, _, ref inner) = *self.mainline.ingredients[ri] {
+        if let node::Type::Reader(_, ref inner) = *self.mainline.ingredients[ri] {
             &*inner
         } else {
             unreachable!("tried to use non-reader node as a reader")
@@ -431,7 +437,7 @@ impl<'a> Migration<'a> {
         // we need to do these here because we'll mutably borrow self.mainline in the if let
         let cols = self.mainline.ingredients[ri].fields().len();
 
-        if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
+        if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
                 use backlog;
                 let (r, w) = backlog::new(cols, key).commit();
@@ -467,7 +473,7 @@ impl<'a> Migration<'a> {
         // we need to do these here because we'll mutably borrow self.mainline in the if let
         let cols = self.mainline.ingredients[ri].fields().len();
 
-        if let node::Type::Reader(_, ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
+        if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
                 use backlog;
                 let (r, w) = backlog::new(cols, key).commit();
@@ -502,266 +508,121 @@ impl<'a> Migration<'a> {
         rx
     }
 
-    fn boot_domain(&mut self,
-                   d: domain::Index,
-                   nodes: Vec<(NodeIndex, NodeAddress)>,
-                   base_nodes: &Vec<NodeIndex>,
-                   rx: mpsc::Receiver<Message>,
-                   timestamp_rx: mpsc::Receiver<i64>)
-                   -> mpsc::SyncSender<domain::Control> {
-        let d = domain::Domain::from_graph(d,
-                                           nodes,
-                                           self.mainline.checktable.clone(),
-                                           base_nodes,
-                                           &mut self.mainline.ingredients);
-        d.boot(rx, timestamp_rx)
-    }
-
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
     ///
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
-    pub fn commit(mut self) -> HashMap<NodeAddress, (FnNTX, FnTX)> {
-        // the user wants us to commit to the changes contained within this Migration. this is
-        // where all the magic happens.
+    pub fn commit(self) -> HashMap<NodeAddress, (FnNTX, FnTX)> {
+        let mut new = HashSet::new();
+        let mut changed_domains = HashSet::new();
 
-        // some nodes that used to be the children of other nodes will now be children of ingress
-        // nodes instead. keep track of this mapping for each domain.
-        let mut domain_remap = HashMap::new();
+        let mainline = self.mainline;
 
-        // for each domain, we need to keep track of its channel pair so any egress nodes in other
-        // domain trying to send to it know where to send.
-        let mut txs = HashMap::new();
-        let mut rxs = HashMap::new();
-        let mut timestamp_rxs = HashMap::new();
-        let mut targets = HashMap::new();
-
-        // keep track of the nodes assigned to each domain.
-        let mut domain_nodes = HashMap::new();
-
-        // find all new nodes in topological order>
-        // we collect first since we'll be mutating the graph below.
-        // we need them to be in topological order here so that we know that parents have been
-        // processed, and that children have not (which matters for ingress/egress setup).
-        let mut topo_list = Vec::with_capacity(self.added.len());
-        let mut topo = petgraph::visit::Topo::new(&self.mainline.ingredients);
-        while let Some(node) = topo.next(&self.mainline.ingredients) {
-            if node == self.mainline.source {
-                continue;
-            }
-            if !self.added.contains_key(&node) {
-                // not new, or a reader
-                continue;
-            }
-            topo_list.push(node);
-        }
-
-        // Map from base node index to the index of the associated timestamp egress node.
-        let mut time_egress_nodes: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-        let mut base_nodes: Vec<NodeIndex> = Vec::new();
-
-        for node in topo_list {
-            let domain = self.added[&node].unwrap_or_else(|| {
+        // Make sure all new nodes are assigned to a domain
+        //
+        // TODO: readers are in same domain as parent!
+        for (node, domain) in self.added {
+            let domain = domain.unwrap_or_else(|| {
                 // new node that doesn't belong to a domain
                 // create a new domain just for that node
-                self.add_domain()
+                // NOTE: this is the same code as in add_domain(), but we can't use self here
+                mainline.ndomains += 1;
+                (mainline.ndomains - 1).into()
+
+            });
+            mainline.ingredients[node].add_to(domain);
+            new.insert(node);
+            changed_domains.insert(domain);
+        }
+
+        // Set up ingress and egress nodes
+        let mut swapped =
+            migrate::routing::add(&mut mainline.ingredients, mainline.source, &mut new);
+
+        // Find all domains that have changed
+        let mut domain_nodes = mainline.ingredients
+            .node_indices()
+            .filter_map(|ni| {
+                let domain = mainline.ingredients[ni].domain();
+                if changed_domains.contains(&domain) {
+                    Some((domain, ni, new.contains(&ni)))
+                } else {
+                    None
+                }
+            })
+            .fold(HashMap::new(), |mut dns, (d, ni, new)| {
+                dns.entry(d).or_insert_with(Vec::new).push((ni, new));
+                dns
             });
 
-            let parents: Vec<_> = self.mainline
-                .ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                .collect(); // collect so we can mutate mainline.ingredients
+        let mut rxs = HashMap::new();
+        let mut time_rxs = HashMap::new();
 
-            for parent in parents {
-                if parent == self.mainline.source ||
-                   domain != self.mainline.ingredients[parent].domain().unwrap() {
-                    // parent is in a different domain
-                    // create an ingress node to handle that
-                    let proxy = self.mainline.ingredients[parent]
-                        .mirror(node::Type::Ingress(domain));
-                    let ingress = self.mainline.ingredients.add_node(proxy);
+        // Add transactional time nodes
+        let new_time_egress = migrate::transactions::add_time_nodes(&mut domain_nodes,
+                                                                    &mut mainline.ingredients,
+                                                                    &mainline.time_txs);
 
-                    // that ingress node also needs to run before us
-                    let no = NodeAddress::make_local(domain_nodes.entry(domain)
-                        .or_insert_with(Vec::new)
-                        .len());
-                    domain_nodes.get_mut(&domain).unwrap().push((ingress, no));
+        // Deal with each domain individually
+        for (domain, nodes) in &mut domain_nodes {
+            // Number of pre-existing nodes
+            let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
 
-                    // we also need to make sure there's a channel to reach the domain on
-                    // we're also going to need to tell any egress node that will send to this
-                    // node about the channel it should use. we'll do that later, so just keep
-                    // track of this work for later for now.
-                    if !rxs.contains_key(&domain) {
-                        let (tx, rx) = mpsc::sync_channel(10);
-                        rxs.insert(domain, rx);
-                        txs.insert(domain, tx);
-                    }
-                    targets.insert(ingress, (no, txs[&domain].clone()));
-
-                    // note that, since we are traversing in topological order, our parent in this
-                    // case should either be the source node, or it should be an egress node!
-                    if cfg!(debug_assertions) && parent != self.mainline.source {
-                        if let node::Type::Egress(..) = *self.mainline.ingredients[parent] {
-                        } else {
-                            unreachable!("parent of ingress is not an egress");
-                        }
-                    }
-
-                    // anything that used to depend on the *parent* of the egress node above us
-                    // should now depend on this ingress node instead
-                    if parent != self.mainline.source {
-                        let original = self.mainline
-                            .ingredients
-                            .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
-                            .next()
-                            .unwrap();
-
-                        domain_remap.entry(domain)
-                            .or_insert_with(HashMap::new)
-                            .insert(NodeAddress::make_global(original), no);
-                    }
-
-                    // we need to hook the ingress node in between us and this parent
-                    let old = self.mainline.ingredients.find_edge(parent, node).unwrap();
-                    let was_materialized = self.mainline.ingredients.remove_edge(old).unwrap();
-                    self.mainline.ingredients.add_edge(parent, ingress, false);
-                    self.mainline.ingredients.add_edge(ingress, node, was_materialized);
+            // Give local addresses to every (new) node
+            for &(ni, new) in nodes.iter() {
+                if new {
+                    mainline.ingredients[ni].set_addr(NodeAddress::make_local(nnodes));
+                    nnodes += 1;
                 }
             }
 
-            // all user-supplied nodes are internal
-            self.mainline.ingredients[node].add_to(domain);
-
-            // assign the node a local identifier
-            let no =
-                NodeAddress::make_local(domain_nodes.entry(domain).or_insert_with(Vec::new).len());
-
-            // record mapping to local id
-            domain_remap.entry(domain)
-                .or_insert_with(HashMap::new)
-                .insert(NodeAddress::make_global(node), no);
-
-            // in this domain, run this node after any parent ingress nodes we may have added
-            domain_nodes.get_mut(&domain).unwrap().push((node, no));
-
-            // let node process the fact that its parents may have changed
-            if let Some(remap) = domain_remap.get(&domain) {
-                self.mainline
-                    .ingredients
-                    .node_weight_mut(node)
-                    .unwrap()
-                    .on_commit(no, remap);
-            } else {
-                self.mainline
-                    .ingredients
-                    .node_weight_mut(node)
-                    .unwrap()
-                    .on_commit(no, &HashMap::new());
+            // Figure out all the remappings that have happened
+            let mut remap = HashMap::new();
+            // The global address of each node in this domain is now a local one
+            for &(ni, _) in nodes.iter() {
+                remap.insert(NodeAddress::make_global(ni),
+                             mainline.ingredients[ni].addr());
+            }
+            // Parents in other domains have been swapped for ingress nodes.
+            // Those ingress nodes' indices are now local.
+            for (from, to) in swapped.remove(domain).unwrap_or_else(HashMap::new) {
+                remap.insert(NodeAddress::make_global(from),
+                             mainline.ingredients[to].addr());
             }
 
-            let children: Vec<_> = self.mainline
-                .ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-                .collect(); // collect so we can mutate mainline.ingredients
-
-            for child in children {
-                if let node::Type::Reader(ref mut rd, _, _) = *self.mainline.ingredients[child] {
-                    // readers are always in the same domain as their parent
-                    // they also only ever have a single parent (i.e., the node they read)
-                    // because of this, we know that we will only hit this if *exactly once*
-                    // per reader. thus, this is a perfectly fine place to initialize the reader
-                    // (which, in our case, just means adding it to the domain's list of nodes).
-                    //
-                    // XXX: this is not true if a reader was added to a node that existed before a
-                    // migration. but lots of things are broken for migration. this seems like a
-                    // minor case.
-                    *rd = Some(domain);
-                    let no = NodeAddress::make_local(domain_nodes[&domain].len());
-                    domain_nodes.get_mut(&domain).unwrap().push((child, no));
-                    continue;
-                }
-
-                let cdomain = self.mainline.ingredients[child]
-                    .domain()
-                    .or_else(|| self.added[&child]);
-                if cdomain.is_none() || domain != cdomain.unwrap() {
-                    // child is in a different domain
-                    // create an egress node to handle that
-                    // NOTE: technically, this doesn't need to mirror its parent, but meh
-                    let proxy = self.mainline.ingredients[node]
-                        .mirror(node::Type::Egress(domain, Default::default()));
-                    let egress = self.mainline.ingredients.add_node(proxy);
-
-                    // we need to hook that node in between us and this child
-                    let old = self.mainline.ingredients.find_edge(node, child).unwrap();
-                    let was_materialized = self.mainline.ingredients.remove_edge(old).unwrap();
-                    self.mainline.ingredients.add_edge(node, egress, false);
-                    self.mainline.ingredients.add_edge(egress, child, was_materialized);
-                    // that egress node also needs to run
-                    let no = NodeAddress::make_local(domain_nodes[&domain].len());
-                    domain_nodes.get_mut(&domain).unwrap().push((egress, no));
+            // Initialize each new node
+            for &(ni, new) in nodes.iter() {
+                if new && mainline.ingredients[ni].is_internal() {
+                    mainline.ingredients.node_weight_mut(ni).unwrap().on_commit(&remap);
                 }
             }
 
-            // Determine if this node is a base node, and if so add a TimestampEgress node below it.
-            let is_base = if let node::Type::Internal(_, ref ingredient) =
-                *self.mainline.ingredients[node] {
-                ingredient.is_base()
-            } else {
-                false
-            };
+            if !mainline.data_txs.contains_key(domain) {
+                let (tx, rx) = mpsc::sync_channel(10);
+                rxs.insert(*domain, rx);
+                mainline.data_txs.insert(*domain, tx);
+            }
 
-            if is_base {
-                base_nodes.push(node);
-
-                let proxy = self.mainline.ingredients[node]
-                    .mirror(node::Type::TimestampEgress(domain,
-                                                        sync::Arc::new(sync::Mutex::new(vec![]))));
-                let time_egress = self.mainline.ingredients.add_node(proxy);
-
-                // we need to hook that node
-                self.mainline.ingredients.add_edge(node, time_egress, false);
-                // that egress node also needs to run
-                let no = NodeAddress::make_local(domain_nodes[&domain].len());
-                domain_nodes.get_mut(&domain).unwrap().push((time_egress, no));
-
-                time_egress_nodes.insert(node, time_egress);
+            if !mainline.time_txs.contains_key(domain) {
+                let (tx, rx) = mpsc::sync_channel(10);
+                time_rxs.insert(*domain, rx);
+                mainline.time_txs.insert(*domain, tx);
             }
         }
 
-        // Create a timestamp ingress node for each domain, and connect it to each of the timestamp
-        // egress nodes associated with a base node that does not (perhaps transitively) send
-        // updates to the domain.
-        for (domain, mut nodes) in domain_nodes.iter_mut() {
-            // TODO: set proper name for new node.
-            let (tx, rx) = sync::mpsc::sync_channel(16);
-            timestamp_rxs.insert(*domain, rx);
-            let t = node::Type::TimestampIngress(*domain, Arc::new(Mutex::new(tx.clone())));
-            let proxy = node::Node::new::<_, Vec<String>, _>("ts-ingress-node", vec![], t);
-            let time_ingress = self.mainline.ingredients.add_node(proxy);
+        // Determine what nodes to materialize
+        let index: Vec<_> = domain_nodes.iter()
+            .map(|(domain, ref nodes)| {
+                let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
+                let idx = migrate::materialization::index(&mainline.ingredients, &nodes[..], mat);
+                (*domain, idx)
+            })
+            .collect();
 
-            // Place the new node into domain_nodes.
-            let no = NodeAddress::make_local(nodes.len());
-            nodes.push((time_ingress, no));
-
-            for (base, time_egress) in time_egress_nodes.iter() {
-                let path_exists = nodes.iter().any(|&(node, _)| {
-                    petgraph::algo::has_path_connecting(&self.mainline.ingredients,
-                                                        *base,
-                                                        node,
-                                                        None)
-                });
-
-                if !path_exists {
-                    self.mainline.ingredients.add_edge(*time_egress, time_ingress, false);
-                    if let node::Type::TimestampEgress(_, ref mut arc) =
-                        *self.mainline.ingredients[*time_egress] {
-                        arc.lock().unwrap().push(tx.clone());
-                    }
-                }
-            }
-        }
+        // ensure domains with connected egress/ingress pairs have channels between them
+        // NOTE: once we do this, we are making existing domains block on new domains!
+        migrate::routing::connect(&mut mainline.ingredients, &mainline.data_txs, &new);
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
         // looks like this:
@@ -781,94 +642,81 @@ impl<'a> Migration<'a> {
         //     :  | \         :   o
         //
         // etc.
-        // println!("{}", self.mainline);
+        // println!("{}", mainline);
 
-        // first, start up all the domains
+        // now, let's first add any new nodes to existing domains
+        migrate::augmentation::inform(&mut mainline.ingredients,
+                                      mainline.source,
+                                      &mut mainline.control_txs,
+                                      &new);
+
+        // and then boot up new domains
         for (domain, nodes) in domain_nodes {
-            if let Some(ref mut ctx) = self.mainline.control_txs.get_mut(&domain) {
-                // Tell existing domain about new nodes
-                for node in nodes {
-                }
+            if mainline.control_txs.contains_key(&domain) {
+                // we've already dealt with changes to this domain
                 continue;
             }
 
             // Start up new domain
-            let ctx = self.boot_domain(domain,
-                                       nodes,
-                                       &base_nodes,
-                                       rxs.remove(&domain).unwrap(),
-                                       timestamp_rxs.remove(&domain).unwrap());
-            self.mainline.control_txs.insert(domain, ctx);
+            let ctx = migrate::booting::boot_new(domain,
+                                                 &mut mainline.ingredients,
+                                                 mainline.source,
+                                                 nodes,
+                                                 mainline.checktable.clone(),
+                                                 rxs.remove(&domain).unwrap(),
+                                                 time_rxs.remove(&domain).unwrap());
+            mainline.control_txs.insert(domain, ctx);
         }
         drop(rxs);
-        drop(txs); // all necessary copies are in targets
 
-        // then, hook up the channels to new ingress nodes
-        let src = NodeAddress::make_global(self.mainline.source);
+        // Finally, set up input channels to any new base tables
+        let src = NodeAddress::make_global(mainline.source);
         let mut sources = HashMap::new();
-        for (ingress, (no, tx)) in targets {
-            // this node is of type ingress, but since the domain has since claimed ownership of
-            // the node, it is now just a node::Type::Taken
-            // any egress with an edge to this node needs to have a tx clone added to its tx
-            // channel set.
-            for egress in self.mainline
-                .ingredients
-                .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming) {
+        for node in &new {
+            let n = &mainline.ingredients[*node];
+            if let node::Type::Ingress = **n {
+                // check the egress connected to this ingress
+            } else {
+                continue;
+            }
 
-                if egress == self.mainline.source {
-                    // input node
-                    debug_assert_eq!(self.mainline
-                                         .ingredients
-                                         .neighbors_directed(ingress,
-                                                             petgraph::EdgeDirection::Incoming)
-                                         .count(),
-                                     1);
-
-                    // the node index the user knows about is that of the original node
-                    let idx = self.mainline
-                        .ingredients
-                        .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-                        .next()
-                        .unwrap();
-
-                    // we want to avoid forcing the end-user to cook up Messages
-                    // they should instead just make Us
-                    let tx2 = tx.clone();
-                    let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
-                        Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
-                            let (send, recv) = mpsc::channel();
-                            tx.send(Message {
-                                    from: src,
-                                    to: no,
-                                    data: vec![u].into(),
-                                    ts: None,
-                                    token: Some((t, send)),
-                                })
-                                .unwrap();
-                            recv.recv().unwrap()
-                        });
-
-                    let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
-                        tx2.send(Message {
-                                from: src,
-                                to: no,
-                                data: vec![u].into(),
-                                ts: None,
-                                token: None,
-                            })
-                            .unwrap()
-                    });
-                    sources.insert(NodeAddress::make_global(idx), (fntx, ftx));
-                    break;
-                }
-
-                if let node::Type::Egress(_, ref txs) = *self.mainline.ingredients[egress] {
-                    // connected to egress from other domain
-                    txs.lock().unwrap().push((no, tx.clone()));
+            for egress in mainline.ingredients
+                .neighbors_directed(*node, petgraph::EdgeDirection::Incoming) {
+                if egress != mainline.source {
                     continue;
                 }
 
-                unreachable!("ingress parent is not egress");
+                // we want to avoid forcing the end-user to cook up Messages
+                // they should instead just make data records
+                let addr = n.addr();
+                let tx = mainline.data_txs[&n.domain()].clone();
+                let tx2 = tx.clone();
+                let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
+                    Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
+                        let (send, recv) = mpsc::channel();
+                        tx.send(Message {
+                                from: src,
+                                to: addr,
+                                data: vec![u].into(),
+                                ts: None,
+                                token: Some((t, send)),
+                            })
+                            .unwrap();
+                        recv.recv().unwrap()
+                    });
+
+                let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
+                    tx2.send(Message {
+                            from: src,
+                            to: addr,
+                            data: vec![u].into(),
+                            ts: None,
+                            token: None,
+                        })
+                        .unwrap()
+                });
+                sources.insert(NodeAddress::make_global(*node), (fntx, ftx));
+                break;
             }
         }
 

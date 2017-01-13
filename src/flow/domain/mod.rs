@@ -1,15 +1,11 @@
-use petgraph;
 use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::cell;
 
 use std::collections::hash_map::Entry;
 
-use flow;
 use flow::prelude::*;
 
 use ops;
@@ -54,228 +50,17 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn from_graph(domain: Index,
-                      nodes: Vec<(NodeIndex, NodeAddress)>,
-                      checktable: Arc<Mutex<checktable::CheckTable>>,
-                      base_nodes: &Vec<NodeIndex>,
-                      graph: &mut Graph)
-                      -> Self {
-        let ni2na: HashMap<NodeIndex, NodeAddress> = nodes.iter().cloned().collect();
-
-        let nodes: Vec<_> = nodes.into_iter()
-            .map(|(ni, _)| {
-                // also include all *internal* descendants
-                let children: Vec<_> = graph
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&c| {
-                        graph[c].domain().unwrap() == domain
-                    })
-                    .map(|ni| ni2na[&ni])
-                    .collect();
-                    (ni, children)
-            })
-            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
-            .into_iter()
-            .map(|(ni, children)| {
-                single::NodeDescriptor {
-                    index: ni,
-                    addr: ni2na[&ni],
-                    inner: graph.node_weight_mut(ni).unwrap().take(),
-                    children: children,
-                }
-            })
-            .collect();
-
-        let mut state: StateMap = nodes.iter()
-            .filter_map(|n| {
-                // materialized state for any nodes that need it
-                // in particular, we keep state for
-                //
-                //  - any internal node that requires its own state to be materialized
-                //  - any internal node that has an outgoing edge marked as materialized (we know
-                //    that that edge has to be internal, since ingress/egress nodes have already
-                //    been added, and they make sure that there are no cross-domain materialized
-                //    edges).
-                //  - any ingress node with children that say that they may query their ancestors
-                //
-                // that last point needs to be checked *after* we have determined if all internal
-                // nodes should be materialized
-                match *n.inner {
-                    flow::node::Type::Internal(_, ref i) => {
-                        if i.should_materialize() ||
-                           graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
-                            .any(|e| *e.weight()) {
-                            Some((*n.addr.as_local(), State::default()))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            })
-            .collect();
-
-        let inquisitive_children: HashSet<_> = nodes.iter()
-            .filter_map(|n| {
-                if let flow::node::Type::Internal(..) = *n.inner {
-                    if n.will_query(state.contains_key(n.addr.as_local())) {
-                        return Some(n.index);
-                    }
-                }
-                None
-            })
-            .collect();
-
-
-        for n in &nodes {
-            if let flow::node::Type::Ingress(..) = *n.inner {
-                if graph.neighbors_directed(n.index, petgraph::EdgeDirection::Outgoing)
-                    .any(|child| inquisitive_children.contains(&child)) {
-                    // we have children that may query us, so our output should be materialized
-                    state.insert(*n.addr.as_local(), State::default());
-                }
-            }
-        }
-
-        // find all nodes that can be queried through, and where any of its outgoing edges are
-        // materialized. for those nodes, we should instead materialize the input to that node.
-        for n in &nodes {
-            if let flow::node::Type::Internal(..) = *n.inner {
-                if !n.can_query_through() {
-                    continue;
-                }
-
-                if !state.contains_key(n.addr.as_local()) {
-                    // we're not materialized, so no materialization shifting necessary
-                    continue;
-                }
-
-                if graph.edges_directed(n.index, petgraph::EdgeDirection::Outgoing)
-                    .any(|e| *e.weight()) {
-                    // our output is materialized! what a waste. instead, materialize our input.
-                    state.remove(n.addr.as_local());
-                    println!("hoisting materialization past {}", n.addr);
-
-                    // TODO: unclear if we need *all* our parents to be materialized. it's
-                    // certainly the case for filter, which is our only use-case for now...
-                    for p in graph.neighbors_directed(n.index, petgraph::EdgeDirection::Incoming) {
-                        state.insert(*ni2na[&p].as_local(), State::default());
-                    }
-                }
-            }
-        }
-
-        // Now let's talk indices.
-        //
-        // We need to query all our nodes for what indices they believe should be maintained, and
-        // apply those to the stores in state. However, this is somewhat complicated by the fact
-        // that we need to push indices through non-materialized views so that they end up on the
-        // columns of the views that will actually query into a table of some sort.
-        {
-            let nodes: HashMap<_, _> = nodes.iter().map(|n| (n.addr, n)).collect();
-            let mut indices = nodes.iter()
-                .filter(|&(_, node)| node.is_internal()) // only internal nodes can suggest indices
-                .filter(|&(_, node)| {
-                    // under what circumstances might a node need indices to be placed?
-                    // there are two cases:
-                    //
-                    //  - if makes queries into its ancestors regardless of whether it's
-                    //    materialized or not
-                    //  - if it queries its ancestors when it is *not* materialized (implying that
-                    //    it queries into its own output)
-                    //
-                    //  unless we come up with a weird operators that *doesn't* need indices when
-                    //  it is *not* materialized, but *does* when is, we can therefore just use
-                    //  will_query(false) as an indicator of whether indices are necessary.
-                    node.will_query(false)
-                })
-                .flat_map(|(ni, node)| node.suggest_indexes(*ni).into_iter())
-                .filter(|&(ref node, _)| nodes.contains_key(node))
-                .fold(HashMap::new(), |mut hm, (v, idx)| {
-                    hm.entry(v).or_insert_with(HashSet::new).insert(idx);
-                    hm
-                });
-
-            // push down indices
-            let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
-            let mut tmp = HashMap::new();
-            while !leftover_indices.is_empty() {
-                for (v, cols) in leftover_indices.drain() {
-                    if let Some(ref mut state) = state.get_mut(v.as_local()) {
-                        // this node is materialized! add the indices!
-                        // we *currently* only support keeping one materialization per node
-                        assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
-                        let col = cols.into_iter().next().unwrap();
-                        println!("adding index on column {:?} of view {:?}", col, v);
-                        state.set_pkey(col);
-                    } else if let Some(node) = nodes.get(&v) {
-                        // this node is not materialized
-                        // we need to push the index up to its ancestor(s)
-                        if let flow::node::Type::Ingress(..) = *node.inner {
-                            // we can't push further up!
-                            unreachable!("node suggested index outside domain, and ingress isn't \
-                                          materalized");
-                        }
-
-                        assert!(node.is_internal());
-                        for col in cols {
-                            let really = node.resolve(col);
-                            if let Some(really) = really {
-                                // the index should instead be placed on the corresponding
-                                // columns of this view's inputs
-                                for (v, col) in really {
-                                    tmp.entry(v).or_insert_with(HashSet::new).insert(col);
-                                }
-                            } else {
-                                // this view is materialized, so we should index this column
-                                indices.entry(v).or_insert_with(HashSet::new).insert(col);
-                            }
-                        }
-                    } else {
-                        unreachable!("node suggested index outside domain");
-                    }
-                }
-                leftover_indices.extend(tmp.drain());
-            }
-        }
-
-        for n in &nodes {
-            if !state.contains_key(n.addr.as_local()) {
-                continue;
-            }
-
-            if !state.get(n.addr.as_local()).unwrap().is_useful() {
-                // this materialization doesn't have any primary key,
-                // so we assume it's not in use.
-                println!("removing unnecessary materialization on {}", n.addr);
-                state.remove(n.addr.as_local());
-            }
-        }
-
-        let nodes: DomainNodes =
-            nodes.into_iter().map(|n| (*n.addr.as_local(), cell::RefCell::new(n))).collect();
-
-        let ingress_nodes: Vec<NodeIndex> =
-            nodes.iter().filter(|n| n.borrow().is_ingress()).map(|n| n.borrow().index).collect();
-
-        let ingress_from_base = base_nodes.iter()
-            .map(|base| {
-                let num_paths = ingress_nodes.iter()
-                    .filter(|ingress| {
-                        petgraph::algo::has_path_connecting(&*graph, *base, **ingress, None)
-                    })
-                    .count();
-                (*base, num_paths)
-            })
-            .collect();
-
+    pub fn new(nodes: DomainNodes,
+               in_from_base: HashMap<NodeIndex, usize>,
+               checktable: Arc<Mutex<checktable::CheckTable>>)
+               -> Self {
         Domain {
             nodes: nodes,
-            state: state,
+            state: StateMap::default(),
             buffered_transactions: HashMap::new(),
-            ingress_from_base: ingress_from_base,
+            ingress_from_base: in_from_base,
             ts: -1,
-            checktable: checktable.clone(),
+            checktable: checktable,
         }
     }
 
@@ -357,14 +142,14 @@ impl Domain {
         }
 
         for n in self.nodes.iter().filter(|n| n.borrow().is_output()) {
-            let data = match egress_messages.entry(n.borrow().addr) {
+            let data = match egress_messages.entry(n.borrow().addr()) {
                 Entry::Occupied(entry) => entry.remove().into(),
                 _ => Records::default(),
             };
 
             let m = Message {
-                from: n.borrow().addr, // TODO: message should be from actual parent, not self.
-                to: n.borrow().addr,
+                from: n.borrow().addr(), // TODO: message should be from actual parent, not self.
+                to: n.borrow().addr(),
                 data: data,
                 ts: ts,
                 token: None,

@@ -205,8 +205,9 @@ pub mod test {
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
             remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(local, &remap);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
             self.states.insert(*local.as_local(), State::default());
             self.remap.insert(global, local);
             global
@@ -234,7 +235,8 @@ pub mod test {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(local, &self.remap);
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(&self.remap);
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[ni].suggest_indexes(local);
@@ -272,7 +274,6 @@ pub mod test {
                 .map(|(i, (ni, n))| {
                     single::NodeDescriptor {
                         index: ni,
-                        addr: NodeAddress::mock_local(i),
                         inner: n,
                         children: Vec::default(),
                     }
@@ -282,7 +283,7 @@ pub mod test {
             self.nodes = nodes.into_iter()
                 .map(|n| {
                     use std::cell;
-                    (*n.addr.as_local(), cell::RefCell::new(n))
+                    (*n.addr().as_local(), cell::RefCell::new(n))
                 })
                 .collect();
         }

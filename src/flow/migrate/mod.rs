@@ -20,7 +20,8 @@
 //!
 //! Beware, Here be dragons™
 
-mod routing;
-mod materialization;
-mod augmentation;
-mod booting;
+pub mod routing;
+pub mod transactions;
+pub mod materialization;
+pub mod augmentation;
+pub mod booting;

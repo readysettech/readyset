@@ -27,7 +27,6 @@ macro_rules! broadcast {
 
 pub struct NodeDescriptor {
     pub index: NodeIndex,
-    pub addr: NodeAddress,
     pub inner: Node,
     pub children: Vec<NodeAddress>,
 }
@@ -42,12 +41,13 @@ impl NodeDescriptor {
                               Option<(checktable::Token,
                                       sync::mpsc::Sender<checktable::TransactionResult>)>)> {
 
+        let addr = *self.addr().as_local();
         match *self.inner {
-            flow::node::Type::Ingress(..) => {
-                materialize(&m.data, state.get_mut(self.addr.as_local()));
+            flow::node::Type::Ingress => {
+                materialize(&m.data, state.get_mut(&addr));
                 Some((m.data, m.ts, m.token))
             }
-            flow::node::Type::Reader(_, ref mut w, ref r) => {
+            flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     state.add(m.data.iter().cloned());
                     if m.ts.is_some() {
@@ -74,7 +74,7 @@ impl NodeDescriptor {
                 // readers never have children
                 None
             }
-            flow::node::Type::Egress(_, ref txs) => {
+            flow::node::Type::Egress(ref txs) => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
@@ -105,13 +105,13 @@ impl NodeDescriptor {
                 debug_assert!(u.is_some() || self.children.is_empty());
                 u.map(|update| (update, ts, None))
             }
-            flow::node::Type::Internal(_, ref mut i) => {
+            flow::node::Type::Internal(ref mut i) => {
                 let ts = m.ts;
                 let u = i.on_input(m.from, m.data, nodes, state);
-                materialize(&u, state.get_mut(self.addr.as_local()));
+                materialize(&u, state.get_mut(&addr));
                 Some((u, ts, None))
             }
-            flow::node::Type::TimestampEgress(_, ref txs) => {
+            flow::node::Type::TimestampEgress(ref txs) => {
                 if let Some((ts, _)) = m.ts {
                     let txs = txs.lock().unwrap();
                     for tx in txs.iter() {
@@ -123,31 +123,6 @@ impl NodeDescriptor {
             flow::node::Type::TimestampIngress(..) |
             flow::node::Type::Unassigned(..) |
             flow::node::Type::Source => unreachable!(),
-        }
-    }
-
-    pub fn is_ingress(&self) -> bool {
-        if let flow::node::Type::Ingress(..) = *self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_internal(&self) -> bool {
-        if let flow::node::Type::Internal(..) = *self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    /// A node is considered to be an output node if changes to its state are visible outside of its domain.
-    pub fn is_output(&self) -> bool {
-        match *self.inner {
-            flow::node::Type::Egress(_, _) => true,
-            flow::node::Type::Reader(..) => true,
-            _ => false,
         }
     }
 }
