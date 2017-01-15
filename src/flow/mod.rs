@@ -673,6 +673,7 @@ impl<'a> Migration<'a> {
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         migrate::augmentation::inform(&mut mainline.ingredients,
+                                      mainline.source,
                                       &mut mainline.control_txs,
                                       domain_nodes);
 
