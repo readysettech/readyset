@@ -72,7 +72,12 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
         let mut proxy = node::Node::new::<_, Vec<String>, _>("time-node", vec![], t);
         proxy.add_to(*domain);
         let time_ingress = graph.add_node(proxy);
-        new_time_ingress.push((domain, time_ingress));
+        new_time_ingress.push((*domain, time_ingress));
+    }
+
+    // Ensure these new TimeIngress nodes are actually adopted by the domain
+    for &(domain, time_in) in &new_time_ingress {
+        nodes.get_mut(&domain).unwrap().push((time_in, true));
     }
 
     // Connect every TimeEgress node in the graph to each such added TimeIngress node iff there is
@@ -88,14 +93,14 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
             for &(domain, ingress) in &new_time_ingress {
                 // is this egress' base node already connected to this domain somehow?
                 if 
-                    nodes[domain].iter().any(|&(node, _)| {
+                    nodes[&domain].iter().any(|&(node, _)| {
                         petgraph::algo::has_path_connecting(&*graph, base, node, None)
                     }) {
                     // yes! no need for time channel
                     continue;
                 }
 
-                txs.push(time_txs[domain].clone());
+                txs.push(time_txs[&domain].clone());
                 add_to.push(ingress);
             }
         }
