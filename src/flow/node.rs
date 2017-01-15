@@ -264,6 +264,14 @@ impl Node {
         writeln!(f, "\"]")
     }
 
+    pub fn is_egress(&self) -> bool {
+        if let Type::Egress(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_ingress(&self) -> bool {
         if let Type::Ingress = *self.inner {
             true

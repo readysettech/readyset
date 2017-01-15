@@ -518,7 +518,6 @@ impl<'a> Migration<'a> {
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(self) -> HashMap<NodeAddress, (FnNTX, FnTX)> {
         let mut new = HashSet::new();
-        let mut changed_domains = HashSet::new();
 
         let mainline = self.mainline;
 
@@ -534,7 +533,6 @@ impl<'a> Migration<'a> {
             });
             mainline.ingredients[node].add_to(domain);
             new.insert(node);
-            changed_domains.insert(domain);
         }
 
         // Readers are nodes too.
@@ -549,7 +547,9 @@ impl<'a> Migration<'a> {
         let mut swapped =
             migrate::routing::add(&mut mainline.ingredients, mainline.source, &mut new);
 
-        // Find all domains that have changed
+        // Find all nodes for domains that have changed
+        let changed_domains: HashSet<_> =
+            new.iter().map(|&ni| mainline.ingredients[ni].domain()).collect();
         let mut domain_nodes = mainline.ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
