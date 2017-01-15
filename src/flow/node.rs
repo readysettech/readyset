@@ -80,6 +80,20 @@ pub enum Type {
     Source,
 }
 
+impl fmt::Debug for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Type::Source => write!(f, "source node"),
+            &Type::Ingress => write!(f, "ingress node"),
+            &Type::Egress(..) => write!(f, "egress node"),
+            &Type::TimestampIngress(..) => write!(f, "time ingress node"),
+            &Type::TimestampEgress(..) => write!(f, "time egress node"),
+            &Type::Reader(..) => write!(f, "reader node"),
+            &Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
+        }
+    }
+}
+
 impl Deref for Type {
     type Target = Ingredient;
     fn deref(&self) -> &Self::Target {
@@ -147,11 +161,21 @@ impl Node {
     }
 
     pub fn domain(&self) -> domain::Index {
-        self.domain.unwrap()
+        match self.domain {
+            Some(domain) => domain,
+            None => {
+                unreachable!("asked for unset domain for {:?}", &*self.inner);
+            }
+        }
     }
 
     pub fn addr(&self) -> NodeAddress {
-        self.addr.unwrap()
+        match self.addr {
+            Some(addr) => addr,
+            None => {
+                unreachable!("asked for unset addr for {:?}", &*self.inner);
+            }
+        }
     }
 
     pub fn take(&mut self) -> Node {
