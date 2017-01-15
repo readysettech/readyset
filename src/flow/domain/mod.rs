@@ -71,6 +71,7 @@ impl Domain {
     }
 
     pub fn dispatch(m: Message,
+                    not_ready: &HashSet<LocalNodeIndex>,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
                     enable_output: bool)
@@ -78,6 +79,10 @@ impl Domain {
         let me = m.to;
         let ts = m.ts;
         let mut output_messages = HashMap::new();
+
+        if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
+            return output_messages;
+        }
 
         let mut n = nodes[me.as_local()].borrow_mut();
         let mut u = n.process(m, states, nodes);
@@ -112,7 +117,8 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, mut v) in Self::dispatch(m, states, nodes, enable_output).into_iter() {
+                for (k, mut v) in Self::dispatch(m, not_ready, states, nodes, enable_output)
+                    .into_iter() {
                     output_messages.entry(k).or_insert(vec![]).append(&mut v);
                 }
             } else {
@@ -140,7 +146,8 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages = Self::dispatch(m, &mut self.state, &self.nodes, false);
+            let new_messages =
+                Self::dispatch(m, &self.not_ready, &mut self.state, &self.nodes, false);
 
             for (key, mut value) in new_messages.into_iter() {
                 egress_messages.entry(key).or_insert(vec![]).append(&mut value);
@@ -160,6 +167,10 @@ impl Domain {
                 ts: ts,
                 token: None,
             };
+
+            if !self.not_ready.is_empty() && self.not_ready.contains(m.to.as_local()) {
+                continue;
+            }
 
             self.nodes[m.to.as_local()]
                 .borrow_mut()
@@ -279,7 +290,7 @@ impl Domain {
 
                     match m.ts {
                         None => {
-                            Self::dispatch(m, &mut self.state, &self.nodes, true);
+                            Self::dispatch(m, &self.not_ready, &mut self.state, &self.nodes, true);
                         }
                         Some(_) => {
                             self.buffer_transaction(m);
@@ -303,9 +314,6 @@ impl Domain {
                     self.nodes.get_mut(&p).unwrap().borrow_mut().children.push(n.addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(n));
-
-                // TODO: actually respect not_ready
-                unimplemented!();
             }
             Control::Ready(ni, state, ack) => {
                 if let Some(state) = state {
