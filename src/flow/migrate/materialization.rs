@@ -226,7 +226,13 @@ pub fn initialize(graph: &Graph,
         let d = n.domain();
 
         let state = materialize.get_mut(&d).and_then(|ss| ss.remove(n.addr().as_local()));
-        let has_state = state.is_some();
+        let mut has_state = state.is_some();
+
+        if let flow::node::Type::Reader(_, ref r) = **n {
+            if r.state.is_some() {
+                has_state = true;
+            }
+        }
 
         // ready communicates to the domain in charge of a particular node that it should start
         // delivering updates to a given new node. note that we wait for the domain to acknowledge
