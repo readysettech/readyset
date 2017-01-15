@@ -45,6 +45,43 @@ fn it_works() {
 }
 
 #[test]
+fn it_works_streaming() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let mut mig = g.start_migration();
+    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let u = distributary::Union::new(emits);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.stream(c);
+
+    let put = mig.commit();
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    put[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
+
+    // update value again
+    put[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
+}
+
+#[test]
 fn it_works_w_mat() {
     // set up graph
     let mut g = distributary::Blender::new();
