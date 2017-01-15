@@ -171,7 +171,7 @@ use flow::node;
 impl Into<node::Type> for Builder {
     fn into(self) -> node::Type {
         let j: Joiner = self.into();
-        node::Type::Unassigned(Box::new(j) as Box<Ingredient>)
+        node::Type::Internal(Box::new(j) as Box<Ingredient>)
     }
 }
 

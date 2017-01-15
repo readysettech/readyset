@@ -11,8 +11,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 
-use std::sync;
-
 pub mod domain;
 pub mod prelude;
 pub mod node;
@@ -192,7 +190,12 @@ pub trait Ingredient
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
-                domain.get(parent.as_local()).unwrap().borrow().query_through(column, value, states)
+                let parent = domain.get(parent.as_local()).unwrap().borrow();
+                if parent.is_internal() {
+                    parent.query_through(column, value, states)
+                } else {
+                    None
+                }
             })
     }
 }
@@ -520,8 +523,6 @@ impl<'a> Migration<'a> {
         let mainline = self.mainline;
 
         // Make sure all new nodes are assigned to a domain
-        //
-        // TODO: readers are in same domain as parent!
         for (node, domain) in self.added {
             let domain = domain.unwrap_or_else(|| {
                 // new node that doesn't belong to a domain
@@ -536,6 +537,14 @@ impl<'a> Migration<'a> {
             changed_domains.insert(domain);
         }
 
+        // Readers are nodes too.
+        // And they should be assigned the same domain as their parents
+        for (parent, reader) in self.readers {
+            let domain = mainline.ingredients[parent].domain();
+            mainline.ingredients[reader].add_to(domain);
+            new.insert(reader);
+        }
+
         // Set up ingress and egress nodes
         let mut swapped =
             migrate::routing::add(&mut mainline.ingredients, mainline.source, &mut new);
@@ -543,6 +552,7 @@ impl<'a> Migration<'a> {
         // Find all domains that have changed
         let mut domain_nodes = mainline.ingredients
             .node_indices()
+            .filter(|&ni| ni != mainline.source)
             .filter_map(|ni| {
                 let domain = mainline.ingredients[ni].domain();
                 if changed_domains.contains(&domain) {
@@ -559,12 +569,27 @@ impl<'a> Migration<'a> {
         let mut rxs = HashMap::new();
         let mut time_rxs = HashMap::new();
 
+        // Set up control and data channels for new domains
+        for (domain, _) in &mut domain_nodes {
+            if !mainline.data_txs.contains_key(domain) {
+                let (tx, rx) = mpsc::sync_channel(10);
+                rxs.insert(*domain, rx);
+                mainline.data_txs.insert(*domain, tx);
+            }
+
+            if !mainline.time_txs.contains_key(domain) {
+                let (tx, rx) = mpsc::sync_channel(10);
+                time_rxs.insert(*domain, rx);
+                mainline.time_txs.insert(*domain, tx);
+            }
+        }
+
         // Add transactional time nodes
         let new_time_egress = migrate::transactions::add_time_nodes(&mut domain_nodes,
                                                                     &mut mainline.ingredients,
                                                                     &mainline.time_txs);
 
-        // Deal with each domain individually
+        // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes
             let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
@@ -596,18 +621,6 @@ impl<'a> Migration<'a> {
                 if new && mainline.ingredients[ni].is_internal() {
                     mainline.ingredients.node_weight_mut(ni).unwrap().on_commit(&remap);
                 }
-            }
-
-            if !mainline.data_txs.contains_key(domain) {
-                let (tx, rx) = mpsc::sync_channel(10);
-                rxs.insert(*domain, rx);
-                mainline.data_txs.insert(*domain, tx);
-            }
-
-            if !mainline.time_txs.contains_key(domain) {
-                let (tx, rx) = mpsc::sync_channel(10);
-                time_rxs.insert(*domain, rx);
-                mainline.time_txs.insert(*domain, tx);
             }
         }
 
@@ -715,7 +728,15 @@ impl<'a> Migration<'a> {
                         })
                         .unwrap()
                 });
-                sources.insert(NodeAddress::make_global(*node), (fntx, ftx));
+
+                // the user is expecting to use the base node addresses to choose a particular
+                // putter, not the ingress node addresses
+                let base = mainline.ingredients
+                    .neighbors_directed(*node, petgraph::EdgeDirection::Outgoing)
+                    .next()
+                    .unwrap();
+
+                sources.insert(NodeAddress::make_global(base), (fntx, ftx));
                 break;
             }
         }

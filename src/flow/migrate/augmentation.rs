@@ -14,6 +14,7 @@ use std::sync::mpsc;
 
 use petgraph::graph::NodeIndex;
 
+#[allow(unused_variables)]
 pub fn inform(graph: &mut Graph,
               source: NodeIndex,
               control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,

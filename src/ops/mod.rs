@@ -270,8 +270,7 @@ pub mod test {
             }
 
             let nodes: Vec<_> = nodes.into_iter()
-                .enumerate()
-                .map(|(i, (ni, n))| {
+                .map(|(ni, n)| {
                     single::NodeDescriptor {
                         index: ni,
                         inner: n,

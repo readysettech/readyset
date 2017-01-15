@@ -69,8 +69,8 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
 
         let tx = time_txs[domain].clone();
         let t = node::Type::TimestampIngress(Arc::new(Mutex::new(tx)));
-        // TODO: set proper name for new node.
-        let proxy = node::Node::new::<_, Vec<String>, _>("ts-ingress-node", vec![], t);
+        let mut proxy = node::Node::new::<_, Vec<String>, _>("time-node", vec![], t);
+        proxy.add_to(*domain);
         let time_ingress = graph.add_node(proxy);
         new_time_ingress.push((domain, time_ingress));
     }

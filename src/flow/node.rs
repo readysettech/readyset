@@ -77,7 +77,6 @@ pub enum Type {
     TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
     TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
     Reader(Option<backlog::WriteHandle>, Reader),
-    Unassigned(Box<Ingredient>),
     Source,
 }
 
@@ -85,8 +84,7 @@ impl Deref for Type {
     type Target = Ingredient;
     fn deref(&self) -> &Self::Target {
         match *self {
-            Type::Internal(ref i) |
-            Type::Unassigned(ref i) => i.deref(),
+            Type::Internal(ref i) => i.deref(),
             _ => unreachable!(),
         }
     }
@@ -95,8 +93,7 @@ impl Deref for Type {
 impl DerefMut for Type {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match *self {
-            Type::Internal(ref mut i) |
-            Type::Unassigned(ref mut i) => i.deref_mut(),
+            Type::Internal(ref mut i) => i.deref_mut(),
             _ => unreachable!(),
         }
     }
@@ -106,7 +103,7 @@ impl<I> From<I> for Type
     where I: Ingredient + 'static
 {
     fn from(i: I) -> Type {
-        Type::Unassigned(Box::new(i))
+        Type::Internal(Box::new(i))
     }
 }
 
@@ -171,8 +168,8 @@ impl Node {
             Type::TimestampEgress(ref arc) => Type::TimestampEgress(arc.clone()),
             Type::TimestampIngress(ref arc) => Type::TimestampIngress(arc.clone()),
             Type::Ingress => Type::Ingress,
-            Type::Internal(ref mut i) => Type::Internal(i.take()),
-            Type::Unassigned(_) |
+            Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
+            Type::Internal(_) |
             Type::Source => unreachable!(),
         };
         self.inner.mark_taken();
@@ -183,14 +180,6 @@ impl Node {
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
-        use std::mem;
-        assert!(self.domain.is_none());
-        match mem::replace(&mut *self.inner, Type::Source) {
-            Type::Unassigned(inner) => {
-                mem::replace(&mut *self.inner, Type::Internal(inner));
-            }
-            _ => unreachable!(),
-        }
         self.domain = Some(domain);
     }
 
@@ -203,7 +192,7 @@ impl Node {
         self.inner.on_commit(self.addr.unwrap(), remap)
     }
 
-    pub fn describe(&self, f: &mut fmt::Formatter, idx: NodeIndex) -> fmt::Result {
+    pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
         use regex::Regex;
 
         let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
@@ -221,7 +210,6 @@ impl Node {
             Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
             Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
             Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
-            Type::Unassigned(ref i) |
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
 

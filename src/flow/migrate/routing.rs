@@ -47,11 +47,26 @@ pub fn add(graph: &mut Graph,
         // add ingress nodes
         for (parent, ingress) in add_ingress_for(graph, source, node, domain) {
             new.insert(ingress);
-            swaps.entry(domain).or_insert_with(HashMap::new).insert(parent, ingress);
+
+            // tracking swaps here is a bit tricky because we've already swapped the "true" parents
+            // of `node` with the ids of the egress nodes. thus, we actually need to do swaps on
+            // the values in `swaps`, not insert new entries (that, or we'd need to change the
+            // resolution process to be recursive, which is painful and unnecessary). note that we
+            // *also* need to special-case handing base nodes, because there there *won't* be a
+            // parent egress swap
+            if parent == source {
+                swaps.entry(domain).or_insert_with(HashMap::new).insert(parent, ingress);
+            } else {
+                for (_, to) in swaps.get_mut(&domain).unwrap().iter_mut() {
+                    if *to == parent {
+                        *to = ingress;
+                    }
+                }
+            }
         }
 
         // add egress nodes
-        for egress in add_egress_for(graph, node, domain) {
+        for egress in add_egress_for(graph, node, domain, &mut swaps) {
             new.insert(egress);
         }
     }
@@ -73,14 +88,16 @@ pub fn connect(graph: &mut Graph,
         }
 
         for egress in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
-            if let node::Type::Egress(ref txs) = *graph[egress] {
-                txs.lock()
-                    .unwrap()
-                    .push((n.addr(), data_txs[&n.domain()].clone()));
-                continue;
+            match *graph[egress] {
+                node::Type::Egress(ref txs) => {
+                    txs.lock()
+                        .unwrap()
+                        .push((n.addr(), data_txs[&n.domain()].clone()));
+                    continue;
+                }
+                node::Type::Source => continue,
+                _ => unreachable!("ingress parent is not egress"),
             }
-
-            unreachable!("ingress parent is not egress");
         }
     }
 }
@@ -99,8 +116,10 @@ fn add_ingress_for(graph: &mut Graph,
         if parent == source || domain != graph[parent].domain() {
             // parent is in a different domain
             // create an ingress node to handle that
-            let proxy = graph[parent].mirror(node::Type::Ingress);
-            let ingress = graph.add_node(proxy);
+            let mut proxy = graph[parent].mirror(node::Type::Ingress);
+
+            // the ingress node belongs to this domain, not that of the parent
+            proxy.add_to(domain);
 
             // note that, since we are traversing in topological order, our parent in this
             // case should either be the source node, or it should be an egress node!
@@ -112,6 +131,7 @@ fn add_ingress_for(graph: &mut Graph,
             }
 
             // we need to hook the ingress node in between us and this parent
+            let ingress = graph.add_node(proxy);
             let old = graph.find_edge(parent, node).unwrap();
             let was_materialized = graph.remove_edge(old).unwrap();
             graph.add_edge(parent, ingress, false);
@@ -122,13 +142,18 @@ fn add_ingress_for(graph: &mut Graph,
     new
 }
 
-pub fn add_egress_for(graph: &mut Graph, node: NodeIndex, domain: domain::Index) -> Vec<NodeIndex> {
+pub fn add_egress_for(graph: &mut Graph,
+                      node: NodeIndex,
+                      domain: domain::Index,
+                      swaps: &mut HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>>)
+                      -> Vec<NodeIndex> {
     let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
         .collect(); // collect so we can mutate graph
 
     let mut new = Vec::new();
     for child in children {
-        if domain != graph[child].domain() {
+        let cdomain = graph[child].domain();
+        if domain != cdomain {
             // child is in a different domain
             // create an egress node to handle that
             // NOTE: technically, this doesn't need to mirror its parent, but meh
@@ -141,6 +166,7 @@ pub fn add_egress_for(graph: &mut Graph, node: NodeIndex, domain: domain::Index)
             graph.add_edge(node, egress, false);
             graph.add_edge(egress, child, was_materialized);
             new.push(egress);
+            swaps.entry(cdomain).or_insert_with(HashMap::new).insert(node, egress);
         }
     }
     new

@@ -121,7 +121,6 @@ impl NodeDescriptor {
                 None
             }
             flow::node::Type::TimestampIngress(..) |
-            flow::node::Type::Unassigned(..) |
             flow::node::Type::Source => unreachable!(),
         }
     }
