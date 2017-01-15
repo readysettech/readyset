@@ -379,7 +379,7 @@ fn crossing_migration() {
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
     let c = mig.add_ingredient("c", &["a", "b"], u);
-    let cq = mig.maintain(c, 0);
+    let cq = mig.stream(c);
 
     mig.commit();
 
@@ -392,7 +392,7 @@ fn crossing_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
-    assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
 
     // update value again
     put[&b].0(vec![id.clone(), 4.into()]);
@@ -401,13 +401,11 @@ fn crossing_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = cq(&id);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
 }
 
 #[test]
-fn amend_domain_migration() {
+fn independent_domain_migration() {
     let id: distributary::DataType = 1.into();
 
     // set up graph
@@ -454,7 +452,7 @@ fn amend_domain_migration() {
 }
 
 #[test]
-fn crossing_domain_amend_migration() {
+fn domain_amend_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
     let (put, a, b, domain) = {
@@ -474,7 +472,7 @@ fn crossing_domain_amend_migration() {
     let u = distributary::Union::new(emits);
     let c = mig.add_ingredient("c", &["a", "b"], u);
     mig.assign_domain(c, domain);
-    let cq = mig.maintain(c, 0);
+    let cq = mig.stream(c);
 
     mig.commit();
 
@@ -489,7 +487,7 @@ fn crossing_domain_amend_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
-    assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
 
     // update value again
     put[&b].0(vec![id.clone(), 4.into()]);
@@ -498,7 +496,5 @@ fn crossing_domain_amend_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = cq(&id);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
 }
