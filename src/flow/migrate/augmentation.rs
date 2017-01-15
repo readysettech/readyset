@@ -9,14 +9,32 @@
 use flow::prelude::*;
 use flow::domain;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::mpsc;
 
+use petgraph;
 use petgraph::graph::NodeIndex;
 
-#[allow(unused_variables)]
 pub fn inform(graph: &mut Graph,
-              source: NodeIndex,
               control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
-              new: &HashSet<NodeIndex>) {
+              nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>) {
+    for (domain, nodes) in nodes {
+        let ctx = control_txs.get_mut(&domain).unwrap();
+        for (ni, new) in nodes {
+            if !new {
+                continue;
+            }
+
+            let node = domain::single::NodeDescriptor::new(graph, ni);
+            let parents = graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                .map(|ni| &graph[ni])
+                .filter(|n| n.domain() == domain)
+                .map(|n| *n.addr().as_local())
+                .collect();
+
+            ctx.send(domain::Control::AddNode(node, parents)).unwrap();
+
+            // TODO: count_base_ingress
+        }
+    }
 }

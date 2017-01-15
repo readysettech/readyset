@@ -1,12 +1,13 @@
 use petgraph::graph::NodeIndex;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 
 use std::collections::hash_map::Entry;
 
 use flow::prelude::*;
+use flow::domain::single::NodeDescriptor;
 
 use ops;
 use checktable;
@@ -27,6 +28,8 @@ impl Into<usize> for Index {
 }
 
 pub enum Control {
+    AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
+    Ready(LocalNodeIndex, Option<State>, mpsc::SyncSender<()>),
 }
 
 pub mod single;
@@ -46,6 +49,8 @@ pub struct Domain {
     /// Timestamp that the domain has seen all transactions up to.
     ts: i64,
 
+    not_ready: HashSet<LocalNodeIndex>,
+
     checktable: Arc<Mutex<checktable::CheckTable>>,
 }
 
@@ -59,6 +64,7 @@ impl Domain {
             state: StateMap::default(),
             buffered_transactions: HashMap::new(),
             ingress_from_base: in_from_base,
+            not_ready: HashSet::new(),
             ts: -1,
             checktable: checktable,
         }
@@ -288,6 +294,26 @@ impl Domain {
 
     fn handle_control(&mut self, c: Control) {
         match c {
+            Control::AddNode(n, parents) => {
+                use std::cell;
+                let addr = *n.addr().as_local();
+                self.not_ready.insert(addr);
+
+                for p in parents {
+                    self.nodes.get_mut(&p).unwrap().borrow_mut().children.push(n.addr());
+                }
+                self.nodes.insert(addr, cell::RefCell::new(n));
+
+                // TODO: actually respect not_ready
+                unimplemented!();
+            }
+            Control::Ready(ni, state, ack) => {
+                if let Some(state) = state {
+                    self.state.insert(ni, state);
+                }
+                self.not_ready.remove(&ni);
+                drop(ack);
+            }
         }
     }
 }

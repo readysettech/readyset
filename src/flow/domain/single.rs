@@ -32,6 +32,22 @@ pub struct NodeDescriptor {
 }
 
 impl NodeDescriptor {
+    pub fn new(graph: &mut Graph, node: NodeIndex) -> Self {
+        use petgraph;
+
+        let inner = graph.node_weight_mut(node).unwrap().take();
+        let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+            .filter(|&c| graph[c].domain() == inner.domain())
+            .map(|ni| graph[ni].addr())
+            .collect();
+
+        NodeDescriptor {
+            index: node,
+            inner: inner,
+            children: children,
+        }
+    }
+
     pub fn process(&mut self,
                    m: Message,
                    state: &mut StateMap,

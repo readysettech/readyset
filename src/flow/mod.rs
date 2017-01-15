@@ -624,19 +624,6 @@ impl<'a> Migration<'a> {
             }
         }
 
-        // Determine what nodes to materialize
-        let index: Vec<_> = domain_nodes.iter()
-            .map(|(domain, ref nodes)| {
-                let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
-                let idx = migrate::materialization::index(&mainline.ingredients, &nodes[..], mat);
-                (*domain, idx)
-            })
-            .collect();
-
-        // ensure domains with connected egress/ingress pairs have channels between them
-        // NOTE: once we do this, we are making existing domains block on new domains!
-        migrate::routing::connect(&mut mainline.ingredients, &mainline.data_txs, &new);
-
         // at this point, we've hooked up the graph such that, for any given domain, the graph
         // looks like this:
         //
@@ -657,30 +644,48 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        // now, let's first add any new nodes to existing domains
-        migrate::augmentation::inform(&mut mainline.ingredients,
-                                      mainline.source,
-                                      &mut mainline.control_txs,
-                                      &new);
+        // Determine what nodes to materialize
+        let index = domain_nodes.iter()
+            .map(|(domain, ref nodes)| {
+                let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
+                let idx = migrate::materialization::index(&mainline.ingredients, &nodes[..], mat);
+                (*domain, idx)
+            })
+            .collect();
 
-        // and then boot up new domains
-        for (domain, nodes) in domain_nodes {
+        // Boot up new domains (they'll ignore all updates for now)
+        for domain in changed_domains {
             if mainline.control_txs.contains_key(&domain) {
-                // we've already dealt with changes to this domain
+                // this is not a new domain
                 continue;
             }
 
             // Start up new domain
-            let ctx = migrate::booting::boot_new(domain,
-                                                 &mut mainline.ingredients,
+            let ctx = migrate::booting::boot_new(&mut mainline.ingredients,
                                                  mainline.source,
-                                                 nodes,
+                                                 domain_nodes.remove(&domain).unwrap(),
                                                  mainline.checktable.clone(),
                                                  rxs.remove(&domain).unwrap(),
                                                  time_rxs.remove(&domain).unwrap());
             mainline.control_txs.insert(domain, ctx);
         }
         drop(rxs);
+
+        // Add any new nodes to existing domains (they'll also ignore all updates for now)
+        migrate::augmentation::inform(&mut mainline.ingredients,
+                                      &mut mainline.control_txs,
+                                      domain_nodes);
+
+        // Set up inter-domain connections
+        // NOTE: once we do this, we are making existing domains block on new domains!
+        migrate::routing::connect(&mut mainline.ingredients, &mainline.data_txs, &new);
+
+        // And now, the last piece of the puzzle -- set up materializations
+        migrate::materialization::initialize(&mainline.ingredients,
+                                             mainline.source,
+                                             &new,
+                                             index,
+                                             &mut mainline.control_txs);
 
         // Finally, set up input channels to any new base tables
         let src = NodeAddress::make_global(mainline.source);

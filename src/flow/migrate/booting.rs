@@ -17,35 +17,11 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::cell;
 
-fn build_descriptors(domain: domain::Index,
-                     graph: &mut Graph,
-                     nodes: Vec<(NodeIndex, bool)>)
-                     -> DomainNodes {
+fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
     nodes.into_iter()
-            .map(|(ni, _)| {
-                // also include all *internal* descendants
-                let children: Vec<_> = graph
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&c| {
-                        graph[c].domain() == domain
-                    })
-                    .map(|ni| graph[ni].addr())
-                    .collect();
-                    (ni, children)
-            })
-            .collect::<Vec<_>>() // because above closure mutably borrows self.mainline
-            .into_iter()
-            .map(|(ni, children)| {
-                single::NodeDescriptor {
-                    index: ni,
-                    inner: graph.node_weight_mut(ni).unwrap().take(),
-                    children: children,
-                }
-            })
-            .map(|nd| {
-                (*nd.addr().as_local(), cell::RefCell::new(nd))
-            })
-            .collect()
+        .map(|(ni, _)| single::NodeDescriptor::new(graph, ni))
+        .map(|nd| (*nd.addr().as_local(), cell::RefCell::new(nd)))
+        .collect()
 }
 
 fn count_base_ingress(graph: &Graph,
@@ -76,8 +52,7 @@ fn count_base_ingress(graph: &Graph,
         .collect()
 }
 
-pub fn boot_new(domain: domain::Index,
-                graph: &mut Graph,
+pub fn boot_new(graph: &mut Graph,
                 source: NodeIndex,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
@@ -86,7 +61,7 @@ pub fn boot_new(domain: domain::Index,
                 -> mpsc::SyncSender<domain::Control> {
 
     let ingress_from_base = count_base_ingress(graph, source, &nodes[..]);
-    let nodes = build_descriptors(domain, graph, nodes);
+    let nodes = build_descriptors(graph, nodes);
 
     let domain = domain::Domain::new(nodes, ingress_from_base, checktable);
     domain.boot(rx, timestamp_rx)

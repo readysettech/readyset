@@ -6,12 +6,14 @@
 //! module).
 
 use flow;
+use flow::domain;
 use flow::prelude::*;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
 
 use std::collections::{HashSet, HashMap};
+use std::sync::mpsc;
 
 pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
     let nodes: Vec<_> = nodes.iter()
@@ -199,4 +201,66 @@ pub fn index(graph: &Graph,
     }
 
     state
+}
+
+pub fn initialize(graph: &Graph,
+                  source: NodeIndex,
+                  new: &HashSet<NodeIndex>,
+                  mut materialize: HashMap<domain::Index, StateMap>,
+                  control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>) {
+    let mut topo_list = Vec::with_capacity(new.len());
+    let mut topo = petgraph::visit::Topo::new(&*graph);
+    while let Some(node) = topo.next(&*graph) {
+        if node == source {
+            continue;
+        }
+        if !new.contains(&node) {
+            continue;
+        }
+        topo_list.push(node);
+    }
+
+    let mut empty = HashSet::new();
+    for node in topo_list {
+        let n = &graph[node];
+        let d = n.domain();
+
+        let state = materialize.get_mut(&d).and_then(|ss| ss.remove(n.addr().as_local()));
+        let has_state = state.is_some();
+
+        // ready communicates to the domain in charge of a particular node that it should start
+        // delivering updates to a given new node. note that we wait for the domain to acknowledge
+        // the change. this is important so that we don't ready a child in a different domain
+        // before the parent has been readied. it's also important to avoid us returning before the
+        // graph is actually fully operational.
+        let ready = || {
+            let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+            control_txs[&d]
+                .send(domain::Control::Ready(*n.addr().as_local(), state, ack_tx))
+                .unwrap();
+            match ack_rx.recv() {
+                Err(mpsc::RecvError) => (),
+                _ => unreachable!(),
+            }
+        };
+
+        if graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .filter(|&ni| ni != source)
+            .all(|n| empty.contains(&n)) {
+            // all parents are empty, so we can materialize it immediately
+            empty.insert(node);
+            ready();
+        } else {
+            // if this node doesn't need to be materialized, then we're done. note that this check
+            // needs to happen *after* the empty parents check so that we keep tracking whether or
+            // not nodes are empty.
+            if !has_state {
+                ready();
+                continue;
+            }
+
+            // we have a parent that has data, so we need to replay and reconstruct
+            unimplemented!();
+        }
+    }
 }
