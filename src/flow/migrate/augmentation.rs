@@ -19,8 +19,11 @@ pub fn inform(graph: &mut Graph,
               source: NodeIndex,
               control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>) {
-    let all_new: HashSet<_> = nodes.values().flat_map(|vs| vs.iter().map(|&(ni, _)| ni)).collect();
+
     for (domain, nodes) in nodes {
+        let old_nodes: HashSet<_> =
+            nodes.iter().filter(|&&(_, new)| !new).map(|&(ni, _)| ni).collect();
+
         let ctx = control_txs.get_mut(&domain).unwrap();
         for (ni, new) in nodes {
             if !new {
@@ -28,9 +31,10 @@ pub fn inform(graph: &mut Graph,
             }
 
             let node = domain::single::NodeDescriptor::new(graph, ni);
+            // new parents already have the right child list
             let old_parents = graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
                 .filter(|&ni| ni != source)
-                .filter(|ni| !all_new.contains(ni))
+                .filter(|ni| old_nodes.contains(ni))
                 .map(|ni| &graph[ni])
                 .filter(|n| n.domain() == domain)
                 .map(|n| *n.addr().as_local())
