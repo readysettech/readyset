@@ -45,6 +45,43 @@ fn it_works() {
 }
 
 #[test]
+fn it_works_streaming() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let mut mig = g.start_migration();
+    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let u = distributary::Union::new(emits);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.stream(c);
+
+    let put = mig.commit();
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    put[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
+
+    // update value again
+    put[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
+}
+
+#[test]
 fn it_works_w_mat() {
     // set up graph
     let mut g = distributary::Blender::new();
@@ -275,4 +312,226 @@ fn transactional_vote() {
     // check that article 2 doesn't have any votes
     let res = endq(&a2);
     assert!(res.len() <= 1); // could be 1 if we had zero-rows
+}
+
+#[test]
+fn empty_migration() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    {
+        let mig = g.start_migration();
+        mig.commit();
+    }
+    let mut mig = g.start_migration();
+    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let u = distributary::Union::new(emits);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.maintain(c, 0);
+
+    let put = mig.commit();
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    put[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
+
+    // update value again
+    put[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    let res = cq(&id);
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+}
+
+#[test]
+fn simple_migration() {
+    let id: distributary::DataType = 1.into();
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (puta, a, aq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let aq = mig.maintain(a, 0);
+        let put = mig.commit();
+        (put, a, aq)
+    };
+
+    // send a value on a
+    puta[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that a got it
+    assert_eq!(aq(&id), vec![vec![1.into(), 2.into()]]);
+
+    // add unrelated node b in a migration
+    let (putb, b, bq) = {
+        let mut mig = g.start_migration();
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+        let bq = mig.maintain(b, 0);
+        let put = mig.commit();
+        (put, b, bq)
+    };
+
+    // send a value on b
+    putb[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that a got it
+    assert_eq!(bq(&id), vec![vec![1.into(), 4.into()]]);
+}
+
+#[test]
+fn crossing_migration() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (put, a, b) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+        (mig.commit(), a, b)
+    };
+
+    let mut mig = g.start_migration();
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let u = distributary::Union::new(emits);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+    let cq = mig.stream(c);
+
+    mig.commit();
+
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    put[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
+
+    // update value again
+    put[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
+}
+
+#[test]
+fn independent_domain_migration() {
+    let id: distributary::DataType = 1.into();
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (puta, a, aq, domain) = {
+        let mut mig = g.start_migration();
+        let domain = mig.add_domain();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        mig.assign_domain(a, domain);
+        let aq = mig.maintain(a, 0);
+        let put = mig.commit();
+        (put, a, aq, domain)
+    };
+
+    // send a value on a
+    puta[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that a got it
+    assert_eq!(aq(&id), vec![vec![1.into(), 2.into()]]);
+
+    // add unrelated node b in a migration
+    let (putb, b, bq) = {
+        let mut mig = g.start_migration();
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+        mig.assign_domain(b, domain);
+        let bq = mig.maintain(b, 0);
+        let put = mig.commit();
+        (put, b, bq)
+    };
+
+    // TODO: check that b is actually running in `domain`
+
+    // send a value on b
+    putb[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that a got it
+    assert_eq!(bq(&id), vec![vec![1.into(), 4.into()]]);
+}
+
+#[test]
+fn domain_amend_migration() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (put, a, b, domain) = {
+        let mut mig = g.start_migration();
+        let domain = mig.add_domain();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+        mig.assign_domain(a, domain);
+        mig.assign_domain(b, domain);
+        (mig.commit(), a, b, domain)
+    };
+
+    let mut mig = g.start_migration();
+    let mut emits = HashMap::new();
+    emits.insert(a, vec![0, 1]);
+    emits.insert(b, vec![0, 1]);
+    let u = distributary::Union::new(emits);
+    let c = mig.add_ingredient("c", &["a", "b"], u);
+    mig.assign_domain(c, domain);
+    let cq = mig.stream(c);
+
+    mig.commit();
+
+    // TODO: check that c is actually running in `domain`
+
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    put[&a].0(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
+
+    // update value again
+    put[&b].0(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that value was updated again
+    assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
 }

@@ -1,5 +1,3 @@
-use ops;
-
 use std::collections::HashMap;
 use std::sync;
 
@@ -69,28 +67,29 @@ impl Ingredient for Permute {
         });
     }
 
-    fn on_input(&mut self, mut input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
-        debug_assert_eq!(input.from, self.src);
+    fn on_input(&mut self,
+                from: NodeAddress,
+                mut rs: Records,
+                _: &DomainNodes,
+                _: &StateMap)
+                -> Records {
+        debug_assert_eq!(from, self.src);
 
         if self.emit.is_some() {
-            match input.data {
-                ops::Update::Records(ref mut rs) => {
-                    for r in rs {
-                        if self.emit.is_none() {
-                            continue;
-                        }
-
-                        let mut new_r = Vec::with_capacity(r.len());
-                        let e = self.emit.as_ref().unwrap();
-                        for i in e {
-                            new_r.push(r[*i].clone());
-                        }
-                        **r = sync::Arc::new(new_r);
-                    }
+            for r in &mut *rs {
+                if self.emit.is_none() {
+                    continue;
                 }
+
+                let mut new_r = Vec::with_capacity(r.len());
+                let e = self.emit.as_ref().unwrap();
+                for i in e {
+                    new_r.push(r[*i].clone());
+                }
+                **r = sync::Arc::new(new_r);
             }
         }
-        input.data.into()
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -152,7 +151,7 @@ mod tests {
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(p.narrow_one_row(rec, false),
-                   Some(vec![vec!["c".into(), "a".into()]].into()));
+                   vec![vec!["c".into(), "a".into()]].into());
     }
 
     #[test]
@@ -161,7 +160,7 @@ mod tests {
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(p.narrow_one_row(rec, false),
-                   Some(vec![vec!["a".into(), "b".into(), "c".into()]].into()));
+                   vec![vec!["a".into(), "b".into(), "c".into()]].into());
     }
 
     #[test]

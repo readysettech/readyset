@@ -11,7 +11,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use query::DataType;
-use ops;
+use flow::prelude::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Conflict {
@@ -166,7 +166,7 @@ impl CheckTable {
     pub fn claim_timestamp(&mut self,
                            token: &Token,
                            base: NodeIndex,
-                           rows: &ops::Update)
+                           rs: &Records)
                            -> TransactionResult {
         if self.validate_token(token) {
             let ts = self.next_timestamp;
@@ -174,8 +174,7 @@ impl CheckTable {
             self.toplevel.insert(base, ts);
 
             let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
-            let &ops::Update::Records(ref rs) = rows;
-            for record in rs {
+            for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
                     if let &mut Some(ref mut m) = t.entry(i).or_insert(None) {
                         *m.entry(value.clone()).or_insert(0) = ts;

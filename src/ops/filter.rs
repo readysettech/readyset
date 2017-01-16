@@ -47,30 +47,29 @@ impl Ingredient for Filter {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, mut input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
+    fn on_input(&mut self,
+                _: NodeAddress,
+                mut rs: Records,
+                _: &DomainNodes,
+                _: &StateMap)
+                -> Records {
+
         let mut f = self.filter.iter();
-        let any;
+        rs.retain(|r| {
+            r.iter().all(|d| {
+                // check if this filter matches
+                let fi = f.next()
+                    .expect("should have as many filters as there are columns in ancestor");
+                if let Some(ref f) = *fi {
+                    f == d
+                } else {
+                    // everything matches no condition
+                    true
+                }
+            })
+        });
 
-        match input.data {
-            Update::Records(ref mut rs) => {
-                rs.retain(|r| {
-                    r.iter().all(|d| {
-                        // check if this filter matches
-                        let fi = f.next()
-                            .expect("should have as many filters as there are columns in ancestor");
-                        if let Some(ref f) = *fi {
-                            f == d
-                        } else {
-                            // everything matches no condition
-                            true
-                        }
-                    })
-                });
-                any = !rs.is_empty();
-            }
-        }
-
-        if any { Some(input.data) } else { None }
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -136,13 +135,13 @@ mod tests {
         let mut left: Vec<query::DataType>;
 
         left = vec![1.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![2.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
     #[test]
@@ -153,13 +152,13 @@ mod tests {
         let mut left: Vec<query::DataType>;
 
         left = vec![1.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), None);
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         left = vec![2.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
     #[test]
@@ -170,16 +169,16 @@ mod tests {
         let mut left: Vec<query::DataType>;
 
         left = vec![1.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), Some(left.into()));
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), None);
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         left = vec![2.into(), "a".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), None);
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         left = vec![2.into(), "b".into()];
-        assert_eq!(g.narrow_one(left.clone(), false), None);
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
     }
 
     #[test]

@@ -74,29 +74,28 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_input(&mut self, input: Message, _: &DomainNodes, _: &StateMap) -> Option<Update> {
-        match input.data {
-            Update::Records(rs) => {
-                let from = input.from;
-                let rs = rs.into_iter()
-                    .map(move |rec| {
-                        let (r, pos) = rec.extract();
+    fn on_input(&mut self,
+                from: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                _: &StateMap)
+                -> Records {
+        rs.into_iter()
+            .map(move |rec| {
+                let (r, pos) = rec.extract();
 
-                        // yield selected columns for this source
-                        // TODO: if emitting all in same order then avoid clone
-                        let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+                // yield selected columns for this source
+                // TODO: if emitting all in same order then avoid clone
+                let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
 
-                        // return new row with appropriate sign
-                        if pos {
-                            ops::Record::Positive(sync::Arc::new(res))
-                        } else {
-                            ops::Record::Negative(sync::Arc::new(res))
-                        }
-                    })
-                    .collect();
-                Some(Update::Records(rs))
-            }
-        }
+                // return new row with appropriate sign
+                if pos {
+                    ops::Record::Positive(sync::Arc::new(res))
+                } else {
+                    ops::Record::Negative(sync::Arc::new(res))
+                }
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
@@ -158,12 +157,12 @@ mod tests {
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
-        assert_eq!(u.one_row(l, left.clone(), false), Some(vec![left].into()));
+        assert_eq!(u.one_row(l, left.clone(), false), vec![left].into());
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
         assert_eq!(u.one_row(r, right.clone(), false),
-                   Some(vec![vec![1.into(), "x".into()]].into()));
+                   vec![vec![1.into(), "x".into()]].into());
     }
 
     #[test]

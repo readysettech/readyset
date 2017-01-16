@@ -27,31 +27,45 @@ macro_rules! broadcast {
 
 pub struct NodeDescriptor {
     pub index: NodeIndex,
-    pub addr: NodeAddress,
     pub inner: Node,
     pub children: Vec<NodeAddress>,
 }
 
 impl NodeDescriptor {
+    pub fn new(graph: &mut Graph, node: NodeIndex) -> Self {
+        use petgraph;
+
+        let inner = graph.node_weight_mut(node).unwrap().take();
+        let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+            .filter(|&c| graph[c].domain() == inner.domain())
+            .map(|ni| graph[ni].addr())
+            .collect();
+
+        NodeDescriptor {
+            index: node,
+            inner: inner,
+            children: children,
+        }
+    }
+
     pub fn process(&mut self,
                    m: Message,
                    state: &mut StateMap,
                    nodes: &DomainNodes)
-                   -> Option<(Update,
+                   -> Option<(Records,
                               Option<(i64, NodeIndex)>,
                               Option<(checktable::Token,
                                       sync::mpsc::Sender<checktable::TransactionResult>)>)> {
 
+        let addr = *self.addr().as_local();
         match *self.inner {
-            flow::node::Type::Ingress(..) => {
-                materialize(&m.data, state.get_mut(self.addr.as_local()));
+            flow::node::Type::Ingress => {
+                materialize(&m.data, state.get_mut(&addr));
                 Some((m.data, m.ts, m.token))
             }
-            flow::node::Type::Reader(_, ref mut w, ref r) => {
+            flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
-                    match m.data {
-                        ops::Update::Records(ref rs) => state.add(rs.iter().cloned()),
-                    }
+                    state.add(m.data.iter().cloned());
                     if m.ts.is_some() {
                         state.update_ts(m.ts.unwrap().0);
                     }
@@ -76,7 +90,7 @@ impl NodeDescriptor {
                 // readers never have children
                 None
             }
-            flow::node::Type::Egress(_, ref txs) => {
+            flow::node::Type::Egress(ref txs) => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
@@ -107,15 +121,13 @@ impl NodeDescriptor {
                 debug_assert!(u.is_some() || self.children.is_empty());
                 u.map(|update| (update, ts, None))
             }
-            flow::node::Type::Internal(_, ref mut i) => {
+            flow::node::Type::Internal(ref mut i) => {
                 let ts = m.ts;
-                let u = i.on_input(m, nodes, state);
-                if let Some(ref u) = u {
-                    materialize(u, state.get_mut(self.addr.as_local()));
-                }
-                u.map(|update| (update, ts, None))
+                let u = i.on_input(m.from, m.data, nodes, state);
+                materialize(&u, state.get_mut(&addr));
+                Some((u, ts, None))
             }
-            flow::node::Type::TimestampEgress(_, ref txs) => {
+            flow::node::Type::TimestampEgress(ref txs) => {
                 if let Some((ts, _)) = m.ts {
                     let txs = txs.lock().unwrap();
                     for tx in txs.iter() {
@@ -125,38 +137,12 @@ impl NodeDescriptor {
                 None
             }
             flow::node::Type::TimestampIngress(..) |
-            flow::node::Type::Unassigned(..) |
             flow::node::Type::Source => unreachable!(),
-        }
-    }
-
-    pub fn is_ingress(&self) -> bool {
-        if let flow::node::Type::Ingress(..) = *self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_internal(&self) -> bool {
-        if let flow::node::Type::Internal(..) = *self.inner {
-            true
-        } else {
-            false
-        }
-    }
-
-    /// A node is considered to be an output node if changes to its state are visible outside of its domain.
-    pub fn is_output(&self) -> bool {
-        match *self.inner {
-            flow::node::Type::Egress(_, _) => true,
-            flow::node::Type::Reader(..) => true,
-            _ => false,
         }
     }
 }
 
-pub fn materialize(u: &Update, state: Option<&mut State>) {
+pub fn materialize(rs: &Records, state: Option<&mut State>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
@@ -165,14 +151,10 @@ pub fn materialize(u: &Update, state: Option<&mut State>) {
 
     // yes!
     let mut state = state.unwrap();
-    match *u {
-        ops::Update::Records(ref rs) => {
-            for r in rs {
-                match *r {
-                    ops::Record::Positive(ref r) => state.insert(r.clone()),
-                    ops::Record::Negative(ref r) => state.remove(r),
-                }
-            }
+    for r in rs.iter() {
+        match *r {
+            ops::Record::Positive(ref r) => state.insert(r.clone()),
+            ops::Record::Negative(ref r) => state.remove(r),
         }
     }
 }

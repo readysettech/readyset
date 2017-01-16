@@ -3,12 +3,13 @@ use petgraph::graph::NodeIndex;
 use std::sync::mpsc;
 use std::sync;
 use std::fmt;
+use std::collections::HashMap;
 
 use std::ops::{Deref, DerefMut};
 
 use checktable;
 
-use ops::Update;
+use ops::Records;
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
 
@@ -16,7 +17,7 @@ use backlog;
 
 #[derive(Clone)]
 pub struct Reader {
-    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Update>>>>,
+    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Records>>>>,
     pub state: Option<backlog::BufferedStore>,
     pub token_generator: checktable::TokenGenerator,
 }
@@ -70,37 +71,25 @@ impl DerefMut for NodeHandle {
 }
 
 pub enum Type {
-    Ingress(domain::Index),
-    Internal(domain::Index, Box<Ingredient>),
-    Egress(domain::Index, sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
-    TimestampIngress(domain::Index, sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
-    TimestampEgress(domain::Index, sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
-    Reader(Option<domain::Index>, Option<backlog::WriteHandle>, Reader), /* domain only known at commit time! */
-    Unassigned(Box<Ingredient>),
+    Ingress,
+    Internal(Box<Ingredient>),
+    Egress(sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
+    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
+    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
+    Reader(Option<backlog::WriteHandle>, Reader),
     Source,
 }
 
-impl Type {
-    fn domain(&self) -> Option<domain::Index> {
-        match *self {
-            Type::Ingress(d) |
-            Type::Internal(d, _) |
-            Type::TimestampIngress(d, _) |
-            Type::TimestampEgress(d, _) |
-            Type::Egress(d, _) => Some(d),
-            Type::Reader(d, _, _) => d,
-            Type::Unassigned(_) |
-            Type::Source => None,
-        }
-    }
-
-    fn assign(&mut self, domain: domain::Index) {
-        use std::mem;
-        match mem::replace(self, Type::Source) {
-            Type::Unassigned(inner) => {
-                mem::replace(self, Type::Internal(domain, inner));
-            }
-            _ => unreachable!(),
+impl fmt::Debug for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Type::Source => write!(f, "source node"),
+            &Type::Ingress => write!(f, "ingress node"),
+            &Type::Egress(..) => write!(f, "egress node"),
+            &Type::TimestampIngress(..) => write!(f, "time ingress node"),
+            &Type::TimestampEgress(..) => write!(f, "time egress node"),
+            &Type::Reader(..) => write!(f, "reader node"),
+            &Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
     }
 }
@@ -109,8 +98,7 @@ impl Deref for Type {
     type Target = Ingredient;
     fn deref(&self) -> &Self::Target {
         match *self {
-            Type::Internal(_, ref i) |
-            Type::Unassigned(ref i) => i.deref(),
+            Type::Internal(ref i) => i.deref(),
             _ => unreachable!(),
         }
     }
@@ -119,8 +107,7 @@ impl Deref for Type {
 impl DerefMut for Type {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match *self {
-            Type::Internal(_, ref mut i) |
-            Type::Unassigned(ref mut i) => i.deref_mut(),
+            Type::Internal(ref mut i) => i.deref_mut(),
             _ => unreachable!(),
         }
     }
@@ -130,14 +117,17 @@ impl<I> From<I> for Type
     where I: Ingredient + 'static
 {
     fn from(i: I) -> Type {
-        Type::Unassigned(Box::new(i))
+        Type::Internal(Box::new(i))
     }
 }
 
 pub struct Node {
-    inner: NodeHandle,
     name: String,
+    domain: Option<domain::Index>,
+    addr: Option<NodeAddress>,
+
     fields: Vec<String>,
+    inner: NodeHandle,
 }
 
 impl Node {
@@ -148,13 +138,18 @@ impl Node {
     {
         Node {
             name: name.to_string(),
+            domain: None,
+            addr: None,
+
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
             inner: NodeHandle::Owned(inner),
         }
     }
 
     pub fn mirror(&self, n: Type) -> Node {
-        Self::new(&*self.name, &self.fields, n)
+        let mut n = Self::new(&*self.name, &self.fields, n);
+        n.domain = self.domain;
+        n
     }
 
     pub fn name(&self) -> &str {
@@ -165,57 +160,81 @@ impl Node {
         &self.fields[..]
     }
 
-    pub fn domain(&self) -> Option<domain::Index> {
-        self.inner.domain()
+    pub fn domain(&self) -> domain::Index {
+        match self.domain {
+            Some(domain) => domain,
+            None => {
+                unreachable!("asked for unset domain for {:?}", &*self.inner);
+            }
+        }
+    }
+
+    pub fn addr(&self) -> NodeAddress {
+        match self.addr {
+            Some(addr) => addr,
+            None => {
+                unreachable!("asked for unset addr for {:?}", &*self.inner);
+            }
+        }
     }
 
     pub fn take(&mut self) -> Node {
         let inner = match *self.inner {
-            Type::Egress(d, ref txs) => {
+            Type::Egress(ref txs) => {
                 // egress nodes can still be modified externally if subgraphs are added
                 // so we just make a new one with a clone of the Mutex-protected Vec
-                Type::Egress(d, txs.clone())
+                Type::Egress(txs.clone())
             }
-            Type::Reader(d, ref mut w, ref r) => {
+            Type::Reader(ref mut w, ref r) => {
                 // reader nodes can still be modified externally if txs are added
-                Type::Reader(d, w.take(), r.clone())
+                Type::Reader(w.take(), r.clone())
             }
-            Type::TimestampEgress(d, ref arc) => Type::TimestampEgress(d, arc.clone()),
-            Type::TimestampIngress(d, ref arc) => Type::TimestampIngress(d, arc.clone()),
-            Type::Ingress(d) => Type::Ingress(d),
-            Type::Internal(d, ref mut i) => Type::Internal(d, i.take()),
-            Type::Unassigned(_) |
+            Type::TimestampEgress(ref arc) => Type::TimestampEgress(arc.clone()),
+            Type::TimestampIngress(ref arc) => Type::TimestampIngress(arc.clone()),
+            Type::Ingress => Type::Ingress,
+            Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
+            Type::Internal(_) |
             Type::Source => unreachable!(),
         };
         self.inner.mark_taken();
 
-        self.mirror(inner)
+        let mut n = self.mirror(inner);
+        n.addr = self.addr;
+        n
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
-        self.inner.assign(domain);
+        self.domain = Some(domain);
     }
 
-    pub fn describe(&self, f: &mut fmt::Formatter, idx: NodeIndex) -> fmt::Result {
+    pub fn set_addr(&mut self, addr: NodeAddress) {
+        self.addr = Some(addr);
+    }
+
+    pub fn on_commit(&mut self, remap: &HashMap<NodeAddress, NodeAddress>) {
+        assert!(self.addr.is_some());
+        self.inner.on_commit(self.addr.unwrap(), remap)
+    }
+
+    pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
         use regex::Regex;
 
         let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
         write!(f,
                " [style=filled, fillcolor={}, label=\"",
-               self.domain()
+               self.domain
                    .map(|d| -> usize { d.into() })
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                    .unwrap_or("white".into()))?;
 
         match *self.inner {
             Type::Source => write!(f, "(source)"),
-            Type::Ingress(..) => write!(f, "{{ {} | (ingress) }}", idx.index()),
+            Type::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
             Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
             Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
-            Type::Unassigned(ref i) |
-            Type::Internal(_, ref i) => {
+            Type::Internal(ref i) => {
                 write!(f, "{{")?;
 
                 // Output node name and description. First row.
@@ -244,6 +263,38 @@ impl Node {
 
         writeln!(f, "\"]")
     }
+
+    pub fn is_egress(&self) -> bool {
+        if let Type::Egress(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_ingress(&self) -> bool {
+        if let Type::Ingress = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_internal(&self) -> bool {
+        if let Type::Internal(..) = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// A node is considered to be an output node if changes to its state are visible outside of its domain.
+    pub fn is_output(&self) -> bool {
+        match *self.inner {
+            Type::Egress(..) | Type::Reader(..) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Deref for Node {
@@ -258,28 +309,3 @@ impl DerefMut for Node {
         &mut self.inner
     }
 }
-
-// TODO: what do we do about .having?
-// impl Node {
-//     /// Add an output filter to this node.
-//     ///
-//     /// Only records matching the given conditions will be output from this node. This filtering
-//     /// applies both to feed-forward and to queries. Note that adding conditions in this way does
-//     /// *not* modify a node's input, and so the node may end up performing computation whose result
-//     /// will simply be discarded.
-//     ///
-//     /// Adding a HAVING condition will not reduce the size of the node's materialized state.
-//     pub fn having(mut self, cond: Vec<shortcut::Condition<query::DataType>>) -> Self {
-//         self.having = Some(query::Query::new(&[], cond));
-//         self
-//     }
-//
-//     /// Retrieve a list of this node's output filters.
-//     pub fn having_conditions(&self) -> Option<&[shortcut::Condition<query::DataType>]> {
-//         self.having.as_ref().map(|q| &q.having[..])
-//     }
-//
-//     pub fn operator(&self) -> &Type {
-//         &*self.inner
-//     }
-// }
