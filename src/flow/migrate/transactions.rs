@@ -47,8 +47,7 @@ fn add_time_egress(nodes: &mut Vec<(NodeIndex, bool)>, graph: &mut Graph) -> Vec
 /// TimestampIngress nodes.
 pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
                       graph: &mut Graph,
-                      time_txs: &HashMap<domain::Index, mpsc::SyncSender<i64>>)
-                      -> Vec<NodeIndex> {
+                      time_txs: &HashMap<domain::Index, mpsc::SyncSender<i64>>) {
 
     // For every *new* base node, add a TimeEgress node after it so that it can communicate to
     // other domains about a new assigned timestamp. This is to ensure that every domain learns
@@ -57,6 +56,50 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
     let mut new_time_egress = Vec::new();
     for (_, nodes) in nodes.iter_mut() {
         new_time_egress.extend(add_time_egress(nodes, graph));
+    }
+
+    // Connect all these new TimeEgress nodes to the TimeIngress nodes of all pre-existing domains
+    // iff there isn't already a path between the TimeEgress's base node and the TimeIngress'
+    // domain.
+
+    // add_to keeps track of edges we need to add to the graph, but can't yet because we already
+    // have a read-only reference to the graph in the if let
+    let mut add_to = Vec::new();
+    for ingress in graph.node_indices() {
+        if let node::Type::TimestampIngress(ref arc) = *graph[ingress] {
+            let tx = arc.lock().unwrap().clone();
+            let domain = graph[ingress].domain();
+            for &egress in &new_time_egress {
+                let base = graph.neighbors_directed(egress, petgraph::EdgeDirection::Incoming)
+                    .next()
+                    .expect("ts egress must be child of base node");
+
+                // we now want to check if the domain holding this time ingress node is somehow
+                // connected to the new base node that this new TimeEgress node is connected to.
+                // that can *only* be the case if at least one node was added to the domain in this
+                // migration. there is no point in checking *old* nodes, because they cannot have
+                // been connected to this new base node
+                if nodes.contains_key(&domain) &&
+                   nodes[&domain].iter().any(|&(node, new)| {
+                    new && petgraph::algo::has_path_connecting(&*graph, base, node, None)
+                }) {
+                    // yes! no need for time channel
+                    continue;
+                }
+
+                // nope, we need to tell this domain about new updates from this base
+                if let node::Type::TimestampEgress(ref arc) = *graph[egress] {
+                    arc.lock().unwrap().push(tx.clone());
+                    add_to.push(egress);
+                } else {
+                    unreachable!();
+                }
+            }
+        }
+
+        for egress in add_to.drain(..) {
+            graph.add_edge(egress, ingress, false);
+        }
     }
 
     // Add a TimeIngress node to every new domain so it can receive these timestamp messages
@@ -109,7 +152,4 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
             graph.add_edge(egress, ingress, false);
         }
     }
-
-    // Ensure that all *new* TimeEgress nodes are added to *pre-existing* TimeIngress nodes
-    new_time_egress
 }

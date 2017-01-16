@@ -585,9 +585,9 @@ impl<'a> Migration<'a> {
         }
 
         // Add transactional time nodes
-        let new_time_egress = migrate::transactions::add_time_nodes(&mut domain_nodes,
-                                                                    &mut mainline.ingredients,
-                                                                    &mainline.time_txs);
+        migrate::transactions::add_time_nodes(&mut domain_nodes,
+                                              &mut mainline.ingredients,
+                                              &mainline.time_txs);
 
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
@@ -676,6 +676,9 @@ impl<'a> Migration<'a> {
                                       mainline.source,
                                       &mut mainline.control_txs,
                                       domain_nodes);
+
+        // TODO: we definitely need to update count_base_ingress somewhere
+        //       but to what? and how? jonathan?!
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!

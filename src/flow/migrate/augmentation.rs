@@ -41,8 +41,6 @@ pub fn inform(graph: &mut Graph,
                 .collect();
 
             ctx.send(domain::Control::AddNode(node, old_parents)).unwrap();
-
-            // TODO: count_base_ingress
         }
     }
 }
