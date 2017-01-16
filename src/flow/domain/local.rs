@@ -102,6 +102,8 @@ use std::collections::hash_map;
 use fnv::FnvHashMap;
 use std::hash::Hash;
 use std::sync::Arc;
+
+#[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
     pkey: usize,
     state: FnvHashMap<T, Vec<Arc<Vec<T>>>>,

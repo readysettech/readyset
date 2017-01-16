@@ -227,7 +227,9 @@ pub fn initialize(graph: &Graph,
         let n = &graph[node];
         let d = n.domain();
 
-        let state = materialize.get_mut(&d).and_then(|ss| ss.remove(n.addr().as_local()));
+        let state = materialize.get_mut(&d)
+            .and_then(|ss| ss.get(n.addr().as_local()))
+            .map(|s| (*s).clone());
         let mut has_state = state.is_some();
 
         if let flow::node::Type::Reader(_, ref r) = **n {
@@ -241,7 +243,7 @@ pub fn initialize(graph: &Graph,
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = || {
+        let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, state| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             control_txs[&d]
                 .send(domain::Control::Ready(*n.addr().as_local(), state, ack_tx))
@@ -257,18 +259,153 @@ pub fn initialize(graph: &Graph,
             .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             empty.insert(node);
-            ready();
+            ready(control_txs, state);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
-                ready();
+                ready(control_txs, state);
                 continue;
             }
 
+            if let flow::node::Type::Reader(..) = **n {
+                // readers need special replay
+                unimplemented!();
+            }
+
             // we have a parent that has data, so we need to replay and reconstruct
-            unimplemented!();
+            reconstruct(graph, &materialize, control_txs, node);
+            ready(control_txs, None);
         }
+    }
+}
+
+pub fn reconstruct(graph: &Graph,
+                   materialized: &HashMap<domain::Index, StateMap>,
+                   control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
+                   node: NodeIndex) {
+    // okay, so here's the situation: `node` is a node that
+    //
+    //   a) was not previously materialized, and
+    //   b) now needs to be materialized, and
+    //   c) at least one of node's parents has existing data
+    //
+    // because of the topological traversal done by `initialize`, we know that all our ancestors
+    // that should be materialized have been.
+    //
+    // our plan is as follows:
+    //
+    //   1. search our ancestors for the closest materialization points along each path
+    //   2. for each such path, identify the domains along that path and pause them
+    //   3. construct a daisy-chain of channels, and pass them to each domain along the path
+    //   4. tell the domain nearest to the root to start replaying
+    //
+    // so, first things first, let's find our closest materialized parents
+    let paths = trace(graph, node, materialized, vec![node]);
+
+
+    // TODO:
+    // when we have multiple paths, replaying one and then the other is probably not ok?
+    // in fact, it probably depends on the node. for a join, replaying one ancestor is sufficient
+    // (maybe even on specific one as it the case for LEFT JOIN). for a union, we need to replay
+    // both...
+    assert_eq!(paths.len(), 1, "multi-way replays are not yet supported");
+
+    // set up channels for replay along each path
+    for path in paths {
+        // first, find out which domains we are crossing
+        // note that path has the ancestor closest to the root *first*
+        let mut segments = Vec::new();
+        let mut last_domain = None;
+        for node in path {
+            let domain = graph[node].domain();
+            if last_domain.is_none() || domain == last_domain.unwrap() {
+                segments.push((domain, Vec::new()));
+                last_domain = Some(domain);
+            }
+
+            if graph[node].is_output() {
+                // we don't want replayed records to spill out as data
+            } else {
+                segments.last_mut().unwrap().1.push(node);
+            }
+        }
+
+        // then, tell the domain in question to create an empty state for the node in question
+        control_txs[&graph[node].domain()]
+            .send(domain::Control::PrepareState(*graph[node].addr().as_local()))
+            .unwrap();
+
+        // next, daisy chain channels between them
+        // this includes the final domain, which will automatically populate `node` during replay
+        let (root_tx, mut next_rx) = mpsc::sync_channel(10);
+        let root_tx = if segments.len() == 1 {
+            // no channels needed
+            None
+        } else {
+            Some(root_tx)
+        };
+
+        let locals = |i: usize| -> Vec<NodeAddress> {
+            segments[i]
+                .1
+                .iter()
+                .map(|&ni| graph[ni].addr())
+                .collect::<Vec<_>>()
+        };
+
+        let mut seen = HashSet::new();
+        for (i, &(ref domain, _)) in segments.iter().skip(1).enumerate() {
+
+            // TODO:
+            //  a domain may appear multiple times in this list if a path crosses into the same
+            //  domain more than once. currently, that will cause a deadlock.
+            assert!(!seen.contains(domain),
+                    "a-b-a domain replays are not yet supported");
+            seen.insert(*domain);
+
+            let (tx, rx) = mpsc::sync_channel(10);
+            let tx = if i == segments.len() - 1 - 1 {
+                // last segment shouldn't emit anything
+                None
+            } else {
+                Some(tx)
+            };
+
+            control_txs[domain]
+                .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx))
+                .unwrap();
+            next_rx = rx;
+        }
+
+        // finally, tell the root domain to start replaying
+        control_txs[&segments[0].0]
+            .send(domain::Control::Replay(locals(0), root_tx))
+            .unwrap();
+    }
+}
+
+fn trace(graph: &Graph,
+         node: NodeIndex,
+         materialized: &HashMap<domain::Index, StateMap>,
+         path: Vec<NodeIndex>)
+         -> Vec<Vec<NodeIndex>> {
+
+    let n = &graph[node];
+    let is_materialized = materialized.get(&n.domain())
+        .map(|dm| dm.contains_key(n.addr().as_local()))
+        .unwrap_or(false);
+
+    if is_materialized {
+        vec![path]
+    } else {
+        graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .flat_map(|parent| {
+                let mut path = path.clone();
+                path.push(parent);
+                trace(graph, parent, materialized, path)
+            })
+            .collect()
     }
 }

@@ -331,6 +331,7 @@ extern crate serde_derive;
 
 extern crate fnv;
 
+extern crate itertools;
 extern crate petgraph;
 extern crate regex;
 
