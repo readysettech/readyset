@@ -220,6 +220,8 @@ pub fn initialize(graph: &Graph,
         topo_list.push(node);
     }
 
+    // TODO: what about adding materialization to *existing* views?
+
     let mut empty = HashSet::new();
     for node in topo_list {
         let n = &graph[node];
