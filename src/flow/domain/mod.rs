@@ -32,7 +32,7 @@ pub enum Control {
     Ready(LocalNodeIndex, Option<State>, mpsc::SyncSender<()>),
     ReplayThrough(Vec<NodeAddress>, mpsc::Receiver<Message>, Option<mpsc::SyncSender<Message>>),
     Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>),
-    PrepareState(LocalNodeIndex),
+    PrepareState(LocalNodeIndex, usize),
 }
 
 pub mod single;
@@ -328,8 +328,10 @@ impl Domain {
                 self.not_ready.remove(&ni);
                 drop(ack);
             }
-            Control::PrepareState(ni) => {
-                self.state.insert(ni, State::default());
+            Control::PrepareState(ni, on) => {
+                let mut state = State::default();
+                state.set_pkey(on);
+                self.state.insert(ni, state);
             }
             Control::Replay(nodes, mut tx) => {
                 // okay, I'm sorry in advance for this.

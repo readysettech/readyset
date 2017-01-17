@@ -275,7 +275,8 @@ pub fn initialize(graph: &Graph,
             }
 
             // we have a parent that has data, so we need to replay and reconstruct
-            reconstruct(graph, &materialize, control_txs, node);
+            let index_on = state.unwrap().get_pkey();
+            reconstruct(graph, &materialize, control_txs, node, index_on);
             ready(control_txs, None);
         }
     }
@@ -284,7 +285,9 @@ pub fn initialize(graph: &Graph,
 pub fn reconstruct(graph: &Graph,
                    materialized: &HashMap<domain::Index, StateMap>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
-                   node: NodeIndex) {
+                   node: NodeIndex,
+                   index_on: usize) {
+
     // okay, so here's the situation: `node` is a node that
     //
     //   a) was not previously materialized, and
@@ -312,6 +315,11 @@ pub fn reconstruct(graph: &Graph,
     // both...
     assert_eq!(paths.len(), 1, "multi-way replays are not yet supported");
 
+    // tell the domain in question to create an empty state for the node in question
+    control_txs[&graph[node].domain()]
+        .send(domain::Control::PrepareState(*graph[node].addr().as_local(), index_on))
+        .unwrap();
+
     // set up channels for replay along each path
     for path in paths {
         // first, find out which domains we are crossing
@@ -331,11 +339,6 @@ pub fn reconstruct(graph: &Graph,
                 segments.last_mut().unwrap().1.push(node);
             }
         }
-
-        // then, tell the domain in question to create an empty state for the node in question
-        control_txs[&graph[node].domain()]
-            .send(domain::Control::PrepareState(*graph[node].addr().as_local()))
-            .unwrap();
 
         // next, daisy chain channels between them
         // this includes the final domain, which will automatically populate `node` during replay

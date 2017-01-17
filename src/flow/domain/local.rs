@@ -126,6 +126,10 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.pkey = key;
     }
 
+    pub fn get_pkey(&self) -> usize {
+        self.pkey
+    }
+
     pub fn is_useful(&self) -> bool {
         self.pkey != usize::max_value()
     }
