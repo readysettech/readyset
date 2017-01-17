@@ -339,7 +339,7 @@ pub fn reconstruct(graph: &Graph,
         let mut last_domain = None;
         for node in path {
             let domain = graph[node].domain();
-            if last_domain.is_none() || domain == last_domain.unwrap() {
+            if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
                 last_domain = Some(domain);
             }
