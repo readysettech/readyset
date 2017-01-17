@@ -21,11 +21,7 @@ impl<T> Map<T> {
         let i = addr.id();
 
         if i >= self.things.len() {
-            let diff = if self.things.is_empty() {
-                i + 1
-            } else {
-                self.things.len() - i + 1
-            };
+            let diff = i - self.things.len() + 1;
             self.things.reserve(diff);
             for _ in 0..diff {
                 self.things.push(None);
