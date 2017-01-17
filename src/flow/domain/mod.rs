@@ -352,13 +352,15 @@ impl Domain {
                     .get(nodes[0].as_local())
                     .expect("migration replay path started with non-materialized node");
 
+                let init_to = if nodes.len() == 1 { nodes[0] } else { nodes[1] };
+
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
                 'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(100) {
                     let chunk: Records = chunk.into_iter().map(|r| r.clone().into()).collect();
                     let mut m = Message {
                         from: nodes[0],
-                        to: nodes[1],
+                        to: init_to,
                         data: chunk,
                         ts: None,
                         token: None,
