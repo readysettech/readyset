@@ -195,6 +195,15 @@ pub fn index(graph: &Graph,
         if !state.get(n.addr().as_local()).unwrap().is_useful() {
             // this materialization doesn't have any primary key,
             // so we assume it's not in use.
+
+            if n.is_base() {
+                // but it's a base nodes!
+                // we must *always* materialize base nodes
+                // so, just make up some column to index on
+                state.get_mut(n.addr().as_local()).unwrap().set_pkey(0);
+                continue;
+            }
+
             println!("removing unnecessary materialization on {}", n.addr());
             state.remove(n.addr().as_local());
         }
@@ -276,13 +285,14 @@ pub fn initialize(graph: &Graph,
 
             // we have a parent that has data, so we need to replay and reconstruct
             let index_on = state.unwrap().get_pkey();
-            reconstruct(graph, &materialize, control_txs, node, index_on);
+            reconstruct(graph, source, &materialize, control_txs, node, index_on);
             ready(control_txs, None);
         }
     }
 }
 
 pub fn reconstruct(graph: &Graph,
+                   source: NodeIndex,
                    materialized: &HashMap<domain::Index, StateMap>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
                    node: NodeIndex,
@@ -305,8 +315,7 @@ pub fn reconstruct(graph: &Graph,
     //   4. tell the domain nearest to the root to start replaying
     //
     // so, first things first, let's find our closest materialized parents
-    let paths = trace(graph, node, materialized, vec![node]);
-
+    let paths = trace(graph, source, node, materialized, vec![node]);
 
     // TODO:
     // when we have multiple paths, replaying one and then the other is probably not ok?
@@ -390,10 +399,15 @@ pub fn reconstruct(graph: &Graph,
 }
 
 fn trace(graph: &Graph,
+         source: NodeIndex,
          node: NodeIndex,
          materialized: &HashMap<domain::Index, StateMap>,
          path: Vec<NodeIndex>)
          -> Vec<Vec<NodeIndex>> {
+
+    if node == source {
+        unreachable!("base node was not materialized!");
+    }
 
     let n = &graph[node];
     let is_materialized = materialized.get(&n.domain())
@@ -407,7 +421,7 @@ fn trace(graph: &Graph,
             .flat_map(|parent| {
                 let mut path = path.clone();
                 path.push(parent);
-                trace(graph, parent, materialized, path)
+                trace(graph, source, parent, materialized, path)
             })
             .collect()
     }
