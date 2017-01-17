@@ -216,7 +216,7 @@ fn votes() {
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2);
-    assert!(res.len() <= 1); // could be 1 if we had zero-rows
+    assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn transactional_vote() {
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2);
-    assert!(res.len() <= 1); // could be 1 if we had zero-rows
+    assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
 #[test]
