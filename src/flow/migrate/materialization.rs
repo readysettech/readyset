@@ -330,9 +330,11 @@ pub fn reconstruct(graph: &Graph,
         .unwrap();
 
     // set up channels for replay along each path
-    for path in paths {
+    for mut path in paths {
+        // we want path to have the ancestor closest to the root *first*
+        path.reverse();
+
         // first, find out which domains we are crossing
-        // note that path has the ancestor closest to the root *first*
         let mut segments = Vec::new();
         let mut last_domain = None;
         for node in path {
