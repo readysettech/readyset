@@ -412,9 +412,15 @@ fn trace(graph: &Graph,
     }
 
     let n = &graph[node];
-    let is_materialized = materialized.get(&n.domain())
-        .map(|dm| dm.contains_key(n.addr().as_local()))
-        .unwrap_or(false);
+    let is_materialized = if path.len() == 1 {
+        // the start node is the one we're trying to replay to, so while it'll be marked as
+        // materialized in the map, it isn't really
+        false
+    } else {
+        materialized.get(&n.domain())
+            .map(|dm| dm.contains_key(n.addr().as_local()))
+            .unwrap_or(false)
+    };
 
     if is_materialized {
         vec![path]
