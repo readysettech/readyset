@@ -328,9 +328,14 @@ impl Blender {
     ///
     /// Two functions are returned, one for perfoming transactional writes, and one for performing
     /// non-transactional writes.
-    pub fn get_putter(&self, n: NodeAddress) -> (FnNTX, FnTX) {
+    pub fn get_putter(&self, base: NodeAddress) -> (FnNTX, FnTX) {
         let src = NodeAddress::make_global(self.source);
-        let node = &self.ingredients[*n.as_global()];
+        // real input is the ingress above the base
+        let n = self.ingredients
+            .neighbors_directed(*base.as_global(), petgraph::EdgeDirection::Incoming)
+            .next()
+            .unwrap();
+        let node = &self.ingredients[n];
         let tx = self.data_txs[&node.domain()].clone();
         let tx2 = tx.clone();
 
