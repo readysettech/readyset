@@ -254,6 +254,24 @@ impl Ingredient for Joiner {
         false
     }
 
+    fn replay_ancestor(&self) -> Option<NodeAddress> {
+        use std::collections::HashSet;
+
+        // we want to replay an ancestor that we are *not* doing an outer join against
+        // it's not *entirely* clear how to extract that from self.join, but we'll use the
+        // following heuristic: find an ancestor that is never performed an outer join against.
+        let mut options: HashSet<_> = self.join.keys().collect();
+        for left in self.join.values() {
+            for right in left.against.keys() {
+                if left.against[right].outer {
+                    options.remove(right);
+                }
+            }
+        }
+        assert!(!options.is_empty());
+        options.into_iter().next().cloned()
+    }
+
     fn will_query(&self, _: bool) -> bool {
         true
     }

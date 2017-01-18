@@ -312,13 +312,6 @@ pub fn reconstruct(graph: &Graph,
     // so, first things first, let's find our closest materialized parents
     let paths = trace(graph, source, node, materialized, vec![node]);
 
-    // TODO:
-    // when we have multiple paths, replaying one and then the other is probably not ok?
-    // in fact, it probably depends on the node. for a join, replaying one ancestor is sufficient
-    // (maybe even on specific one as it the case for LEFT JOIN). for a union, we need to replay
-    // both...
-    assert_eq!(paths.len(), 1, "multi-way replays are not yet supported");
-
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
     } else {
@@ -426,7 +419,23 @@ fn trace(graph: &Graph,
     if is_materialized {
         vec![path]
     } else {
-        graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .collect();
+        if parents.len() != 1 {
+            // there are two cases where we have multiple parents: joins and unions
+            // for unions, we should replay *all* paths. for joins, we should only replay one path.
+            // in particular, for a join, we should only replay the ancestor that yields the full
+            // result-set (i.e., the left side of a left join).
+            assert!(graph[node].is_internal());
+            if let Some(picked_ancestor) = graph[node].replay_ancestor() {
+                // join, only replay picked ancestor
+                parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
+            } else {
+                // union; just replay all
+            }
+        }
+
+        parents.into_iter()
             .flat_map(|parent| {
                 let mut path = path.clone();
                 path.push(parent);
