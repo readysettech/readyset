@@ -278,13 +278,8 @@ pub fn initialize(graph: &Graph,
                 continue;
             }
 
-            if let flow::node::Type::Reader(..) = **n {
-                // readers need special replay
-                unimplemented!();
-            }
-
             // we have a parent that has data, so we need to replay and reconstruct
-            let index_on = state.unwrap().get_pkey();
+            let index_on = state.map(|s| s.get_pkey());
             reconstruct(graph, source, &materialize, control_txs, node, index_on);
             ready(control_txs, None);
         }
@@ -296,7 +291,7 @@ pub fn reconstruct(graph: &Graph,
                    materialized: &HashMap<domain::Index, StateMap>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
                    node: NodeIndex,
-                   index_on: usize) {
+                   index_on: Option<usize>) {
 
     // okay, so here's the situation: `node` is a node that
     //
@@ -324,10 +319,16 @@ pub fn reconstruct(graph: &Graph,
     // both...
     assert_eq!(paths.len(), 1, "multi-way replays are not yet supported");
 
-    // tell the domain in question to create an empty state for the node in question
-    control_txs[&graph[node].domain()]
-        .send(domain::Control::PrepareState(*graph[node].addr().as_local(), index_on))
-        .unwrap();
+    if let flow::node::Type::Reader(..) = *graph[node] {
+        // readers have their own internal state
+    } else {
+        let index_on = index_on.expect("all non-reader nodes must have a state key");
+
+        // tell the domain in question to create an empty state for the node in question
+        control_txs[&graph[node].domain()]
+            .send(domain::Control::PrepareState(*graph[node].addr().as_local(), index_on))
+            .unwrap();
+    }
 
     // set up channels for replay along each path
     for mut path in paths {
@@ -344,8 +345,8 @@ pub fn reconstruct(graph: &Graph,
                 last_domain = Some(domain);
             }
 
-            if graph[node].is_output() {
-                // we don't want replayed records to spill out as data
+            if graph[node].is_egress() {
+                // we don't want replayed records to spill out into data channels
             } else {
                 segments.last_mut().unwrap().1.push(node);
             }
