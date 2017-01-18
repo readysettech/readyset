@@ -40,7 +40,6 @@ impl DataType {
 #[cfg(feature="web")]
 impl ToJson for DataType {
     fn to_json(&self) -> Json {
-        use std::ops::Deref;
         match *self {
             DataType::None => Json::Null,
             DataType::Number(n) => Json::I64(n),

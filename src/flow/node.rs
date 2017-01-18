@@ -9,7 +9,8 @@ use std::ops::{Deref, DerefMut};
 
 use checktable;
 
-use ops::Records;
+use query::DataType;
+use ops::{Records, Datas};
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress};
 
@@ -29,6 +30,16 @@ impl Reader {
             state: None,
             token_generator: token_generator,
         }
+    }
+
+    pub fn get_reader(&self) -> Option<Box<Fn(&DataType) -> Vec<Vec<DataType>> + Send + Sync>> {
+        self.state.clone().map(|arc| {
+            Box::new(move |q: &DataType| -> Datas {
+                arc.find_and(q,
+                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
+                    .0
+            }) as Box<_>
+        })
     }
 }
 
