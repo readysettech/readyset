@@ -538,7 +538,7 @@ fn domain_amend_migration() {
 }
 
 #[test]
-fn state_replay_migration() {
+fn state_replay_migration_stream() {
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.
     // then, we'll do a migration that adds a join in a different domain (requiring state replay),
@@ -599,4 +599,61 @@ fn state_replay_migration() {
     // there should now be no more records
     drop(g);
     assert_eq!(out.recv(), Err(mpsc::RecvError));
+}
+
+#[test]
+fn state_replay_migration_query() {
+    // similar to test above, except we will have a materialized Reader node that we're going to
+    // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
+    // are created and populated before the migration, meaning we have to replay through a join.
+
+    let mut g = distributary::Blender::new();
+    let (put1, a, b) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base {});
+
+        let domain = mig.add_domain();
+        mig.assign_domain(a, domain);
+        mig.assign_domain(b, domain);
+        (mig.commit(), a, b)
+    };
+
+    // make a couple of records
+    put1[&a].0(vec![1.into(), "a".into()]);
+    put1[&a].0(vec![1.into(), "b".into()]);
+    put1[&a].0(vec![2.into(), "c".into()]);
+    put1[&b].0(vec![1.into(), "n".into()]);
+    put1[&b].0(vec![2.into(), "o".into()]);
+
+    let out = {
+        // add join and a reader node
+        let mut mig = g.start_migration();
+        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
+            .from(a, vec![1, 0])
+            .join(b, vec![1, 0]);
+        let j = mig.add_ingredient("j", &["x", "y", "z"], j);
+
+        // we want to observe what comes out of the join
+        let out = mig.maintain(j, 0);
+
+        // do the migration
+        let _ = mig.commit();
+
+        out
+    };
+
+    // if all went according to plan, the join should now be fully populated!
+
+    // there are (/should be) two records in a with x == 1
+    // they may appear in any order
+    let res = out(&1.into());
+    assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
+
+    // there are (/should be) one record in a with x == 2
+    assert_eq!(out(&2.into()), vec![vec![2.into(), "c".into(), "o".into()]]);
+
+    // there are (/should be) no records with x == 3
+    assert!(out(&3.into()).is_empty());
 }
