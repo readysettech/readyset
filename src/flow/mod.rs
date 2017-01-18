@@ -71,6 +71,21 @@ impl NodeAddress {
     }
 }
 
+impl Into<usize> for NodeAddress {
+    fn into(self) -> usize {
+        match self.addr {
+            NodeAddress_::Global(ni) => ni.index(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<usize> for NodeAddress {
+    fn from(o: usize) -> Self {
+        NodeAddress { addr: NodeAddress_::Global(NodeIndex::new(o)) }
+    }
+}
+
 impl fmt::Display for NodeAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.addr {
@@ -261,6 +276,94 @@ impl Blender {
         return Box::new(move |ref t: &checktable::Token| {
             checktable.lock().unwrap().validate_token(&t)
         });
+    }
+
+    /// Get references to all known input nodes.
+    ///
+    /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
+    /// all have been returned as a key in the map from `commit` at some point in the past.
+    ///
+    /// This function will only tell you which nodes are input nodes in the graph. To obtain a
+    /// function for inserting writes, use `Blender::get_putter`.
+    pub fn inputs(&self) -> Vec<(NodeAddress, &node::Node)> {
+        self.ingredients
+            .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
+            .flat_map(|ingress| {
+                self.ingredients.neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+            })
+            .map(|n| (n, &self.ingredients[n]))
+            .filter(|&(_, base)| base.is_internal() && base.is_base())
+            .map(|(n, base)| (NodeAddress::make_global(n), &*base))
+            .collect()
+    }
+
+    /// Get a reference to all known output nodes.
+    ///
+    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
+    /// to calling `.maintain` or `.stream` for a node during a migration.
+    ///
+    /// This function will only tell you which nodes are output nodes in the graph. To obtain a
+    /// function for performing reads, call `.get_reader()` on the returned reader.
+    pub fn outputs(&self) -> Vec<(NodeAddress, &node::Node, &node::Reader)> {
+        self.ingredients
+            .externals(petgraph::EdgeDirection::Outgoing)
+            .filter_map(|n| {
+                use flow::node;
+                if let node::Type::Reader(_, ref inner) = *self.ingredients[n] {
+                    // we want to give the the node that is being materialized
+                    // not the reader node itself
+                    let src = self.ingredients
+                        .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
+                        .next()
+                        .unwrap();
+                    Some((NodeAddress::make_global(src), &self.ingredients[src], inner))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Obtain a new function for inserting writes into the soup at the given base node.
+    ///
+    /// Two functions are returned, one for perfoming transactional writes, and one for performing
+    /// non-transactional writes.
+    pub fn get_putter(&self, n: NodeAddress) -> (FnNTX, FnTX) {
+        let src = NodeAddress::make_global(self.source);
+        let node = &self.ingredients[*n.as_global()];
+        let tx = self.data_txs[&node.domain()].clone();
+        let tx2 = tx.clone();
+
+        let addr = node.addr();
+
+        // we want to avoid forcing the end-user to cook up Messages
+        // they should instead just make data records
+        let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
+            Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
+                let (send, recv) = mpsc::channel();
+                tx.send(Message {
+                        from: src,
+                        to: addr,
+                        data: vec![u].into(),
+                        ts: None,
+                        token: Some((t, send)),
+                    })
+                    .unwrap();
+                recv.recv().unwrap()
+            });
+
+        let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
+            tx2.send(Message {
+                    from: src,
+                    to: addr,
+                    data: vec![u].into(),
+                    ts: None,
+                    token: None,
+                })
+                .unwrap()
+        });
+
+        (fntx, ftx)
     }
 }
 
@@ -453,12 +556,7 @@ impl<'a> Migration<'a> {
             }
 
             // cook up a function to query this materialized state
-            let arc = inner.state.as_ref().unwrap().clone();
-            Box::new(move |q: &query::DataType| -> ops::Datas {
-                arc.find_and(q,
-                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
-                    .0
-            })
+            inner.get_reader().unwrap()
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -696,7 +794,6 @@ impl<'a> Migration<'a> {
                                              &mut mainline.control_txs);
 
         // Finally, set up input channels to any new base tables
-        let src = NodeAddress::make_global(mainline.source);
         let mut sources = HashMap::new();
         for node in &new {
             let n = &mainline.ingredients[*node];
@@ -712,44 +809,15 @@ impl<'a> Migration<'a> {
                     continue;
                 }
 
-                // we want to avoid forcing the end-user to cook up Messages
-                // they should instead just make data records
-                let addr = n.addr();
-                let tx = mainline.data_txs[&n.domain()].clone();
-                let tx2 = tx.clone();
-                let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
-                    Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
-                        let (send, recv) = mpsc::channel();
-                        tx.send(Message {
-                                from: src,
-                                to: addr,
-                                data: vec![u].into(),
-                                ts: None,
-                                token: Some((t, send)),
-                            })
-                            .unwrap();
-                        recv.recv().unwrap()
-                    });
-
-                let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
-                    tx2.send(Message {
-                            from: src,
-                            to: addr,
-                            data: vec![u].into(),
-                            ts: None,
-                            token: None,
-                        })
-                        .unwrap()
-                });
-
                 // the user is expecting to use the base node addresses to choose a particular
                 // putter, not the ingress node addresses
                 let base = mainline.ingredients
                     .neighbors_directed(*node, petgraph::EdgeDirection::Outgoing)
                     .next()
                     .unwrap();
+                let base = NodeAddress::make_global(base);
 
-                sources.insert(NodeAddress::make_global(base), (fntx, ftx));
+                sources.insert(base, mainline.get_putter(base));
                 break;
             }
         }
