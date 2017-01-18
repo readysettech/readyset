@@ -13,8 +13,8 @@ no_strings = []
 no_domains = []
 
 [dependencies]
+itertools = "0.5"
 petgraph = "0.4"
-clocked-dispatch = "4.0"
 regex = "0.1"
 fnv = "1.0"
 

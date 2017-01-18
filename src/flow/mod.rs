@@ -106,6 +106,10 @@ pub trait Ingredient
     fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 
+    fn replay_ancestor(&self) -> Option<NodeAddress> {
+        None
+    }
+
     /// Should return true if this ingredient will ever query the state of an ancestor.
     fn will_query(&self, materialized: bool) -> bool;
 

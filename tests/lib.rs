@@ -2,6 +2,7 @@ extern crate distributary;
 
 use std::time;
 use std::thread;
+use std::sync::mpsc;
 
 use std::collections::HashMap;
 
@@ -216,7 +217,7 @@ fn votes() {
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2);
-    assert!(res.len() <= 1); // could be 1 if we had zero-rows
+    assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
 #[test]
@@ -311,7 +312,7 @@ fn transactional_vote() {
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2);
-    assert!(res.len() <= 1); // could be 1 if we had zero-rows
+    assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
 #[test]
@@ -534,4 +535,125 @@ fn domain_amend_migration() {
 
     // check that value was updated again
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()]].into()));
+}
+
+#[test]
+fn state_replay_migration_stream() {
+    // we're going to set up a migration test that requires replaying existing state
+    // to do that, we'll first create a schema with just a base table, and write some stuff to it.
+    // then, we'll do a migration that adds a join in a different domain (requiring state replay),
+    // and send through some updates on the other (new) side of the join, and see that the expected
+    // things come out the other end.
+
+    let mut g = distributary::Blender::new();
+    let (put1, a) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base {});
+        (mig.commit(), a)
+    };
+
+    // make a couple of records
+    put1[&a].0(vec![1.into(), "a".into()]);
+    put1[&a].0(vec![1.into(), "b".into()]);
+    put1[&a].0(vec![2.into(), "c".into()]);
+
+    let (out, put2, b) = {
+        // add a new base and a join
+        let mut mig = g.start_migration();
+        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base {});
+        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
+            .from(a, vec![1, 0])
+            .join(b, vec![1, 0]);
+        let j = mig.add_ingredient("j", &["x", "y", "z"], j);
+
+        // for predictability, ensure the new nodes are in the same domain
+        let domain = mig.add_domain();
+        mig.assign_domain(b, domain);
+        mig.assign_domain(j, domain);
+
+        // we want to observe what comes out of the join
+        let out = mig.stream(j);
+
+        // do the migration
+        let put2 = mig.commit();
+
+        (out, put2, b)
+    };
+
+    // if all went according to plan, the ingress to j's domains hould now contain all the records
+    // that we initially inserted into a. thus, when we forward matching things through j, we
+    // should see joined output records.
+
+    // there are (/should be) two records in a with x == 1
+    put2[&b].0(vec![1.into(), "n".into()]);
+    // they may arrive in any order
+    let res = out.recv().unwrap();
+    assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()].into()));
+    assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
+
+    // there are (/should be) one record in a with x == 2
+    put2[&b].0(vec![2.into(), "o".into()]);
+    assert_eq!(out.recv(),
+               Ok(vec![vec![2.into(), "c".into(), "o".into()]].into()));
+
+    // there should now be no more records
+    drop(g);
+    assert_eq!(out.recv(), Err(mpsc::RecvError));
+}
+
+#[test]
+fn state_replay_migration_query() {
+    // similar to test above, except we will have a materialized Reader node that we're going to
+    // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
+    // are created and populated before the migration, meaning we have to replay through a join.
+
+    let mut g = distributary::Blender::new();
+    let (put1, a, b) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base {});
+
+        let domain = mig.add_domain();
+        mig.assign_domain(a, domain);
+        mig.assign_domain(b, domain);
+        (mig.commit(), a, b)
+    };
+
+    // make a couple of records
+    put1[&a].0(vec![1.into(), "a".into()]);
+    put1[&a].0(vec![1.into(), "b".into()]);
+    put1[&a].0(vec![2.into(), "c".into()]);
+    put1[&b].0(vec![1.into(), "n".into()]);
+    put1[&b].0(vec![2.into(), "o".into()]);
+
+    let out = {
+        // add join and a reader node
+        let mut mig = g.start_migration();
+        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
+            .from(a, vec![1, 0])
+            .join(b, vec![1, 0]);
+        let j = mig.add_ingredient("j", &["x", "y", "z"], j);
+
+        // we want to observe what comes out of the join
+        let out = mig.maintain(j, 0);
+
+        // do the migration
+        let _ = mig.commit();
+
+        out
+    };
+
+    // if all went according to plan, the join should now be fully populated!
+
+    // there are (/should be) two records in a with x == 1
+    // they may appear in any order
+    let res = out(&1.into());
+    assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
+    assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
+
+    // there are (/should be) one record in a with x == 2
+    assert_eq!(out(&2.into()), vec![vec![2.into(), "c".into(), "o".into()]]);
+
+    // there are (/should be) no records with x == 3
+    assert!(out(&3.into()).is_empty());
 }

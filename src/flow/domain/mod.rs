@@ -30,6 +30,9 @@ impl Into<usize> for Index {
 pub enum Control {
     AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
     Ready(LocalNodeIndex, Option<State>, mpsc::SyncSender<()>),
+    ReplayThrough(Vec<NodeAddress>, mpsc::Receiver<Message>, Option<mpsc::SyncSender<Message>>),
+    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>),
+    PrepareState(LocalNodeIndex, usize),
 }
 
 pub mod single;
@@ -304,6 +307,7 @@ impl Domain {
     }
 
     fn handle_control(&mut self, c: Control) {
+        use itertools::Itertools;
         match c {
             Control::AddNode(n, parents) => {
                 use std::cell;
@@ -318,9 +322,129 @@ impl Domain {
             Control::Ready(ni, state, ack) => {
                 if let Some(state) = state {
                     self.state.insert(ni, state);
+                } else {
+                    // NOTE: just because state is None does *not* mean we're not materialized
                 }
                 self.not_ready.remove(&ni);
                 drop(ack);
+            }
+            Control::PrepareState(ni, on) => {
+                let mut state = State::default();
+                state.set_pkey(on);
+                self.state.insert(ni, state);
+            }
+            Control::Replay(nodes, mut tx) => {
+                // okay, I'm sorry in advance for this.
+                // we have to have read-only reference to the state of the node we are replaying.
+                // however, we *also* need to have a mutable reference to the states such that we
+                // can call .process for each node we're operating on. and *that* is again
+                // necessary because process() may need to update materialized state. and *that*
+                // can happen even in this flow (where the whole reason we're replaying through
+                // nodes is because they *aren't* materialized) because the target node of the
+                // replay may *also* be one of ours.
+                // so, to facilitate this, we stash away an &mut self.state here.
+                let extra_mut_state: *mut _ = &mut self.state;
+
+                // we know that nodes[0] is materialized, as the migration coordinator picks path
+                // that originate with materialized nodes. if this weren't the case, we wouldn't be
+                // able to do the replay, and the entire migration would fail.
+                let state = self.state
+                    .get(nodes[0].as_local())
+                    .expect("migration replay path started with non-materialized node");
+
+                let init_to = if nodes.len() == 1 { nodes[0] } else { nodes[1] };
+
+                // process all records in state to completion within domain
+                // and then forward on tx (if there is one)
+                'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(100) {
+                    let chunk: Records = chunk.into_iter().map(|r| r.clone().into()).collect();
+                    let mut m = Message {
+                        from: nodes[0],
+                        to: init_to,
+                        data: chunk,
+                        ts: None,
+                        token: None,
+                    };
+
+                    // forward the current chunk through all local nodes
+                    for (i, ni) in nodes.iter().enumerate().skip(1) {
+                        // process the current chunk in this node
+                        //
+                        // NOTE: the unsafe below is safe because
+                        //
+                        //   a) .process never modifies state, only its individual states
+                        //   b) the state we have borrow immutably is for nodes[0]
+                        //   c) we here iterate over all nodes that are *not* nodes[0]
+                        //      (due to .skip(1)). the assertion should be unnecssary.
+                        //
+                        let mut n = self.nodes[ni.as_local()].borrow_mut();
+                        assert!(ni != &nodes[0]);
+                        let state: &mut _ = unsafe { &mut *extra_mut_state };
+                        let u = n.process(m, state, &self.nodes);
+                        drop(n);
+
+                        if u.is_none() {
+                            continue 'chunks;
+                        }
+
+                        m = Message {
+                            from: *ni,
+                            to: *ni,
+                            data: u.unwrap().0,
+                            ts: None,
+                            token: None,
+                        };
+
+                        if i != nodes.len() - 1 {
+                            m.to = nodes[i + 1];
+                        } else {
+                            // to is overwritten by receiving domain. from doesn't need to be set
+                            // to the egress, because the ingress ignores it. setting it to this
+                            // node is basically just as correct.
+                        }
+                    }
+
+                    if let Some(tx) = tx.as_mut() {
+                        tx.send(m).unwrap();
+                    }
+                }
+            }
+            Control::ReplayThrough(nodes, rx, mut tx) => {
+                // process all records in state to completion within domain
+                // and then forward on tx (if there is one)
+                'replay: for mut m in rx {
+                    // forward the current message through all local nodes
+                    for (i, ni) in nodes.iter().enumerate() {
+                        // process the current message in this node
+                        let mut n = self.nodes[ni.as_local()].borrow_mut();
+                        let u = n.process(m, &mut self.state, &self.nodes);
+                        drop(n);
+
+                        if u.is_none() {
+                            continue 'replay;
+                        }
+
+                        m = Message {
+                            from: *ni,
+                            to: *ni,
+                            data: u.unwrap().0,
+                            ts: None,
+                            token: None,
+                        };
+
+                        if i != nodes.len() - 1 {
+                            m.to = nodes[i + 1];
+                        } else {
+                            // to is overwritten by receiving domain. from doesn't need to be set
+                            // to the egress, because the ingress ignores it. setting it to this
+                            // node is basically just as correct.
+                        }
+                    }
+
+                    if let Some(tx) = tx.as_mut() {
+                        tx.send(m).unwrap();
+                    }
+                }
             }
         }
     }

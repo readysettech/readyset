@@ -195,6 +195,15 @@ pub fn index(graph: &Graph,
         if !state.get(n.addr().as_local()).unwrap().is_useful() {
             // this materialization doesn't have any primary key,
             // so we assume it's not in use.
+
+            if n.is_base() {
+                // but it's a base nodes!
+                // we must *always* materialize base nodes
+                // so, just make up some column to index on
+                state.get_mut(n.addr().as_local()).unwrap().set_pkey(0);
+                continue;
+            }
+
             println!("removing unnecessary materialization on {}", n.addr());
             state.remove(n.addr().as_local());
         }
@@ -227,7 +236,9 @@ pub fn initialize(graph: &Graph,
         let n = &graph[node];
         let d = n.domain();
 
-        let state = materialize.get_mut(&d).and_then(|ss| ss.remove(n.addr().as_local()));
+        let state = materialize.get_mut(&d)
+            .and_then(|ss| ss.get(n.addr().as_local()))
+            .map(|s| (*s).clone());
         let mut has_state = state.is_some();
 
         if let flow::node::Type::Reader(_, ref r) = **n {
@@ -241,7 +252,7 @@ pub fn initialize(graph: &Graph,
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = || {
+        let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, state| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             control_txs[&d]
                 .send(domain::Control::Ready(*n.addr().as_local(), state, ack_tx))
@@ -257,18 +268,179 @@ pub fn initialize(graph: &Graph,
             .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             empty.insert(node);
-            ready();
+            ready(control_txs, state);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
-                ready();
+                ready(control_txs, state);
                 continue;
             }
 
             // we have a parent that has data, so we need to replay and reconstruct
-            unimplemented!();
+            let index_on = state.map(|s| s.get_pkey());
+            reconstruct(graph, source, &materialize, control_txs, node, index_on);
+            ready(control_txs, None);
         }
+    }
+}
+
+pub fn reconstruct(graph: &Graph,
+                   source: NodeIndex,
+                   materialized: &HashMap<domain::Index, StateMap>,
+                   control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
+                   node: NodeIndex,
+                   index_on: Option<usize>) {
+
+    // okay, so here's the situation: `node` is a node that
+    //
+    //   a) was not previously materialized, and
+    //   b) now needs to be materialized, and
+    //   c) at least one of node's parents has existing data
+    //
+    // because of the topological traversal done by `initialize`, we know that all our ancestors
+    // that should be materialized have been.
+    //
+    // our plan is as follows:
+    //
+    //   1. search our ancestors for the closest materialization points along each path
+    //   2. for each such path, identify the domains along that path and pause them
+    //   3. construct a daisy-chain of channels, and pass them to each domain along the path
+    //   4. tell the domain nearest to the root to start replaying
+    //
+    // so, first things first, let's find our closest materialized parents
+    let paths = trace(graph, source, node, materialized, vec![node]);
+
+    if let flow::node::Type::Reader(..) = *graph[node] {
+        // readers have their own internal state
+    } else {
+        let index_on = index_on.expect("all non-reader nodes must have a state key");
+
+        // tell the domain in question to create an empty state for the node in question
+        control_txs[&graph[node].domain()]
+            .send(domain::Control::PrepareState(*graph[node].addr().as_local(), index_on))
+            .unwrap();
+    }
+
+    // set up channels for replay along each path
+    for mut path in paths {
+        // we want path to have the ancestor closest to the root *first*
+        path.reverse();
+
+        // first, find out which domains we are crossing
+        let mut segments = Vec::new();
+        let mut last_domain = None;
+        for node in path {
+            let domain = graph[node].domain();
+            if last_domain.is_none() || domain != last_domain.unwrap() {
+                segments.push((domain, Vec::new()));
+                last_domain = Some(domain);
+            }
+
+            if graph[node].is_egress() {
+                // we don't want replayed records to spill out into data channels
+            } else {
+                segments.last_mut().unwrap().1.push(node);
+            }
+        }
+
+        // next, daisy chain channels between them
+        // this includes the final domain, which will automatically populate `node` during replay
+        let (root_tx, mut next_rx) = mpsc::sync_channel(10);
+        let root_tx = if segments.len() == 1 {
+            // no channels needed
+            None
+        } else {
+            Some(root_tx)
+        };
+
+        let locals = |i: usize| -> Vec<NodeAddress> {
+            segments[i]
+                .1
+                .iter()
+                .map(|&ni| graph[ni].addr())
+                .collect::<Vec<_>>()
+        };
+
+        let mut seen = HashSet::new();
+        for (i, &(ref domain, _)) in segments.iter().skip(1).enumerate() {
+
+            // TODO:
+            //  a domain may appear multiple times in this list if a path crosses into the same
+            //  domain more than once. currently, that will cause a deadlock.
+            assert!(!seen.contains(domain),
+                    "a-b-a domain replays are not yet supported");
+            seen.insert(*domain);
+
+            let (tx, rx) = mpsc::sync_channel(10);
+            let tx = if i == segments.len() - 1 - 1 {
+                // last segment shouldn't emit anything
+                None
+            } else {
+                Some(tx)
+            };
+
+            control_txs[domain]
+                .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx))
+                .unwrap();
+            next_rx = rx;
+        }
+
+        // finally, tell the root domain to start replaying
+        control_txs[&segments[0].0]
+            .send(domain::Control::Replay(locals(0), root_tx))
+            .unwrap();
+    }
+}
+
+fn trace(graph: &Graph,
+         source: NodeIndex,
+         node: NodeIndex,
+         materialized: &HashMap<domain::Index, StateMap>,
+         path: Vec<NodeIndex>)
+         -> Vec<Vec<NodeIndex>> {
+
+    if node == source {
+        unreachable!("base node was not materialized!");
+    }
+
+    let n = &graph[node];
+    let is_materialized = if path.len() == 1 {
+        // the start node is the one we're trying to replay to, so while it'll be marked as
+        // materialized in the map, it isn't really
+        false
+    } else {
+        materialized.get(&n.domain())
+            .map(|dm| dm.contains_key(n.addr().as_local()))
+            .unwrap_or(false)
+    };
+
+    if is_materialized {
+        vec![path]
+    } else {
+        let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .collect();
+        if parents.len() != 1 {
+            // there are two cases where we have multiple parents: joins and unions
+            // for unions, we should replay *all* paths. for joins, we should only replay one path.
+            // in particular, for a join, we should only replay the ancestor that yields the full
+            // result-set (i.e., the left side of a left join).
+            assert!(graph[node].is_internal());
+            if let Some(picked_ancestor) = graph[node].replay_ancestor() {
+                // join, only replay picked ancestor
+                parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
+            } else {
+                // union; just replay all
+            }
+        }
+
+        parents.into_iter()
+            .flat_map(|parent| {
+                let mut path = path.clone();
+                path.push(parent);
+                trace(graph, source, parent, materialized, path)
+            })
+            .collect()
     }
 }
