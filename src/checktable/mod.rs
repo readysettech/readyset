@@ -176,9 +176,10 @@ impl CheckTable {
             let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
-                    if let &mut Some(ref mut m) = t.entry(i).or_insert(None) {
+                    if let &mut Some(ref mut m) = t.entry(i).or_insert(Some(HashMap::new())) {
                         *m.entry(value.clone()).or_insert(0) = ts;
                     }
+                    // TODO(jonathan): fall back to coarse checktable if granular table has gotten too large.
                 }
             }
 

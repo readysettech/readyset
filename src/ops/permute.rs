@@ -113,6 +113,10 @@ impl Ingredient for Permute {
         };
         format!("π[{}]", emit_cols)
     }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(self.resolve_col(column)))]
+    }
 }
 
 #[cfg(test)]

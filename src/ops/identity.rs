@@ -55,6 +55,10 @@ impl Ingredient for Identity {
     fn description(&self) -> String {
         "≡".into()
     }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(column))]
+    }
 }
 
 #[cfg(test)]

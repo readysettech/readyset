@@ -122,6 +122,9 @@ impl Ingredient for Union {
             .collect::<Vec<_>>()
             .join(" ⋃ ")
     }
+    fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        self.emit.iter().map(|(src, emit)| (*src, Some(emit[col]))).collect()
+    }
 }
 
 #[cfg(test)]

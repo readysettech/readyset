@@ -398,6 +398,23 @@ impl Ingredient for Joiner {
             .join(", ");
         format!("[{}] {}", emit, joins)
     }
+
+    fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        let (nl, c) = self.emit[col];
+
+        let ref j = self.join[&nl];
+        assert!(j.against.len() == 1);
+
+        let (nr, target) = j.against.iter().next().unwrap();
+        let (lcol, rcol) = target.on;
+
+        if lcol == c {
+            vec![(nl, Some(lcol)), (*nr, Some(rcol))]
+        } else {
+            // TODO(jonathan): Handle this case.
+            unimplemented!();
+        }
+    }
 }
 
 #[cfg(test)]

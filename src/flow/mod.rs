@@ -65,6 +65,13 @@ impl NodeAddress {
         NodeAddress { addr: NodeAddress_::Global(id) }
     }
 
+    fn is_global(&self) -> bool {
+        match self.addr {
+            NodeAddress_::Global(_) => true,
+            _ => false,
+        }
+    }
+
     #[cfg(test)]
     pub fn mock_local(id: usize) -> NodeAddress {
         Self::make_local(id)
@@ -222,6 +229,12 @@ pub trait Ingredient
                 }
             })
     }
+
+    // Translate a column in this ingredient into the corresponding column(s) in
+    // parent ingredients. None for the column means that the parent doesn't
+    // have an associated column. Similar to resolve, but does not depend on
+    // materialization, and returns results even for computed columns.
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)>;
 }
 
 /// `Blender` is the core component of the alternate Soup implementation.
@@ -539,21 +552,29 @@ impl<'a> Migration<'a> {
         assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
-    fn ensure_reader_for(&mut self, n: NodeAddress) {
+    fn ensure_reader_for(&mut self, n: NodeAddress, key: usize) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let base_parents: Vec<_> = self.mainline
-                .ingredients
-                .neighbors_directed(self.mainline.source, petgraph::EdgeDirection::Outgoing)
-                .filter(|b| {
-                    petgraph::algo::has_path_connecting(&self.mainline.ingredients,
-                                                        *b,
-                                                        *n.as_global(),
-                                                        None)
-                })
-                .collect();
+            let base_columns:Vec<(_,Option<_>)> = self.mainline.ingredients[*n.as_global()]
+                .base_columns(key, &self.mainline.ingredients, *n.as_global());
 
-            let r = node::Reader::new(checktable::TokenGenerator::new(base_parents, vec![]));
+            let coarse_parents = base_columns.iter().filter_map(|&(ni, o)| {
+                if o.is_none() {
+                    Some(ni)
+                } else {
+                    None
+                }
+            }).collect();
+
+            let granular_parents = base_columns.into_iter().filter_map(|(ni, o)| {
+                if o.is_some() {
+                    Some((ni, o.unwrap()))
+                } else {
+                    None
+                }
+            }).collect();
+
+            let r = node::Reader::new(checktable::TokenGenerator::new(coarse_parents, granular_parents));
             let r = node::Type::Reader(None, r);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
@@ -579,8 +600,7 @@ impl<'a> Migration<'a> {
                     n: NodeAddress,
                     key: usize)
                     -> Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync> {
-        self.ensure_reader_for(n);
-
+        self.ensure_reader_for(n, key);
         let ri = self.readers[n.as_global()];
 
         // we need to do these here because we'll mutably borrow self.mainline in the if let
@@ -611,7 +631,7 @@ impl<'a> Migration<'a> {
          n: NodeAddress,
          key: usize)
          -> Box<Fn(&query::DataType) -> Result<(ops::Datas, checktable::Token), ()> + Send + Sync> {
-        self.ensure_reader_for(n);
+        self.ensure_reader_for(n, key);
         let ri = self.readers[n.as_global()];
 
         // we need to do these here because we'll mutably borrow self.mainline in the if let
@@ -647,7 +667,8 @@ impl<'a> Migration<'a> {
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
     pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<prelude::Records> {
-        self.ensure_reader_for(n);
+        // TODO(jonathan): pass real value here...
+        self.ensure_reader_for(n, 0);
         let (tx, rx) = mpsc::channel();
         self.reader_for(n).streamers.lock().unwrap().push(tx);
         rx
