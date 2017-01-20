@@ -323,6 +323,7 @@
 #![feature(optin_builtin_traits)]
 #![feature(ptr_eq)]
 #![feature(mpsc_select)]
+#![feature(pub_restricted)]
 #![deny(missing_docs)]
 
 #[cfg(feature="b_netsoup")]
@@ -353,7 +354,7 @@ mod ops;
 mod backlog;
 
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Migration};
+pub use flow::{Blender, Migration, NodeAddress};
 pub use ops::Datas;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};

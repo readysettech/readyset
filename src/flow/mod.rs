@@ -46,6 +46,8 @@ enum NodeAddress_ {
     Local(LocalNodeIndex), // XXX: maybe include domain here?
 }
 
+/// `NodeAddress` is a unique identifier that can be used to refer to nodes in the graph across
+/// migrations.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct NodeAddress {
     addr: NodeAddress_, // wrap the enum so people can't create these accidentally
@@ -96,14 +98,14 @@ impl fmt::Display for NodeAddress {
 }
 
 impl NodeAddress {
-    pub fn as_global(&self) -> &NodeIndex {
+    pub(crate) fn as_global(&self) -> &NodeIndex {
         match self.addr {
             NodeAddress_::Global(ref ni) => ni,
             NodeAddress_::Local(_) => unreachable!("tried to use local address as global"),
         }
     }
 
-    pub fn as_local(&self) -> &LocalNodeIndex {
+    pub(crate) fn as_local(&self) -> &LocalNodeIndex {
         match self.addr {
             NodeAddress_::Local(ref i) => i,
             NodeAddress_::Global(_) => unreachable!("tried to use global address as local"),
@@ -322,6 +324,24 @@ impl Blender {
                 }
             })
             .collect()
+    }
+
+    /// Obtain a new function for querying a given (already maintained) reader node.
+    pub fn get_getter(&self,
+                      node: NodeAddress)
+                      -> Option<Box<Fn(&query::DataType) -> ops::Datas + Send + Sync>> {
+
+        // reader should be a child of the given node
+        let reader = self.ingredients
+            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
+            .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
+                Some(inner)
+            } else {
+                None
+            })
+            .next(); // there should be at most one
+
+        reader.and_then(|r| r.get_reader())
     }
 
     /// Obtain a new function for inserting writes into the soup at the given base node.

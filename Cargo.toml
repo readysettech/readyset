@@ -18,6 +18,8 @@ petgraph = "0.4"
 regex = "0.1"
 fnv = "1.0"
 
+spmc = "0.2.1"
+
 # for benchmarks
 # cli
 clap = "2.13"
