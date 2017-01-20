@@ -30,8 +30,11 @@ impl Into<usize> for Index {
 pub enum Control {
     AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
     Ready(LocalNodeIndex, Option<State>, mpsc::SyncSender<()>),
-    ReplayThrough(Vec<NodeAddress>, mpsc::Receiver<Message>, Option<mpsc::SyncSender<Message>>),
-    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>),
+    ReplayThrough(Vec<NodeAddress>,
+                  mpsc::Receiver<Message>,
+                  Option<mpsc::SyncSender<Message>>,
+                  mpsc::SyncSender<()>),
+    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>, mpsc::SyncSender<()>),
     PrepareState(LocalNodeIndex, usize),
 }
 
@@ -336,7 +339,10 @@ impl Domain {
                 state.set_pkey(on);
                 self.state.insert(ni, state);
             }
-            Control::Replay(nodes, mut tx) => {
+            Control::Replay(nodes, mut tx, ack) => {
+                // let coordinator know that we've entered replay loop
+                ack.send(()).unwrap();
+
                 // okay, I'm sorry in advance for this.
                 // we have to have read-only reference to the state of the node we are replaying.
                 // however, we *also* need to have a mutable reference to the states such that we
@@ -412,7 +418,10 @@ impl Domain {
                     }
                 }
             }
-            Control::ReplayThrough(nodes, rx, mut tx) => {
+            Control::ReplayThrough(nodes, rx, mut tx, ack) => {
+                // let coordinator know that we've entered replay loop
+                ack.send(()).unwrap();
+
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
                 'replay: for mut m in rx {

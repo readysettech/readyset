@@ -363,9 +363,35 @@ pub fn reconstruct(graph: &Graph,
                 .collect::<Vec<_>>()
         };
 
+        let (wait_tx, wait_rx) = mpsc::sync_channel(0);
+
+        // first, tell the root domain to start replaying
+        control_txs[&segments[0].0]
+            .send(domain::Control::Replay(locals(0), root_tx, wait_tx.clone()))
+            .unwrap();
+
+        // wait for the root to start replay.
+        //
+        // NOTE:
+        // this is crucial to prevent deadlock.
+        // if we *didn't* do this, we could run into the following situation:
+        //
+        //  - next domain in chain (let's call it [1]) receives ReplayThrough
+        //  - [1] enters replay loop (and crucially, stops running its main loop)
+        //  - [0] continues receiving records on its data channel
+        //  - [0] processes those records all the way to egress node connected to [1]
+        //  - [0] fills up channel between [0] egress and [1] ingress since [1] isn't reading
+        //  - [0] blocks on said channel
+        //
+        // now, [1] is blocking on [0] reading from its control channel, and [0] is blocking on [1]
+        // reading from its data channel. deadlock. yay!
+        //
+        // by having [n] wait for [0..n-1], we know that this won't happen.
+        wait_rx.recv().unwrap();
+
+        // next, replay through the later domains one by one, linking up the daisy-chain
         let mut seen = HashSet::new();
         for (i, &(ref domain, _)) in segments.iter().skip(1).enumerate() {
-
             // TODO:
             //  a domain may appear multiple times in this list if a path crosses into the same
             //  domain more than once. currently, that will cause a deadlock.
@@ -382,15 +408,13 @@ pub fn reconstruct(graph: &Graph,
             };
 
             control_txs[domain]
-                .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx))
+                .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx, wait_tx.clone()))
                 .unwrap();
             next_rx = rx;
-        }
 
-        // finally, tell the root domain to start replaying
-        control_txs[&segments[0].0]
-            .send(domain::Control::Replay(locals(0), root_tx))
-            .unwrap();
+            // wait for this domain too -- see explanation above
+            wait_rx.recv().unwrap();
+        }
     }
 }
 
