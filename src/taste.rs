@@ -42,6 +42,13 @@ fn benchmark(workdir: &str,
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();
+
+    // Don't try parsing the output if we didn't succeed
+    if !output.status.success() {
+        return (output.status, res);
+    }
+
+    // Success, so let's look for the results
     for l in lines {
         for (i, regex) in cfg.result_expr.iter().enumerate() {
             for cap in regex.captures_iter(l) {
