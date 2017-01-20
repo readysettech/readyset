@@ -62,12 +62,15 @@ impl Domain {
                in_from_base: HashMap<NodeIndex, usize>,
                checktable: Arc<Mutex<checktable::CheckTable>>)
                -> Self {
+        // initially, all nodes are not ready!
+        let not_ready = nodes.iter().map(|n| *n.borrow().addr().as_local()).collect();
+
         Domain {
             nodes: nodes,
             state: StateMap::default(),
             buffered_transactions: HashMap::new(),
             ingress_from_base: in_from_base,
-            not_ready: HashSet::new(),
+            not_ready: not_ready,
             ts: -1,
             checktable: checktable,
         }

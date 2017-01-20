@@ -646,6 +646,113 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 #[test]
+fn full_vote_migration() {
+    // we're trying to force a very particular race, namely that a put arrives for a new join
+    // *before* its state has been fully initialized. it may take a couple of iterations to hit
+    // that, so we run the test a couple of times.
+    for _ in 0..5 {
+        use distributary::{Blender, Base, JoinBuilder, Aggregation, DataType};
+        let mut g = Blender::new();
+        let article;
+        let vote;
+        let vc;
+        let end;
+        let put1 = {
+            // migrate
+            let mut mig = g.start_migration();
+
+            // add article base node
+            article = mig.add_ingredient("article", &["id", "title"], Base {});
+
+            // add vote base table
+            vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+
+            // add vote count
+            vc = mig.add_ingredient("votecount",
+                                    &["id", "votes"],
+                                    Aggregation::COUNT.over(vote, 0, &[1]));
+
+            // add final join using first field from article and first from vc
+            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
+                .from(article, vec![1, 0])
+                .join(vc, vec![1, 0]);
+            end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
+
+            mig.maintain(end, 0);
+
+            // start processing
+            mig.commit()
+        };
+
+        let n = 1000i64;
+        let title: DataType = "foo".into();
+        let voten: DataType = 1.into();
+        let raten: DataType = 5.into();
+
+        for i in 0..n {
+            put1[&article].0(vec![i.into(), title.clone()]);
+        }
+        for i in 0..n {
+            put1[&vote].0(vec![1.into(), i.into()]);
+        }
+
+        // migrate
+        let mut mig = g.start_migration();
+
+        let domain = mig.add_domain();
+
+        // add new "ratings" base table
+        let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base {});
+
+        // add sum of ratings
+        let rs = mig.add_ingredient("rsum",
+                                    &["id", "total"],
+                                    Aggregation::SUM.over(rating, 2, &[1]));
+
+        // join vote count and rsum (and in theory, sum them)
+        let j = JoinBuilder::new(vec![(rs, 0), (rs, 1), (vc, 1)])
+            .from(rs, vec![1, 0])
+            .join(vc, vec![1, 0]);
+        let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
+
+        mig.assign_domain(rating, domain);
+        mig.assign_domain(rs, domain);
+        mig.assign_domain(total, domain);
+
+        // finally, produce end result
+        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (total, 1), (total, 2)])
+            .from(article, vec![1, 0])
+            .join(total, vec![1, 0, 0]);
+        let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
+        let last = mig.maintain(newend, 0);
+
+        // start processing
+        let put2 = mig.commit();
+        for i in 0..n {
+            put2[&rating].0(vec![1.into(), i.into(), raten.clone()]);
+        }
+
+        // system does about 10k/s = 10/ms
+        // wait for twice that before expecting to see results
+        thread::sleep(::std::time::Duration::from_millis(2 * n as u64 / 10));
+        for i in 0..n {
+            let foo = last(&i.into());
+            assert!(!foo.is_empty(), "every article should be voted for");
+            assert_eq!(foo.len(), 1, "every article should have only one entry");
+            let foo = foo.into_iter().next().unwrap();
+            assert_eq!(foo[0],
+                       i.into(),
+                       "each article result should have the right id");
+            assert_eq!(foo[1], title, "all articles should have title 'foo'");
+            assert_eq!(foo[2], raten, "all articles should have one 5-star rating");
+            assert_eq!(foo[3], voten, "all articles should have one vote");
+        }
+    }
+
+    assert!(true);
+}
+
+#[test]
 fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
