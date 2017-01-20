@@ -116,7 +116,10 @@ pub fn taste_commit(ws: &Workspace,
     println!("Tasting commit {}", id);
     ws.checkout_commit(id)?;
 
-    let branch = String::from(&commit_ref[commit_ref.rfind("/").unwrap() + 1..]);
+    let branch = match commit_ref.rfind("/") {
+        None => String::from(""),
+        Some(i) => String::from(&commit_ref[i + 1..]),
+    };
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();
