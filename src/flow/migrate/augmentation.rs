@@ -24,6 +24,11 @@ pub fn inform(graph: &mut Graph,
         let old_nodes: HashSet<_> =
             nodes.iter().filter(|&&(_, new)| !new).map(|&(ni, _)| ni).collect();
 
+        if old_nodes.len() == nodes.len() {
+            // some domains haven't changed at all
+            continue;
+        }
+
         let ctx = control_txs.get_mut(&domain).unwrap();
         for (ni, new) in nodes {
             if !new {

@@ -602,6 +602,50 @@ fn state_replay_migration_stream() {
 }
 
 #[test]
+fn migration_depends_on_unchanged_domain() {
+    // here's the case we want to test: before the migration, we have some domain that contains
+    // some materialized node n, as well as an egress node. after the migration, we add a domain
+    // that depends on n being materialized. the tricky part here is that n's domain hasn't changed
+    // as far as the system is aware (in particular, because it didn't need to add an egress node).
+    // this is tricky, because the system must realize that n is materialized, even though it
+    // normally wouldn't even look at that part of the data flow graph!
+
+    let mut g = distributary::Blender::new();
+    let foo = {
+        let mut mig = g.start_migration();
+
+        // base node, so will be materialized
+        let foo = mig.add_ingredient("foo", &["a", "b"], distributary::Base {});
+
+        // node in different domain that depends on foo causes egress to be added
+        mig.add_ingredient("bar", &["a", "b"], distributary::Identity::new(foo));
+
+        // start processing
+        mig.commit();
+        foo
+    };
+
+    let mut mig = g.start_migration();
+
+    // joins require their inputs to be materialized
+    // we need a new base as well so we can actually make a join
+    let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base {});
+    let j = distributary::JoinBuilder::new(vec![(foo, 0), (tmp, 1)])
+        .from(foo, vec![1, 0])
+        .join(tmp, vec![1, 0]);
+    let j = mig.add_ingredient("join", &["a", "b"], j);
+
+    // we assign tmp and j to the same domain just to make the graph less complex
+    let d = mig.add_domain();
+    mig.assign_domain(tmp, d);
+    mig.assign_domain(j, d);
+
+    // start processing
+    mig.commit();
+    assert!(true);
+}
+
+#[test]
 fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes

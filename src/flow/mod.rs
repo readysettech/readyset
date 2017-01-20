@@ -660,13 +660,9 @@ impl<'a> Migration<'a> {
         let mut domain_nodes = mainline.ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
-            .filter_map(|ni| {
+            .map(|ni| {
                 let domain = mainline.ingredients[ni].domain();
-                if changed_domains.contains(&domain) {
-                    Some((domain, ni, new.contains(&ni)))
-                } else {
-                    None
-                }
+                (domain, ni, new.contains(&ni))
             })
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
@@ -700,6 +696,11 @@ impl<'a> Migration<'a> {
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes
             let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
+
+            if nnodes == nodes.len() {
+                // Nothing to do here
+                continue;
+            }
 
             // Give local addresses to every (new) node
             for &(ni, new) in nodes.iter() {
@@ -752,6 +753,7 @@ impl<'a> Migration<'a> {
         // println!("{}", mainline);
 
         // Determine what nodes to materialize
+        // NOTE: index will also contain the materialization information for *existing* domains
         let index = domain_nodes.iter()
             .map(|(domain, ref nodes)| {
                 let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
