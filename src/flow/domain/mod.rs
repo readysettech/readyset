@@ -327,7 +327,11 @@ impl Domain {
             }
             Control::Ready(ni, index_on, ack) => {
                 if let Some(index_on) = index_on {
-                    let mut s = State::default();
+                    let mut s = if self.nodes[&ni].borrow().is_base() {
+                        State::base()
+                    } else {
+                        State::default()
+                    };
                     s.set_pkey(index_on);
                     self.state.insert(ni, s);
                 } else {

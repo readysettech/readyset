@@ -115,6 +115,11 @@ impl<T: Hash + Eq + Clone> Default for State<T> {
 }
 
 impl<T: Hash + Eq + Clone> State<T> {
+    /// Construct base materializations differently (potentially)
+    pub fn base() -> Self {
+        Self::default()
+    }
+
     pub fn set_pkey(&mut self, key: usize) {
         if self.pkey != usize::max_value() && self.pkey != key {
             unreachable!("asked to index {} when already indexing {}", key, self.pkey);
