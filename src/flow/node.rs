@@ -32,12 +32,14 @@ impl Reader {
         }
     }
 
-    pub fn get_reader(&self) -> Option<Box<Fn(&DataType) -> Vec<Vec<DataType>> + Send + Sync>> {
+    pub fn get_reader
+        (&self)
+         -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>> {
         self.state.clone().map(|arc| {
-            Box::new(move |q: &DataType| -> Datas {
+            Box::new(move |q: &DataType| -> Result<Datas, ()> {
                 arc.find_and(q,
                               |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
-                    .0
+                    .map(|r| r.0)
             }) as Box<_>
         })
     }

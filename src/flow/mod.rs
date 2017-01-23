@@ -327,9 +327,10 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter(&self,
-                      node: NodeAddress)
-                      -> Option<Box<Fn(&query::DataType) -> ops::Datas + Send + Sync>> {
+    pub fn get_getter
+        (&self,
+         node: NodeAddress)
+         -> Option<Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync>> {
 
         // reader should be a child of the given node
         let reader = self.ingredients
@@ -564,7 +565,7 @@ impl<'a> Migration<'a> {
     pub fn maintain(&mut self,
                     n: NodeAddress,
                     key: usize)
-                    -> Box<Fn(&query::DataType) -> ops::Datas + Send + Sync> {
+                    -> Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync> {
         self.ensure_reader_for(n);
 
         let ri = self.readers[n.as_global()];
@@ -596,7 +597,7 @@ impl<'a> Migration<'a> {
         (&mut self,
          n: NodeAddress,
          key: usize)
-         -> Box<Fn(&query::DataType) -> (ops::Datas, checktable::Token) + Send + Sync> {
+         -> Box<Fn(&query::DataType) -> Result<(ops::Datas, checktable::Token), ()> + Send + Sync> {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -614,12 +615,13 @@ impl<'a> Migration<'a> {
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
             let generator = inner.token_generator.clone();
-            Box::new(move |q: &query::DataType| -> (ops::Datas, checktable::Token) {
-                let (res, ts) = arc.find_and(q, |rs| {
-                    rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
-                });
-                let token = generator.generate(ts, q.clone());
-                (res, token)
+            Box::new(move |q: &query::DataType| -> Result<(ops::Datas, checktable::Token), ()> {
+                arc.find_and(q,
+                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
+                    .map(|(res, ts)| {
+                        let token = generator.generate(ts, q.clone());
+                        (res, token)
+                    })
             })
         } else {
             unreachable!("tried to use non-reader node as a reader")

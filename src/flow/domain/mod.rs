@@ -94,7 +94,7 @@ impl Domain {
         }
 
         let mut n = nodes[me.as_local()].borrow_mut();
-        let mut u = n.process(m, states, nodes);
+        let mut u = n.process(m, states, nodes, true);
         drop(n);
 
         if ts.is_some() {
@@ -183,7 +183,7 @@ impl Domain {
 
             self.nodes[m.to.as_local()]
                 .borrow_mut()
-                .process(m, &mut self.state, &self.nodes);
+                .process(m, &mut self.state, &self.nodes, true);
             assert_eq!(n.borrow().children.len(), 0);
         }
     }
@@ -331,6 +331,16 @@ impl Domain {
                 } else {
                     // NOTE: just because state is None does *not* mean we're not materialized
                 }
+
+                // swap replayed reader nodes to expose new state
+                use flow::node::Type;
+                let mut n = self.nodes[&ni].borrow_mut();
+                if let Type::Reader(ref mut w, _) = *n.inner {
+                    if let Some(ref mut state) = *w {
+                        state.swap();
+                    }
+                }
+
                 self.not_ready.remove(&ni);
                 drop(ack);
             }
@@ -389,7 +399,7 @@ impl Domain {
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
                         assert!(ni != &nodes[0]);
                         let state: &mut _ = unsafe { &mut *extra_mut_state };
-                        let u = n.process(m, state, &self.nodes);
+                        let u = n.process(m, state, &self.nodes, false);
                         drop(n);
 
                         if u.is_none() {
@@ -429,7 +439,7 @@ impl Domain {
                     for (i, ni) in nodes.iter().enumerate() {
                         // process the current message in this node
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
-                        let u = n.process(m, &mut self.state, &self.nodes);
+                        let u = n.process(m, &mut self.state, &self.nodes, false);
                         drop(n);
 
                         if u.is_none() {

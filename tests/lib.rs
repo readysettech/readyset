@@ -31,7 +31,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
-    assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
     put[&b].0(vec![id.clone(), 4.into()]);
@@ -40,7 +40,7 @@ fn it_works() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = cq(&id);
+    let res = cq(&id).unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
@@ -110,7 +110,7 @@ fn it_works_w_mat() {
 
     // send a query to c
     // we should see all the a values
-    let res = cq(&id);
+    let res = cq(&id).unwrap();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -125,7 +125,7 @@ fn it_works_w_mat() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = cq(&id);
+    let res = cq(&id).unwrap();
     assert_eq!(res.len(), 6);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
@@ -184,7 +184,7 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query articles to see that it was updated
-    assert_eq!(articleq(&a1), vec![vec![a1.clone(), 2.into()]]);
+    assert_eq!(articleq(&a1), Ok(vec![vec![a1.clone(), 2.into()]]));
 
     // make another article
     put[&article2].0(vec![a2.clone(), 4.into()]);
@@ -194,8 +194,8 @@ fn votes() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    assert_eq!(articleq(&a1), vec![vec![a1.clone(), 2.into()]]);
-    assert_eq!(articleq(&a2), vec![vec![a2.clone(), 4.into()]]);
+    assert_eq!(articleq(&a1), Ok(vec![vec![a1.clone(), 2.into()]]));
+    assert_eq!(articleq(&a2), Ok(vec![vec![a2.clone(), 4.into()]]));
 
     // create a vote (user 1 votes for article 1)
     put[&vote].0(vec![1.into(), a1.clone()]);
@@ -204,19 +204,19 @@ fn votes() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query vote count to see that the count was updated
-    let res = vcq(&a1);
+    let res = vcq(&a1).unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq(&a1);
+    let res = endq(&a1).unwrap();
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq(&a2);
+    let res = endq(&a2).unwrap();
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
@@ -263,7 +263,7 @@ fn transactional_vote() {
     // start processing
     let put = mig.commit();
 
-    let token = articleq(&a1).1;
+    let token = articleq(&a1).unwrap().1;
 
     // make one article
     assert!(put[&article1].1(vec![a1.clone(), 2.into()], token).ok());
@@ -272,7 +272,7 @@ fn transactional_vote() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query articles to see that it was absorbed
-    let (res, token) = articleq(&a1);
+    let (res, token) = articleq(&a1).unwrap();
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
 
     // make another article
@@ -283,9 +283,9 @@ fn transactional_vote() {
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
-    let (res, mut token) = articleq(&a1);
+    let (res, mut token) = articleq(&a1).unwrap();
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
-    let (res, token2) = articleq(&a2);
+    let (res, token2) = articleq(&a2).unwrap();
     assert_eq!(res, vec![vec![a2.clone(), 4.into()]]);
 
     // Check that the two reads happened transactionally.
@@ -299,19 +299,19 @@ fn transactional_vote() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // query vote count to see that the count was updated
-    let res = vcq(&a1);
+    let res = vcq(&a1).unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq(&a1);
+    let res = endq(&a1).unwrap();
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq(&a2);
+    let res = endq(&a2).unwrap();
     assert!(res.len() <= 1) // could be 1 if we had zero-rows
 }
 
@@ -344,7 +344,7 @@ fn empty_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // send a query to c
-    assert_eq!(cq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
     put[&b].0(vec![id.clone(), 4.into()]);
@@ -353,7 +353,7 @@ fn empty_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that value was updated again
-    let res = cq(&id);
+    let res = cq(&id).unwrap();
     assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 }
@@ -379,7 +379,7 @@ fn simple_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that a got it
-    assert_eq!(aq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
     let (putb, b, bq) = {
@@ -397,7 +397,7 @@ fn simple_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that a got it
-    assert_eq!(bq(&id), vec![vec![1.into(), 4.into()]]);
+    assert_eq!(bq(&id), Ok(vec![vec![1.into(), 4.into()]]));
 }
 
 #[test]
@@ -465,7 +465,7 @@ fn independent_domain_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that a got it
-    assert_eq!(aq(&id), vec![vec![1.into(), 2.into()]]);
+    assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
     let (putb, b, bq) = {
@@ -486,7 +486,7 @@ fn independent_domain_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that a got it
-    assert_eq!(bq(&id), vec![vec![1.into(), 4.into()]]);
+    assert_eq!(bq(&id), Ok(vec![vec![1.into(), 4.into()]]));
 }
 
 #[test]
@@ -736,7 +736,7 @@ fn full_vote_migration() {
         // wait for twice that before expecting to see results
         thread::sleep(::std::time::Duration::from_millis(2 * n as u64 / 10));
         for i in 0..n {
-            let foo = last(&i.into());
+            let foo = last(&i.into()).unwrap();
             assert!(!foo.is_empty(), "every article should be voted for");
             assert_eq!(foo.len(), 1, "every article should have only one entry");
             let foo = foo.into_iter().next().unwrap();
@@ -795,16 +795,18 @@ fn state_replay_migration_query() {
     };
 
     // if all went according to plan, the join should now be fully populated!
+    assert!(!out(&1.into()).is_err());
 
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
-    let res = out(&1.into());
+    let res = out(&1.into()).unwrap();
     assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
     assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
-    assert_eq!(out(&2.into()), vec![vec![2.into(), "c".into(), "o".into()]]);
+    assert_eq!(out(&2.into()),
+               Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
 
     // there are (/should be) no records with x == 3
-    assert!(out(&3.into()).is_empty());
+    assert!(out(&3.into()).unwrap().is_empty());
 }

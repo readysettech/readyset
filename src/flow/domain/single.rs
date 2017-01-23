@@ -51,7 +51,8 @@ impl NodeDescriptor {
     pub fn process(&mut self,
                    m: Message,
                    state: &mut StateMap,
-                   nodes: &DomainNodes)
+                   nodes: &DomainNodes,
+                   swap: bool)
                    -> Option<(Records,
                               Option<(i64, NodeIndex)>,
                               Option<(checktable::Token,
@@ -69,7 +70,10 @@ impl NodeDescriptor {
                     if m.ts.is_some() {
                         state.update_ts(m.ts.unwrap().0);
                     }
-                    state.swap();
+
+                    if swap {
+                        state.swap();
+                    }
                 }
 
                 let mut data = Some(m.data); // so we can .take() for last tx
