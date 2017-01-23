@@ -29,7 +29,7 @@ impl Into<usize> for Index {
 
 pub enum Control {
     AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
-    Ready(LocalNodeIndex, Option<State>, mpsc::SyncSender<()>),
+    Ready(LocalNodeIndex, Option<usize>, mpsc::SyncSender<()>),
     ReplayThrough(Vec<NodeAddress>,
                   mpsc::Receiver<Message>,
                   Option<mpsc::SyncSender<Message>>,
@@ -325,11 +325,13 @@ impl Domain {
                 }
                 self.nodes.insert(addr, cell::RefCell::new(n));
             }
-            Control::Ready(ni, state, ack) => {
-                if let Some(state) = state {
-                    self.state.insert(ni, state);
+            Control::Ready(ni, index_on, ack) => {
+                if let Some(index_on) = index_on {
+                    let mut s = State::default();
+                    s.set_pkey(index_on);
+                    self.state.insert(ni, s);
                 } else {
-                    // NOTE: just because state is None does *not* mean we're not materialized
+                    // NOTE: just because index_on is None does *not* mean we're not materialized
                 }
 
                 // swap replayed reader nodes to expose new state

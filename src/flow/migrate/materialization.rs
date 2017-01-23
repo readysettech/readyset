@@ -113,13 +113,15 @@ pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeInde
 pub fn index(graph: &Graph,
              nodes: &[(NodeIndex, bool)],
              materialize: HashSet<LocalNodeIndex>)
-             -> StateMap {
+             -> HashMap<LocalNodeIndex, usize> {
 
+    let map: HashMap<_, _> =
+        nodes.iter().map(|&(ni, _)| (*graph[ni].addr().as_local(), ni)).collect();
     let nodes: Vec<_> = nodes.iter()
         .map(|&(ni, new)| (&graph[ni], new))
         .collect();
 
-    let mut state: StateMap = materialize.into_iter().map(|n| (n, State::default())).collect();
+    let mut state: HashMap<_, Option<usize>> = materialize.into_iter().map(|n| (n, None)).collect();
 
     // Now let's talk indices.
     //
@@ -157,13 +159,13 @@ pub fn index(graph: &Graph,
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
             for (v, cols) in leftover_indices.drain() {
-                if let Some(ref mut state) = state.get_mut(v.as_local()) {
+                if let Some(mut state) = state.get_mut(v.as_local()) {
                     // this node is materialized! add the indices!
                     // we *currently* only support keeping one materialization per node
                     assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
                     let col = cols.into_iter().next().unwrap();
                     println!("adding index on column {:?} of view {:?}", col, v);
-                    state.set_pkey(col);
+                    *state = Some(col);
                 } else if let Some(node) = nodes.get(&v) {
                     // this node is not materialized
                     // we need to push the index up to its ancestor(s)
@@ -195,35 +197,32 @@ pub fn index(graph: &Graph,
         }
     }
 
-    for &(n, _) in &nodes {
-        if !state.contains_key(n.addr().as_local()) {
-            continue;
-        }
+    state.into_iter()
+        .filter_map(|(n, col)| {
+            if let Some(col) = col {
+                Some((n, col))
+            } else {
+                // this materialization doesn't have any primary key,
+                // so we assume it's not in use.
 
-        if !state.get(n.addr().as_local()).unwrap().is_useful() {
-            // this materialization doesn't have any primary key,
-            // so we assume it's not in use.
+                if graph[map[&n]].is_base() {
+                    // but it's a base nodes!
+                    // we must *always* materialize base nodes
+                    // so, just make up some column to index on
+                    return Some((n, 0));
+                }
 
-            if n.is_base() {
-                // but it's a base nodes!
-                // we must *always* materialize base nodes
-                // so, just make up some column to index on
-                state.get_mut(n.addr().as_local()).unwrap().set_pkey(0);
-                continue;
+                println!("removing unnecessary materialization on {:?}", map[&n]);
+                None
             }
-
-            println!("removing unnecessary materialization on {}", n.addr());
-            state.remove(n.addr().as_local());
-        }
-    }
-
-    state
+        })
+        .collect()
 }
 
 pub fn initialize(graph: &Graph,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
-                  mut materialize: HashMap<domain::Index, StateMap>,
+                  mut materialize: HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
                   control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>) {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -244,10 +243,10 @@ pub fn initialize(graph: &Graph,
         let n = &graph[node];
         let d = n.domain();
 
-        let state = materialize.get_mut(&d)
+        let index_on = materialize.get_mut(&d)
             .and_then(|ss| ss.get(n.addr().as_local()))
-            .map(|s| (*s).clone());
-        let mut has_state = state.is_some();
+            .map(|col| *col);
+        let mut has_state = index_on.is_some();
 
         if let flow::node::Type::Reader(_, ref r) = **n {
             if r.state.is_some() {
@@ -260,10 +259,10 @@ pub fn initialize(graph: &Graph,
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, state| {
+        let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Option<usize>| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             control_txs[&d]
-                .send(domain::Control::Ready(*n.addr().as_local(), state, ack_tx))
+                .send(domain::Control::Ready(*n.addr().as_local(), index_on, ack_tx))
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -276,18 +275,17 @@ pub fn initialize(graph: &Graph,
             .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             empty.insert(node);
-            ready(control_txs, state);
+            ready(control_txs, index_on);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
-                ready(control_txs, state);
+                ready(control_txs, index_on);
                 continue;
             }
 
             // we have a parent that has data, so we need to replay and reconstruct
-            let index_on = state.map(|s| s.get_pkey());
             let start = ::std::time::Instant::now();
             reconstruct(graph, source, &materialize, control_txs, node, index_on);
             ready(control_txs, None);
@@ -301,7 +299,7 @@ pub fn initialize(graph: &Graph,
 
 pub fn reconstruct(graph: &Graph,
                    source: NodeIndex,
-                   materialized: &HashMap<domain::Index, StateMap>,
+                   materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
                    node: NodeIndex,
                    index_on: Option<usize>) {
@@ -434,7 +432,7 @@ pub fn reconstruct(graph: &Graph,
 fn trace(graph: &Graph,
          source: NodeIndex,
          node: NodeIndex,
-         materialized: &HashMap<domain::Index, StateMap>,
+         materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
          path: Vec<NodeIndex>)
          -> Vec<Vec<NodeIndex>> {
 
