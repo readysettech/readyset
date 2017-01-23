@@ -294,7 +294,7 @@ pub fn initialize(graph: &Graph,
             println!("reconstruction of {:?} {:?} took {}us",
                      *graph[node],
                      node,
-                     dur_to_ns!(start.elapsed()));
+                     dur_to_ns!(start.elapsed()) / 1000);
         }
     }
 }
