@@ -375,7 +375,7 @@ impl Domain {
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
-                'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(100) {
+                'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(1000) {
                     let chunk: Records = chunk.into_iter().map(|r| r.clone().into()).collect();
                     let mut m = Message {
                         from: nodes[0],
