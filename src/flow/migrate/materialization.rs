@@ -15,6 +15,14 @@ use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use std::sync::mpsc;
 
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+macro_rules! dur_to_ns {
+    ($d:expr) => {{
+        let d = $d;
+        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
+    }}
+}
+
 pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
     let nodes: Vec<_> = nodes.iter()
         .map(|&(ni, new)| (ni, &graph[ni], new))
@@ -280,8 +288,13 @@ pub fn initialize(graph: &Graph,
 
             // we have a parent that has data, so we need to replay and reconstruct
             let index_on = state.map(|s| s.get_pkey());
+            let start = ::std::time::Instant::now();
             reconstruct(graph, source, &materialize, control_txs, node, index_on);
             ready(control_txs, None);
+            println!("reconstruction of {:?} {:?} took {}us",
+                     *graph[node],
+                     node,
+                     dur_to_ns!(start.elapsed()));
         }
     }
 }
