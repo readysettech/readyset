@@ -7,7 +7,7 @@ use std::sync;
 use std::sync::atomic;
 use std::sync::atomic::AtomicPtr;
 
-type S = (FnvHashMap<query::DataType, Vec<sync::Arc<Vec<query::DataType>>>>, i64);
+type S = (FnvHashMap<query::DataType, Vec<sync::Arc<Vec<query::DataType>>>>, i64, bool);
 pub struct WriteHandle {
     w_store: Option<Box<sync::Arc<S>>>,
     w_log: Vec<ops::Record>,
@@ -74,6 +74,7 @@ impl WriteHandle {
                     Self::apply(w_store, self.key, Cow::Owned(r));
                 }
                 w_store.1 = w_ts;
+                w_store.2 = true;
 
                 // w_store (the old r_store) is now fully up to date!
                 break;
@@ -167,8 +168,8 @@ pub fn new(cols: usize, key: usize) -> BufferedStoreBuilder {
     BufferedStoreBuilder {
         key: key,
         cols: cols,
-        w_store: (FnvHashMap::default(), -1),
-        r_store: (FnvHashMap::default(), -1),
+        w_store: (FnvHashMap::default(), -1, true),
+        r_store: (FnvHashMap::default(), -1, false),
     }
 }
 
@@ -230,7 +231,7 @@ impl BufferedStore {
             // that no writer is currently modifying r_store_again (and won't be for as long as we
             // hold rs).
             let rs2: sync::Arc<_> = (&*r_store_again).clone();
-            if rs2.0.is_empty() {
+            if !rs2.2 {
                 Err(())
             } else {
                 let res = then(rs2.0.get(key).map(|v| &**v).unwrap_or(&[]));
@@ -252,7 +253,7 @@ impl BufferedStore {
             // read r_store_again == r_store, which means that at some point *after the clone*, a
             // writer made r_store read owned. since no writer can take ownership of r_store after
             // we cloned it, we know that r_store must still be owned by readers.
-            if rs.0.is_empty() {
+            if !rs.2 {
                 Err(())
             } else {
                 let res = then(rs.0.get(key).map(|v| &**v).unwrap_or(&[]));
@@ -278,13 +279,18 @@ mod tests {
 
         let (r, mut w) = new(2, 0).commit();
 
-        // nothing there initially
+        // initially, store is uninitialized
         assert_eq!(r.find_and(&a[0], |rs| rs.len()), Err(()));
+
+        w.swap();
+
+        // after first swap, it is empty, but ready
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), Ok((0, -1)));
 
         w.add(vec![ops::Record::Positive(a.clone())]);
 
-        // not even after an add (we haven't swapped yet)
-        assert_eq!(r.find_and(&a[0], |rs| rs.len()), Err(()));
+        // it is empty even after an add (we haven't swapped yet)
+        assert_eq!(r.find_and(&a[0], |rs| rs.len()), Ok((0, -1)));
 
         w.swap();
 
