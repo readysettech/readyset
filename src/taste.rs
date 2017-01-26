@@ -70,7 +70,7 @@ fn benchmark(workdir: &str,
                         }
                     };
                     let new_result = match previous_result {
-                        None => BenchmarkResult::Neutral(val, 0.0),
+                        None => BenchmarkResult::Improvement(val, 0.0),
                         Some(prev_res) => {
                             let old_val = match *prev_res.get(&bm_name).unwrap() {
                                 BenchmarkResult::Improvement(v, _) => v,
