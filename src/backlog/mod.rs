@@ -14,6 +14,7 @@ pub struct WriteHandle {
     bs: BufferedStore,
     cols: usize,
     key: usize,
+    first: bool,
 }
 
 #[derive(Clone)]
@@ -48,6 +49,14 @@ impl WriteHandle {
         // prepare w_store
         let w_store = self.w_store.take().unwrap();
         let w_ts = w_store.1;
+        let w_store_clone = if self.first {
+            // this is the *first* swap, clone current w_store instead of insterting all the rows
+            // one-by-one
+            self.first = false;
+            Some(w_store.0.clone())
+        } else {
+            None
+        };
         let w_store: *mut sync::Arc<S> = Box::into_raw(w_store);
 
         // swap in our w_store, and get r_store in return
@@ -70,8 +79,12 @@ impl WriteHandle {
                 // is safe for us to start mutating here
 
                 // put in all the updates the read store hasn't seen
-                for r in self.w_log.drain(..) {
-                    Self::apply(w_store, self.key, Cow::Owned(r));
+                if let Some(old_w_store) = w_store_clone {
+                    w_store.0 = old_w_store;
+                } else {
+                    for r in self.w_log.drain(..) {
+                        Self::apply(w_store, self.key, Cow::Owned(r));
+                    }
                 }
                 w_store.1 = w_ts;
                 w_store.2 = true;
@@ -114,8 +127,13 @@ impl WriteHandle {
                     }
                 }
             }
+
             // and also log it to later apply to the reads
-            self.w_log.push(r);
+            if self.first {
+                // except before first swap, when we'd rather just clone the entire map
+            } else {
+                self.w_log.push(r);
+            }
         }
     }
 
@@ -186,6 +204,7 @@ impl BufferedStoreBuilder {
             bs: r.clone(),
             cols: self.cols,
             key: self.key,
+            first: true,
         };
         (r, w)
     }
