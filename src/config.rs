@@ -10,6 +10,7 @@ pub struct Benchmark {
     pub cmd: String,
     pub args: Vec<String>,
     pub result_expr: Vec<Regex>,
+    pub lower_is_better: bool,
 }
 
 pub fn parse_config(cfg: &Path) -> Result<Vec<Benchmark>, Error> {
@@ -37,6 +38,10 @@ pub fn parse_config(cfg: &Path) -> Result<Vec<Benchmark>, Error> {
                 .iter()
                 .map(|r| Regex::new(r.as_str().unwrap()).unwrap())
                 .collect(),
+            lower_is_better: match t.1.lookup("lower_better") {
+                None => false,
+                Some(v) => v.as_bool().unwrap(),
+            },
         }
     };
     let benchmarks = value.iter().map(|t| to_bench(t)).collect();

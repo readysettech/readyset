@@ -77,12 +77,22 @@ fn benchmark(workdir: &str,
                                 BenchmarkResult::Regression(v, _) => v,
                                 BenchmarkResult::Neutral(v, _) => v,
                             };
-                            let new_result = if val >= old_val * 1.1 {
-                                BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
-                            } else if val < old_val * 0.9 {
-                                BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                            let new_result = if cfg.lower_is_better {
+                                if val >= old_val * 1.1 {
+                                    BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                                } else if val < old_val * 0.9 {
+                                    BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                                } else {
+                                    BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                                }
                             } else {
-                                BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                                if val >= old_val * 1.1 {
+                                    BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
+                                } else if val < old_val * 0.9 {
+                                    BenchmarkResult::Regression(val, (val / old_val) - 1.0)
+                                } else {
+                                    BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
+                                }
                             };
                             new_result
                         }
