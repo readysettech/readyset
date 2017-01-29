@@ -3,6 +3,7 @@ extern crate log;
 extern crate env_logger;
 
 extern crate afterparty;
+#[macro_use]
 extern crate clap;
 extern crate lettre;
 extern crate git2;
@@ -58,6 +59,18 @@ pub fn main() {
             .takes_value(true)
             .required(false)
             .help("Email address to send notifications to"))
+        .arg(Arg::with_name("default_regression_reporting_threshold")
+            .long("default_regression_reporting_threshold")
+            .takes_value(true)
+            .default_value("0.9")
+            .help("Normalized performance threshold below which a result is considered a \
+                   regression that needs reporting."))
+        .arg(Arg::with_name("default_improvement_reporting_threshold")
+            .long("default_improvement_reporting_threshold")
+            .takes_value(true)
+            .default_value("1.1")
+            .help("Normalized performance threshold above which a result is considered an \
+                   improvement that needs reporting."))
         .arg(Arg::with_name("secret")
             .short("s")
             .long("secret")
@@ -110,6 +123,10 @@ pub fn main() {
     let taste_head_only = args.is_present("taste_head_only");
     let workdir = Path::new(args.value_of("workdir").unwrap());
     let verbose_notify = args.is_present("verbose_notifications");
+    let improvement_threshold =
+        value_t_or_exit!(args, "default_improvement_reporting_threshold", f64);
+    let regression_threshold =
+        value_t_or_exit!(args, "default_regression_reporting_threshold", f64);
 
     let mut history = HashMap::new();
     let ws = repo::Workspace::new(repo, workdir);
@@ -131,7 +148,14 @@ pub fn main() {
         } else {
             String::from(taste_commit.unwrap())
         };
-        let res = taste::taste_commit(&ws, &mut history, "", &cid, &cid, "");
+        let res = taste::taste_commit(&ws,
+                                      &mut history,
+                                      "",
+                                      &cid,
+                                      &cid,
+                                      "",
+                                      improvement_threshold,
+                                      regression_threshold);
         match res {
             Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
             Ok(tr) => {
@@ -167,7 +191,9 @@ pub fn main() {
                                           &b,
                                           &format!("{}", c.id()),
                                           c.message().unwrap(),
-                                          "");
+                                          "",
+                                          improvement_threshold,
+                                          regression_threshold);
             assert!(res.is_ok());
         }
     }
@@ -202,7 +228,9 @@ pub fn main() {
                                                        &_ref,
                                                        &head_commit.id,
                                                        &head_commit.message,
-                                                       &head_commit.url);
+                                                       &head_commit.url,
+                                                       improvement_threshold,
+                                                       regression_threshold);
                     match head_res {
                         Err(e) => {
                             println!("ERROR: failed to taste HEAD commit {}: {}",
@@ -224,7 +252,9 @@ pub fn main() {
                                                                   &_ref,
                                                                   &c.id,
                                                                   &c.message,
-                                                                  &c.url);
+                                                                  &c.url,
+                                                                  improvement_threshold,
+                                                                  regression_threshold);
                                     match res {
                                         Err(e) => {
                                             println!("ERROR: failed to taste commit {}: {}",

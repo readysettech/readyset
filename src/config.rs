@@ -11,9 +11,14 @@ pub struct Benchmark {
     pub args: Vec<String>,
     pub result_expr: Vec<Regex>,
     pub lower_is_better: bool,
+    pub improvement_threshold: f64,
+    pub regression_threshold: f64,
 }
 
-pub fn parse_config(cfg: &Path) -> Result<Vec<Benchmark>, Error> {
+pub fn parse_config(cfg: &Path,
+                    def_imp_threshold: f64,
+                    def_reg_threshold: f64)
+                    -> Result<Vec<Benchmark>, Error> {
     let mut f = try!(fs::File::open(cfg));
     let mut buf = String::new();
     try!(f.read_to_string(&mut buf));
@@ -41,6 +46,14 @@ pub fn parse_config(cfg: &Path) -> Result<Vec<Benchmark>, Error> {
             lower_is_better: match t.1.lookup("lower_better") {
                 None => false,
                 Some(v) => v.as_bool().unwrap(),
+            },
+            improvement_threshold: match t.1.lookup("improvement_threshold") {
+                None => def_imp_threshold,
+                Some(ref it) => it.as_float().unwrap(),
+            },
+            regression_threshold: match t.1.lookup("regression_threshold") {
+                None => def_reg_threshold,
+                Some(ref rt) => rt.as_float().unwrap(),
             },
         }
     };

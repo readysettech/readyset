@@ -78,17 +78,17 @@ fn benchmark(workdir: &str,
                                 BenchmarkResult::Neutral(v, _) => v,
                             };
                             let new_result = if cfg.lower_is_better {
-                                if val >= old_val * 1.1 {
+                                if val >= old_val * cfg.regression_threshold {
                                     BenchmarkResult::Regression(val, (val / old_val) - 1.0)
-                                } else if val < old_val * 0.9 {
+                                } else if val < old_val * cfg.improvement_threshold {
                                     BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
                                 } else {
                                     BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
                                 }
                             } else {
-                                if val >= old_val * 1.1 {
+                                if val >= old_val * cfg.improvement_threshold {
                                     BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
-                                } else if val < old_val * 0.9 {
+                                } else if val < old_val * cfg.regression_threshold {
                                     BenchmarkResult::Regression(val, (val / old_val) - 1.0)
                                 } else {
                                     BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
@@ -121,7 +121,9 @@ pub fn taste_commit(ws: &Workspace,
                     commit_ref: &str,
                     id: &str,
                     msg: &str,
-                    url: &str)
+                    url: &str,
+                    def_improvement_threshold: f64,
+                    def_regression_threshold: f64)
                     -> Result<TastingResult, String> {
     println!("Tasting commit {}", id);
     ws.checkout_commit(id)?;
@@ -134,7 +136,9 @@ pub fn taste_commit(ws: &Workspace,
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();
 
-    let cfg = match parse_config(Path::new(&format!("{}/taster.toml", ws.path))) {
+    let cfg = match parse_config(Path::new(&format!("{}/taster.toml", ws.path)),
+                                 def_improvement_threshold,
+                                 def_regression_threshold) {
         Ok(c) => c,
         Err(e) => {
             match e.kind() {
