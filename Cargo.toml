@@ -19,6 +19,7 @@ regex = "0.1"
 fnv = "1.0"
 
 spmc = "0.2.1"
+nom_sql = { git = "https://github.com/ms705/nom-sql.git" }
 
 # for benchmarks
 # cli
@@ -53,6 +54,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "web"
 path = "src/web/main.rs"
+
+[[bin]]
+name = "web_sql"
+path = "src/web/sql_main.rs"
 
 [[bin]]
 name = "bank"

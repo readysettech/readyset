@@ -17,7 +17,7 @@ pub enum Aggregation {
 impl Aggregation {
     /// Construct a new `Aggregator` that performs this operation.
     ///
-    /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
+    /// The aggregation will aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
     pub fn over(self,

@@ -1,3 +1,6 @@
+pub mod sql_to_flow;
+mod sql;
+
 use petgraph;
 use petgraph::graph::NodeIndex;
 use query;
@@ -280,6 +283,11 @@ impl Blender {
         });
     }
 
+    #[cfg(test)]
+    pub fn graph(&self) -> &prelude::Graph {
+        &self.ingredients
+    }
+
     /// Get references to all known input nodes.
     ///
     /// Input nodes are here all nodes of type `Base`. The addresses returned by this function will
@@ -475,7 +483,7 @@ impl<'a> Migration<'a> {
         let parents = i.ancestors();
 
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(name, fields, i));
+        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i));
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
@@ -489,6 +497,11 @@ impl<'a> Migration<'a> {
         }
         // and tell the caller its id
         NodeAddress::make_global(ni)
+    }
+
+    #[cfg(test)]
+    pub fn graph(&self) -> &prelude::Graph {
+        self.mainline.graph()
     }
 
     /// Mark the edge between `src` and `dst` in the graph as requiring materialization.

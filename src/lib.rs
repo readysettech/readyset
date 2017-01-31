@@ -335,6 +335,7 @@ extern crate fnv;
 extern crate itertools;
 extern crate petgraph;
 extern crate regex;
+extern crate nom_sql;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;
@@ -355,6 +356,7 @@ mod backlog;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, NodeAddress};
+pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use ops::Datas;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
