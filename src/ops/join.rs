@@ -411,8 +411,8 @@ impl Ingredient for Joiner {
         if lcol == c {
             vec![(nl, Some(lcol)), (*nr, Some(rcol))]
         } else {
-            // TODO(jonathan): Handle this case.
-            unimplemented!();
+            let other = *self.join.keys().filter(|n:&&NodeAddress| **n != nl).next().unwrap();
+            vec![(nl, Some(c)), (other, None)]
         }
     }
 }
