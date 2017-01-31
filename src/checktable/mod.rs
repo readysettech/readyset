@@ -177,10 +177,17 @@ impl CheckTable {
             let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
+                    let mut delete = false;
                     if let &mut Some(ref mut m) = t.entry(i).or_insert(Some(HashMap::new())) {
-                        *m.entry(value.clone()).or_insert(0) = ts;
+                        if m.len() > 10000000 {
+                            delete = true;
+                        } else {
+                            *m.entry(value.clone()).or_insert(0) = ts;
+                        }
                     }
-                    // TODO(jonathan): fall back to coarse checktable if granular table has gotten too large.
+                    if delete {
+                        t.insert(i, None);
+                    }
                 }
             }
 
