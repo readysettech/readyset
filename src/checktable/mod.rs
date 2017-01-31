@@ -187,4 +187,12 @@ impl CheckTable {
             TransactionResult::Aborted
         }
     }
+
+    /// Claim a pair of successive timestamps. Used by migration code to ensure
+    /// that no transactions happen while a migration is in progress.
+    pub fn claim_timestamp_pair(&mut self) -> (i64, i64){
+        let ts = self.next_timestamp;
+        self.next_timestamp += 2;
+        (ts, ts+1)
+    }
 }

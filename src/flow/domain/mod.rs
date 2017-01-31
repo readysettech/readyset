@@ -37,6 +37,8 @@ pub enum Control {
     Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>, mpsc::SyncSender<()>),
     PrepareState(LocalNodeIndex, usize),
 
+    /// At the start of a migration, flush pending transactions then notify blender.
+    StartMigration(i64, mpsc::SyncSender<()>),
     /// At the end of a migration, send the new timestamp and ingress_from_base counts.
     CompleteMigration(i64, HashMap<NodeIndex, usize>),
 }
@@ -47,7 +49,8 @@ pub mod local;
 enum BufferedTransaction {
     RemoteTransaction,
     Transaction(NodeIndex, Vec<Message>),
-    Migration(HashMap<NodeIndex, usize>),
+    MigrationStart(mpsc::SyncSender<()>),
+    MigrationEnd(HashMap<NodeIndex, usize>),
 }
 
 pub struct Domain {
@@ -69,8 +72,8 @@ pub struct Domain {
 
 impl Domain {
     pub fn new(nodes: DomainNodes,
-               in_from_base: HashMap<NodeIndex, usize>,
-               checktable: Arc<Mutex<checktable::CheckTable>>)
+               checktable: Arc<Mutex<checktable::CheckTable>>,
+               ts: i64)
                -> Self {
         // initially, all nodes are not ready (except for timestamp egress nodes)!
         let not_ready = nodes.iter()
@@ -88,9 +91,9 @@ impl Domain {
             nodes: nodes,
             state: StateMap::default(),
             buffered_transactions: HashMap::new(),
-            ingress_from_base: in_from_base,
+            ingress_from_base: HashMap::new(),
             not_ready: not_ready,
-            ts: -1,
+            ts: ts,
             checktable: checktable,
         }
     }
@@ -227,7 +230,10 @@ impl Domain {
                 BufferedTransaction::Transaction(_, messages) => {
                     self.transactional_dispatch(messages);
                 }
-                BufferedTransaction::Migration(ingress_from_base) => {
+                BufferedTransaction::MigrationStart(channel) => {
+                    let _ = channel.send(());
+                }
+                BufferedTransaction::MigrationEnd(ingress_from_base) => {
                     self.ingress_from_base = ingress_from_base;
                 }
             }
@@ -494,8 +500,16 @@ impl Domain {
                     }
                 }
             }
+            Control::StartMigration(ts, channel) => {
+                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationStart(channel));
+                assert!(o.is_none());
+
+                if ts == self.ts + 1 {
+                    self.apply_transactions();
+                }
+            }
             Control::CompleteMigration(ts, ingress_from_base) => {
-                let o = self.buffered_transactions.insert(ts, BufferedTransaction::Migration(ingress_from_base));
+                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
                 assert!(o.is_none());
 
                 if ts == self.ts + 1 {

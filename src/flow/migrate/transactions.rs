@@ -5,6 +5,7 @@ use flow::prelude::*;
 use petgraph;
 use petgraph::graph::NodeIndex;
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -152,4 +153,45 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
             graph.add_edge(egress, ingress, false);
         }
     }
+}
+
+fn count_base_ingress(graph: &Graph,
+                      source: NodeIndex,
+                      nodes: &[(NodeIndex, bool)])
+                      -> HashMap<NodeIndex, usize> {
+
+    let ingress_nodes: Vec<_> = nodes.into_iter()
+        .map(|&(ni, _)| ni)
+        .filter(|&ni| graph[ni].borrow().is_ingress())
+        .collect();
+
+    graph.neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
+        .map(|ingress| {
+            graph.neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+                .next()
+                .expect("source ingress must have a base child")
+        })
+        .map(|base| {
+            let num_paths =
+                ingress_nodes.iter()
+                    .filter(|&&ingress| {
+                        petgraph::algo::has_path_connecting(graph, base, ingress, None)
+                    })
+                    .count();
+            (base, num_paths)
+        })
+        .collect()
+}
+
+pub fn finalize(graph: &Graph,
+                source: NodeIndex,
+                domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+                control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
+                ts: i64) {
+    for (domain, nodes) in domain_nodes {
+        let ingress_from_base = count_base_ingress(graph, source, &nodes[..]);
+        let ctx = control_txs.get_mut(&domain).unwrap();
+        let _ = ctx.send(domain::Control::CompleteMigration(ts, ingress_from_base));
+    }
+
 }
