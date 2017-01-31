@@ -3,9 +3,13 @@ use flow::prelude::*;
 use flow;
 
 use tarpc;
+use tarpc::util::Never;
+use futures;
+use tokio_core::reactor;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 /// Available RPC methods
 pub mod ext {
@@ -17,7 +21,7 @@ pub mod ext {
         /// If `args = None`, all records are returned. Otherwise, all records are returned whose
         /// `i`th column matches the value contained in `args[i]` (or any value if `args[i] =
         /// None`).
-        rpc query(view: usize, key: DataType) -> Vec<Vec<DataType>>;
+        rpc query(view: usize, key: DataType) -> Result<Vec<Vec<DataType>>, ()>;
 
         /// Insert a new record into the given view.
         ///
@@ -32,7 +36,7 @@ pub mod ext {
 use self::ext::*;
 
 type Put = Box<Fn(Vec<DataType>) + Send + 'static>;
-type Get = Box<Fn(&DataType) -> Vec<Vec<DataType>> + Send + Sync>;
+type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>;
 
 struct Server {
     put: HashMap<NodeAddress, (String, Vec<String>, Mutex<Put>)>,
@@ -40,33 +44,58 @@ struct Server {
     _g: Mutex<flow::Blender>, // never read or written, just needed so the server doesn't stop
 }
 
-impl ext::Service for Server {
-    fn query(&self, view: usize, key: DataType) -> Vec<Vec<DataType>> {
+impl ext::FutureService for Arc<Server> {
+    type QueryFut = futures::Finished<Result<Vec<Vec<DataType>>, ()>, Never>;
+    fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
         let get = &self.get[&view.into()];
-        get.2(&key)
+        futures::finished(get.2(&key))
     }
 
-    fn insert(&self, view: usize, args: Vec<DataType>) -> i64 {
+    type InsertFut = futures::Finished<i64, Never>;
+    fn insert(&self, view: usize, args: Vec<DataType>) -> Self::InsertFut {
         self.put[&view.into()].2.lock().unwrap()(args);
-        0
+        futures::finished(0)
     }
 
-    fn list(&self) -> HashMap<String, (usize, bool)> {
-        self.get
+    type ListFut = futures::Finished<HashMap<String, (usize, bool)>, Never>;
+    fn list(&self) -> Self::ListFut {
+        futures::finished(self.get
             .iter()
             .map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
             .chain(self.put.iter().map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), true))))
-            .collect()
+            .collect())
+    }
+}
+
+/// A handle for a running RPC server.
+///
+/// Will terminate and wait for all server threads when dropped.
+pub struct ServerHandle {
+    threads: Vec<(futures::sync::oneshot::Sender<()>, thread::JoinHandle<()>)>,
+}
+
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        let wait: Vec<_> = self.threads
+            .drain(..)
+            .map(|(tx, jh)| {
+                tx.complete(());
+                jh
+            })
+            .collect();
+        for jh in wait {
+            jh.join().unwrap();
+        }
     }
 }
 
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
-pub fn run<T>(soup: flow::Blender, addr: T)
-    -> tarpc::ServeHandle<<T::Listener as tarpc::transport::Listener>::Dialer>
-    where T: tarpc::transport::Transport
-{
+pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
+                                            addr: T,
+                                            threads: usize)
+                                            -> ServerHandle {
     // Figure out what inputs and outputs to expose
     let (ins, outs) = {
         let ins: Vec<_> = soup.inputs()
@@ -98,5 +127,29 @@ pub fn run<T>(soup: flow::Blender, addr: T)
         _g: Mutex::new(soup),
     };
 
-    s.spawn(addr).unwrap()
+    let addr = addr.into();
+    let s = Arc::new(s);
+    let threads = (0..threads)
+        .map(move |_| {
+            use futures::Future;
+
+            let s = s.clone();
+            let (tx, rx) = futures::sync::oneshot::channel();
+            let jh = thread::spawn(move || {
+                let mut core = reactor::Core::new().unwrap();
+                s.listen(addr,
+                            tarpc::server::Options::default().handle(core.handle()))
+                    .wait()
+                    .unwrap();
+
+                match core.run(rx) {
+                    Ok(_) => println!("RPC server thread quitting normally"),
+                    Err(_) => println!("RPC server thread crashing and burning"),
+                }
+            });
+            (tx, jh)
+        })
+        .collect();
+
+    ServerHandle { threads: threads }
 }
