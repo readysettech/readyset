@@ -291,7 +291,9 @@ impl Domain {
                     }
                     let ts = ts.unwrap();
 
-                    self.buffered_transactions.insert(ts, BufferedTransaction::RemoteTransaction);
+                    let o = self.buffered_transactions.insert(ts, BufferedTransaction::RemoteTransaction);
+                    assert!(o.is_none());
+
                     self.apply_transactions();
                 } else if id == rx_handle.id() {
                     let m = rx_handle.recv();
@@ -511,7 +513,7 @@ impl Domain {
             Control::CompleteMigration(ts, ingress_from_base) => {
                 let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
                 assert!(o.is_none());
-                assert!(ts == self.ts + 1);
+                assert_eq!(ts, self.ts + 1);
                 self.apply_transactions();
             }
         }
