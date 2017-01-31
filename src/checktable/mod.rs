@@ -141,9 +141,10 @@ impl CheckTable {
                     // Column is being tracked.
                     let t = t.get(key);
                     if t.is_none() {
-                        // If the column is being tracked, and a token has been generated for a given
-                        // value, then the value must be present in the checktable.
-                        unreachable!();
+                        // If the column is being tracked, and a token has been generated for a
+                        // given value, but no time is present in the checktable, then there could
+                        // never have been a write with that key.
+                        return false;
                     }
 
                     ts < *t.unwrap()
