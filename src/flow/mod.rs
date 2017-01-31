@@ -592,8 +592,11 @@ impl<'a> Migration<'a> {
             }
         }).collect();
 
+        let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
+        self.mainline.checktable.lock().unwrap().track(&token_generator);
+
         if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
-            inner.token_generator = Some(checktable::TokenGenerator::new(coarse_parents, granular_parents));
+            inner.token_generator = Some(token_generator);
         }
     }
 

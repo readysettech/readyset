@@ -110,9 +110,10 @@ pub struct CheckTable {
     // Holds the last time each base node was written to.
     toplevel: HashMap<NodeIndex, i64>,
 
-    // For each base node, holds a hash map from column number to a map from value to the last time
-    // that a row of that value was written.
-    granular: HashMap<NodeIndex, HashMap<usize, Option<HashMap<DataType, i64>>>>,
+    // For each base node, holds a hash map from column number to a tuple. First element is a map
+    // from value to the last time that a row of that value was written. Second element is the time
+    // the column started being tracked.
+    granular: HashMap<NodeIndex, HashMap<usize, (HashMap<DataType, i64>, i64)>>,
 }
 
 impl CheckTable {
@@ -135,19 +136,12 @@ impl CheckTable {
                     return false;
                 }
 
-                let r = None;
-                let t = t.unwrap().get(&column).unwrap_or(&r);
-                if let &Some(ref t) = t {
+                if let Some(&(ref t, ref start_time)) = (*t.unwrap()).get(&column) {
                     // Column is being tracked.
-                    let t = t.get(key);
-                    if t.is_none() {
-                        // If the column is being tracked, and a token has been generated for a
-                        // given value, but no time is present in the checktable, then there could
-                        // never have been a write with that key.
-                        return false;
+                    match t.get(key) {
+                        None => ts < *start_time,
+                        Some(update_time) => ts < *update_time,
                     }
-
-                    ts < *t.unwrap()
                 } else {
                     // If this column is not being tracked, then trigger only if there has been any
                     // write to the base node.
@@ -178,7 +172,7 @@ impl CheckTable {
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
                     let mut delete = false;
-                    if let &mut Some(ref mut m) = t.entry(i).or_insert(Some(HashMap::new())) {
+                    if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
                         if m.len() > 10000000 {
                             delete = true;
                         } else {
@@ -186,7 +180,7 @@ impl CheckTable {
                         }
                     }
                     if delete {
-                        t.insert(i, None);
+                        t.remove(&i);
                     }
                 }
             }
@@ -203,5 +197,17 @@ impl CheckTable {
         let ts = self.next_timestamp;
         self.next_timestamp += 2;
         (ts, ts+1)
+    }
+
+    pub fn track(&mut self, gen: &TokenGenerator) {
+        for conflict in gen.conflicts.iter() {
+            match conflict {
+                &Conflict::BaseTable(..) => {}
+                &Conflict::BaseColumn(base, col) => {
+                    let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
+                    t.entry(col).or_insert((HashMap::new(), self.next_timestamp - 1));
+                }
+            }
+        }
     }
 }
