@@ -511,10 +511,8 @@ impl Domain {
             Control::CompleteMigration(ts, ingress_from_base) => {
                 let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
                 assert!(o.is_none());
-
-                if ts == self.ts + 1 {
-                    self.apply_transactions();
-                }
+                assert!(ts == self.ts + 1);
+                self.apply_transactions();
             }
         }
     }
