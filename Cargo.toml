@@ -7,7 +7,7 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcache"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
-b_netsoup = ["tarpc", "serde", "serde_derive"]
+b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
 rtm = ['no_strings', 'no_domains']
 no_strings = []
 no_domains = []
@@ -36,7 +36,10 @@ r2d2_postgres = { version = "0.10", optional = true }
 # memcached
 memcache = {git="https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7dec2dfcd4cda76002d8c10b993263", optional = true }
 # netsoup
-tarpc = { version = "0.6", optional = true }
+futures = { version ="0.1.9", optional = true }
+tokio-core = { version = "0.1", optional = true }
+tarpc = {git="https://github.com/google/tarpc.git", optional = true}
+tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
 serde = { version = "0.8", optional = true }
 serde_derive = { version = "0.8", optional = true }
 

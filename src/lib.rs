@@ -325,6 +325,8 @@
 #![feature(mpsc_select)]
 #![feature(pub_restricted)]
 #![deny(missing_docs)]
+#![cfg_attr(feature="b_netsoup", feature(conservative_impl_trait, plugin))]
+#![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]
 
 #[cfg(feature="b_netsoup")]
 #[macro_use]
@@ -347,6 +349,10 @@ extern crate rustful;
 #[macro_use]
 #[cfg(feature="b_netsoup")]
 extern crate tarpc;
+#[cfg(feature="b_netsoup")]
+extern crate futures;
+#[cfg(feature="b_netsoup")]
+extern crate tokio_core;
 
 mod checktable;
 mod flow;

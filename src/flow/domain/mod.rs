@@ -65,8 +65,15 @@ impl Domain {
                in_from_base: HashMap<NodeIndex, usize>,
                checktable: Arc<Mutex<checktable::CheckTable>>)
                -> Self {
-        // initially, all nodes are not ready!
-        let not_ready = nodes.iter().map(|n| *n.borrow().addr().as_local()).collect();
+        // initially, all nodes are not ready (except for timestamp egress nodes)!
+        let not_ready = nodes.iter().filter_map(|n| {
+            use flow::node::Type;
+            if let Type::TimestampEgress(..) = *n.borrow().inner {
+                return None;
+            }
+
+            Some(*n.borrow().addr().as_local())
+        }).collect();
 
         Domain {
             nodes: nodes,
