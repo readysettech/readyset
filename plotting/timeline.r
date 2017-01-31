@@ -5,7 +5,7 @@ for (a in args) {
 	label = a[[1]][[1]]
 	file = a[[1]][[2]]
 	v <- read.table(text = grep("percentile", grep("PUT|GET", readLines(file), value=TRUE), invert=TRUE, value=TRUE))
-	t <- rbind(t, data.frame(t=v[,1], op=sub("0?:$", "", v[,2]), opss=v[,3], variant=label, buffer=FALSE))
+	t <- rbind(t, data.frame(t=v[,1], op=sub("\\d?:$", "", v[,2]), opss=v[,3], variant=label, buffer=FALSE))
 }
 t$t <- t$t/1000000000.0
 t$opss <- t$opss/1000.0
