@@ -21,15 +21,15 @@ use backlog;
 pub struct Reader {
     pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Records>>>>,
     pub state: Option<backlog::BufferedStore>,
-    pub token_generator: checktable::TokenGenerator,
+    pub token_generator: Option<checktable::TokenGenerator>,
 }
 
 impl Reader {
-    pub fn new(token_generator: checktable::TokenGenerator) -> Self {
+    pub fn new() -> Self {
         Reader {
             streamers: sync::Arc::default(),
             state: None,
-            token_generator: token_generator,
+            token_generator: None,
         }
     }
 
