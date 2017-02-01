@@ -83,7 +83,18 @@ impl Ingredient for Filter {
     }
 
     fn description(&self) -> String {
-        "σ".into()
+        format!("σ[{}]",
+                self.filter
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, ref e)| match e.as_ref() {
+                        Some(ref x) => Some(format!("{}={}", i, x)),
+                        None => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .as_slice()
+                    .join(", "))
+            .into()
     }
 
     fn can_query_through(&self) -> bool {

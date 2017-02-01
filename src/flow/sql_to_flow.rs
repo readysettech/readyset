@@ -714,7 +714,7 @@ mod tests {
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
-        assert_eq!(filter.description(), format!("σ"));
+        assert_eq!(filter.description(), format!("σ[0=\"42\"]"));
         // projection node
         let project = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(project.fields(), &["name"]);
