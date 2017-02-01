@@ -12,7 +12,9 @@ pub struct Filter {
 }
 
 impl Filter {
-    /// Construct a new identity operator.
+    /// Construct a new filter operator. The `filter` vector must have as many elements as the
+    /// `src` node has columns. Each column that is set to `None` matches any value, while columns
+    /// in the filter that have values set will check for equality on that column.
     pub fn new(src: NodeAddress, filter: &[Option<DataType>]) -> Filter {
         Filter {
             src: src,
