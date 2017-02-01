@@ -21,7 +21,7 @@ pub mod ext {
         /// If `args = None`, all records are returned. Otherwise, all records are returned whose
         /// `i`th column matches the value contained in `args[i]` (or any value if `args[i] =
         /// None`).
-        rpc query(view: usize, key: DataType) -> Result<Vec<Vec<DataType>>, ()>;
+        rpc query(view: usize, key: DataType) -> Vec<Vec<DataType>> | ();
 
         /// Insert a new record into the given view.
         ///
@@ -45,10 +45,10 @@ struct Server {
 }
 
 impl ext::FutureService for Arc<Server> {
-    type QueryFut = futures::Finished<Result<Vec<Vec<DataType>>, ()>, Never>;
+    type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
     fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
         let get = &self.get[&view.into()];
-        futures::finished(get.2(&key))
+        futures::future::result(get.2(&key))
     }
 
     type InsertFut = futures::Finished<i64, Never>;
