@@ -797,6 +797,9 @@ impl<'a> Migration<'a> {
             })
             .collect();
 
+        let mut uninformed_domain_nodes = domain_nodes.clone();
+        let (start_ts, end_ts) = mainline.checktable.lock().unwrap().claim_timestamp_pair();
+
         // Boot up new domains (they'll ignore all updates for now)
         for domain in changed_domains {
             if mainline.control_txs.contains_key(&domain) {
@@ -806,11 +809,11 @@ impl<'a> Migration<'a> {
 
             // Start up new domain
             let ctx = migrate::booting::boot_new(&mut mainline.ingredients,
-                                                 mainline.source,
-                                                 domain_nodes.remove(&domain).unwrap(),
+                                                 uninformed_domain_nodes.remove(&domain).unwrap(),
                                                  mainline.checktable.clone(),
                                                  rxs.remove(&domain).unwrap(),
-                                                 time_rxs.remove(&domain).unwrap());
+                                                 time_rxs.remove(&domain).unwrap(),
+                                                 start_ts);
             mainline.control_txs.insert(domain, ctx);
         }
         drop(rxs);
@@ -819,7 +822,8 @@ impl<'a> Migration<'a> {
         migrate::augmentation::inform(&mut mainline.ingredients,
                                       mainline.source,
                                       &mut mainline.control_txs,
-                                      domain_nodes);
+                                      uninformed_domain_nodes,
+                                      start_ts);
 
         // TODO: we definitely need to update count_base_ingress somewhere
         //       but to what? and how? jonathan?!
@@ -834,6 +838,12 @@ impl<'a> Migration<'a> {
                                              &new,
                                              index,
                                              &mut mainline.control_txs);
+
+        migrate::transactions::finalize(&mainline.ingredients,
+                                        mainline.source,
+                                        domain_nodes,
+                                        &mut mainline.control_txs,
+                                        end_ts);
 
         // Finally, set up input channels to any new base tables
         let mut sources = HashMap::new();

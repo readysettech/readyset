@@ -396,8 +396,74 @@ fn simple_migration() {
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 
-    // check that a got it
+    // check that b got it
     assert_eq!(bq(&id), Ok(vec![vec![1.into(), 4.into()]]));
+}
+
+#[test]
+fn transactional_migration() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (puta, a, aq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let aq = mig.transactional_maintain(a, 0);
+        let put = mig.commit();
+        (put, a, aq)
+    };
+
+    // send a value on a
+    puta[&a].1(vec![1.into(), 2.into()], distributary::Token::empty());
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that a got it
+    assert_eq!(aq(&1.into()).unwrap().0, vec![vec![1.into(), 2.into()]]);
+
+    // add unrelated node b in a migration
+    let (putb, b, bq) = {
+        let mut mig = g.start_migration();
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+        let bq = mig.transactional_maintain(b, 0);
+        let put = mig.commit();
+        (put, b, bq)
+    };
+
+    // send a value on b
+    putb[&b].1(vec![2.into(), 4.into()], distributary::Token::empty());
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that b got it
+    assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
+
+    let cq = {
+        let mut mig = g.start_migration();
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.transactional_maintain(c, 0);
+        let _ = mig.commit();
+        cq
+    };
+
+    // check that c has both previous entries
+    assert_eq!(aq(&1.into()).unwrap().0, vec![vec![1.into(), 2.into()]]);
+    assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
+
+    // send a value on a and b
+    puta[&a].1(vec![3.into(), 5.into()], distributary::Token::empty());
+    putb[&b].1(vec![3.into(), 6.into()], distributary::Token::empty());
+
+    // give them some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // check that c got them
+    assert_eq!(cq(&3.into()).unwrap().0, vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
 }
 
 #[test]

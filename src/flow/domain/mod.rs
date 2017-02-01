@@ -36,19 +36,29 @@ pub enum Control {
                   mpsc::SyncSender<()>),
     Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>, mpsc::SyncSender<()>),
     PrepareState(LocalNodeIndex, usize),
+
+    /// At the start of a migration, flush pending transactions then notify blender.
+    StartMigration(i64, mpsc::SyncSender<()>),
+    /// At the end of a migration, send the new timestamp and ingress_from_base counts.
+    CompleteMigration(i64, HashMap<NodeIndex, usize>),
 }
 
 pub mod single;
 pub mod local;
 
+enum BufferedTransaction {
+    RemoteTransaction,
+    Transaction(NodeIndex, Vec<Message>),
+    MigrationStart(mpsc::SyncSender<()>),
+    MigrationEnd(HashMap<NodeIndex, usize>),
+}
+
 pub struct Domain {
     nodes: DomainNodes,
     state: StateMap,
 
-    /// Map from timestamp to vector of messages buffered for that timestamp. None in place of
-    /// NodeIndex means that the timestamp will be skipped (because it is from a base node that
-    /// never sends updates to this domain).
-    buffered_transactions: HashMap<i64, (Option<NodeIndex>, Vec<Message>)>,
+    /// Map from timestamp to data buffered for that timestamp.
+    buffered_transactions: HashMap<i64, BufferedTransaction>,
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
     /// that are only connected by timestamp ingress nodes are not included.
     ingress_from_base: HashMap<NodeIndex, usize>,
@@ -62,8 +72,8 @@ pub struct Domain {
 
 impl Domain {
     pub fn new(nodes: DomainNodes,
-               in_from_base: HashMap<NodeIndex, usize>,
-               checktable: Arc<Mutex<checktable::CheckTable>>)
+               checktable: Arc<Mutex<checktable::CheckTable>>,
+               ts: i64)
                -> Self {
         // initially, all nodes are not ready (except for timestamp egress nodes)!
         let not_ready = nodes.iter()
@@ -81,9 +91,9 @@ impl Domain {
             nodes: nodes,
             state: StateMap::default(),
             buffered_transactions: HashMap::new(),
-            ingress_from_base: in_from_base,
+            ingress_from_base: HashMap::new(),
             not_ready: not_ready,
-            ts: -1,
+            ts: ts,
             checktable: checktable,
         }
     }
@@ -199,34 +209,34 @@ impl Domain {
 
     fn apply_transactions(&mut self) {
         while !self.buffered_transactions.is_empty() {
-            // Extract a complete set of messages for timestep (self.ts+1) if one exists.
-            let messages = match self.buffered_transactions.entry(self.ts + 1) {
-                Entry::Occupied(entry) => {
-                    match entry.get().0 {
-                        Some(base) => {
-                            let messages_needed = self.ingress_from_base.get(&base).unwrap();
-                            // If we don't have all the messages for this timestamp, then stop.
-                            if entry.get().1.len() < *messages_needed {
-                                break;
-                            }
+            let e = {
+                // If we don't have anything for this timestamp yet, then stop.
+                let entry = match self.buffered_transactions.entry(self.ts + 1) {
+                    Entry::Occupied(e) => e,
+                    _ => break,
+                };
 
-                            // Otherwise, extract this set of messages.
-                            entry.remove().1
-                        }
-                        None => {
-                            // If we learned about this timestamp from our timestamp ingress node,
-                            // then skip it and move on to the next.
-                            entry.remove();
-                            self.ts += 1;
-                            continue;
-                        }
+                // If this is a normal transaction and we don't have all the messages for this timestamp, then stop.
+                if let &BufferedTransaction::Transaction(base, ref messages) = entry.get() {
+                    if messages.len() < *self.ingress_from_base.get(&base).unwrap() {
+                        break;
                     }
                 }
-                Entry::Vacant(_) => break,
+                entry.remove()
             };
 
-            // Process messages and advance to the next timestep.
-            self.transactional_dispatch(messages);
+            match e {
+                BufferedTransaction::RemoteTransaction => {}
+                BufferedTransaction::Transaction(_, messages) => {
+                    self.transactional_dispatch(messages);
+                }
+                BufferedTransaction::MigrationStart(channel) => {
+                    let _ = channel.send(());
+                }
+                BufferedTransaction::MigrationEnd(ingress_from_base) => {
+                    self.ingress_from_base = ingress_from_base;
+                }
+            }
             self.ts += 1;
         }
     }
@@ -235,7 +245,10 @@ impl Domain {
         let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
-        self.buffered_transactions.entry(ts).or_insert((Some(base), vec![])).1.push(m);
+        match self.buffered_transactions.entry(ts).or_insert(BufferedTransaction::Transaction(base, vec![])) {
+            &mut BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
+            _ => unreachable!(),
+        }
 
         if ts == self.ts + 1 {
             self.apply_transactions();
@@ -278,7 +291,9 @@ impl Domain {
                     }
                     let ts = ts.unwrap();
 
-                    self.buffered_transactions.insert(ts, (None, vec![]));
+                    let o = self.buffered_transactions.insert(ts, BufferedTransaction::RemoteTransaction);
+                    assert!(o.is_none());
+
                     self.apply_transactions();
                 } else if id == rx_handle.id() {
                     let m = rx_handle.recv();
@@ -486,6 +501,20 @@ impl Domain {
                         tx.send(m).unwrap();
                     }
                 }
+            }
+            Control::StartMigration(ts, channel) => {
+                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationStart(channel));
+                assert!(o.is_none());
+
+                if ts == self.ts + 1 {
+                    self.apply_transactions();
+                }
+            }
+            Control::CompleteMigration(ts, ingress_from_base) => {
+                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
+                assert!(o.is_none());
+                assert_eq!(ts, self.ts + 1);
+                self.apply_transactions();
             }
         }
     }
