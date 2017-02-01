@@ -149,9 +149,11 @@
 //!
 //! // we want to be able to query awvc_q using "id"
 //! let awvc_q = mig.maintain(awvc, 0);
+//! # drop(awvc_q);
 //!
 //! // start the data flow graph
 //! let put = mig.commit();
+//! # drop(put);
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
@@ -171,16 +173,10 @@
 //! the new record to on one of the functions in the `put` map returned by `Migration::commit`
 //!
 //! ```rust
-//! # use distributary::{Blender, Base, Aggregation, JoinBuilder};
+//! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let mut mig = g.start_migration();
 //! # let article = mig.add_ingredient("article", &["id", "title"], Base {});
-//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
-//! # let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
-//! # let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-//! #     .from(article, vec![1, 0])
-//! #     .join(vc, vec![1, 0]);
-//! # let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //! # let put = mig.commit();
 //! // the .0 here is because we want to do a non-transactional write
 //! put[&article].0(vec![1.into(), "Hello world".into()]);
@@ -237,20 +233,11 @@
 //! Let's next trace what happens when a `Vote` is introduced into the system using
 //!
 //! ```rust
-//! # use distributary::{Blender, Base, Aggregation, JoinBuilder};
-//! # use std::thread; use std::time::Duration;
+//! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
 //! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"], Base {});
 //! # let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
-//! # let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
-//! # let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-//! #     .from(article, vec![1, 0])
-//! #     .join(vc, vec![1, 0]);
-//! # let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //! # let put = mig.commit();
-//! # put[&article].0(vec![1.into(), "Hello world".into()]);
-//! # thread::sleep(Duration::from_millis(100));
 //! put[&vote].0(vec![1000.into(), 1.into()]);
 //! ```
 //!
