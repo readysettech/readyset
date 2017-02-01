@@ -121,6 +121,10 @@ impl Ingredient for Filter {
             })) as Box<_>
         })
     }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(column))]
+    }
 }
 
 #[cfg(test)]

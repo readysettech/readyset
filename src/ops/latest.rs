@@ -129,6 +129,10 @@ impl Ingredient for Latest {
             .join(", ");
         format!("⧖ γ[{}]", key_cols)
     }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(column))]
+    }
 }
 
 #[cfg(test)]

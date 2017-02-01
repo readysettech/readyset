@@ -222,7 +222,7 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Base, Union, Aggregation, JoinBuilder};
+    use distributary::{Base, Union, Aggregation, JoinBuilder, Identity};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -255,7 +255,12 @@ fn transactional_vote() {
         .from(article, vec![1, 0])
         .join(vc, vec![1, 0]);
     let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-    let endq = mig.maintain(end, 0);
+    let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+    let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+
+    let endq = mig.transactional_maintain(end, 0);
+    let endq_title = mig.transactional_maintain(end2, 1);
+    let endq_votes = mig.transactional_maintain(end3, 2);
 
     let a1: distributary::DataType = 1.into();
     let a2: distributary::DataType = 2.into();
@@ -264,6 +269,10 @@ fn transactional_vote() {
     let put = mig.commit();
 
     let token = articleq(&a1).unwrap().1;
+
+    let endq_token = endq(&a2).unwrap().1;
+    let endq_title_token = endq_title(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // make one article
     assert!(put[&article1].1(vec![a1.clone(), 2.into()], token).ok());
@@ -274,6 +283,11 @@ fn transactional_vote() {
     // query articles to see that it was absorbed
     let (res, token) = articleq(&a1).unwrap();
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
+
+    // check endq tokens are as expected
+    assert!(validate(&endq_token));
+    assert!(validate(&endq_title_token));
+    assert!(!validate(&endq_votes_token));
 
     // make another article
     assert!(put[&article2].1(vec![a2.clone(), 4.into()], token).ok());
@@ -287,10 +301,18 @@ fn transactional_vote() {
     assert_eq!(res, vec![vec![a1.clone(), 2.into()]]);
     let (res, token2) = articleq(&a2).unwrap();
     assert_eq!(res, vec![vec![a2.clone(), 4.into()]]);
+    // check endq tokens are as expected
+    assert!(!validate(&endq_token));
+    assert!(!validate(&endq_title_token));
+    assert!(!validate(&endq_votes_token));
 
     // Check that the two reads happened transactionally.
     token.merge(token2);
     assert!(validate(&token));
+
+    let endq_token = endq(&a1).unwrap().1;
+    let endq_title_token = endq_title(&4.into()).unwrap().1;
+    let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
     assert!(put[&vote].1(vec![1.into(), a1.clone()], token).ok());
@@ -298,21 +320,26 @@ fn transactional_vote() {
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
 
+    // check endq tokens
+    assert!(!validate(&endq_token));
+    assert!(!validate(&endq_title_token));
+    assert!(!validate(&endq_votes_token));
+
     // query vote count to see that the count was updated
     let res = vcq(&a1).unwrap();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq(&a1).unwrap();
+    let res = endq(&a1).unwrap().0;
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq(&a2).unwrap();
-    assert!(res.len() <= 1) // could be 1 if we had zero-rows
+    let res = endq(&a2).unwrap().0;
+    assert!(res.len() <= 1); // could be 1 if we had zero-rows
 }
 
 #[test]

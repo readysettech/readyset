@@ -75,6 +75,10 @@ impl Ingredient for GatedIdentity {
     fn description(&self) -> String {
         "GatedIdentity".into()
     }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(column))]
+    }
 }
 
 #[cfg(test)]
