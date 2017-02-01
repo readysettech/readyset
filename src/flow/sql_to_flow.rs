@@ -8,10 +8,12 @@ use ops;
 use ops::base::Base;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
+use query::DataType;
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::str;
+use std::sync::Arc;
 use std::vec::Vec;
 
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
@@ -57,6 +59,33 @@ impl SqlIncorporator {
         match self.node_addresses.get(name) {
             None => panic!("node {} unknown!", name),
             Some(na) => na.clone(),
+        }
+    }
+
+    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
+    /// vector of conditions that `shortcut` understands.
+    fn to_conditions(&self, ct: &ConditionTree, na: &NodeAddress) -> Vec<Option<DataType>> {
+        // TODO(malte): support other types of operators
+        if ct.operator != Operator::Equal {
+            println!("Conditionals with {:?} are not supported yet, so ignoring {:?}",
+                     ct.operator,
+                     ct);
+            vec![]
+        } else {
+            // TODO(malte): we only support one level of condition nesting at this point :(
+            let l = match *ct.left.as_ref().unwrap().as_ref() {
+                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+                _ => unimplemented!(),
+            };
+            let r = match *ct.right.as_ref().unwrap().as_ref() {
+                ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+                _ => unimplemented!(),
+            };
+            let num_columns = self.fields_for(*na).len();
+            let mut filter = vec![None; num_columns];
+            filter[self.field_to_columnid(*na, &l.name).unwrap()] =
+                Some(DataType::Text(Arc::new(r)));
+            filter
         }
     }
 
@@ -219,29 +248,42 @@ impl SqlIncorporator {
         n
     }
 
-    fn make_filter_node(&mut self,
-                        name: &str,
-                        qgn: &QueryGraphNode,
-                        mig: &mut Migration)
-                        -> NodeAddress {
-        let parent_ni = self.address_for(&qgn.rel_name);
-        let projected_columns: Vec<usize> = qgn.columns
+    fn make_filter_and_project_nodes(&mut self,
+                                     name: &str,
+                                     qgn: &QueryGraphNode,
+                                     mig: &mut Migration)
+                                     -> Vec<NodeAddress> {
+        use ops::filter::Filter;
+
+        let mut parent_ni = self.address_for(&qgn.rel_name);
+        let mut new_nodes = vec![];
+        // chain all the filters associated with this QGN
+        for (i, cond) in qgn.predicates.iter().enumerate() {
+            // convert ConditionTree to a chain of Filter operators.
+            let filter = self.to_conditions(cond, &parent_ni);
+            let parent_fields = Vec::from(self.fields_for(parent_ni));
+            let f_name = String::from(format!("{}_f{}", name, i));
+            let n = mig.add_ingredient(f_name.clone(),
+                                       parent_fields.as_slice(),
+                                       Filter::new(parent_ni, filter.as_slice()));
+            self.node_addresses.insert(f_name, n);
+            self.node_fields.insert(n, parent_fields);
+            parent_ni = n;
+            new_nodes.push(n);
+        }
+        // finally, project only the columns we need
+        let projected_columns = Vec::from_iter(qgn.columns.iter().map(|c| c.name.clone()));
+        let projected_column_ids: Vec<usize> = qgn.columns
             .iter()
             .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
             .collect();
-        let fields = Vec::from_iter(qgn.columns.iter().map(|c| c.name.clone()));
         let n = mig.add_ingredient(String::from(name),
-                                   fields.as_slice(),
-                                   Permute::new(parent_ni, projected_columns.as_slice()));
-        // println!("added filter on {:?}: {:#?}", parent_ni, n);
-    /*for cond in qgn.predicates.iter() {
-        // convert ConditionTree to shortcut-style condition vector.
-        let filter = to_conditions(cond, parent_view);
-        n = n.having(filter);
-    }*/
+                                   projected_columns.as_slice(),
+                                   Permute::new(parent_ni, projected_column_ids.as_slice()));
         self.node_addresses.insert(String::from(name), n);
-        self.node_fields.insert(n, fields);
-        n
+        self.node_fields.insert(n, projected_columns);
+        new_nodes.push(n);
+        new_nodes
     }
 
     fn make_join_node(&mut self,
@@ -316,8 +358,8 @@ impl SqlIncorporator {
 
         let mut i = 0;
         {
-            // 1. Generate a filter node for each relation node in the query graph.
-            let mut filter_nodes = HashMap::<String, NodeAddress>::new();
+            // 1. Generate the necessary filter node for each relation node in the query graph.
+            let mut filter_nodes = HashMap::<String, Vec<NodeAddress>>::new();
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be added in
             // a different order every time, which will yield different node identifiers and make it
             // difficult for applications to check what's going on.
@@ -333,15 +375,16 @@ impl SqlIncorporator {
                         // add a basic filter/permute node for each query graph node if it either has:
                         // 1. projected columns, or
                         // 2. a filter condition
-                        let ni =
-                            self.make_filter_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
-                                                  qgn,
-                                                  mig);
-                        filter_nodes.insert((*rel).clone(), ni);
+                        let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
+                                                                              qg.signature().hash,
+                                                                              i),
+                                                                     qgn,
+                                                                     mig);
+                        filter_nodes.insert((*rel).clone(), fns);
                     } else {
                         // otherwise, just record the node index of the base node for the relation that is
                         // being selected from
-                        filter_nodes.insert((*rel).clone(), self.address_for(rel));
+                        filter_nodes.insert((*rel).clone(), vec![self.address_for(rel)]);
                     }
                 }
                 i += 1;
@@ -366,16 +409,18 @@ impl SqlIncorporator {
                         let left_ni = match prev_ni {
                             None => {
                                 joined_tables.insert(src);
-                                filter_nodes.get(src).unwrap().clone()
+                                let filters = filter_nodes.get(src).unwrap();
+                                assert_ne!(filters.len(), 0);
+                                filters.last().unwrap().clone()
                             }
                             Some(ni) => ni,
                         };
                         let right_ni = if joined_tables.contains(src) {
                             joined_tables.insert(dst);
-                            filter_nodes.get(dst).unwrap().clone()
+                            filter_nodes.get(dst).unwrap().last().unwrap().clone()
                         } else if joined_tables.contains(dst) {
                             joined_tables.insert(src);
-                            filter_nodes.get(src).unwrap().clone()
+                            filter_nodes.get(src).unwrap().last().unwrap().clone()
                         } else {
                             // We have already handled *both* tables that are part of the join. This should never
                             // occur, because their join predicates must be associated with the same query graph
@@ -454,7 +499,9 @@ impl SqlIncorporator {
                     func_nodes.last().unwrap()
                 } else {
                     assert!(filter_nodes.len() == 1);
-                    filter_nodes.iter().next().as_ref().unwrap().1
+                    let filter = filter_nodes.iter().next().as_ref().unwrap().1;
+                    assert_ne!(filter.len(), 0);
+                    filter.last().unwrap()
                 };
                 let projected_columns: Vec<Column> = sorted_rels.iter()
                     .fold(Vec::new(), |mut v, s| {
@@ -474,11 +521,11 @@ impl SqlIncorporator {
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
             }
-            filter_nodes.insert(String::from(name), ni);
+            filter_nodes.insert(String::from(name), vec![ni]);
 
             // finally, we output all the nodes we generated
             nodes_added = filter_nodes.into_iter()
-                .map(|(_, n)| n)
+                .flat_map(|(_, n)| n.into_iter())
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
                 .collect();
@@ -662,10 +709,20 @@ mod tests {
                                 None,
                                 &mut mig);
         assert!(res.is_ok());
+
         let qid = query_id_hash(&["users"], &[&Column::from("users.id")]);
-        let new_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
-        assert_eq!(new_view.fields(), &["name"]);
-        assert_eq!(new_view.description(), format!("π[1]"));
+        // filter node
+        let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
+        assert_eq!(filter.fields(), &["id", "name"]);
+        assert_eq!(filter.description(), format!("σ"));
+        // projection node
+        let project = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
+        assert_eq!(project.fields(), &["name"]);
+        assert_eq!(project.description(), format!("π[1]"));
+        // edge node
+        let edge = get_node(&inc, &mig, &res.unwrap().0);
+        assert_eq!(edge.fields(), &["name"]);
+        assert_eq!(edge.description(), format!("π[0]"));
     }
 
     #[test]
@@ -701,7 +758,7 @@ mod tests {
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view
-        let edge_view = get_node(&inc, &mig, "q_1");
+        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
         assert_eq!(edge_view.fields(), &["votes"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
     }
@@ -736,7 +793,7 @@ mod tests {
         assert_eq!(agg_view.fields(), &["count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view
-        let edge_view = get_node(&inc, &mig, "q_2");
+        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
         assert_eq!(edge_view.fields(), &["count"]);
         assert_eq!(edge_view.description(), format!("π[0]"));
     }
