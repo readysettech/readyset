@@ -66,14 +66,16 @@ impl Domain {
                checktable: Arc<Mutex<checktable::CheckTable>>)
                -> Self {
         // initially, all nodes are not ready (except for timestamp egress nodes)!
-        let not_ready = nodes.iter().filter_map(|n| {
-            use flow::node::Type;
-            if let Type::TimestampEgress(..) = *n.borrow().inner {
-                return None;
-            }
+        let not_ready = nodes.iter()
+            .filter_map(|n| {
+                use flow::node::Type;
+                if let Type::TimestampEgress(..) = *n.borrow().inner {
+                    return None;
+                }
 
-            Some(*n.borrow().addr().as_local())
-        }).collect();
+                Some(*n.borrow().addr().as_local())
+            })
+            .collect();
 
         Domain {
             nodes: nodes,
@@ -248,7 +250,8 @@ impl Domain {
 
         let (ctx, crx) = mpsc::sync_channel(16);
 
-        thread::spawn(move || {
+        let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
+        thread::Builder::new().name(format!("domain{}", name)).spawn(move || {
             let sel = mpsc::Select::new();
             let mut rx_handle = sel.handle(&rx);
             let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
@@ -314,7 +317,7 @@ impl Domain {
                     }
                 }
             }
-        });
+        }).unwrap();
 
         ctx
     }

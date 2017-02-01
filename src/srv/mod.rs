@@ -130,23 +130,26 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
     let addr = addr.into();
     let s = Arc::new(s);
     let threads = (0..threads)
-        .map(move |_| {
+        .map(move |i| {
             use futures::Future;
 
             let s = s.clone();
             let (tx, rx) = futures::sync::oneshot::channel();
-            let jh = thread::spawn(move || {
-                let mut core = reactor::Core::new().unwrap();
-                s.listen(addr,
-                            tarpc::server::Options::default().handle(core.handle()))
-                    .wait()
-                    .unwrap();
+            let jh = thread::Builder::new()
+                .name(format!("rpc{}", i))
+                .spawn(move || {
+                    let mut core = reactor::Core::new().unwrap();
+                    s.listen(addr,
+                                tarpc::server::Options::default().handle(core.handle()))
+                        .wait()
+                        .unwrap();
 
-                match core.run(rx) {
-                    Ok(_) => println!("RPC server thread quitting normally"),
-                    Err(_) => println!("RPC server thread crashing and burning"),
-                }
-            });
+                    match core.run(rx) {
+                        Ok(_) => println!("RPC server thread quitting normally"),
+                        Err(_) => println!("RPC server thread crashing and burning"),
+                    }
+                })
+                .unwrap();
             (tx, jh)
         })
         .collect();
