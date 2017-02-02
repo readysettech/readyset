@@ -54,7 +54,9 @@ named!(pub insertion<&[u8], InsertStatement>,
                     None =>
                         values.into_iter()
                               .enumerate()
-                              .map(|(i, v)| (Column::from(format!("{}", i).as_str()), String::from(v)))
+                              .map(|(i, v)| {
+                                  (Column::from(format!("{}", i).as_str()), String::from(v))
+                              })
                               .collect(),
                 },
             }
@@ -76,7 +78,8 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("0"), "42".into()), (Column::from("1"), "test".into())],
+                       fields: vec![(Column::from("0"), "42".into()),
+                                    (Column::from("1"), "test".into())],
                        ..Default::default()
                    });
     }
@@ -89,7 +92,8 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("0"), "?".into()), (Column::from("1"), "?".into())],
+                       fields: vec![(Column::from("0"), "?".into()),
+                                    (Column::from("1"), "?".into())],
                        ..Default::default()
                    });
     }
@@ -102,7 +106,8 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    InsertStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("id"), "42".into()), (Column::from("name"), "test".into())],
+                       fields: vec![(Column::from("id"), "42".into()),
+                                    (Column::from("name"), "test".into())],
                        ..Default::default()
                    });
     }

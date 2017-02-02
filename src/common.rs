@@ -326,10 +326,13 @@ mod tests {
         let qs = b"max(addr_id)";
 
         let res = column_identifier(qs);
-        assert_eq!(res.unwrap().1, Column {
+        let expected_fields = FieldExpression::Seq(vec![Column::from("addr_id")]);
+        let expected_fn = Some(FunctionExpression::Max(expected_fields));
+        let expected = Column {
             name: String::from("anon_fn"),
             table: None,
-            function: Some(FunctionExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]))),
-        });
+            function: expected_fn,
+        };
+        assert_eq!(res.unwrap().1, expected);
     }
 }

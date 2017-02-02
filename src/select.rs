@@ -167,7 +167,9 @@ mod tests {
     use super::*;
     use column::{Column, FunctionExpression};
     use common::{FieldExpression, Operator};
-    use condition::{ConditionBase, ConditionExpression, ConditionTree};
+    use condition::ConditionBase::*;
+    use condition::ConditionExpression::*;
+    use condition::ConditionTree;
     use table::Table;
 
     fn columns(cols: &[&str]) -> Vec<Column> {
@@ -240,10 +242,10 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("email"))))),
-            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+        let expected_left = Base(Field(Column::from("email")));
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Some(Box::new(expected_left)),
+            right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
@@ -312,9 +314,9 @@ mod tests {
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![Table {
-                           name: String::from("PaperTag"),
-                           alias: Some(String::from("t")),
-                       }],
+                                        name: String::from("PaperTag"),
+                                        alias: Some(String::from("t")),
+                                    }],
                        fields: FieldExpression::All,
                        ..Default::default()
                    });
@@ -327,10 +329,10 @@ mod tests {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
         let res = selection(qstring.as_bytes());
-        let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperId"))))),
-            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+        let expected_left = Base(Field(Column::from("paperId")));
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Some(Box::new(expected_left)),
+            right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
@@ -349,19 +351,17 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let left_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperId"))))),
-            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+        let left_comp = Some(Box::new(ComparisonOp(ConditionTree {
+            left: Some(Box::new(Base(Field(Column::from("paperId"))))),
+            right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         })));
-        let right_comp = Some(Box::new(ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("paperStorageId"))))),
-            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+        let right_comp = Some(Box::new(ComparisonOp(ConditionTree {
+            left: Some(Box::new(Base(Field(Column::from("paperStorageId"))))),
+            right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         })));
-        let expected_where_cond = Some(ConditionExpression::LogicalOp(ConditionTree {
+        let expected_where_cond = Some(LogicalOp(ConditionTree {
             left: left_comp,
             right: right_comp,
             operator: Operator::And,
@@ -384,10 +384,9 @@ mod tests {
             limit: 10,
             offset: 0,
         });
-        let expected_where_cond = Some(ConditionExpression::ComparisonOp(ConditionTree {
-            left:
-                Some(Box::new(ConditionExpression::Base(ConditionBase::Field(Column::from("id"))))),
-            right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Some(Box::new(Base(Field(Column::from("id"))))),
+            right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         }));
 

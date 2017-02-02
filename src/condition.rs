@@ -226,8 +226,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::Placeholder)
-                  );
+                                       ConditionBase::Placeholder));
     }
 
     #[test]
@@ -239,17 +238,13 @@ mod tests {
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::Literal(String::from("42"))
-                                      )
-                   );
+                                       ConditionBase::Literal(String::from("42"))));
 
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::Literal(String::from("hello"))
-                                      )
-                   );
+                                       ConditionBase::Literal(String::from("hello"))));
     }
 
     #[test]
@@ -261,16 +256,12 @@ mod tests {
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::GreaterOrEqual,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::Literal(String::from("42"))
-                                      )
-                   );
+                                       ConditionBase::Literal(String::from("42"))));
 
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::LessOrEqual,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::Literal(String::from("5"))
-                                      )
-                   );
+                                       ConditionBase::Literal(String::from("5"))));
     }
 }
