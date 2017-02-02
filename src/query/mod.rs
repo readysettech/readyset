@@ -15,12 +15,8 @@ pub enum DataType {
     /// A numeric value.
     Number(i64),
 
-    #[cfg(not(feature="no_strings"))]
     /// A reference-counted string-like value.
     Text(sync::Arc<String>),
-    #[cfg(feature="no_strings")]
-    /// An emulated no-cost string
-    Text(&'static str),
 }
 
 impl DataType {
@@ -99,11 +95,7 @@ impl Into<i64> for DataType {
 
 impl From<String> for DataType {
     fn from(s: String) -> Self {
-        #[cfg(feature = "no_strings")]
-        return DataType::Text("");
-
-        #[cfg(not(feature = "no_strings"))]
-        return DataType::Text(sync::Arc::new(s));
+        DataType::Text(sync::Arc::new(s))
     }
 }
 

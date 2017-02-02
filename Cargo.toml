@@ -8,9 +8,6 @@ web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcache"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
-rtm = ['no_strings', 'no_domains']
-no_strings = []
-no_domains = []
 
 [dependencies]
 itertools = "0.5"
