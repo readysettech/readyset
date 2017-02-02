@@ -288,6 +288,8 @@ pub fn initialize(graph: &Graph,
             // we have a parent that has data, so we need to replay and reconstruct
             let start = ::std::time::Instant::now();
             reconstruct(graph, source, &materialize, control_txs, node, index_on);
+            // NOTE: the state has already been marked ready by the replay completing,
+            // but we want to wait for the domain to finish replay, which a Ready does.
             ready(control_txs, None);
             println!("reconstruction of {:?} {:?} took {}us",
                      *graph[node],

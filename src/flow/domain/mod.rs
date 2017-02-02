@@ -461,6 +461,12 @@ impl Domain {
                         tx.send(m).unwrap();
                     }
                 }
+
+                if tx.is_none() {
+                    // we must mark the node as ready immediately, otherwise it might miss updates
+                    // that follow the replay, but precede the ready.
+                    self.not_ready.remove(nodes.last().unwrap().as_local());
+                }
             }
             Control::ReplayThrough(nodes, rx, mut tx, ack) => {
                 // let coordinator know that we've entered replay loop
@@ -500,6 +506,12 @@ impl Domain {
                     if let Some(tx) = tx.as_mut() {
                         tx.send(m).unwrap();
                     }
+                }
+
+                if tx.is_none() {
+                    // we must mark the node as ready immediately, otherwise it might miss updates
+                    // that follow the replay, but precede the ready.
+                    self.not_ready.remove(nodes.last().unwrap().as_local());
                 }
             }
             Control::StartMigration(ts, channel) => {
