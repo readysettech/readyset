@@ -103,23 +103,24 @@ impl NodeDescriptor {
                 let mut u = Some(m.data); // so we can use .take()
                 for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
                     if txi == txn && self.children.is_empty() {
-                        tx.send(Message {
-                            from: NodeAddress::make_global(self.index), // the ingress node knows where it should go
-                            to: dst,
-                            data: u.take().unwrap(),
-                            ts: m.ts.clone(),
-                            token: None,
-                        })
-                    } else {
-                        tx.send(Message {
-                            from: NodeAddress::make_global(self.index),
-                            to: dst,
-                            data: u.clone().unwrap(),
-                            ts: m.ts.clone(),
-                            token: None,
-                        })
-                    }
-                    .unwrap();
+                            tx.send(Message {
+                                // the ingress node knows where it should go
+                                from: NodeAddress::make_global(self.index),
+                                to: dst,
+                                data: u.take().unwrap(),
+                                ts: m.ts.clone(),
+                                token: None,
+                            })
+                        } else {
+                            tx.send(Message {
+                                from: NodeAddress::make_global(self.index),
+                                to: dst,
+                                data: u.clone().unwrap(),
+                                ts: m.ts.clone(),
+                                token: None,
+                            })
+                        }
+                        .unwrap();
                 }
 
                 debug_assert!(u.is_some() || self.children.is_empty());

@@ -490,7 +490,8 @@ fn transactional_migration() {
     thread::sleep(time::Duration::new(0, 10_000_000));
 
     // check that c got them
-    assert_eq!(cq(&3.into()).unwrap().0, vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
+    assert_eq!(cq(&3.into()).unwrap().0,
+               vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
 }
 
 #[test]

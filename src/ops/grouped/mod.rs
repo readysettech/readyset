@@ -273,7 +273,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
         if column == self.cols - 1 {
-            return vec![(self.src, None)]
+            return vec![(self.src, None)];
         }
         vec![(self.src, Some(self.colfix[column]))]
     }

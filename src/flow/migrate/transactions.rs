@@ -136,10 +136,11 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
             let mut txs = arc.lock().unwrap();
             for &(domain, ingress) in &new_time_ingress {
                 // is this egress' base node already connected to this domain somehow?
-                if 
+                let connected =
                     nodes[&domain].iter().any(|&(node, _)| {
                         petgraph::algo::has_path_connecting(&*graph, base, node, None)
-                    }) {
+                    });
+                if connected {
                     // yes! no need for time channel
                     continue;
                 }

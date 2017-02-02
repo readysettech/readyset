@@ -193,11 +193,11 @@ pub fn new(cols: usize, key: usize) -> BufferedStoreBuilder {
 
 impl BufferedStoreBuilder {
     pub fn commit(self) -> (BufferedStore, WriteHandle) {
-        let r =
-            BufferedStore{
-                store: sync::Arc::new(AtomicPtr::new(Box::into_raw(Box::new(sync::Arc::new(self.r_store))))),
-                key: self.key,
-            };
+        let store = Box::into_raw(Box::new(sync::Arc::new(self.r_store)));
+        let r = BufferedStore {
+            store: sync::Arc::new(AtomicPtr::new(store)),
+            key: self.key,
+        };
         let w = WriteHandle {
             w_store: Some(Box::new(sync::Arc::new(self.w_store))),
             w_log: Vec::new(),

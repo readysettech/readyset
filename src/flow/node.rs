@@ -98,26 +98,30 @@ impl Type {
     // Returns a map from base node to the column in that base node whose value must match the value
     // of this node's column to cause a conflict. Returns None for a given base node if any write to
     // that base node might cause a conflict.
-    pub fn base_columns(&self, column: usize, graph: &petgraph::Graph<Node, Edge>, index: NodeIndex)
-                    ->  Vec<(NodeIndex, Option<usize>)>{
+    pub fn base_columns(&self,
+                        column: usize,
+                        graph: &petgraph::Graph<Node, Edge>,
+                        index: NodeIndex)
+                        -> Vec<(NodeIndex, Option<usize>)> {
 
-        fn base_parents(graph: &petgraph::Graph<Node, Edge>, index: NodeIndex) -> Vec<(NodeIndex, Option<usize>)> {
+        fn base_parents(graph: &petgraph::Graph<Node, Edge>,
+                        index: NodeIndex)
+                        -> Vec<(NodeIndex, Option<usize>)> {
             if let &Type::Internal(ref i) = graph[index].deref() {
                 if i.is_base() {
-                    return vec![(index, None)]
+                    return vec![(index, None)];
                 }
             }
-            graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming).flat_map(|n|{
-                base_parents(graph, n)
-            }).collect()
+            graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming)
+                .flat_map(|n| base_parents(graph, n))
+                .collect()
         }
 
-        let parents:Vec<_> = graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming).collect();
+        let parents: Vec<_> = graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming)
+            .collect();
 
         match *self {
-            Type::Ingress |
-            Type::Reader(..) |
-            Type::Egress(..) => {
+            Type::Ingress | Type::Reader(..) | Type::Egress(..) => {
                 assert_eq!(parents.len(), 1);
                 graph[parents[0]].base_columns(column, graph, parents[0])
             }
@@ -125,24 +129,29 @@ impl Type {
                 if i.is_base() {
                     vec![(index, Some(column))]
                 } else {
-                    i.parent_columns(column).into_iter().flat_map(|(n, c)|{
-                        let n = if n.is_global() {
-                            *n.as_global()
-                        } else {
-                            // Find the parent with node address matching the result from parent_columns.
-                            *parents.iter().filter(|p|{
-                                match graph[**p].addr {
-                                    Some(a) if a == n => true,
-                                    _ => false,
-                                }
-                            }).next().unwrap()
-                        };
+                    i.parent_columns(column)
+                        .into_iter()
+                        .flat_map(|(n, c)| {
+                            let n = if n.is_global() {
+                                *n.as_global()
+                            } else {
+                                // Find the parent with node address matching the result from
+                                // parent_columns.
+                                *parents.iter()
+                                    .filter(|p| match graph[**p].addr {
+                                        Some(a) if a == n => true,
+                                        _ => false,
+                                    })
+                                    .next()
+                                    .unwrap()
+                            };
 
-                        match c {
-                            Some(c) => graph[n].base_columns(c, graph, n),
-                            None => base_parents(graph, n),
-                        }
-                    }).collect()
+                            match c {
+                                Some(c) => graph[n].base_columns(c, graph, n),
+                                None => base_parents(graph, n),
+                            }
+                        })
+                        .collect()
                 }
             }
             Type::TimestampIngress(..) |
@@ -360,7 +369,8 @@ impl Node {
         }
     }
 
-    /// A node is considered to be an output node if changes to its state are visible outside of its domain.
+    /// A node is considered to be an output node if changes to its state are visible outside of
+    /// its domain.
     pub fn is_output(&self) -> bool {
         match *self.inner {
             Type::Egress(..) | Type::Reader(..) => true,

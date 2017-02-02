@@ -61,7 +61,8 @@ impl ImpliedTableExpansion for SqlQuery {
             f.table = match f.table {
                 None => {
                     if let Some(_) = f.function {
-                        // There is no implied table (other than "self") for anonymous function columns
+                        // There is no implied table (other than "self") for anonymous function
+                        // columns
                         None
                     } else {
                         let mut matches = write_schemas.iter()
@@ -94,15 +95,14 @@ impl ImpliedTableExpansion for SqlQuery {
             f
         };
 
+        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
         match self {
             // nothing to do for INSERTs, as they cannot have implied tables
             SqlQuery::Insert(i) => SqlQuery::Insert(i),
             SqlQuery::Select(mut sq) => {
                 // Expand within field list
                 sq.fields = match sq.fields {
-                    FieldExpression::All => {
-                        panic!("Must apply StarExpansion pass before ImpliedTableExpansion")
-                    }
+                    FieldExpression::All => panic!(err),
                     FieldExpression::Seq(fs) => {
                         FieldExpression::Seq(fs.into_iter()
                             .map(&translate_column)
@@ -132,23 +132,18 @@ mod tests {
     fn it_expands_implied_tables() {
         use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
 
+        let wrap = |cb| Some(Box::new(ConditionExpression::Base(cb)));
+
         // SELECT name, title FROM users, articles WHERE users.id = author;
         // -->
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
-            tables: vec![Table::from("users"),
-                         Table::from("articles")],
+            tables: vec![Table::from("users"), Table::from("articles")],
             fields: FieldExpression::Seq(vec![Column::from("name"), Column::from("title")]),
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
-                left: Some(Box::new(ConditionExpression::Base(
-                            ConditionBase::Field(
-                                Column::from("users.id"))
-                            ))),
-                right: Some(Box::new(ConditionExpression::Base(
-                            ConditionBase::Field(
-                                Column::from("author"))
-                            ))),
+                left: wrap(ConditionBase::Field(Column::from("users.id"))),
+                right: wrap(ConditionBase::Field(Column::from("author"))),
             })),
             ..Default::default()
         };
@@ -167,14 +162,8 @@ mod tests {
                 assert_eq!(tq.where_clause,
                            Some(ConditionExpression::ComparisonOp(ConditionTree {
                                operator: Operator::Equal,
-                               left: Some(Box::new(ConditionExpression::Base(
-                                       ConditionBase::Field(
-                                           Column::from("users.id"))
-                                       ))),
-                               right: Some(Box::new(ConditionExpression::Base(
-                                        ConditionBase::Field(
-                                            Column::from("articles.author"))
-                                        ))),
+                               left: wrap(ConditionBase::Field(Column::from("users.id"))),
+                               right: wrap(ConditionBase::Field(Column::from("articles.author"))),
                            })));
             }
             // if we get anything other than a selection query back, something really weird is up

@@ -100,19 +100,17 @@ impl AliasRemoval for SqlQuery {
                     FieldExpression::All => FieldExpression::All,
                     FieldExpression::Seq(fs) => {
                         let new_fs = fs.into_iter()
-                            .map(|f| {
-                                match f.table {
-                                    None => f,
-                                    Some(t) => {
-                                        Column {
-                                            name: f.name,
-                                            table: if table_aliases.contains_key(&t) {
-                                                Some(table_aliases[&t].clone())
-                                            } else {
-                                                Some(t)
-                                            },
-                                            function: None,
-                                        }
+                            .map(|f| match f.table {
+                                None => f,
+                                Some(t) => {
+                                    Column {
+                                        name: f.name,
+                                        table: if table_aliases.contains_key(&t) {
+                                            Some(table_aliases[&t].clone())
+                                        } else {
+                                            Some(t)
+                                        },
+                                        function: None,
                                     }
                                 }
                             })
@@ -141,6 +139,7 @@ mod tests {
     fn it_removes_aliases() {
         use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
 
+        let wrap = |cb| Some(Box::new(ConditionExpression::Base(cb)));
         let q = SelectStatement {
             tables: vec![Table {
                              name: String::from("PaperTag"),
@@ -149,11 +148,8 @@ mod tests {
             fields: FieldExpression::Seq(vec![Column::from("t.id")]),
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
-                left: Some(Box::new(ConditionExpression::Base(
-                            ConditionBase::Field(
-                                Column::from("t.id"))
-                            ))),
-                right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+                left: wrap(ConditionBase::Field(Column::from("t.id"))),
+                right: wrap(ConditionBase::Placeholder),
             })),
             ..Default::default()
         };
@@ -166,11 +162,8 @@ mod tests {
                 assert_eq!(tq.where_clause,
                            Some(ConditionExpression::ComparisonOp(ConditionTree {
                                operator: Operator::Equal,
-                               left: Some(Box::new(ConditionExpression::Base(
-                                       ConditionBase::Field(
-                                           Column::from("PaperTag.id"))
-                                       ))),
-                               right: Some(Box::new(ConditionExpression::Base(ConditionBase::Placeholder))),
+                               left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
+                               right: wrap(ConditionBase::Placeholder),
                            })));
             }
             // if we get anything other than a selection query back, something really weird is up

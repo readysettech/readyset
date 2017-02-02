@@ -216,7 +216,8 @@ impl Domain {
                     _ => break,
                 };
 
-                // If this is a normal transaction and we don't have all the messages for this timestamp, then stop.
+                // If this is a normal transaction and we don't have all the messages for this
+                // timestamp, then stop.
                 if let &BufferedTransaction::Transaction(base, ref messages) = entry.get() {
                     if messages.len() < *self.ingress_from_base.get(&base).unwrap() {
                         break;
@@ -245,7 +246,9 @@ impl Domain {
         let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
-        match self.buffered_transactions.entry(ts).or_insert(BufferedTransaction::Transaction(base, vec![])) {
+        match self.buffered_transactions
+            .entry(ts)
+            .or_insert(BufferedTransaction::Transaction(base, vec![])) {
             &mut BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
             _ => unreachable!(),
         }
@@ -264,75 +267,85 @@ impl Domain {
         let (ctx, crx) = mpsc::sync_channel(16);
 
         let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
-        thread::Builder::new().name(format!("domain{}", name)).spawn(move || {
-            let sel = mpsc::Select::new();
-            let mut rx_handle = sel.handle(&rx);
-            let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
-            let mut control_rx_handle = sel.handle(&crx);
+        thread::Builder::new()
+            .name(format!("domain{}", name))
+            .spawn(move || {
+                let sel = mpsc::Select::new();
+                let mut rx_handle = sel.handle(&rx);
+                let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
+                let mut control_rx_handle = sel.handle(&crx);
 
-            unsafe {
-                rx_handle.add();
-                timestamp_rx_handle.add();
-                control_rx_handle.add();
-            }
+                unsafe {
+                    rx_handle.add();
+                    timestamp_rx_handle.add();
+                    control_rx_handle.add();
+                }
 
-            loop {
-                let id = sel.wait();
-                if id == control_rx_handle.id() {
-                    let control = control_rx_handle.recv();
-                    if control.is_err() {
-                        return;
-                    }
-                    self.handle_control(control.unwrap());
-                } else if id == timestamp_rx_handle.id() {
-                    let ts = timestamp_rx_handle.recv();
-                    if ts.is_err() {
-                        return;
-                    }
-                    let ts = ts.unwrap();
+                loop {
+                    let id = sel.wait();
+                    if id == control_rx_handle.id() {
+                        let control = control_rx_handle.recv();
+                        if control.is_err() {
+                            return;
+                        }
+                        self.handle_control(control.unwrap());
+                    } else if id == timestamp_rx_handle.id() {
+                        let ts = timestamp_rx_handle.recv();
+                        if ts.is_err() {
+                            return;
+                        }
+                        let ts = ts.unwrap();
 
-                    let o = self.buffered_transactions.insert(ts, BufferedTransaction::RemoteTransaction);
-                    assert!(o.is_none());
+                        let o = BufferedTransaction::RemoteTransaction;
+                        let o = self.buffered_transactions.insert(ts, o);
+                        assert!(o.is_none());
 
-                    self.apply_transactions();
-                } else if id == rx_handle.id() {
-                    let m = rx_handle.recv();
-                    if m.is_err() {
-                        return;
-                    }
-                    let mut m = m.unwrap();
+                        self.apply_transactions();
+                    } else if id == rx_handle.id() {
+                        let m = rx_handle.recv();
+                        if m.is_err() {
+                            return;
+                        }
+                        let mut m = m.unwrap();
 
-                    if let Some((token, send)) = m.token.take() {
-                        let ingress = self.nodes[m.to.as_local()].borrow();
-                        let base_node = self.nodes[ingress.children[0].as_local()].borrow().index; // TODO: is this the correct node?
-                        let result = self.checktable
-                            .lock()
-                            .unwrap()
-                            .claim_timestamp(&token, base_node, &m.data);
-                        match result {
-                            checktable::TransactionResult::Committed(i) => {
-                                m.ts = Some((i, base_node));
-                                m.token = None;
-                                let _ = send.send(result);
-                            }
-                            checktable::TransactionResult::Aborted => {
-                                let _ = send.send(result);
-                                continue;
+                        if let Some((token, send)) = m.token.take() {
+                            let ingress = self.nodes[m.to.as_local()].borrow();
+                            // TODO: is this the correct node?
+                            let base_node =
+                                self.nodes[ingress.children[0].as_local()].borrow().index;
+                            let result = self.checktable
+                                .lock()
+                                .unwrap()
+                                .claim_timestamp(&token, base_node, &m.data);
+                            match result {
+                                checktable::TransactionResult::Committed(i) => {
+                                    m.ts = Some((i, base_node));
+                                    m.token = None;
+                                    let _ = send.send(result);
+                                }
+                                checktable::TransactionResult::Aborted => {
+                                    let _ = send.send(result);
+                                    continue;
+                                }
                             }
                         }
-                    }
 
-                    match m.ts {
-                        None => {
-                            Self::dispatch(m, &self.not_ready, &mut self.state, &self.nodes, true);
-                        }
-                        Some(_) => {
-                            self.buffer_transaction(m);
+                        match m.ts {
+                            None => {
+                                Self::dispatch(m,
+                                               &self.not_ready,
+                                               &mut self.state,
+                                               &self.nodes,
+                                               true);
+                            }
+                            Some(_) => {
+                                self.buffer_transaction(m);
+                            }
                         }
                     }
                 }
-            }
-        }).unwrap();
+            })
+            .unwrap();
 
         ctx
     }
@@ -515,7 +528,8 @@ impl Domain {
                 }
             }
             Control::StartMigration(ts, channel) => {
-                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationStart(channel));
+                let o = self.buffered_transactions
+                    .insert(ts, BufferedTransaction::MigrationStart(channel));
                 assert!(o.is_none());
 
                 if ts == self.ts + 1 {
@@ -523,7 +537,8 @@ impl Domain {
                 }
             }
             Control::CompleteMigration(ts, ingress_from_base) => {
-                let o = self.buffered_transactions.insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
+                let o = self.buffered_transactions
+                    .insert(ts, BufferedTransaction::MigrationEnd(ingress_from_base));
                 assert!(o.is_none());
                 assert_eq!(ts, self.ts + 1);
                 self.apply_transactions();

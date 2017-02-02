@@ -301,8 +301,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     None => (),  // we've already dealt with this column as part of some relation
                     Some(_) => {
                         // add a special node representing the computed columns
-                        // TODO(malte): the predicates here should probably reflect HAVING conditions, if
-                        // any are present
+                        // TODO(malte): the predicates here should probably reflect HAVING
+                        // conditions, if any are present
                         let mut n = new_node(String::from("computed_columns"), vec![], &st);
                         n.columns.push(column.clone());
                         qg.relations.insert(String::from("computed_columns"), n);

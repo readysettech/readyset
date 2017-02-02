@@ -160,11 +160,11 @@
 //! above. Note that we didn't specify any domains in this migration, so Soup will automatically
 //! put each node in a separate domain.
 //!
-//! When you `commit` the `Migration`, it will set up a bunch of data structures used for bookkeping,
-//! set up channels for the different domains to talk to each other, and then spin up a thread for
-//! every new domain in the graph (which is all of them). The main loop for every node is in
-//! `Domain::boot`. It reads incoming updates, does some transactional bookkeping, processes the
-//! updates using the inner operation of the node (this is where the `domain::single` component
+//! When you `commit` the `Migration`, it will set up a bunch of data structures used for
+//! bookkeping, set up channels for the different domains to talk to each other, and then spin up a
+//! thread for every new domain in the graph (which is all of them). The main loop for every node
+//! is in `Domain::boot`. It reads incoming updates, does some transactional bookkeping, processes
+//! the updates using the inner operation of the node (this is where the `domain::single` component
 //! comes into play), and then forwards the resulting update to any descendant views.
 //!
 //! ## Tracing a write

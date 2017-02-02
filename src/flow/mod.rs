@@ -573,24 +573,20 @@ impl<'a> Migration<'a> {
             unreachable!("tried to add token generator to non-reader node");
         }
 
-        let base_columns:Vec<(_,Option<_>)> = self.mainline.ingredients[*n.as_global()]
+        let base_columns: Vec<(_, Option<_>)> = self.mainline.ingredients[*n.as_global()]
             .base_columns(key, &self.mainline.ingredients, *n.as_global());
 
-        let coarse_parents = base_columns.iter().filter_map(|&(ni, o)| {
-            if o.is_none() {
-                Some(ni)
-            } else {
-                None
-            }
-        }).collect();
+        let coarse_parents = base_columns.iter()
+            .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
+            .collect();
 
-        let granular_parents = base_columns.into_iter().filter_map(|(ni, o)| {
-            if o.is_some() {
+        let granular_parents = base_columns.into_iter()
+            .filter_map(|(ni, o)| if o.is_some() {
                 Some((ni, o.unwrap()))
             } else {
                 None
-            }
-        }).collect();
+            })
+            .collect();
 
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
         self.mainline.checktable.lock().unwrap().track(&token_generator);

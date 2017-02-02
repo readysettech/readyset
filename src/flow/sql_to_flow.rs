@@ -121,8 +121,8 @@ impl SqlIncorporator {
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
-        // first run some standard rewrite passes on the query. This makes the later work easier, as we
-        // no longer have to consider complications like aliases.
+        // first run some standard rewrite passes on the query. This makes the later work easier,
+        // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
             .expand_stars(&self.write_schemas)
             .expand_implied_tables(&self.write_schemas);
@@ -238,9 +238,10 @@ impl SqlIncorporator {
                                            mig)
             }
             FunctionExpression::Count(FieldExpression::All) => {
-                // XXX(malte): we will need a special operator here, since COUNT(*) refers to all rows
-                // in the group (if we have a GROUP BY) or table/view (if we don't). As such, there is
-                // no "over" column, but our aggregation operators' API requires one to be specified.
+                // XXX(malte): we will need a special operator here, since COUNT(*) refers to all
+                // rows in the group (if we have a GROUP BY) or table/view (if we don't). As such,
+                // there is no "over" column, but our aggregation operators' API requires one to be
+                // specified.
                 unimplemented!()
             }
             _ => unimplemented!(),
@@ -360,21 +361,20 @@ impl SqlIncorporator {
         {
             // 1. Generate the necessary filter node for each relation node in the query graph.
             let mut filter_nodes = HashMap::<String, Vec<NodeAddress>>::new();
-            // Need to iterate over relations in a deterministic order, as otherwise nodes will be added in
-            // a different order every time, which will yield different node identifiers and make it
-            // difficult for applications to check what's going on.
+            // Need to iterate over relations in a deterministic order, as otherwise nodes will be
+            // added in a different order every time, which will yield different node identifiers
+            // and make it difficult for applications to check what's going on.
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             sorted_rels.sort();
             for rel in sorted_rels.iter() {
                 let qgn = qg.relations.get(*rel).unwrap();
                 // we'll handle computed columns later
                 if *rel != "computed_columns" {
-                    // the following conditional is required to avoid "empty" nodes (without any projected
-                    // columns) that are required as inputs to joins
+                    // the following conditional is required to avoid "empty" nodes (without any
+                    // projected columns) that are required as inputs to joins
                     if qgn.columns.len() > 0 || qgn.predicates.len() > 0 {
-                        // add a basic filter/permute node for each query graph node if it either has:
-                        // 1. projected columns, or
-                        // 2. a filter condition
+                        // add a basic filter/permute node for each query graph node if it either
+                        // has: 1) projected columns; or 2) a filter condition
                         let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
                                                                               i),
@@ -382,19 +382,19 @@ impl SqlIncorporator {
                                                                      mig);
                         filter_nodes.insert((*rel).clone(), fns);
                     } else {
-                        // otherwise, just record the node index of the base node for the relation that is
-                        // being selected from
+                        // otherwise, just record the node index of the base node for the relation
+                        // that is being selected from
                         filter_nodes.insert((*rel).clone(), vec![self.address_for(rel)]);
                     }
                 }
                 i += 1;
             }
 
-            // 2. Generate join nodes for the query. This starts out by joining two of the filter nodes
-            //    corresponding to relations in the first join predicate, and then continues to join the
-            //    result against previously unseen tables from the remaining predicates.
-            //    Note that no (src, dst) pair ever occurs twice, since we've already previously moved all
-            //    predicates pertaining to src/dst joins onto a single edge.
+            // 2. Generate join nodes for the query. This starts out by joining two of the filter
+            //    nodes corresponding to relations in the first join predicate, and then continues
+            //    to join the result against previously unseen tables from the remaining
+            //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
+            //    previously moved all predicates pertaining to src/dst joins onto a single edge.
             let mut join_nodes = Vec::new();
             let mut joined_tables = HashSet::new();
             let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
@@ -422,9 +422,9 @@ impl SqlIncorporator {
                             joined_tables.insert(src);
                             filter_nodes.get(src).unwrap().last().unwrap().clone()
                         } else {
-                            // We have already handled *both* tables that are part of the join. This should never
-                            // occur, because their join predicates must be associated with the same query graph
-                            // edge.
+                            // We have already handled *both* tables that are part of the join.
+                            // This should never occur, because their join predicates must be
+                            // associated with the same query graph edge.
                             unreachable!();
                         };
                         let ni = self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
@@ -449,12 +449,14 @@ impl SqlIncorporator {
                         match *e {
                             QueryGraphEdge::Join(_) => (),
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
-                                // Generate the right function nodes for all relevant columns in the "computed_columns" node
-                                // TODO(malte): I think we don't need to record the group columns with the function since
-                                // there can only be one GROUP BY in each query, but I should verify this.
+                                // Generate the right function nodes for all relevant columns in
+                                // the "computed_columns" node
+                                // TODO(malte): I think we don't need to record the group columns
+                                // with the function since there can only be one GROUP BY in each
+                                // query, but I should verify this.
                                 // TODO(malte): what about computed columns without a GROUP BY?
-                                // XXX(malte): ensure that the GROUP BY columns are all on the same (and correct) table
-                                // assert!(computed_cols_cgn.columns.all());
+                                // XXX(malte): ensure that the GROUP BY columns are all on the same
+                                // (and correct) table assert!(computed_cols_cgn.columns.all());
                                 for fn_col in computed_cols_cgn.columns.iter() {
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
@@ -668,9 +670,11 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "articles").description(), "B");
 
         // Try a simple equi-JOIN query
-        assert!(inc.add_query("SELECT users.name, articles.title FROM articles, users WHERE users.id = \
-                 articles.author;", None, &mut mig)
-            .is_ok());
+        let q = "SELECT users.name, articles.title \
+                 FROM articles, users \
+                 WHERE users.id = articles.author;";
+        let q = inc.add_query(q, None, &mut mig);
+        assert!(q.is_ok());
         let qid = query_id_hash(&["articles", "users"],
                                 &[&Column::from("articles.author"), &Column::from("users.id")]);
         // permute node 1 (for articles)
