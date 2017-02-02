@@ -291,9 +291,7 @@ impl Blender {
     /// Get a boxed function which can be used to validate tokens.
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
         let checktable = self.checktable.clone();
-        return Box::new(move |ref t: &checktable::Token| {
-            checktable.lock().unwrap().validate_token(&t)
-        });
+        Box::new(move |t: &checktable::Token| checktable.lock().unwrap().validate_token(t))
     }
 
     #[cfg(test)]
@@ -452,7 +450,7 @@ impl fmt::Display for Blender {
 }
 
 
-/// A FnTX is a function with which a transactional write can be submitted.
+/// A `FnTX` is a function with which a transactional write can be submitted.
 pub type FnTX = Box<Fn(Vec<query::DataType>, checktable::Token) ->
                     checktable::TransactionResult + Send + 'static>;
 
@@ -555,7 +553,7 @@ impl<'a> Migration<'a> {
     fn ensure_reader_for(&mut self, n: NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let r = node::Type::Reader(None, node::Reader::new());
+            let r = node::Type::Reader(None, Default::default());
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
@@ -742,7 +740,7 @@ impl<'a> Migration<'a> {
         let mut time_rxs = HashMap::new();
 
         // Set up control and data channels for new domains
-        for (domain, _) in &mut domain_nodes {
+        for domain in domain_nodes.keys() {
             if !mainline.data_txs.contains_key(domain) {
                 let (tx, rx) = mpsc::sync_channel(10);
                 rxs.insert(*domain, rx);
@@ -824,7 +822,7 @@ impl<'a> Migration<'a> {
         // Determine what nodes to materialize
         // NOTE: index will also contain the materialization information for *existing* domains
         let index = domain_nodes.iter()
-            .map(|(domain, ref nodes)| {
+            .map(|(domain, nodes)| {
                 let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
                 let idx = migrate::materialization::index(&mainline.ingredients, &nodes[..], mat);
                 (*domain, idx)

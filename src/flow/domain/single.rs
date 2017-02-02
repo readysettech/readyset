@@ -108,7 +108,7 @@ impl NodeDescriptor {
                                 from: NodeAddress::make_global(self.index),
                                 to: dst,
                                 data: u.take().unwrap(),
-                                ts: m.ts.clone(),
+                                ts: m.ts,
                                 token: None,
                             })
                         } else {
@@ -116,7 +116,7 @@ impl NodeDescriptor {
                                 from: NodeAddress::make_global(self.index),
                                 to: dst,
                                 data: u.clone().unwrap(),
-                                ts: m.ts.clone(),
+                                ts: m.ts,
                                 token: None,
                             })
                         }

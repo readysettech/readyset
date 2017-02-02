@@ -207,7 +207,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                 // current value is in the last output column
                 // or "" if there is no current group
                 let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
-                    .unwrap_or(self.inner.zero().map(Cow::Owned));
+                    .unwrap_or_else(|| self.inner.zero().map(Cow::Owned));
 
                 // new is the result of applying all diffs for the group to the current value
                 let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);

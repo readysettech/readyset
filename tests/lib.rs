@@ -705,18 +705,18 @@ fn migration_depends_on_unchanged_domain() {
     // normally wouldn't even look at that part of the data flow graph!
 
     let mut g = distributary::Blender::new();
-    let foo = {
+    let left = {
         let mut mig = g.start_migration();
 
         // base node, so will be materialized
-        let foo = mig.add_ingredient("foo", &["a", "b"], distributary::Base {});
+        let left = mig.add_ingredient("foo", &["a", "b"], distributary::Base {});
 
         // node in different domain that depends on foo causes egress to be added
-        mig.add_ingredient("bar", &["a", "b"], distributary::Identity::new(foo));
+        mig.add_ingredient("bar", &["a", "b"], distributary::Identity::new(left));
 
         // start processing
         mig.commit();
-        foo
+        left
     };
 
     let mut mig = g.start_migration();
@@ -724,8 +724,8 @@ fn migration_depends_on_unchanged_domain() {
     // joins require their inputs to be materialized
     // we need a new base as well so we can actually make a join
     let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base {});
-    let j = distributary::JoinBuilder::new(vec![(foo, 0), (tmp, 1)])
-        .from(foo, vec![1, 0])
+    let j = distributary::JoinBuilder::new(vec![(left, 0), (tmp, 1)])
+        .from(left, vec![1, 0])
         .join(tmp, vec![1, 0]);
     let j = mig.add_ingredient("join", &["a", "b"], j);
 
@@ -830,16 +830,16 @@ fn full_vote_migration() {
         // wait for twice that before expecting to see results
         thread::sleep(::std::time::Duration::from_millis(2 * n as u64 / 10));
         for i in 0..n {
-            let foo = last(&i.into()).unwrap();
-            assert!(!foo.is_empty(), "every article should be voted for");
-            assert_eq!(foo.len(), 1, "every article should have only one entry");
-            let foo = foo.into_iter().next().unwrap();
-            assert_eq!(foo[0],
+            let rows = last(&i.into()).unwrap();
+            assert!(!rows.is_empty(), "every article should be voted for");
+            assert_eq!(rows.len(), 1, "every article should have only one entry");
+            let row = rows.into_iter().next().unwrap();
+            assert_eq!(row[0],
                        i.into(),
                        "each article result should have the right id");
-            assert_eq!(foo[1], title, "all articles should have title 'foo'");
-            assert_eq!(foo[2], raten, "all articles should have one 5-star rating");
-            assert_eq!(foo[3], voten, "all articles should have one vote");
+            assert_eq!(row[1], title, "all articles should have title 'foo'");
+            assert_eq!(row[2], raten, "all articles should have one 5-star rating");
+            assert_eq!(row[3], voten, "all articles should have one vote");
         }
     }
 
@@ -913,7 +913,7 @@ fn tpc_w() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut inc = distributary::SqlIncorporator::new();
+    let mut inc = distributary::SqlIncorporator::default();
     let mut mig = g.start_migration();
 
     let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
@@ -922,8 +922,8 @@ fn tpc_w() {
     // Load queries
     f.read_to_string(&mut s).unwrap();
     let lines: Vec<String> = s.lines()
-        .filter(|l| !l.is_empty() && !l.starts_with("#"))
-        .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
             String::from(l) + "\n"
         } else {
             String::from(l)

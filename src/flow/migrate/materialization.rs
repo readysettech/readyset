@@ -245,7 +245,7 @@ pub fn initialize(graph: &Graph,
 
         let index_on = materialize.get_mut(&d)
             .and_then(|ss| ss.get(n.addr().as_local()))
-            .map(|col| *col);
+            .cloned();
         let mut has_state = index_on.is_some();
 
         if let flow::node::Type::Reader(_, ref r) = **n {

@@ -225,6 +225,7 @@ impl BufferedStore {
         let rs: sync::Arc<_> = (&*r_store).clone();
 
         let r_store_again = unsafe { Box::from_raw(self.store.load(atomic::Ordering::SeqCst)) };
+        #[allow(collapsible_if)]
         let res = if !sync::Arc::ptr_eq(&*r_store, &*r_store_again) {
             // a swap happened under us.
             //

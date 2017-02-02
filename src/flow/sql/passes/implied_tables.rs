@@ -60,13 +60,13 @@ impl ImpliedTableExpansion for SqlQuery {
         let translate_column = |mut f: Column| -> Column {
             f.table = match f.table {
                 None => {
-                    if let Some(_) = f.function {
+                    if f.function.is_some() {
                         // There is no implied table (other than "self") for anonymous function
                         // columns
                         None
                     } else {
                         let mut matches = write_schemas.iter()
-                            .filter_map(|(ref t, ref ws)| {
+                            .filter_map(|(t, ws)| {
                                 let num_matching = ws.iter()
                                     .filter(|c| **c == f.name)
                                     .count();

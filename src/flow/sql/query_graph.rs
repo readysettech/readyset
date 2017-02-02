@@ -55,34 +55,34 @@ impl QueryGraph {
         // Compute relations part of hash
         let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
         r_vec.sort();
-        for r in r_vec.iter() {
+        for r in &r_vec {
             r.hash(&mut hasher);
         }
 
         let mut attrs = HashSet::<&Column>::new();
         let mut attrs_vec = Vec::<&Column>::new();
-        for (_, n) in self.relations.iter() {
-            for p in n.predicates.iter() {
-                for c in p.contained_columns().iter() {
-                    attrs_vec.push(c.clone());
+        for n in self.relations.values() {
+            for p in &n.predicates {
+                for c in &p.contained_columns() {
+                    attrs_vec.push(c);
                     attrs.insert(c);
                 }
             }
         }
-        for (_, e) in self.edges.iter() {
+        for e in self.edges.values() {
             match *e {
                 QueryGraphEdge::Join(ref join_predicates) => {
-                    for p in join_predicates.iter() {
-                        for c in p.contained_columns().iter() {
-                            attrs_vec.push(c.clone());
+                    for p in join_predicates {
+                        for c in &p.contained_columns() {
+                            attrs_vec.push(c);
                             attrs.insert(c);
                         }
                     }
                 }
                 QueryGraphEdge::GroupBy(ref cols) => {
                     for c in cols {
-                        attrs_vec.push(&c);
-                        attrs.insert(&c);
+                        attrs_vec.push(c);
+                        attrs.insert(c);
                     }
                 }
             }
@@ -90,7 +90,7 @@ impl QueryGraph {
 
         // Compute attributes part of hash
         attrs_vec.sort();
-        for a in attrs_vec.iter() {
+        for a in &attrs_vec {
             a.hash(&mut hasher);
         }
 
@@ -138,13 +138,11 @@ fn classify_conditionals(ce: &ConditionExpression,
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
-                                    match fr.table.as_ref().cmp(&fl.table.as_ref()) {
-                                        Ordering::Less => {
-                                            let tmp = join_ct.left;
-                                            join_ct.left = join_ct.right;
-                                            join_ct.right = tmp;
-                                        }
-                                        _ => (),
+                                    if let Ordering::Less = fr.table
+                                        .as_ref()
+                                        .cmp(&fl.table.as_ref()) {
+                                        use std::mem;
+                                        mem::swap(&mut join_ct.left, &mut join_ct.right);
                                     }
                                     join.push(join_ct);
                                 } else {
@@ -228,15 +226,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
         // Now we're ready to build the query graph
         // 1. Set up nodes for each relation that we have local predicates for
-        for (rel, preds) in local_predicates.into_iter() {
-            let n = new_node(rel.clone(), preds, &st);
+        for (rel, preds) in local_predicates {
+            let n = new_node(rel.clone(), preds, st);
             qg.relations.insert(rel, n);
         }
         // 2. Add edges for each pair of joined relations
         // TODO(malte): This is pretty heavily into cloning things all over, which makes it both
         // inefficient and hideous. Maybe we can reengineer the data structures to require less of
         // that?
-        for jp in join_predicates.into_iter() {
+        for jp in join_predicates {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) =
                 *jp.left.as_ref().unwrap().as_ref() {
@@ -244,7 +242,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     *jp.right.as_ref().unwrap().as_ref() {
                     let mut e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
-                        .or_insert(QueryGraphEdge::Join(vec![]));
+                        .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
                         QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
                         _ => panic!("Expected join edge for join condition {:#?}", jp),
@@ -252,29 +250,26 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // XXX(malte): push join columns into projected column set as well. This isn't
                     // strictly required, and eagerly pushes more columns than needed, but makes a
                     // naive version of the graph construction work.
-                    if !qg.relations
-                        .entry(l.table.as_ref().unwrap().clone())
-                        .or_insert(new_node(l.table.as_ref().unwrap().clone(), vec![], &st))
-                        .columns
-                        .iter()
-                        .any(|c| c.name == l.name) {
-                        qg.relations
-                            .get_mut(l.table.as_ref().unwrap())
-                            .unwrap()
-                            .columns
-                            .push(l.clone());
+                    {
+                        let left = &mut qg.relations
+                            .entry(l.table.as_ref().unwrap().clone())
+                            .or_insert_with(|| {
+                                new_node(l.table.as_ref().unwrap().clone(), vec![], st)
+                            });
+                        if !left.columns.iter().any(|c| c.name == l.name) {
+                            left.columns.push(l.clone());
+                        }
                     }
-                    if !qg.relations
-                        .entry(r.table.as_ref().unwrap().clone())
-                        .or_insert(new_node(r.table.as_ref().unwrap().clone(), vec![], &st))
-                        .columns
-                        .iter()
-                        .any(|c| c.name == r.name) {
-                        qg.relations
-                            .get_mut(r.table.as_ref().unwrap())
-                            .unwrap()
-                            .columns
-                            .push(r.clone());
+
+                    {
+                        let right = &mut qg.relations
+                            .entry(r.table.as_ref().unwrap().clone())
+                            .or_insert_with(|| {
+                                new_node(r.table.as_ref().unwrap().clone(), vec![], st)
+                            });
+                        if !right.columns.iter().any(|c| c.name == r.name) {
+                            right.columns.push(r.clone());
+                        }
                     }
                 }
             }
@@ -284,10 +279,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // 3. Add any relations mentioned in the query but not in any conditionals.
     // This is also needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
-    for table in st.tables.iter() {
+    for table in &st.tables {
         if !qg.relations.contains_key(table.name.as_str()) {
             qg.relations.insert(table.name.clone(),
-                                new_node(table.name.clone(), Vec::new(), &st));
+                                new_node(table.name.clone(), Vec::new(), st));
         }
     }
 
@@ -303,7 +298,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         // add a special node representing the computed columns
                         // TODO(malte): the predicates here should probably reflect HAVING
                         // conditions, if any are present
-                        let mut n = new_node(String::from("computed_columns"), vec![], &st);
+                        let mut n = new_node(String::from("computed_columns"), vec![], st);
                         n.columns.push(column.clone());
                         qg.relations.insert(String::from("computed_columns"), n);
                     }
@@ -315,12 +310,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         None => (),
         Some(ref clause) => {
             // println!("{:#?}", clause);
-            for column in clause.columns.iter() {
+            for column in &clause.columns {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
                 let mut e = qg.edges
                     .entry((String::from("computed_columns"),
                             column.table.as_ref().unwrap().clone()))
-                    .or_insert(QueryGraphEdge::GroupBy(vec![]));
+                    .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
                     _ => unreachable!(),

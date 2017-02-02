@@ -87,7 +87,7 @@ impl AliasRemoval for SqlQuery {
             SqlQuery::Insert(i) => SqlQuery::Insert(i),
             SqlQuery::Select(mut sq) => {
                 // Collect table aliases
-                for t in sq.tables.iter() {
+                for t in &sq.tables {
                     match t.alias {
                         None => (),
                         Some(ref a) => {

@@ -44,8 +44,8 @@ fn add_time_egress(nodes: &mut Vec<(NodeIndex, bool)>, graph: &mut Graph) -> Vec
 
 }
 
-/// Returns a list of newly added TimeEgress nodes that need to be registered with pre-existing
-/// TimestampIngress nodes.
+/// Returns a list of newly added `TimeEgress` nodes that need to be registered with pre-existing
+/// `TimestampIngress` nodes.
 pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
                       graph: &mut Graph,
                       time_txs: &HashMap<domain::Index, mpsc::SyncSender<i64>>) {
@@ -80,10 +80,10 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
                 // that can *only* be the case if at least one node was added to the domain in this
                 // migration. there is no point in checking *old* nodes, because they cannot have
                 // been connected to this new base node
-                if nodes.contains_key(&domain) &&
-                   nodes[&domain].iter().any(|&(node, new)| {
+                let connected = nodes[&domain].iter().any(|&(node, new)| {
                     new && petgraph::algo::has_path_connecting(&*graph, base, node, None)
-                }) {
+                });
+                if nodes.contains_key(&domain) && connected {
                     // yes! no need for time channel
                     continue;
                 }

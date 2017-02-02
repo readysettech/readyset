@@ -119,7 +119,7 @@ impl Domain {
         if ts.is_some() {
             // Any message with a timestamp (ie part of a transaction) must flow through the entire
             // graph, even if there are no updates associated with it.
-            u = u.or(Some((Records::default(), ts, None)));
+            u = u.or_else(|| Some((Records::default(), ts, None)));
         }
 
         if u.is_none() {
@@ -145,9 +145,8 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, mut v) in Self::dispatch(m, not_ready, states, nodes, enable_output)
-                    .into_iter() {
-                    output_messages.entry(k).or_insert(vec![]).append(&mut v);
+                for (k, mut v) in Self::dispatch(m, not_ready, states, nodes, enable_output) {
+                    output_messages.entry(k).or_insert_with(Vec::new).append(&mut v);
                 }
             } else {
                 let mut data = data;
@@ -166,7 +165,7 @@ impl Domain {
     }
 
     pub fn transactional_dispatch(&mut self, messages: Vec<Message>) {
-        if messages.len() == 0 {
+        if messages.is_empty() {
             return;
         }
 
@@ -177,8 +176,8 @@ impl Domain {
             let new_messages =
                 Self::dispatch(m, &self.not_ready, &mut self.state, &self.nodes, false);
 
-            for (key, mut value) in new_messages.into_iter() {
-                egress_messages.entry(key).or_insert(vec![]).append(&mut value);
+            for (key, mut value) in new_messages {
+                egress_messages.entry(key).or_insert_with(Vec::new).append(&mut value);
             }
         }
 
@@ -218,8 +217,8 @@ impl Domain {
 
                 // If this is a normal transaction and we don't have all the messages for this
                 // timestamp, then stop.
-                if let &BufferedTransaction::Transaction(base, ref messages) = entry.get() {
-                    if messages.len() < *self.ingress_from_base.get(&base).unwrap() {
+                if let BufferedTransaction::Transaction(base, ref messages) = *entry.get() {
+                    if messages.len() < self.ingress_from_base[&base] {
                         break;
                     }
                 }
@@ -246,10 +245,10 @@ impl Domain {
         let (ts, base) = m.ts.unwrap();
 
         // Insert message into buffer.
-        match self.buffered_transactions
+        match *self.buffered_transactions
             .entry(ts)
-            .or_insert(BufferedTransaction::Transaction(base, vec![])) {
-            &mut BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
+            .or_insert_with(|| BufferedTransaction::Transaction(base, vec![])) {
+            BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
             _ => unreachable!(),
         }
 

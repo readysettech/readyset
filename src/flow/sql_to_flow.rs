@@ -27,11 +27,9 @@ pub struct SqlIncorporator {
     num_queries: usize,
 }
 
-impl SqlIncorporator {
-    /// Creates a new `SqlIncorporator` for the flow graph `g` (of which it takes and stores a
-    /// mutable borrow). Use this to add SQL queries to a Soup graph, but note that once you have
-    /// started using a `SqlIncorporator`, you can't manually add nodes any more (deliberately so).
-    pub fn new() -> SqlIncorporator {
+impl Default for SqlIncorporator {
+    /// Creates a new `SqlIncorporator` for an empty flow graph.
+    fn default() -> Self {
         SqlIncorporator {
             write_schemas: HashMap::default(),
             node_addresses: HashMap::default(),
@@ -40,15 +38,17 @@ impl SqlIncorporator {
             num_queries: 0,
         }
     }
+}
 
+impl SqlIncorporator {
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
     fn fields_for(&self, na: NodeAddress) -> &[String] {
-        self.node_fields.get(&na).unwrap().as_slice()
+        self.node_fields[&na].as_slice()
     }
 
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
     fn field_to_columnid(&self, na: NodeAddress, f: &str) -> Result<usize, String> {
-        match self.fields_for(na).iter().position(|ref s| **s == f) {
+        match self.fields_for(na).iter().position(|s| *s == f) {
             None => Err(format!("field {} not found in view {}", f, na)),
             Some(i) => Ok(i),
         }
@@ -58,7 +58,7 @@ impl SqlIncorporator {
     fn address_for(&self, name: &str) -> NodeAddress {
         match self.node_addresses.get(name) {
             None => panic!("node {} unknown!", name),
-            Some(na) => na.clone(),
+            Some(na) => *na,
         }
     }
 
@@ -96,11 +96,11 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
-    pub fn add_query<'a>(&mut self,
-                         query: &str,
-                         name: Option<String>,
-                         mut mig: &mut Migration)
-                         -> Result<(String, Vec<NodeAddress>), String> {
+    pub fn add_query(&mut self,
+                     query: &str,
+                     name: Option<String>,
+                     mut mig: &mut Migration)
+                     -> Result<(String, Vec<NodeAddress>), String> {
         query.to_flow_parts(self, name, &mut mig)
     }
 
@@ -184,7 +184,7 @@ impl SqlIncorporator {
         // Resolve column IDs in parent
         let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
         let group_col_indx = group_by.iter()
-            .map(|ref c| self.field_to_columnid(parent_ni, &c.name).unwrap())
+            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
             .collect::<Vec<_>>();
 
         // The function node's set of output columns is the group columns plus the function
@@ -210,7 +210,7 @@ impl SqlIncorporator {
         use ops::grouped::aggregate::Aggregation;
 
         let func = func_col.function.as_ref().unwrap();
-        let n = match *func {
+        match *func {
             FunctionExpression::Sum(FieldExpression::Seq(ref cols)) => {
                 // No support for multi-columns counts
                 assert_eq!(cols.len(), 1);
@@ -245,8 +245,7 @@ impl SqlIncorporator {
                 unimplemented!()
             }
             _ => unimplemented!(),
-        };
-        n
+        }
     }
 
     fn make_filter_and_project_nodes(&mut self,
@@ -289,7 +288,7 @@ impl SqlIncorporator {
 
     fn make_join_node(&mut self,
                       name: &str,
-                      jps: &Vec<ConditionTree>,
+                      jps: &[ConditionTree],
                       left_ni: NodeAddress,
                       right_ni: NodeAddress,
                       mig: &mut Migration)
@@ -303,7 +302,7 @@ impl SqlIncorporator {
             let tuples_for_cols =
                 |ni: NodeAddress, cols: &[String]| -> Vec<(NodeAddress, usize)> {
                     cols.iter()
-                        .map(|c| (ni, self.field_to_columnid(ni, &c).unwrap()))
+                        .map(|c| (ni, self.field_to_columnid(ni, c).unwrap()))
                         .collect()
                 };
 
@@ -366,13 +365,13 @@ impl SqlIncorporator {
             // and make it difficult for applications to check what's going on.
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             sorted_rels.sort();
-            for rel in sorted_rels.iter() {
-                let qgn = qg.relations.get(*rel).unwrap();
+            for rel in &sorted_rels {
+                let qgn = &qg.relations[*rel];
                 // we'll handle computed columns later
                 if *rel != "computed_columns" {
                     // the following conditional is required to avoid "empty" nodes (without any
                     // projected columns) that are required as inputs to joins
-                    if qgn.columns.len() > 0 || qgn.predicates.len() > 0 {
+                    if !qgn.columns.is_empty() || !qgn.predicates.is_empty() {
                         // add a basic filter/permute node for each query graph node if it either
                         // has: 1) projected columns; or 2) a filter condition
                         let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
@@ -399,28 +398,27 @@ impl SqlIncorporator {
             let mut joined_tables = HashSet::new();
             let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
                 qg.edges.iter().collect();
-            sorted_edges.sort_by_key(|ref k| &(k.0).0);
-            let mut edge_iter = sorted_edges.iter();
+            sorted_edges.sort_by_key(|k| &(k.0).0);
             let mut prev_ni = None;
-            while let Some(&(&(ref src, ref dst), edge)) = edge_iter.next() {
+            for &(&(ref src, ref dst), edge) in &sorted_edges {
                 match *edge {
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
                         let left_ni = match prev_ni {
                             None => {
                                 joined_tables.insert(src);
-                                let filters = filter_nodes.get(src).unwrap();
+                                let filters = &filter_nodes[src];
                                 assert_ne!(filters.len(), 0);
-                                filters.last().unwrap().clone()
+                                *filters.last().unwrap()
                             }
                             Some(ni) => ni,
                         };
                         let right_ni = if joined_tables.contains(src) {
                             joined_tables.insert(dst);
-                            filter_nodes.get(dst).unwrap().last().unwrap().clone()
+                            *filter_nodes[dst].last().unwrap()
                         } else if joined_tables.contains(dst) {
                             joined_tables.insert(src);
-                            filter_nodes.get(src).unwrap().last().unwrap().clone()
+                            *filter_nodes[src].last().unwrap()
                         } else {
                             // We have already handled *both* tables that are part of the join.
                             // This should never occur, because their join predicates must be
@@ -443,9 +441,9 @@ impl SqlIncorporator {
             let mut func_nodes = Vec::new();
             match qg.relations.get("computed_columns") {
                 None => (),
-                Some(ref computed_cols_cgn) => {
+                Some(computed_cols_cgn) => {
                     // Function columns with GROUP BY clause
-                    for (&(_, _), e) in qg.edges.iter() {
+                    for e in qg.edges.values() {
                         match *e {
                             QueryGraphEdge::Join(_) => (),
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
@@ -457,7 +455,7 @@ impl SqlIncorporator {
                                 // TODO(malte): what about computed columns without a GROUP BY?
                                 // XXX(malte): ensure that the GROUP BY columns are all on the same
                                 // (and correct) table assert!(computed_cols_cgn.columns.all());
-                                for fn_col in computed_cols_cgn.columns.iter() {
+                                for fn_col in &computed_cols_cgn.columns {
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
                                                                               i),
@@ -507,8 +505,7 @@ impl SqlIncorporator {
                 };
                 let projected_columns: Vec<Column> = sorted_rels.iter()
                     .fold(Vec::new(), |mut v, s| {
-                        let qgn = qg.relations.get(*s).unwrap();
-                        v.extend(qgn.columns.clone().into_iter());
+                        v.extend(qg.relations[*s].columns.clone().into_iter());
                         v
                     });
                 let projected_column_ids: Vec<usize> = projected_columns.iter()
@@ -541,11 +538,11 @@ pub trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
     /// string in the `Option<String>` in the third argument.
-    fn to_flow_parts<'a>(&self,
-                         &mut SqlIncorporator,
-                         Option<String>,
-                         &mut Migration)
-                         -> Result<(String, Vec<NodeAddress>), String>;
+    fn to_flow_parts(&self,
+                     &mut SqlIncorporator,
+                     Option<String>,
+                     &mut Migration)
+                     -> Result<(String, Vec<NodeAddress>), String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
@@ -568,7 +565,7 @@ impl<'a> ToFlowParts for &'a str {
         let parsed_query = sql_parser::parse_query(self);
 
         // if ok, manufacture a node for the query structure we got
-        let nodes = match parsed_query {
+        match parsed_query {
             Ok(q) => {
                 match name {
                     Some(name) => Ok(inc.nodes_for_named_query(q, name, mig)),
@@ -576,8 +573,7 @@ impl<'a> ToFlowParts for &'a str {
                 }
             }
             Err(e) => Err(String::from(e)),
-        };
-        nodes
+        }
     }
 }
 
@@ -616,7 +612,7 @@ mod tests {
     fn it_parses() {
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Must have a base node for type inference to work, so make one manually
@@ -643,7 +639,7 @@ mod tests {
     fn it_incorporates_simple_join() {
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Establish a base write type for "users"
@@ -694,7 +690,7 @@ mod tests {
     fn it_incorporates_simple_selection() {
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Establish a base write type
@@ -733,7 +729,7 @@ mod tests {
     fn it_incorporates_aggregation() {
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Establish a base write types
@@ -773,7 +769,7 @@ mod tests {
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Establish a base write type
@@ -810,7 +806,7 @@ mod tests {
 
         // set up graph
         let mut g = Blender::new();
-        let mut inc = SqlIncorporator::new();
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         let mut f = File::open("tests/finkelstein82.txt").unwrap();

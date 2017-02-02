@@ -25,14 +25,6 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn new() -> Self {
-        Reader {
-            streamers: sync::Arc::default(),
-            state: None,
-            token_generator: None,
-        }
-    }
-
     pub fn get_reader
         (&self)
          -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>> {
@@ -43,6 +35,16 @@ impl Reader {
                     .map(|r| r.0)
             }) as Box<_>
         })
+    }
+}
+
+impl Default for Reader {
+    fn default() -> Self {
+        Reader {
+            streamers: sync::Arc::default(),
+            state: None,
+            token_generator: None,
+        }
     }
 }
 
@@ -107,7 +109,7 @@ impl Type {
         fn base_parents(graph: &petgraph::Graph<Node, Edge>,
                         index: NodeIndex)
                         -> Vec<(NodeIndex, Option<usize>)> {
-            if let &Type::Internal(ref i) = graph[index].deref() {
+            if let Type::Internal(ref i) = *graph[index] {
                 if i.is_base() {
                     return vec![(index, None)];
                 }
@@ -138,11 +140,10 @@ impl Type {
                                 // Find the parent with node address matching the result from
                                 // parent_columns.
                                 *parents.iter()
-                                    .filter(|p| match graph[**p].addr {
+                                    .find(|p| match graph[**p].addr {
                                         Some(a) if a == n => true,
                                         _ => false,
                                     })
-                                    .next()
                                     .unwrap()
                             };
 
@@ -163,14 +164,14 @@ impl Type {
 
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Type::Source => write!(f, "source node"),
-            &Type::Ingress => write!(f, "ingress node"),
-            &Type::Egress(..) => write!(f, "egress node"),
-            &Type::TimestampIngress(..) => write!(f, "time ingress node"),
-            &Type::TimestampEgress(..) => write!(f, "time egress node"),
-            &Type::Reader(..) => write!(f, "reader node"),
-            &Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
+        match *self {
+            Type::Source => write!(f, "source node"),
+            Type::Ingress => write!(f, "ingress node"),
+            Type::Egress(..) => write!(f, "egress node"),
+            Type::TimestampIngress(..) => write!(f, "time ingress node"),
+            Type::TimestampEgress(..) => write!(f, "time egress node"),
+            Type::Reader(..) => write!(f, "reader node"),
+            Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
     }
 }

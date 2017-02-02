@@ -52,7 +52,7 @@ impl Token {
 
 impl Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for &(ts, ref key, ref c) in self.conflicts.iter() {
+        for &(ts, ref key, ref c) in &self.conflicts {
             match write!(f, "{:?} @ ts={}, key={:?}", c, ts, key) {
                 Ok(_) => (),
                 Err(e) => return Err(e),
@@ -73,7 +73,7 @@ impl TokenGenerator {
                -> Self {
         TokenGenerator {
             conflicts: base_table_conflicts.into_iter()
-                .map(|n| Conflict::BaseTable(n))
+                .map(Conflict::BaseTable)
                 .chain(base_column_conflicts.into_iter()
                     .map(|(n, c)| Conflict::BaseColumn(n, c)))
                 .collect(),
@@ -97,7 +97,7 @@ pub enum TransactionResult {
 impl TransactionResult {
     /// Checks if a transaction committed.
     pub fn ok(&self) -> bool {
-        if let &TransactionResult::Committed(_) = self {
+        if let TransactionResult::Committed(_) = *self {
             true
         } else {
             false
@@ -128,9 +128,9 @@ impl CheckTable {
 
     // Return whether the conflict should trigger, causing the associated transaction to abort.
     fn check_conflict(&self, ts: i64, key: &DataType, conflict: &Conflict) -> bool {
-        match conflict {
-            &Conflict::BaseTable(node) => ts < *self.toplevel.get(&node).unwrap_or(&-1),
-            &Conflict::BaseColumn(node, column) => {
+        match *conflict {
+            Conflict::BaseTable(node) => ts < *self.toplevel.get(&node).unwrap_or(&-1),
+            Conflict::BaseColumn(node, column) => {
                 let t = self.granular.get(&node);
                 if t.is_none() {
                     // If the base node has never seen a write, then don't trigger.
@@ -155,7 +155,7 @@ impl CheckTable {
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
         !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-            conflicts.iter().any(|ref c| self.check_conflict(ts, &key, c))
+            conflicts.iter().any(|c| self.check_conflict(ts, key, c))
         })
     }
 
@@ -169,7 +169,7 @@ impl CheckTable {
             self.next_timestamp += 1;
             self.toplevel.insert(base, ts);
 
-            let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
+            let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
                     let mut delete = false;
@@ -201,11 +201,11 @@ impl CheckTable {
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {
-        for conflict in gen.conflicts.iter() {
-            match conflict {
-                &Conflict::BaseTable(..) => {}
-                &Conflict::BaseColumn(base, col) => {
-                    let ref mut t = self.granular.entry(base).or_insert_with(HashMap::new);
+        for conflict in &gen.conflicts {
+            match *conflict {
+                Conflict::BaseTable(..) => {}
+                Conflict::BaseColumn(base, col) => {
+                    let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
                     t.entry(col).or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
             }

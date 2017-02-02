@@ -277,7 +277,7 @@ impl Ingredient for Joiner {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        for (_, j) in &mut self.join {
+        for j in self.join.values_mut() {
             for (t, jt) in &mut j.against {
                 jt.select = iter::repeat(true)
                     .take(g[*t.as_global()].fields().len())
@@ -402,7 +402,7 @@ impl Ingredient for Joiner {
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
         let (nl, c) = self.emit[col];
 
-        let ref j = self.join[&nl];
+        let j = &self.join[&nl];
         assert!(j.against.len() == 1);
 
         let (nr, target) = j.against.iter().next().unwrap();
@@ -411,7 +411,7 @@ impl Ingredient for Joiner {
         if lcol == c {
             vec![(nl, Some(lcol)), (*nr, Some(rcol))]
         } else {
-            let other = *self.join.keys().filter(|n: &&NodeAddress| **n != nl).next().unwrap();
+            let other = *self.join.keys().find(|n: &&NodeAddress| **n != nl).unwrap();
             vec![(nl, Some(c)), (other, None)]
         }
     }

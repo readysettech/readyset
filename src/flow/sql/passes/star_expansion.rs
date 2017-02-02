@@ -16,7 +16,7 @@ impl StarExpansion for SqlQuery {
                     FieldExpression::All => {
                         // XXX(malte): not currently compatible with selections from > 1 table.
                         // This will be fixed once we support "* FROM table" syntax.
-                        let table = sq.tables.get(0).unwrap();
+                        let table = &sq.tables[0];
                         let new_fs = write_schemas.get(&table.name).unwrap().clone();
                         FieldExpression::Seq(new_fs.iter()
                             .map(|f| Column::from(format!("{}.{}", table.name, f).as_ref()))
