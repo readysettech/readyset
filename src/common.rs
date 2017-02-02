@@ -6,7 +6,7 @@ use std::str::FromStr;
 use column::{Column, FunctionExpression};
 use table::Table;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Operator {
     Not,
     And,

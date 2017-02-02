@@ -1,6 +1,6 @@
 use std::str;
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct Table {
     pub name: String,
     pub alias: Option<String>,

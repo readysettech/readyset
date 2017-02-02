@@ -8,31 +8,31 @@ use common::{field_expr, field_list, unsigned_number, statement_terminator, tabl
 use condition::{condition_expr, ConditionExpression};
 use table::Table;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
     pub having: Option<ConditionExpression>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct LimitClause {
     pub limit: u64,
     pub offset: u64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct OrderClause {
     pub cols: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
     pub order: OrderType,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,

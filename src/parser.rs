@@ -5,7 +5,7 @@ pub use common::{FieldExpression, Operator};
 use insert::*;
 use select::*;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum SqlQuery {
     Insert(InsertStatement),
     Select(SelectStatement),
@@ -33,4 +33,22 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     };
 
     Err("failed to parse query")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+
+    #[test]
+    fn hash_query() {
+        let qstring = "INSERT INTO users VALUES (42, test);";
+        let res = parse_query(qstring);
+        assert!(res.is_ok());
+
+        let mut h = DefaultHasher::new();
+        res.unwrap().hash(&mut h);
+        assert_eq!(format!("{:x}", h.finish()), "18c5663ec2a3a77b");
+    }
 }
