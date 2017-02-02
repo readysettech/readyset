@@ -1,12 +1,15 @@
-use flow::{FlowGraph, NodeIndex};
-use query::{DataType, Query};
-use ops::Update;
+use query::DataType;
+use flow::prelude::*;
+use flow;
 
 use tarpc;
-use shortcut;
+use tarpc::util::Never;
+use futures;
+use tokio_core::reactor;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 /// Available RPC methods
 pub mod ext {
@@ -18,7 +21,7 @@ pub mod ext {
         /// If `args = None`, all records are returned. Otherwise, all records are returned whose
         /// `i`th column matches the value contained in `args[i]` (or any value if `args[i] =
         /// None`).
-        rpc query(view: usize, args: Option<Vec<Option<DataType>>>) -> Vec<Vec<DataType>>;
+        rpc query(view: usize, key: DataType) -> Vec<Vec<DataType>> | ();
 
         /// Insert a new record into the given view.
         ///
@@ -32,93 +35,124 @@ pub mod ext {
 
 use self::ext::*;
 
-type Put = Box<Fn(Vec<DataType>) -> i64 + Send + 'static>;
-type Get = Box<Fn(Option<&Query>) -> Vec<Vec<DataType>> + Send + Sync>;
-type FG = FlowGraph<Query, Update, Vec<DataType>>;
+type Put = Box<Fn(Vec<DataType>) + Send + 'static>;
+type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>;
 
 struct Server {
-    put: HashMap<NodeIndex, (String, Vec<String>, Mutex<Put>)>,
-    get: HashMap<NodeIndex, (String, Vec<String>, Get)>,
-    _g: Mutex<FG>, // never read or written, just needed so the server doesn't stop
+    put: HashMap<NodeAddress, (String, Vec<String>, Mutex<Put>)>,
+    get: HashMap<NodeAddress, (String, Vec<String>, Get)>,
+    _g: Mutex<flow::Blender>, // never read or written, just needed so the server doesn't stop
 }
 
-impl ext::Service for Server {
-    fn query(&self, view: usize, args: Option<Vec<Option<DataType>>>) -> Vec<Vec<DataType>> {
-        let get = &self.get[&NodeIndex::new(view)];
-        let arg = args.map(|mut args| {
-            use std::iter;
-
-            let conds = get.1
-                .iter()
-                .enumerate()
-                .filter_map(|(i, _)| {
-                    args.get_mut(i).and_then(|a| a.take()).map(|arg| {
-                        shortcut::Condition {
-                            column: i,
-                            cmp: shortcut::Comparison::Equal(shortcut::Value::Const(arg)),
-                        }
-                    })
-                })
-                .collect();
-
-            Query::new(&iter::repeat(true).take(get.1.len()).collect::<Vec<_>>(),
-                       conds)
-        });
-
-        get.2(arg.as_ref())
+impl ext::FutureService for Arc<Server> {
+    type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
+    fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
+        let get = &self.get[&view.into()];
+        futures::future::result(get.2(&key))
     }
 
-    fn insert(&self, view: usize, args: Vec<DataType>) -> i64 {
-        self.put[&NodeIndex::new(view)].2.lock().unwrap()(args)
+    type InsertFut = futures::Finished<i64, Never>;
+    fn insert(&self, view: usize, args: Vec<DataType>) -> Self::InsertFut {
+        self.put[&view.into()].2.lock().unwrap()(args);
+        futures::finished(0)
     }
 
-    fn list(&self) -> HashMap<String, (usize, bool)> {
-        self.get
+    type ListFut = futures::Finished<HashMap<String, (usize, bool)>, Never>;
+    fn list(&self) -> Self::ListFut {
+        futures::finished(self.get
             .iter()
-            .map(|(ni, &(ref n, _, _))| (n.clone(), (ni.index(), false)))
-            .chain(self.put.iter().map(|(ni, &(ref n, _, _))| (n.clone(), (ni.index(), true))))
-            .collect()
+            .map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
+            .chain(self.put.iter().map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), true))))
+            .collect())
+    }
+}
+
+/// A handle for a running RPC server.
+///
+/// Will terminate and wait for all server threads when dropped.
+pub struct ServerHandle {
+    threads: Vec<(futures::sync::oneshot::Sender<()>, thread::JoinHandle<()>)>,
+}
+
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        let wait: Vec<_> = self.threads
+            .drain(..)
+            .map(|(tx, jh)| {
+                tx.complete(());
+                jh
+            })
+            .collect();
+        for jh in wait {
+            jh.join().unwrap();
+        }
     }
 }
 
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
-pub fn run<T>(mut soup: FG, addr: T)
-    -> tarpc::ServeHandle<<T::Listener as tarpc::transport::Listener>::Dialer>
-    where T: tarpc::transport::Transport
-{
+pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
+                                            addr: T,
+                                            threads: usize)
+                                            -> ServerHandle {
     // Figure out what inputs and outputs to expose
     let (ins, outs) = {
-        let (graph, source) = soup.graph();
-        let ni2ep = |ni| {
-            let ns = graph.node_weight(ni).unwrap().as_ref().unwrap();
-            (ni, (ns.name().to_owned(), ns.args().iter().cloned().collect()))
-        };
-
-        // this maps the base nodes to inputs and other nodes to outputs
-        (graph.neighbors(source).map(&ni2ep).collect::<Vec<_>>(),
-         graph.node_indices()
-            .filter(|ni| {
-                let nw = graph.node_weight(*ni);
-                nw.is_some() && nw.unwrap().as_ref().is_some()
+        let ins: Vec<_> = soup.inputs()
+            .into_iter()
+            .map(|(ni, n)| {
+                (ni,
+                 (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_putter(ni).0))
             })
-            .map(&ni2ep)
-            .collect::<Vec<_>>())
+            .collect();
+        let outs: Vec<_> = soup.outputs()
+            .into_iter()
+            .map(|(ni, n, r)| {
+                (ni,
+                 (n.name().to_owned(),
+                  n.fields().iter().cloned().collect(),
+                  r.get_reader().unwrap()))
+            })
+            .collect();
+        (ins, outs)
     };
-
-    // Start Soup
-    let (mut put, mut get) = soup.run(10);
 
     let s = Server {
         put: ins.into_iter()
-            .map(|(ni, (nm, args))| (ni, (nm, args, Mutex::new(put.remove(&ni).unwrap()))))
+            .map(|(ni, (nm, args, putter))| (ni, (nm, args, Mutex::new(putter))))
             .collect(),
         get: outs.into_iter()
-            .map(|(ni, (nm, args))| (ni, (nm, args, get.remove(&ni).unwrap())))
+            .map(|(ni, (nm, args, getter))| (ni, (nm, args, getter)))
             .collect(),
         _g: Mutex::new(soup),
     };
 
-    s.spawn(addr).unwrap()
+    let addr = addr.into();
+    let s = Arc::new(s);
+    let threads = (0..threads)
+        .map(move |i| {
+            use futures::Future;
+
+            let s = s.clone();
+            let (tx, rx) = futures::sync::oneshot::channel();
+            let jh = thread::Builder::new()
+                .name(format!("rpc{}", i))
+                .spawn(move || {
+                    let mut core = reactor::Core::new().unwrap();
+                    s.listen(addr,
+                                tarpc::server::Options::default().handle(core.handle()))
+                        .wait()
+                        .unwrap();
+
+                    match core.run(rx) {
+                        Ok(_) => println!("RPC server thread quitting normally"),
+                        Err(_) => println!("RPC server thread crashing and burning"),
+                    }
+                })
+                .unwrap();
+            (tx, jh)
+        })
+        .collect();
+
+    ServerHandle { threads: threads }
 }

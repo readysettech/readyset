@@ -1,14 +1,12 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
-use flow::{FlowGraph, FreshnessProbe, NodeIndex};
-use query::{DataType, Query};
+use flow::Blender;
+use query::DataType;
 use std::collections::HashMap;
-use shortcut;
 
-struct Endpoint {
-    node: NodeIndex,
+struct Endpoint<F> {
     arguments: Vec<String>,
-    freshness_probe: Option<FreshnessProbe>,
+    f: F,
 }
 
 /// Start exposing the given `FlowGraph` over HTTP.
@@ -17,55 +15,50 @@ struct Endpoint {
 /// should contain a single JSON object representing the record with field names equal to those
 /// passed to `new()`.
 ///
-/// All nodes are available for reading by GETing from `localhost:8080/<view>`. Without further
-/// arguments, the view is queried without filters. Equality filters can be added using query
-/// parameters such as `?id=1`. A JSON array with all matching records is returned. Each record is
-/// represented as a JSON object with field names as dictated by those passed to `new()` for the
-/// view being queried.
-pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listening>
-    where U: 'static + Clone + Send + From<Vec<DataType>>
-{
+/// All nodes are available for reading by GETing from `localhost:8080/<view>?key=<key>`. A JSON
+/// array with all matching records is returned. Each record is represented as a JSON object with
+/// field names as dictated by those passed to `new()` for the view being queried.
+pub fn run(soup: Blender) -> HttpResult<Listening> {
     use rustc_serialize::json::ToJson;
     use rustful::header::ContentType;
 
     let mut router = TreeRouter::new();
 
+    // Figure out what inputs and outputs to expose
     let (ins, outs) = {
-        let (graph, source) = soup.graph();
-        let ni2ep = |ni| {
-            let ns = graph.node_weight(ni).unwrap().as_ref().unwrap();
-            (ns.name().to_owned(),
-             Endpoint {
-                node: ni,
-                arguments: ns.args().iter().cloned().collect(),
-                freshness_probe: None,
+        let ins: Vec<_> = soup.inputs()
+            .into_iter()
+            .map(|(ni, n)| {
+                (n.name().to_owned(),
+                 Endpoint {
+                     arguments: n.fields().iter().cloned().collect(),
+                     f: soup.get_putter(ni).0,
+                 })
             })
-        };
-
-        // this maps the base nodes to inputs
-        // and the leaves to outputs
-        // TODO: we may want to allow non-leaves to be outputs too
-        (graph.neighbors(source).map(&ni2ep).collect::<Vec<_>>(),
-         graph.node_indices()
-            .filter(|ni| {
-                let nw = graph.node_weight(*ni);
-                nw.is_some() && nw.unwrap().as_ref().is_some()
+            .collect();
+        let outs: Vec<_> = soup.outputs()
+            .into_iter()
+            .map(|(_, n, r)| {
+                (n.name().to_owned(),
+                 Endpoint {
+                     arguments: n.fields().iter().cloned().collect(),
+                     f: r.get_reader().unwrap(),
+                 })
             })
-            .map(&ni2ep)
-            .collect::<Vec<_>>())
+            .collect();
+        (ins, outs)
     };
-
-    let (mut put, mut get) = soup.run(10);
 
     for (path, ep) in ins.into_iter() {
         use std::sync::Mutex;
-        let put = Mutex::new(put.remove(&ep.node).unwrap());
+        let put = Mutex::new(ep.f);
+        let args = ep.arguments;
         insert_routes! {
             &mut router => {
                 path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    let ts = put.lock().unwrap()(ep.arguments.iter().map(|arg| {
+                    let ts = put.lock().unwrap()(args.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {
@@ -79,54 +72,30 @@ pub fn run<U>(mut soup: FlowGraph<Query, U, Vec<DataType>>) -> HttpResult<Listen
         };
     }
 
-    for (path, mut ep) in outs.into_iter() {
-        let get = get.remove(&ep.node).unwrap();
-        // Must do this here as the freshness probes are initialized on `soup.run()`
-        ep.freshness_probe = soup.freshness(ep.node);
+    for (path, ep) in outs.into_iter() {
+        let get = ep.f;
+        let args = ep.arguments;
         insert_routes! {
             &mut router => {
                 path => Get: Box::new(move |ctx: Context, mut res: Response| {
-                    let mut arg = None;
-                    if !ctx.query.is_empty() {
-                        use std::iter;
-                        let conds = ep.arguments.iter().enumerate().filter_map(|(i, arg)| {
-                            if ctx.query.contains_key(arg) {
-                                let arg = if let Ok(n) = ctx.query.parse(arg) {
-                                    let n: i64 = n;
-                                    n.into()
-                                } else {
-                                    ctx.query.get(arg).unwrap().into_owned().into()
-                                };
+                    if let Some(key) = ctx.query.get("key") {
+                        let key = if let Ok(n) = ctx.query.parse("key") {
+                            let n: i64 = n;
+                            n.into()
+                        } else {
+                            key.into_owned().into()
+                        };
 
-                                Some(shortcut::Condition {
-                                    column: i,
-                                    cmp:
-                                        shortcut::Comparison::Equal(shortcut::Value::Const(arg))
-                                })
-                            } else {
-                                None
-                            }
-                        }).collect();
-                        arg = Some(Query::new(
-                                &iter::repeat(true).take(ep.arguments.len()).collect::<Vec<_>>(),
-                                conds
-                                ));
-                    };
-
-                    let data = get(arg.as_ref()).into_iter().map(|row| {
-                        ep
-                            .arguments
-                            .clone()
-                            .into_iter()
-                            .zip(row.into_iter())
-                            .collect::<HashMap<_, _>>()
-                    }).collect::<Vec<_>>();
-                    res.headers_mut().set(ContentType::json());
-                    let freshness = match ep.freshness_probe {
-                        Some(ref fp) => fp.lower_bound(),
-                        _ => 0,
-                    };
-                    res.send(format!("{}", (data, freshness).to_json()));
+                        let data = get(&key).into_iter().map(|row| {
+                                args
+                                .clone()
+                                .into_iter()
+                                .zip(row.into_iter())
+                                .collect::<HashMap<_, _>>()
+                        }).collect::<Vec<_>>();
+                        res.headers_mut().set(ContentType::json());
+                        res.send(format!("{}", data.to_json()));
+                    }
                 }) as Box<Handler>,
             }
         };

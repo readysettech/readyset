@@ -1,10 +1,3 @@
-use ops;
-use flow;
-use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
-
 use std::collections::HashMap;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
@@ -12,54 +5,40 @@ use std::collections::HashMap;
 /// These nodes perform no computation, and their job is merely to persist all received updates and
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Base {}
 
-impl From<Base> for NodeType {
-    fn from(b: Base) -> NodeType {
-        NodeType::Base(b)
-    }
-}
+use flow::prelude::*;
 
-impl NodeOp for Base {
-    fn prime(&mut self, _: &ops::Graph) -> Vec<flow::NodeIndex> {
+impl Ingredient for Base {
+    fn take(&mut self) -> Box<Ingredient> {
+        Box::new(Clone::clone(self))
+    }
+
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![]
     }
 
-    fn forward(&self,
-               mut u: Option<ops::Update>,
-               _: flow::NodeIndex,
-               ts: i64,
-               last: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
-
-        // basically our only job is to record timestamps
-        if let Some(ops::Update::Records(ref mut rs)) = u {
-            for r in rs.iter_mut() {
-                match *r {
-                    ops::Record::Positive(_, ref mut rts) |
-                    ops::Record::Negative(_, ref mut rts) => *rts = ts,
-                }
-            }
-        }
-
-        // we should only have one ancestor
-        debug_assert!(last);
-        u.into()
+    fn should_materialize(&self) -> bool {
+        true
     }
 
-    fn query(&self, _: Option<&query::Query>, _: i64) -> ops::Datas {
-        unreachable!("base nodes are always materialized");
+    fn will_query(&self, _: bool) -> bool {
+        false
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
+    fn on_connected(&mut self, _: &Graph) {}
+    fn on_commit(&mut self, _: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {}
+    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
+        rs
+    }
+
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
         HashMap::new()
     }
 
-    fn resolve(&self, _: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
-        // base tables are always materialized
-        unreachable!();
+    fn resolve(&self, _: usize) -> Option<Vec<(NodeAddress, usize)>> {
+        None
     }
 
     fn is_base(&self) -> bool {
@@ -68,5 +47,9 @@ impl NodeOp for Base {
 
     fn description(&self) -> String {
         "B".into()
+    }
+
+    fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        unreachable!();
     }
 }

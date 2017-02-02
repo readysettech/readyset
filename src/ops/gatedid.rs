@@ -1,10 +1,3 @@
-use ops;
-use flow;
-use query;
-use backlog;
-use ops::NodeOp;
-use ops::NodeType;
-
 use std::collections::HashMap;
 
 use std::sync::mpsc::channel;
@@ -12,70 +5,79 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
+use flow::prelude::*;
+
 /// Applies the identity operation to the view but waits for an recv on a
 /// channel before forwarding. This is useful for writing tests because it
 /// enables precise control of the propogation of updates through the graph.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GatedIdentity {
-    src: flow::NodeIndex,
-    srcn: Option<ops::V>,
+    src: NodeAddress,
     rx: Mutex<Receiver<()>>,
 }
 
 impl GatedIdentity {
     /// Construct a new gated identity operator.
-    pub fn new(src: flow::NodeIndex) -> (GatedIdentity, Sender<()>) {
+    #[allow(dead_code)]
+    pub fn new(src: NodeAddress) -> (GatedIdentity, Sender<()>) {
         let (tx, rx) = channel();
         let g = GatedIdentity {
             src: src,
-            srcn: None,
             rx: Mutex::new(rx),
         };
         (g, tx)
     }
 }
 
-impl From<GatedIdentity> for NodeType {
-    fn from(b: GatedIdentity) -> NodeType {
-        NodeType::GatedIdentity(b)
+impl Ingredient for GatedIdentity {
+    fn take(&mut self) -> Box<Ingredient> {
+        use std::mem;
+        // we cheat a little here because rx can't be cloned. we just construct a new GatedIdentity
+        // (with a separate channel), and leave that behind in the graph. this is fine, since that
+        // channel will never be used for anything.
+        let src = self.src;
+        Box::new(mem::replace(self, Self::new(src).0))
     }
-}
 
-impl NodeOp for GatedIdentity {
-    fn prime(&mut self, g: &ops::Graph) -> Vec<flow::NodeIndex> {
-        self.srcn = g[self.src].as_ref().map(|n| n.clone());
-
+    fn ancestors(&self) -> Vec<NodeAddress> {
         vec![self.src]
     }
 
-    fn forward(&self,
-               update: Option<ops::Update>,
-               _: flow::NodeIndex,
-               _: i64,
-               _: bool,
-               _: Option<&backlog::BufferedStore>)
-               -> flow::ProcessingResult<ops::Update> {
-
-        if update.is_some() {
-            self.rx.lock().unwrap().recv().unwrap();
-        }
-        update.into()
+    fn should_materialize(&self) -> bool {
+        false
     }
 
-    fn query(&self, q: Option<&query::Query>, ts: i64) -> ops::Datas {
-        self.srcn.as_ref().unwrap().find(q, Some(ts))
+    fn will_query(&self, _: bool) -> bool {
+        false
     }
 
-    fn suggest_indexes(&self, _: flow::NodeIndex) -> HashMap<flow::NodeIndex, Vec<usize>> {
-        self.srcn.as_ref().unwrap().suggest_indexes(self.src)
+    fn on_connected(&mut self, _: &Graph) {}
+
+    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+        self.src = remap[&self.src];
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(flow::NodeIndex, usize)>> {
+    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
+        self.rx.lock().unwrap().recv().unwrap();
+        rs
+    }
+
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
+        // TODO
+        HashMap::new()
+    }
+
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
         Some(vec![(self.src, col)])
     }
 
     fn description(&self) -> String {
         "GatedIdentity".into()
+    }
+
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        vec![(self.src, Some(column))]
     }
 }
 
@@ -84,51 +86,29 @@ mod tests {
     use super::*;
 
     use ops;
-    use flow;
-    use petgraph;
 
-    use flow::View;
-    use ops::NodeOp;
     use std::thread;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::sync::mpsc::Sender;
 
-    fn setup(materialized: bool) -> (ops::Node, Sender<()>) {
-        use std::sync;
-
-        let mut g = petgraph::Graph::new();
-        let mut s = ops::new("source", &["x", "y", "z"], true, ops::base::Base {});
-        s.prime(&g);
-        let s = g.add_node(Some(sync::Arc::new(s)));
-
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 1.into()], 0).into()), s, 0, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 1.into()], 1).into()), s, 1, true);
-        g[s].as_ref().unwrap().process(Some((vec![2.into(), 2.into()], 2).into()), s, 2, true);
-        g[s].as_ref().unwrap().process(Some((vec![1.into(), 2.into()], 3).into()), s, 3, true);
-        g[s].as_ref().unwrap().process(Some((vec![3.into(), 3.into()], 4).into()), s, 4, true);
-
-        let (mut i, tx) = GatedIdentity::new(s);
-        i.prime(&g);
-
-        let op = ops::new("latest", &["x", "y", "z"], materialized, i);
-        (op, tx)
+    fn setup() -> (ops::test::MockGraph, Sender<()>) {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        let (i, tx) = GatedIdentity::new(s);
+        g.set_op("identity", &["x", "y", "z"], i, false);
+        (g, tx)
     }
 
     #[test]
     fn it_forwards() {
-        let src = flow::NodeIndex::new(0);
-        let (i, tx) = GatedIdentity::new(src);
+        let (mut i, tx) = setup();
         let left = vec![1.into(), "a".into()];
 
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            match i.forward(Some(left.clone().into()), src, 0, true, None).unwrap() {
-                ops::Update::Records(rs) => {
-                    assert_eq!(rs, vec![ops::Record::Positive(left, 0)]);
-                }
-            };
+            assert_eq!(i.narrow_one_row(left.clone(), false), vec![left].into());
             &done.store(true, Ordering::SeqCst);
         });
 
@@ -139,25 +119,18 @@ mod tests {
     }
 
     #[test]
-    fn it_queries() {
-        let (i, _) = setup(false);
-        let hits = i.find(None, None);
-        println!("{:?}", hits);
-        assert_eq!(hits.len(), 5);
-    }
-
-    #[test]
     fn it_suggests_indices() {
-        let (i, _) = setup(false);
-        let idx = i.suggest_indexes(1.into());
+        let (i, _) = setup();
+        let me = NodeAddress::mock_global(1.into());
+        let idx = i.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
 
     #[test]
     fn it_resolves() {
-        let (i, _) = setup(false);
-        assert_eq!(i.resolve(0), Some(vec![(0.into(), 0)]));
-        assert_eq!(i.resolve(1), Some(vec![(0.into(), 1)]));
-        assert_eq!(i.resolve(2), Some(vec![(0.into(), 2)]));
+        let (i, _) = setup();
+        assert_eq!(i.node().resolve(0), Some(vec![(i.narrow_base_id(), 0)]));
+        assert_eq!(i.node().resolve(1), Some(vec![(i.narrow_base_id(), 1)]));
+        assert_eq!(i.node().resolve(2), Some(vec![(i.narrow_base_id(), 2)]));
     }
 }
