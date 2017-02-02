@@ -39,8 +39,8 @@ futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
 tarpc = {git="https://github.com/google/tarpc.git", optional = true}
 tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
-serde = { version = "0.8", optional = true }
-serde_derive = { version = "0.8", optional = true }
+serde = { version = "0.9", optional = true }
+serde_derive = { version = "0.9", optional = true }
 
 # for web
 rustful = { version = "0.9", optional = true }
