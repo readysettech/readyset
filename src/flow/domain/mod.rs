@@ -165,9 +165,7 @@ impl Domain {
     }
 
     pub fn transactional_dispatch(&mut self, messages: Vec<Message>) {
-        if messages.is_empty() {
-            return;
-        }
+        assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
         let ts = messages.iter().next().unwrap().ts;
