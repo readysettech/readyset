@@ -27,14 +27,19 @@ impl Into<usize> for Index {
     }
 }
 
+pub enum ReplayBatch {
+    Full(NodeAddress, State),
+    Partial(Message),
+}
+
 pub enum Control {
     AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
     Ready(LocalNodeIndex, Option<usize>, mpsc::SyncSender<()>),
     ReplayThrough(Vec<NodeAddress>,
-                  mpsc::Receiver<Message>,
-                  Option<mpsc::SyncSender<Message>>,
+                  mpsc::Receiver<ReplayBatch>,
+                  Option<mpsc::SyncSender<ReplayBatch>>,
                   mpsc::SyncSender<()>),
-    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<Message>>, mpsc::SyncSender<()>),
+    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<ReplayBatch>>, mpsc::SyncSender<()>),
     PrepareState(LocalNodeIndex, usize),
 
     /// At the start of a migration, flush pending transactions then notify blender.
@@ -399,6 +404,9 @@ impl Domain {
                 // let coordinator know that we've entered replay loop
                 ack.send(()).unwrap();
 
+                // check for stupidity
+                assert!(!nodes.is_empty());
+
                 // okay, I'm sorry in advance for this.
                 // we have to have read-only reference to the state of the node we are replaying.
                 // however, we *also* need to have a mutable reference to the states such that we
@@ -417,12 +425,29 @@ impl Domain {
                     .get(nodes[0].as_local())
                     .expect("migration replay path started with non-materialized node");
 
-                let init_to = if nodes.len() == 1 { nodes[0] } else { nodes[1] };
+                if nodes.len() == 1 {
+                    // now, we can just send our entire state in one go, rather than chunk it. this
+                    // will be much faster than iterating over the map one-by-one and cloning each
+                    // record. furthermore, it allows the receiver to simply replace their current
+                    // empty state with this state if it is not passing thorugh other nodes.
+                    if let Some(tx) = tx {
+                        tx.send(ReplayBatch::Full(nodes[0], state.clone())).unwrap();
+                    } else {
+                        // replaying a single node has no purpose if there isn't someone we're
+                        // sending to.
+                        unreachable!()
+                    }
+                    return;
+                }
+
+                // since we must have more than one node, this is safe
+                let init_to = nodes[1];
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
                 'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(1000) {
-                    let chunk: Records = chunk.into_iter().map(|r| r.clone().into()).collect();
+                    use std::iter::FromIterator;
+                    let chunk = Records::from_iter(chunk.into_iter().map(|r| r.clone()));
                     let mut m = Message {
                         from: nodes[0],
                         to: init_to,
@@ -470,7 +495,7 @@ impl Domain {
                     }
 
                     if let Some(tx) = tx.as_mut() {
-                        tx.send(m).unwrap();
+                        tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
                 }
 
@@ -483,6 +508,42 @@ impl Domain {
             Control::ReplayThrough(nodes, rx, mut tx, ack) => {
                 // let coordinator know that we've entered replay loop
                 ack.send(()).unwrap();
+
+                // a couple of shortcuts first...
+                // if nodes.len() == 1, we know we're an ingress node, and we can just stuff the
+                // state directly into it. we *also* know that that ingress is the node whose state
+                // is being rebuilt.
+                if nodes.len() == 1 {
+                    assert!(self.nodes[nodes[0].as_local()].borrow().is_ingress());
+                    assert!(tx.is_none());
+                    for batch in rx {
+                        match batch {
+                            ReplayBatch::Full(_, state) => {
+                                // oh boy, we're in luck! we just sent the full state we need for
+                                // this node. no need to process or anything, just move in the
+                                // state and we're done.
+                                // TODO: fall back to regular replay here
+                                assert_eq!(self.state[nodes[0].as_local()].get_pkey(),
+                                           state.get_pkey());
+                                self.state.insert(*nodes[0].as_local(), state);
+                                break;
+                            }
+                            ReplayBatch::Partial(m) => {
+                                let state = self.state.get_mut(nodes[0].as_local()).unwrap();
+                                for r in m.data.into_iter() {
+                                    match r {
+                                        ops::Record::Positive(r) => state.insert(r),
+                                        ops::Record::Negative(ref r) => state.remove(r),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.not_ready.remove(nodes[0].as_local());
+                    return;
+                }
+
+                let rx = BatchedIterator::new(rx, nodes[0]);
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
@@ -516,7 +577,7 @@ impl Domain {
                     }
 
                     if let Some(tx) = tx.as_mut() {
-                        tx.send(m).unwrap();
+                        tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
                 }
 
@@ -541,6 +602,60 @@ impl Domain {
                 assert!(o.is_none());
                 assert_eq!(ts, self.ts + 1);
                 self.apply_transactions();
+            }
+        }
+    }
+}
+
+use std::collections::hash_map;
+struct BatchedIterator {
+    rx: mpsc::IntoIter<ReplayBatch>,
+    state_iter: Option<hash_map::IntoIter<DataType, Vec<Arc<Vec<DataType>>>>>,
+    to: NodeAddress,
+    from: Option<NodeAddress>,
+}
+
+impl BatchedIterator {
+    fn new(rx: mpsc::Receiver<ReplayBatch>, to: NodeAddress) -> Self {
+        BatchedIterator {
+            rx: rx.into_iter(),
+            state_iter: None,
+            to: to,
+            from: None,
+        }
+    }
+}
+
+impl Iterator for BatchedIterator {
+    type Item = Message;
+    fn next(&mut self) -> Option<Self::Item> {
+        use itertools::Itertools;
+        if let Some(ref mut state_iter) = self.state_iter {
+            let from = self.from.unwrap();
+            let to = self.to;
+            state_iter.flat_map(|(_, rs)| rs)
+                .chunks(1000)
+                .into_iter()
+                .map(|chunk| {
+                    use std::iter::FromIterator;
+                    Message {
+                        from: from,
+                        to: to,
+                        data: FromIterator::from_iter(chunk.into_iter()),
+                        ts: None,
+                        token: None,
+                    }
+                })
+                .next()
+        } else {
+            match self.rx.next() {
+                None => None,
+                Some(ReplayBatch::Partial(m)) => Some(m),
+                Some(ReplayBatch::Full(from, state)) => {
+                    self.from = Some(from);
+                    self.state_iter = Some(state.into_iter());
+                    self.next()
+                }
             }
         }
     }

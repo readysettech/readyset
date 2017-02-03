@@ -99,6 +99,13 @@ impl FromIterator<Record> for Records {
         Records(iter.into_iter().collect())
     }
 }
+impl FromIterator<sync::Arc<Vec<query::DataType>>> for Records {
+    fn from_iter<I>(iter: I) -> Self
+        where I: IntoIterator<Item = sync::Arc<Vec<query::DataType>>>
+    {
+        Records(iter.into_iter().map(Record::Positive).collect())
+    }
+}
 
 impl IntoIterator for Records {
     type Item = Record;
