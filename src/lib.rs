@@ -348,7 +348,7 @@ mod ops;
 mod backlog;
 
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Migration, NodeAddress};
+pub use flow::{Blender, Migration, NodeAddress, Mutator};
 pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use ops::Datas;
 pub use ops::base::Base;

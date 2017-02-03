@@ -237,6 +237,41 @@ pub trait Ingredient
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)>;
 }
 
+/// A `Mutator` is used to perform reads and writes to base nodes.
+#[derive(Clone)]
+pub struct Mutator {
+    src: NodeAddress,
+    tx: mpsc::SyncSender<Message>,
+    addr: NodeAddress,
+}
+
+impl Mutator {
+    /// Perform a non-transactional write to the base node this Mutator was generated for.
+    pub fn put(&self, u: Vec<query::DataType>) {
+            self.tx.send(Message {
+                    from: self.src,
+                    to: self.addr,
+                    data: vec![u].into(),
+                    ts: None,
+                    token: None,
+                }).unwrap()
+    }
+
+    /// Perform a transactional write to the base node this Mutator was generated for.
+    pub fn transactional_put(&self, u: Vec<query::DataType>, t: checktable::Token)
+                             -> checktable::TransactionResult {
+        let (send, recv) = mpsc::channel();
+        self.tx.send(Message {
+            from: self.src,
+            to: self.addr,
+            data: vec![u].into(),
+            ts: None,
+            token: Some((t, send)),
+        }).unwrap();
+        recv.recv().unwrap()
+    }
+}
+
 /// `Blender` is the core component of the alternate Soup implementation.
 ///
 /// It keeps track of the structure of the underlying data flow graph and its domains. `Blender`
@@ -364,51 +399,20 @@ impl Blender {
         reader.and_then(|r| r.get_reader())
     }
 
-    /// Obtain a new function for inserting writes into the soup at the given base node.
-    ///
-    /// Two functions are returned, one for perfoming transactional writes, and one for performing
-    /// non-transactional writes.
-    pub fn get_putter(&self, base: NodeAddress) -> (FnNTX, FnTX) {
-        let src = NodeAddress::make_global(self.source);
-        // real input is the ingress above the base
+    /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
+    pub fn get_mutator(&self, base: NodeAddress) -> Mutator {
         let n = self.ingredients
             .neighbors_directed(*base.as_global(), petgraph::EdgeDirection::Incoming)
             .next()
             .unwrap();
         let node = &self.ingredients[n];
         let tx = self.data_txs[&node.domain()].clone();
-        let tx2 = tx.clone();
 
-        let addr = node.addr();
-
-        // we want to avoid forcing the end-user to cook up Messages
-        // they should instead just make data records
-        let ftx: Box<Fn(_, _) -> checktable::TransactionResult + Send> =
-            Box::new(move |u: Vec<query::DataType>, t: checktable::Token| {
-                let (send, recv) = mpsc::channel();
-                tx.send(Message {
-                        from: src,
-                        to: addr,
-                        data: vec![u].into(),
-                        ts: None,
-                        token: Some((t, send)),
-                    })
-                    .unwrap();
-                recv.recv().unwrap()
-            });
-
-        let fntx: Box<Fn(_) + Send> = Box::new(move |u: Vec<query::DataType>| {
-            tx2.send(Message {
-                    from: src,
-                    to: addr,
-                    data: vec![u].into(),
-                    ts: None,
-                    token: None,
-                })
-                .unwrap()
-        });
-
-        (fntx, ftx)
+        Mutator {
+            src: NodeAddress::make_global(self.source),
+            tx: tx,
+            addr: node.addr(),
+        }
     }
 }
 
@@ -448,16 +452,6 @@ impl fmt::Display for Blender {
         Ok(())
     }
 }
-
-
-/// A `FnTX` is a function with which a transactional write can be submitted.
-pub type FnTX = Box<Fn(Vec<query::DataType>, checktable::Token) ->
-                    checktable::TransactionResult + Send + 'static>;
-
-// A FnNTX is a function with which a non-transactional write can be submitted.
-pub type FnNTX = Box<Fn(Vec<query::DataType>) + Send + 'static>;
-
-
 
 /// A `Migration` encapsulates a number of changes to the Soup data flow graph.
 ///
@@ -690,7 +684,7 @@ impl<'a> Migration<'a> {
     /// This will spin up an execution thread for each new thread domain, and hook those new
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
-    pub fn commit(self) -> HashMap<NodeAddress, (FnNTX, FnTX)> {
+    pub fn commit(self) {
         let mut new = HashSet::new();
 
         let mainline = self.mainline;
@@ -876,36 +870,5 @@ impl<'a> Migration<'a> {
                                         domain_nodes,
                                         &mut mainline.control_txs,
                                         end_ts);
-
-        // Finally, set up input channels to any new base tables
-        let mut sources = HashMap::new();
-        for node in &new {
-            let n = &mainline.ingredients[*node];
-            if let node::Type::Ingress = **n {
-                // check the egress connected to this ingress
-            } else {
-                continue;
-            }
-
-            for egress in mainline.ingredients
-                .neighbors_directed(*node, petgraph::EdgeDirection::Incoming) {
-                if egress != mainline.source {
-                    continue;
-                }
-
-                // the user is expecting to use the base node addresses to choose a particular
-                // putter, not the ingress node addresses
-                let base = mainline.ingredients
-                    .neighbors_directed(*node, petgraph::EdgeDirection::Outgoing)
-                    .next()
-                    .unwrap();
-                let base = NodeAddress::make_global(base);
-
-                sources.insert(base, mainline.get_putter(base));
-                break;
-            }
-        }
-
-        sources
     }
 }
