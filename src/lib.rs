@@ -335,6 +335,7 @@ extern crate itertools;
 extern crate petgraph;
 extern crate regex;
 extern crate nom_sql;
+extern crate uuid;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;
@@ -356,6 +357,7 @@ mod flow;
 mod query;
 mod ops;
 mod backlog;
+mod recipe;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, NodeAddress, Mutator};
