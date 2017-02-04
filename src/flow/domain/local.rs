@@ -169,3 +169,11 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 }
+
+impl<T: Hash + Eq + Clone> IntoIterator for State<T> {
+    type Item = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::Item;
+    type IntoIter = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::IntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        self.state.into_iter()
+    }
+}

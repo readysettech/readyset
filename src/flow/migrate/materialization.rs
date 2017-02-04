@@ -336,6 +336,13 @@ pub fn reconstruct(graph: &Graph,
             .unwrap();
     }
 
+    // TODO:
+    // technically, we can be a bit smarter here. for example, a join with a view we know is empty
+    // will always just be empty. a union with a 1-1 project does not need to be replayed through
+    // if it is not materialized. neither does an ingress node. unfortunately, skipping things this
+    // way would make `Message::to` and `Message::from` contain weird values, and cause breakage.
+    // The join trick we might be able to detect further up though.
+
     // set up channels for replay along each path
     for mut path in paths {
         // we want path to have the ancestor closest to the root *first*
