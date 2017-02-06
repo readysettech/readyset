@@ -20,7 +20,7 @@ use backlog;
 #[derive(Clone)]
 pub struct Reader {
     pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Records>>>>,
-    pub state: Option<backlog::BufferedStore>,
+    pub state: Option<backlog::ReadHandle>,
     pub token_generator: Option<checktable::TokenGenerator>,
 }
 
