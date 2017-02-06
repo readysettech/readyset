@@ -152,8 +152,7 @@
 //! # drop(awvc_q);
 //!
 //! // start the data flow graph
-//! let put = mig.commit();
-//! # drop(put);
+//! mig.commit();
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
@@ -170,16 +169,19 @@
 //! ## Tracing a write
 //!
 //! Let us see what happens when a new `Article` write enters the system. This happens by passing
-//! the new record to on one of the functions in the `put` map returned by `Migration::commit`
+//! the new record to the put function on a mutator obtained for article.
 //!
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
+//! # let article = {
 //! # let mut mig = g.start_migration();
 //! # let article = mig.add_ingredient("article", &["id", "title"], Base {});
-//! # let put = mig.commit();
-//! // the .0 here is because we want to do a non-transactional write
-//! put[&article].0(vec![1.into(), "Hello world".into()]);
+//! # mig.commit();
+//! # article
+//! # };
+//! let muta = g.get_mutator(article);
+//! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```
 //!
 //! The `.into()` calls here turn the given values into Soup's internal `DataType`. Soup records
@@ -235,10 +237,14 @@
 //! ```rust
 //! # use distributary::{Blender, Base};
 //! # let mut g = Blender::new();
+//! # let vote = {
 //! # let mut mig = g.start_migration();
 //! # let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
-//! # let put = mig.commit();
-//! put[&vote].0(vec![1000.into(), 1.into()]);
+//! # mig.commit();
+//! # vote
+//! # };
+//! let mutv = g.get_mutator(vote);
+//! mutv.put(vec![1000.into(), 1.into()]);
 //! ```
 //!
 //! We will skip the parts related to the `Vote` base node, since they are equivalent to the
