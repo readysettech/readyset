@@ -184,6 +184,18 @@ impl Domain {
         output_messages
     }
 
+    fn dispatch_(&mut self,
+                 m: Message,
+                 enable_output: bool)
+                 -> HashMap<NodeAddress, Vec<ops::Record>> {
+        Self::dispatch(m,
+                       &self.not_ready,
+                       &mut self.replaying_to,
+                       &mut self.state,
+                       &self.nodes,
+                       enable_output)
+    }
+
     pub fn transactional_dispatch(&mut self, messages: Vec<Message>) {
         assert!(!messages.is_empty());
 
@@ -191,12 +203,7 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages = Self::dispatch(m,
-                                              &self.not_ready,
-                                              &mut self.replaying_to,
-                                              &mut self.state,
-                                              &self.nodes,
-                                              false);
+            let new_messages = self.dispatch_(m, false);
 
             for (key, mut value) in new_messages {
                 egress_messages.entry(key).or_insert_with(Vec::new).append(&mut value);
@@ -280,7 +287,7 @@ impl Domain {
     }
 
     pub fn boot(mut self,
-                rx: mpsc::Receiver<Message>,
+                mut rx: mpsc::Receiver<Message>,
                 timestamp_rx: mpsc::Receiver<i64>)
                 -> mpsc::SyncSender<Control> {
         use std::thread;
@@ -291,6 +298,13 @@ impl Domain {
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {
+                // we want to keep around a second handle to the data channel so that we can access
+                // it during replay. we know that that's safe, because while handle_control is
+                // executing, we know we're not also using the Select or its handles.
+                let secondary_rx = &mut rx as *mut _;
+                let secondary_rx = unsafe { &mut *secondary_rx };
+
+                // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
                 let mut rx_handle = sel.handle(&rx);
                 let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
@@ -309,7 +323,7 @@ impl Domain {
                         if control.is_err() {
                             return;
                         }
-                        self.handle_control(control.unwrap());
+                        self.handle_control(control.unwrap(), secondary_rx);
                     } else if id == timestamp_rx_handle.id() {
                         let ts = timestamp_rx_handle.recv();
                         if ts.is_err() {
@@ -353,12 +367,7 @@ impl Domain {
 
                         match m.ts {
                             None => {
-                                Self::dispatch(m,
-                                               &self.not_ready,
-                                               &mut self.replaying_to,
-                                               &mut self.state,
-                                               &self.nodes,
-                                               true);
+                                self.dispatch_(m, true);
                             }
                             Some(_) => {
                                 self.buffer_transaction(m);
@@ -372,15 +381,79 @@ impl Domain {
         ctx
     }
 
-    fn replay_done(&mut self, node: LocalNodeIndex) {
+    fn replay_done(&mut self, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Message>) {
         self.not_ready.remove(&node);
-        if let Some((target, buffered)) = self.replaying_to.take() {
+        let needed_draining = self.replaying_to.is_some() &&
+                              !self.replaying_to.as_ref().unwrap().1.is_empty();
+        while let Some((target, buffered)) = self.replaying_to.take() {
             assert_eq!(target, node);
-            assert!(buffered.is_empty());
+            if buffered.is_empty() {
+                break;
+            }
+
+            // some updates were propagated to this node during the migration. we need to replay
+            // them before we take even newer updates. however, we don't want to completely block
+            // the domain data channel, so we keep processing updates and backlogging them if
+            // necessary.
+
+            // we drain the buffered messages, and for every other message we process. we also
+            // process a domain message. this has the effect of letting us catch up, but also not
+            // stopping the domain entirely. we don't do this if there are fewer than 10 things
+            // left, just to avoid the overhead of the switching.
+            let switching = buffered.len() > 10;
+            let mut even = true;
+
+            println!("draining {}", buffered.len());
+
+            // make sure any updates from rx that we handle, and that hit this node, are buffered
+            // so we can get back to them later.
+            if switching {
+                self.replaying_to = Some((target, Vec::with_capacity(buffered.len() / 2)));
+            }
+
+            for m in buffered {
+                // no transactions allowed here since we're still in a migration
+                assert!(m.token.is_none());
+                assert!(m.ts.is_none());
+                if switching && !even {
+                    // also process from rx
+                    if let Ok(m) = rx.try_recv() {
+                        // still no transactions allowed
+                        assert!(m.token.is_none());
+                        assert!(m.ts.is_none());
+
+                        self.dispatch_(m, true);
+                    }
+                }
+                even = !even;
+
+                self.dispatch_(m, true);
+            }
+        }
+
+        if needed_draining {
+            println!("done draining");
         }
     }
 
-    fn handle_control(&mut self, c: Control) {
+    fn mid_replay_process(&mut self, rx: &mut mpsc::Receiver<Message>) {
+        let mut left = 1;
+        while let Ok(m) = rx.try_recv() {
+            // we know no transactions happen during migrations
+            assert!(m.token.is_none());
+            assert!(m.ts.is_none());
+
+            self.dispatch_(m, true);
+
+            // don't process too many things
+            left -= 1;
+            if left == 0 {
+                break;
+            }
+        }
+    }
+
+    fn handle_control(&mut self, c: Control, domain_rx: &mut mpsc::Receiver<Message>) {
         use itertools::Itertools;
         match c {
             Control::AddNode(n, parents) => {
@@ -420,7 +493,7 @@ impl Domain {
                     }
                 }
 
-                self.replay_done(ni);
+                self.replay_done(ni, domain_rx);
                 drop(ack);
             }
             Control::PrepareState(ni, on) => {
@@ -524,12 +597,18 @@ impl Domain {
                     if let Some(tx) = tx.as_mut() {
                         tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
+
+                    // NOTE: at this point, the downstream domain is probably busy handling our
+                    // replayed message. We take this opportunity to process some updates from our
+                    // upstream.
+                    // TODO: don't do this for the last batch?
+                    self.mid_replay_process(domain_rx);
                 }
 
                 if tx.is_none() {
                     // we must mark the node as ready immediately, otherwise it might miss updates
                     // that follow the replay, but precede the ready.
-                    self.replay_done(*nodes.last().unwrap().as_local());
+                    self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
                 }
             }
             Control::ReplayThrough(nodes, rx, mut tx, ack) => {
@@ -566,7 +645,7 @@ impl Domain {
                             }
                         }
                     }
-                    self.replay_done(*nodes[0].as_local());
+                    self.replay_done(*nodes[0].as_local(), domain_rx);
                     return;
                 }
 
@@ -614,12 +693,18 @@ impl Domain {
                     if let Some(tx) = tx.as_mut() {
                         tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
+
+                    // NOTE: at this point, the downstream domain is probably busy handling our
+                    // replayed message. We take this opportunity to process some updates from our
+                    // upstream.
+                    // TODO: don't do this for the last batch?
+                    self.mid_replay_process(domain_rx);
                 }
 
                 if tx.is_none() {
                     // we must mark the node as ready immediately, otherwise it might miss updates
                     // that follow the replay, but precede the ready.
-                    self.replay_done(*nodes.last().unwrap().as_local());
+                    self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
                 }
             }
             Control::StartMigration(ts, channel) => {
