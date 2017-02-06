@@ -10,22 +10,27 @@ use std::collections::HashMap;
 fn it_works() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut mig = g.start_migration();
-    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
-    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+    let (a,b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
-    let mut emits = HashMap::new();
-    emits.insert(a, vec![0, 1]);
-    emits.insert(b, vec![0, 1]);
-    let u = distributary::Union::new(emits);
-    let c = mig.add_ingredient("c", &["a", "b"], u);
-    let cq = mig.maintain(c, 0);
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
 
-    let put = mig.commit();
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -34,7 +39,7 @@ fn it_works() {
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
-    put[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -49,22 +54,27 @@ fn it_works() {
 fn it_works_streaming() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut mig = g.start_migration();
-    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
-    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+    let (a, b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
-    let mut emits = HashMap::new();
-    emits.insert(a, vec![0, 1]);
-    emits.insert(b, vec![0, 1]);
-    let u = distributary::Union::new(emits);
-    let c = mig.add_ingredient("c", &["a", "b"], u);
-    let cq = mig.stream(c);
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.stream(c);
+        mig.commit();
+        (a, b, cq)
+    };
 
-    let put = mig.commit();
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -73,7 +83,7 @@ fn it_works_streaming() {
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
 
     // update value again
-    put[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -86,24 +96,29 @@ fn it_works_streaming() {
 fn it_works_w_mat() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut mig = g.start_migration();
-    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
-    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
+    let (a, b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
-    let mut emits = HashMap::new();
-    emits.insert(a, vec![0, 1]);
-    emits.insert(b, vec![0, 1]);
-    let u = distributary::Union::new(emits);
-    let c = mig.add_ingredient("c", &["a", "b"], u);
-    let cq = mig.maintain(c, 0);
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
 
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
-    let put = mig.commit();
 
     // send a few values on a
-    put[&a].0(vec![id.clone(), 1.into()]);
-    put[&a].0(vec![id.clone(), 2.into()]);
-    put[&a].0(vec![id.clone(), 3.into()]);
+    muta.put(vec![id.clone(), 1.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 3.into()]);
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -117,9 +132,9 @@ fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
-    put[&b].0(vec![id.clone(), 4.into()]);
-    put[&b].0(vec![id.clone(), 5.into()]);
-    put[&b].0(vec![id.clone(), 6.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 5.into()]);
+    mutb.put(vec![id.clone(), 6.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -141,44 +156,51 @@ fn votes() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut mig = g.start_migration();
+    let (article1, article2, vote, articleq, vcq, endq) = {
+        let mut mig = g.start_migration();
 
-    // add article base nodes (we use two so we can exercise unions too)
-    let article1 = mig.add_ingredient("article1", &["id", "title"], Base {});
-    let article2 = mig.add_ingredient("article1", &["id", "title"], Base {});
+        // add article base nodes (we use two so we can exercise unions too)
+        let article1 = mig.add_ingredient("article1", &["id", "title"], Base {});
+        let article2 = mig.add_ingredient("article1", &["id", "title"], Base {});
 
-    // add a (stupid) union of article1 + article2
-    let mut emits = HashMap::new();
-    emits.insert(article1, vec![0, 1]);
-    emits.insert(article2, vec![0, 1]);
-    let u = Union::new(emits);
-    let article = mig.add_ingredient("article", &["id", "title"], u);
-    let articleq = mig.maintain(article, 0);
+        // add a (stupid) union of article1 + article2
+        let mut emits = HashMap::new();
+        emits.insert(article1, vec![0, 1]);
+        emits.insert(article2, vec![0, 1]);
+        let u = Union::new(emits);
+        let article = mig.add_ingredient("article", &["id", "title"], u);
+        let articleq = mig.maintain(article, 0);
 
-    // add vote base table
-    let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+        // add vote base table
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
 
-    // add vote count
-    let vc = mig.add_ingredient("vc",
-                                &["id", "votes"],
-                                Aggregation::COUNT.over(vote, 0, &[1]));
-    let vcq = mig.maintain(vc, 0);
+        // add vote count
+        let vc = mig.add_ingredient("vc",
+                                    &["id", "votes"],
+                                    Aggregation::COUNT.over(vote, 0, &[1]));
+        let vcq = mig.maintain(vc, 0);
 
-    // add final join using first field from article and first from vc
-    let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-        .from(article, vec![1, 0])
-        .join(vc, vec![1, 0]);
-    let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-    let endq = mig.maintain(end, 0);
+        // add final join using first field from article and first from vc
+        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
+            .from(article, vec![1, 0])
+            .join(vc, vec![1, 0]);
+        let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
+        let endq = mig.maintain(end, 0);
+
+        // start processing
+        mig.commit();
+        (article1, article2, vote, articleq, vcq, endq)
+    };
+
+    let mut1 = g.get_mutator(article1);
+    let mut2 = g.get_mutator(article2);
+    let mutv = g.get_mutator(vote);
 
     let a1: distributary::DataType = 1.into();
     let a2: distributary::DataType = 2.into();
 
-    // start processing
-    let put = mig.commit();
-
     // make one article
-    put[&article1].0(vec![a1.clone(), 2.into()]);
+    mut1.put(vec![a1.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -187,7 +209,7 @@ fn votes() {
     assert_eq!(articleq(&a1), Ok(vec![vec![a1.clone(), 2.into()]]));
 
     // make another article
-    put[&article2].0(vec![a2.clone(), 4.into()]);
+    mut2.put(vec![a2.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -198,7 +220,7 @@ fn votes() {
     assert_eq!(articleq(&a2), Ok(vec![vec![a2.clone(), 4.into()]]));
 
     // create a vote (user 1 votes for article 1)
-    put[&vote].0(vec![1.into(), a1.clone()]);
+    mutv.put(vec![1.into(), a1.clone()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -227,46 +249,54 @@ fn transactional_vote() {
     // set up graph
     let mut g = distributary::Blender::new();
     let validate = g.get_validator();
-    let mut mig = g.start_migration();
 
-    // add article base nodes (we use two so we can exercise unions too)
-    let article1 = mig.add_ingredient("article1", &["id", "title"], Base {});
-    let article2 = mig.add_ingredient("article1", &["id", "title"], Base {});
+    let (article1, article2, vote, articleq, vcq, endq, endq_title, endq_votes) = {
+        let mut mig = g.start_migration();
 
-    // add a (stupid) union of article1 + article2
-    let mut emits = HashMap::new();
-    emits.insert(article1, vec![0, 1]);
-    emits.insert(article2, vec![0, 1]);
-    let u = Union::new(emits);
-    let article = mig.add_ingredient("article", &["id", "title"], u);
-    let articleq = mig.transactional_maintain(article, 0);
+        // add article base nodes (we use two so we can exercise unions too)
+        let article1 = mig.add_ingredient("article1", &["id", "title"], Base {});
+        let article2 = mig.add_ingredient("article1", &["id", "title"], Base {});
 
-    // add vote base table
-    let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+        // add a (stupid) union of article1 + article2
+        let mut emits = HashMap::new();
+        emits.insert(article1, vec![0, 1]);
+        emits.insert(article2, vec![0, 1]);
+        let u = Union::new(emits);
+        let article = mig.add_ingredient("article", &["id", "title"], u);
+        let articleq = mig.transactional_maintain(article, 0);
 
-    // add vote count
-    let vc = mig.add_ingredient("vc",
-                                &["id", "votes"],
-                                Aggregation::COUNT.over(vote, 0, &[1]));
-    let vcq = mig.maintain(vc, 0);
+        // add vote base table
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
 
-    // add final join using first field from article and first from vc
-    let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-        .from(article, vec![1, 0])
-        .join(vc, vec![1, 0]);
-    let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
-    let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
-    let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+        // add vote count
+        let vc = mig.add_ingredient("vc",
+                                    &["id", "votes"],
+                                    Aggregation::COUNT.over(vote, 0, &[1]));
+        let vcq = mig.maintain(vc, 0);
 
-    let endq = mig.transactional_maintain(end, 0);
-    let endq_title = mig.transactional_maintain(end2, 1);
-    let endq_votes = mig.transactional_maintain(end3, 2);
+        // add final join using first field from article and first from vc
+        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
+            .from(article, vec![1, 0])
+            .join(vc, vec![1, 0]);
+        let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
+        let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+        let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
+
+        let endq = mig.transactional_maintain(end, 0);
+        let endq_title = mig.transactional_maintain(end2, 1);
+        let endq_votes = mig.transactional_maintain(end3, 2);
+
+        // start processing
+        mig.commit();
+        (article1, article2, vote, articleq, vcq, endq, endq_title, endq_votes)
+    };
+
+    let mut1 = g.get_mutator(article1);
+    let mut2 = g.get_mutator(article2);
+    let mutv = g.get_mutator(vote);
 
     let a1: distributary::DataType = 1.into();
     let a2: distributary::DataType = 2.into();
-
-    // start processing
-    let put = mig.commit();
 
     let token = articleq(&a1).unwrap().1;
 
@@ -275,7 +305,7 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // make one article
-    assert!(put[&article1].1(vec![a1.clone(), 2.into()], token).ok());
+    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token).ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -290,7 +320,7 @@ fn transactional_vote() {
     assert!(!validate(&endq_votes_token));
 
     // make another article
-    assert!(put[&article2].1(vec![a2.clone(), 4.into()], token).ok());
+    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token).ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -315,7 +345,7 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
-    assert!(put[&vote].1(vec![1.into(), a1.clone()], token).ok());
+    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token).ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -350,22 +380,28 @@ fn empty_migration() {
         let mig = g.start_migration();
         mig.commit();
     }
-    let mut mig = g.start_migration();
-    let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
-    let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
-    let mut emits = HashMap::new();
-    emits.insert(a, vec![0, 1]);
-    emits.insert(b, vec![0, 1]);
-    let u = distributary::Union::new(emits);
-    let c = mig.add_ingredient("c", &["a", "b"], u);
-    let cq = mig.maintain(c, 0);
+    let (a, b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
 
-    let put = mig.commit();
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
+
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -374,7 +410,7 @@ fn empty_migration() {
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
-    put[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -391,16 +427,17 @@ fn simple_migration() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let (puta, a, aq) = {
+    let (a, aq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
         let aq = mig.maintain(a, 0);
-        let put = mig.commit();
-        (put, a, aq)
+        mig.commit();
+        (a, aq)
     };
+    let muta = g.get_mutator(a);
 
     // send a value on a
-    puta[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -409,16 +446,17 @@ fn simple_migration() {
     assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
-    let (putb, b, bq) = {
+    let (b, bq) = {
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
         let bq = mig.maintain(b, 0);
-        let put = mig.commit();
-        (put, b, bq)
+        mig.commit();
+        (b, bq)
     };
+    let mutb = g.get_mutator(b);
 
     // send a value on b
-    putb[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -431,16 +469,17 @@ fn simple_migration() {
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let (puta, a, aq) = {
+    let (a, aq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
         let aq = mig.transactional_maintain(a, 0);
-        let put = mig.commit();
-        (put, a, aq)
+        mig.commit();
+        (a, aq)
     };
+    let muta = g.get_mutator(a);
 
     // send a value on a
-    puta[&a].1(vec![1.into(), 2.into()], distributary::Token::empty());
+    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -449,16 +488,17 @@ fn transactional_migration() {
     assert_eq!(aq(&1.into()).unwrap().0, vec![vec![1.into(), 2.into()]]);
 
     // add unrelated node b in a migration
-    let (putb, b, bq) = {
+    let (b, bq) = {
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
         let bq = mig.transactional_maintain(b, 0);
-        let put = mig.commit();
-        (put, b, bq)
+        mig.commit();
+        (b, bq)
     };
+    let mutb = g.get_mutator(b);
 
     // send a value on b
-    putb[&b].1(vec![2.into(), 4.into()], distributary::Token::empty());
+    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -483,8 +523,8 @@ fn transactional_migration() {
     assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
 
     // send a value on a and b
-    puta[&a].1(vec![3.into(), 5.into()], distributary::Token::empty());
-    putb[&b].1(vec![3.into(), 6.into()], distributary::Token::empty());
+    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty());
+    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty());
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -498,12 +538,15 @@ fn transactional_migration() {
 fn crossing_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let (put, a, b) = {
+    let (a, b) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
-        (mig.commit(), a, b)
+        mig.commit();
+        (a, b)
     };
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
 
     let mut mig = g.start_migration();
     let mut emits = HashMap::new();
@@ -518,7 +561,7 @@ fn crossing_migration() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -527,7 +570,7 @@ fn crossing_migration() {
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
 
     // update value again
-    put[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -542,18 +585,19 @@ fn independent_domain_migration() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let (puta, a, aq, domain) = {
+    let (a, aq, domain) = {
         let mut mig = g.start_migration();
         let domain = mig.add_domain();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
         mig.assign_domain(a, domain);
         let aq = mig.maintain(a, 0);
-        let put = mig.commit();
-        (put, a, aq, domain)
+        mig.commit();
+        (a, aq, domain)
     };
+    let muta = g.get_mutator(a);
 
     // send a value on a
-    puta[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -562,19 +606,20 @@ fn independent_domain_migration() {
     assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
 
     // add unrelated node b in a migration
-    let (putb, b, bq) = {
+    let (b, bq) = {
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
         mig.assign_domain(b, domain);
         let bq = mig.maintain(b, 0);
-        let put = mig.commit();
-        (put, b, bq)
+        mig.commit();
+        (b, bq)
     };
+    let mutb = g.get_mutator(b);
 
     // TODO: check that b is actually running in `domain`
 
     // send a value on b
-    putb[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -587,15 +632,18 @@ fn independent_domain_migration() {
 fn domain_amend_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let (put, a, b, domain) = {
+    let (a, b, domain) = {
         let mut mig = g.start_migration();
         let domain = mig.add_domain();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base {});
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base {});
         mig.assign_domain(a, domain);
         mig.assign_domain(b, domain);
-        (mig.commit(), a, b, domain)
+        mig.commit();
+        (a, b, domain)
     };
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
 
     let mut mig = g.start_migration();
     let mut emits = HashMap::new();
@@ -613,7 +661,7 @@ fn domain_amend_migration() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    put[&a].0(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -622,7 +670,7 @@ fn domain_amend_migration() {
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()]].into()));
 
     // update value again
-    put[&b].0(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -640,18 +688,20 @@ fn state_replay_migration_stream() {
     // things come out the other end.
 
     let mut g = distributary::Blender::new();
-    let (put1, a) = {
+    let a = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["x", "y"], distributary::Base {});
-        (mig.commit(), a)
+        mig.commit();
+        a
     };
+    let muta = g.get_mutator(a);
 
     // make a couple of records
-    put1[&a].0(vec![1.into(), "a".into()]);
-    put1[&a].0(vec![1.into(), "b".into()]);
-    put1[&a].0(vec![2.into(), "c".into()]);
+    muta.put(vec![1.into(), "a".into()]);
+    muta.put(vec![1.into(), "b".into()]);
+    muta.put(vec![2.into(), "c".into()]);
 
-    let (out, put2, b) = {
+    let (out, b) = {
         // add a new base and a join
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["x", "z"], distributary::Base {});
@@ -669,24 +719,25 @@ fn state_replay_migration_stream() {
         let out = mig.stream(j);
 
         // do the migration
-        let put2 = mig.commit();
+        mig.commit();
 
-        (out, put2, b)
+        (out, b)
     };
+    let mutb = g.get_mutator(b);
 
     // if all went according to plan, the ingress to j's domains hould now contain all the records
     // that we initially inserted into a. thus, when we forward matching things through j, we
     // should see joined output records.
 
     // there are (/should be) two records in a with x == 1
-    put2[&b].0(vec![1.into(), "n".into()]);
+    mutb.put(vec![1.into(), "n".into()]);
     // they may arrive in any order
     let res = out.recv().unwrap();
     assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()].into()));
     assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
 
     // there are (/should be) one record in a with x == 2
-    put2[&b].0(vec![2.into(), "o".into()]);
+    mutb.put(vec![2.into(), "o".into()]);
     assert_eq!(out.recv(),
                Ok(vec![vec![2.into(), "c".into(), "o".into()]].into()));
 
@@ -751,7 +802,7 @@ fn full_vote_migration() {
         let vote;
         let vc;
         let end;
-        let put1 = {
+        let (article, vote) = {
             // migrate
             let mut mig = g.start_migration();
 
@@ -775,8 +826,12 @@ fn full_vote_migration() {
             mig.maintain(end, 0);
 
             // start processing
-            mig.commit()
+            mig.commit();
+
+            (article, vote)
         };
+        let muta = g.get_mutator(article);
+        let mutv = g.get_mutator(vote);
 
         let n = 1000i64;
         let title: DataType = "foo".into();
@@ -784,46 +839,51 @@ fn full_vote_migration() {
         let raten: DataType = 5.into();
 
         for i in 0..n {
-            put1[&article].0(vec![i.into(), title.clone()]);
+            muta.put(vec![i.into(), title.clone()]);
         }
         for i in 0..n {
-            put1[&vote].0(vec![1.into(), i.into()]);
+            mutv.put(vec![1.into(), i.into()]);
         }
 
         // migrate
-        let mut mig = g.start_migration();
+        let (rating, last) = {
+            let mut mig = g.start_migration();
 
-        let domain = mig.add_domain();
+            let domain = mig.add_domain();
 
-        // add new "ratings" base table
-        let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base {});
+            // add new "ratings" base table
+            let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base {});
 
-        // add sum of ratings
-        let rs = mig.add_ingredient("rsum",
-                                    &["id", "total"],
-                                    Aggregation::SUM.over(rating, 2, &[1]));
+            // add sum of ratings
+            let rs = mig.add_ingredient("rsum",
+                                        &["id", "total"],
+                                        Aggregation::SUM.over(rating, 2, &[1]));
 
-        // join vote count and rsum (and in theory, sum them)
-        let j = JoinBuilder::new(vec![(rs, 0), (rs, 1), (vc, 1)])
-            .from(rs, vec![1, 0])
-            .join(vc, vec![1, 0]);
-        let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
+            // join vote count and rsum (and in theory, sum them)
+            let j = JoinBuilder::new(vec![(rs, 0), (rs, 1), (vc, 1)])
+                .from(rs, vec![1, 0])
+                .join(vc, vec![1, 0]);
+            let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
-        mig.assign_domain(rating, domain);
-        mig.assign_domain(rs, domain);
-        mig.assign_domain(total, domain);
+            mig.assign_domain(rating, domain);
+            mig.assign_domain(rs, domain);
+            mig.assign_domain(total, domain);
 
-        // finally, produce end result
-        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (total, 1), (total, 2)])
-            .from(article, vec![1, 0])
-            .join(total, vec![1, 0, 0]);
-        let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
-        let last = mig.maintain(newend, 0);
+            // finally, produce end result
+            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (total, 1), (total, 2)])
+                .from(article, vec![1, 0])
+                .join(total, vec![1, 0, 0]);
+            let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
+            let last = mig.maintain(newend, 0);
 
-        // start processing
-        let put2 = mig.commit();
+            // start processing
+            mig.commit();
+
+            (rating, last)
+        };
+        let mutr = g.get_mutator(rating);
         for i in 0..n {
-            put2[&rating].0(vec![1.into(), i.into(), raten.clone()]);
+            mutr.put(vec![1.into(), i.into(), raten.clone()]);
         }
 
         // system does about 10k/s = 10/ms
@@ -853,7 +913,7 @@ fn state_replay_migration_query() {
     // are created and populated before the migration, meaning we have to replay through a join.
 
     let mut g = distributary::Blender::new();
-    let (put1, a, b) = {
+    let (a, b) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["x", "y"], distributary::Base {});
         let b = mig.add_ingredient("b", &["x", "z"], distributary::Base {});
@@ -861,15 +921,19 @@ fn state_replay_migration_query() {
         let domain = mig.add_domain();
         mig.assign_domain(a, domain);
         mig.assign_domain(b, domain);
-        (mig.commit(), a, b)
+        mig.commit();
+
+        (a, b)
     };
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
 
     // make a couple of records
-    put1[&a].0(vec![1.into(), "a".into()]);
-    put1[&a].0(vec![1.into(), "b".into()]);
-    put1[&a].0(vec![2.into(), "c".into()]);
-    put1[&b].0(vec![1.into(), "n".into()]);
-    put1[&b].0(vec![2.into(), "o".into()]);
+    muta.put(vec![1.into(), "a".into()]);
+    muta.put(vec![1.into(), "b".into()]);
+    muta.put(vec![2.into(), "c".into()]);
+    mutb.put(vec![1.into(), "n".into()]);
+    mutb.put(vec![2.into(), "o".into()]);
 
     let out = {
         // add join and a reader node

@@ -102,7 +102,7 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
             .into_iter()
             .map(|(ni, n)| {
                 (ni,
-                 (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_putter(ni).0))
+                 (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_mutator(ni)))
             })
             .collect();
         let outs: Vec<_> = soup.outputs()
@@ -119,7 +119,9 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
 
     let s = Server {
         put: ins.into_iter()
-            .map(|(ni, (nm, args, putter))| (ni, (nm, args, Mutex::new(putter))))
+            .map(|(ni, (nm, args, mutator))| (ni, (nm, args, Mutex::new(Box::new(move |v: Vec<DataType>|{
+                mutator.put(v)
+            }) as Box<_>))))
             .collect(),
         get: outs.into_iter()
             .map(|(ni, (nm, args, getter))| (ni, (nm, args, getter)))
