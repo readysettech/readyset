@@ -308,7 +308,6 @@
 //! propagating the `Update` since there are no descendant views.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(ptr_eq)]
 #![feature(mpsc_select)]
 #![feature(pub_restricted)]
 #![feature(conservative_impl_trait)]
@@ -321,6 +320,7 @@
 extern crate serde_derive;
 
 extern crate fnv;
+extern crate evmap;
 
 extern crate itertools;
 extern crate petgraph;

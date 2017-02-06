@@ -620,7 +620,7 @@ impl<'a> Migration<'a> {
         if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
                 use backlog;
-                let (r, w) = backlog::new(cols, key).commit();
+                let (r, w) = backlog::new(cols, key);
                 inner.state = Some(r);
                 *wh = Some(w);
             }
@@ -652,7 +652,7 @@ impl<'a> Migration<'a> {
         if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.state.is_none() {
                 use backlog;
-                let (r, w) = backlog::new(cols, key).commit();
+                let (r, w) = backlog::new(cols, key);
                 inner.state = Some(r);
                 *wh = Some(w);
             }
