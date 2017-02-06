@@ -73,6 +73,8 @@ pub struct Domain {
     not_ready: HashSet<LocalNodeIndex>,
 
     checktable: Arc<Mutex<checktable::CheckTable>>,
+
+    replaying_to: Option<(LocalNodeIndex, Vec<Message>)>,
 }
 
 impl Domain {
@@ -100,11 +102,13 @@ impl Domain {
             not_ready: not_ready,
             ts: ts,
             checktable: checktable,
+            replaying_to: None,
         }
     }
 
     pub fn dispatch(m: Message,
                     not_ready: &HashSet<LocalNodeIndex>,
+                    replaying_to: &mut Option<(LocalNodeIndex, Vec<Message>)>,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
                     enable_output: bool)
@@ -113,6 +117,12 @@ impl Domain {
         let ts = m.ts;
         let mut output_messages = HashMap::new();
 
+        if let Some((ref bufnode, ref mut buffered)) = *replaying_to {
+            if bufnode == me.as_local() {
+                buffered.push(m);
+                return output_messages;
+            }
+        }
         if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
             return output_messages;
         }
@@ -150,7 +160,12 @@ impl Domain {
                     token: token,
                 };
 
-                for (k, mut v) in Self::dispatch(m, not_ready, states, nodes, enable_output) {
+                for (k, mut v) in Self::dispatch(m,
+                                                 not_ready,
+                                                 replaying_to,
+                                                 states,
+                                                 nodes,
+                                                 enable_output) {
                     output_messages.entry(k).or_insert_with(Vec::new).append(&mut v);
                 }
             } else {
@@ -176,8 +191,12 @@ impl Domain {
         let ts = messages.iter().next().unwrap().ts;
 
         for m in messages {
-            let new_messages =
-                Self::dispatch(m, &self.not_ready, &mut self.state, &self.nodes, false);
+            let new_messages = Self::dispatch(m,
+                                              &self.not_ready,
+                                              &mut self.replaying_to,
+                                              &mut self.state,
+                                              &self.nodes,
+                                              false);
 
             for (key, mut value) in new_messages {
                 egress_messages.entry(key).or_insert_with(Vec::new).append(&mut value);
@@ -336,6 +355,7 @@ impl Domain {
                             None => {
                                 Self::dispatch(m,
                                                &self.not_ready,
+                                               &mut self.replaying_to,
                                                &mut self.state,
                                                &self.nodes,
                                                true);
@@ -350,6 +370,14 @@ impl Domain {
             .unwrap();
 
         ctx
+    }
+
+    fn replay_done(&mut self, node: LocalNodeIndex) {
+        self.not_ready.remove(&node);
+        if let Some((target, buffered)) = self.replaying_to.take() {
+            assert_eq!(target, node);
+            assert!(buffered.is_empty());
+        }
     }
 
     fn handle_control(&mut self, c: Control) {
@@ -382,15 +410,17 @@ impl Domain {
                 }
 
                 // swap replayed reader nodes to expose new state
-                use flow::node::Type;
-                let mut n = self.nodes[&ni].borrow_mut();
-                if let Type::Reader(ref mut w, _) = *n.inner {
-                    if let Some(ref mut state) = *w {
-                        state.swap();
+                {
+                    use flow::node::Type;
+                    let mut n = self.nodes[&ni].borrow_mut();
+                    if let Type::Reader(ref mut w, _) = *n.inner {
+                        if let Some(ref mut state) = *w {
+                            state.swap();
+                        }
                     }
                 }
 
-                self.not_ready.remove(&ni);
+                self.replay_done(ni);
                 drop(ack);
             }
             Control::PrepareState(ni, on) => {
@@ -405,23 +435,17 @@ impl Domain {
                 // check for stupidity
                 assert!(!nodes.is_empty());
 
-                // okay, I'm sorry in advance for this.
-                // we have to have read-only reference to the state of the node we are replaying.
-                // however, we *also* need to have a mutable reference to the states such that we
-                // can call .process for each node we're operating on. and *that* is again
-                // necessary because process() may need to update materialized state. and *that*
-                // can happen even in this flow (where the whole reason we're replaying through
-                // nodes is because they *aren't* materialized) because the target node of the
-                // replay may *also* be one of ours.
-                // so, to facilitate this, we stash away an &mut self.state here.
-                let extra_mut_state: *mut _ = &mut self.state;
-
                 // we know that nodes[0] is materialized, as the migration coordinator picks path
                 // that originate with materialized nodes. if this weren't the case, we wouldn't be
                 // able to do the replay, and the entire migration would fail.
-                let state = self.state
+                //
+                // we clone the entire state so that we can continue to occasionally process
+                // incoming updates to the domain without disturbing the state that is being
+                // replayed.
+                let state: State = self.state
                     .get(nodes[0].as_local())
-                    .expect("migration replay path started with non-materialized node");
+                    .expect("migration replay path started with non-materialized node")
+                    .clone();
 
                 if nodes.len() == 1 {
                     // now, we can just send our entire state in one go, rather than chunk it. this
@@ -429,7 +453,7 @@ impl Domain {
                     // record. furthermore, it allows the receiver to simply replace their current
                     // empty state with this state if it is not passing thorugh other nodes.
                     if let Some(tx) = tx {
-                        tx.send(ReplayBatch::Full(nodes[0], state.clone())).unwrap();
+                        tx.send(ReplayBatch::Full(nodes[0], state)).unwrap();
                     } else {
                         // replaying a single node has no purpose if there isn't someone we're
                         // sending to.
@@ -438,14 +462,28 @@ impl Domain {
                     return;
                 }
 
+                // TODO: in the special case where nodes.len() == 2 and tx.is_none(), and we
+                // literally just need a copy of the state, we could early-terminate here.
+
                 // since we must have more than one node, this is safe
                 let init_to = nodes[1];
 
+                if tx.is_none() {
+                    // the sink node is in this domain. make sure we buffer any updates that get
+                    // propagated to it during the migration (as they logically follow the state
+                    // snapshot that is being replayed to it).
+                    self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
+                                              Vec::new()));
+                }
+
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
-                'chunks: for chunk in &state.iter().flat_map(|rs| rs).chunks(1000) {
+                'chunks: for chunk in state.into_iter()
+                    .flat_map(|(_, rs)| rs)
+                    .chunks(1000)
+                    .into_iter() {
                     use std::iter::FromIterator;
-                    let chunk = Records::from_iter(chunk.into_iter().map(|r| r.clone()));
+                    let chunk = Records::from_iter(chunk.into_iter());
                     let mut m = Message {
                         from: nodes[0],
                         to: init_to,
@@ -457,18 +495,9 @@ impl Domain {
                     // forward the current chunk through all local nodes
                     for (i, ni) in nodes.iter().enumerate().skip(1) {
                         // process the current chunk in this node
-                        //
-                        // NOTE: the unsafe below is safe because
-                        //
-                        //   a) .process never modifies state, only its individual states
-                        //   b) the state we have borrow immutably is for nodes[0]
-                        //   c) we here iterate over all nodes that are *not* nodes[0]
-                        //      (due to .skip(1)). the assertion should be unnecssary.
-                        //
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
                         assert!(ni != &nodes[0]);
-                        let state: &mut _ = unsafe { &mut *extra_mut_state };
-                        let u = n.process(m, state, &self.nodes, false);
+                        let u = n.process(m, &mut self.state, &self.nodes, false);
                         drop(n);
 
                         if u.is_none() {
@@ -500,7 +529,7 @@ impl Domain {
                 if tx.is_none() {
                     // we must mark the node as ready immediately, otherwise it might miss updates
                     // that follow the replay, but precede the ready.
-                    self.not_ready.remove(nodes.last().unwrap().as_local());
+                    self.replay_done(*nodes.last().unwrap().as_local());
                 }
             }
             Control::ReplayThrough(nodes, rx, mut tx, ack) => {
@@ -537,11 +566,19 @@ impl Domain {
                             }
                         }
                     }
-                    self.not_ready.remove(nodes[0].as_local());
+                    self.replay_done(*nodes[0].as_local());
                     return;
                 }
 
                 let rx = BatchedIterator::new(rx, nodes[0]);
+
+                if tx.is_none() {
+                    // the sink node is in this domain. make sure we buffer any updates that get
+                    // propagated to it during the migration (as they logically follow the state
+                    // snapshot that is being replayed to it).
+                    self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
+                                              Vec::new()));
+                }
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
@@ -582,7 +619,7 @@ impl Domain {
                 if tx.is_none() {
                     // we must mark the node as ready immediately, otherwise it might miss updates
                     // that follow the replay, but precede the ready.
-                    self.not_ready.remove(nodes.last().unwrap().as_local());
+                    self.replay_done(*nodes.last().unwrap().as_local());
                 }
             }
             Control::StartMigration(ts, channel) => {
