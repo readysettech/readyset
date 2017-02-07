@@ -758,24 +758,28 @@ impl BatchedIterator {
 impl Iterator for BatchedIterator {
     type Item = Message;
     fn next(&mut self) -> Option<Self::Item> {
-        use itertools::Itertools;
         if let Some(ref mut state_iter) = self.state_iter {
             let from = self.from.unwrap();
             let to = self.to;
-            state_iter.flat_map(|(_, rs)| rs)
-                .chunks(1000)
-                .into_iter()
-                .map(|chunk| {
-                    use std::iter::FromIterator;
-                    Message {
-                        from: from,
-                        to: to,
-                        data: FromIterator::from_iter(chunk.into_iter()),
-                        ts: None,
-                        token: None,
-                    }
+            let mut rs = Vec::with_capacity(1000);
+            while let Some((_, next)) = state_iter.next() {
+                rs.extend(next);
+                if rs.len() >= 1000 {
+                    break;
+                }
+            }
+            if rs.is_empty() {
+                None
+            } else {
+                use std::iter::FromIterator;
+                Some(Message {
+                    from: from,
+                    to: to,
+                    data: FromIterator::from_iter(rs.into_iter()),
+                    ts: None,
+                    token: None,
                 })
-                .next()
+            }
         } else {
             match self.rx.next() {
                 None => None,
