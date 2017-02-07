@@ -427,7 +427,15 @@ impl Domain {
                 }
                 even = !even;
 
-                self.dispatch_(m, true);
+                // NOTE: we cannot use self.dispatch_ here, because we specifically need to
+                // override the buffering behavior that our self.replaying_to = Some above would
+                // initiate.
+                Self::dispatch(m,
+                               &self.not_ready,
+                               &mut None,
+                               &mut self.state,
+                               &self.nodes,
+                               true);
             }
         }
 
