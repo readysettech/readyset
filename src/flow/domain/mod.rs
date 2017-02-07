@@ -490,6 +490,8 @@ impl Domain {
                     // NOTE: just because index_on is None does *not* mean we're not materialized
                 }
 
+                self.replay_done(ni, domain_rx);
+
                 // swap replayed reader nodes to expose new state
                 {
                     use flow::node::Type;
@@ -501,7 +503,6 @@ impl Domain {
                     }
                 }
 
-                self.replay_done(ni, domain_rx);
                 drop(ack);
             }
             Control::PrepareState(ni, on) => {
