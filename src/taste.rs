@@ -1,4 +1,6 @@
-use config::{Benchmark, parse_config};
+use config::{Benchmark, Config, parse_config};
+use Commit;
+use Push;
 use repo::Workspace;
 
 use std::collections::HashMap;
@@ -17,10 +19,8 @@ pub enum BenchmarkResult<T> {
 
 #[derive(Debug, Clone)]
 pub struct TastingResult {
-    pub branch: String,
-    pub commit_id: String,
-    pub commit_msg: String,
-    pub commit_url: String,
+    pub branch: Option<String>,
+    pub commit: Commit,
     pub build: bool,
     pub test: bool,
     pub bench: bool,
@@ -118,19 +118,22 @@ fn build(workdir: &str) -> ExitStatus {
 pub fn taste_commit(ws: &Workspace,
                     history: &mut HashMap<String,
                                           HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
-                    commit_ref: &str,
-                    id: &str,
-                    msg: &str,
-                    url: &str,
+                    push: &Push,
+                    commit: &Commit,
                     def_improvement_threshold: f64,
                     def_regression_threshold: f64)
-                    -> Result<TastingResult, String> {
-    println!("Tasting commit {}", id);
-    ws.checkout_commit(id)?;
+                    -> Result<(Option<Config>, TastingResult), String> {
+    println!("Tasting commit {}", commit.id);
+    ws.checkout_commit(&commit.id)?;
 
-    let branch = match commit_ref.rfind("/") {
-        None => String::from(""),
-        Some(i) => String::from(&commit_ref[i + 1..]),
+    let branch = match push.push_ref {
+        None => None,
+        Some(ref pr) => {
+            match pr.rfind("/") {
+                None => None,
+                Some(i) => Some(String::from(&pr[i + 1..])),
+            }
+        }
     };
 
     let build_success = update(&ws.path).success() && build(&ws.path).success();
@@ -143,44 +146,54 @@ pub fn taste_commit(ws: &Workspace,
         Err(e) => {
             match e.kind() {
                 io::ErrorKind::NotFound => {
-                    println!("Skipping commit {} which doesn't have a Taster config.", id);
-                    return Ok(TastingResult {
-                        branch: branch,
-                        commit_id: String::from(id),
-                        commit_msg: String::from(msg),
-                        commit_url: String::from(url),
-                        build: build_success,
-                        test: test_success,
-                        bench: false,
-                        results: None,
-                    });
+                    println!("Skipping commit {} which doesn't have a Taster config.",
+                             commit.id);
+                    return Ok((None,
+                               TastingResult {
+                                   branch: branch,
+                                   commit: commit.clone(),
+                                   build: build_success,
+                                   test: test_success,
+                                   bench: false,
+                                   results: None,
+                               }));
                 }
                 _ => unimplemented!(),
             }
         }
     };
 
-    let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
-    let bench_out = cfg.iter()
-        .map(|b| {
-            let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
-            branch_history.insert(b.name.clone(), new_result.1.clone());
-            new_result
-        })
-        .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>();
+    let bench_out = match branch {
+        Some(ref branch) => {
+            let branch_history = history.entry(branch.clone()).or_insert(HashMap::new());
+            cfg.benchmarks
+                .iter()
+                .map(|b| {
+                    let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
+                    branch_history.insert(b.name.clone(), new_result.1.clone());
+                    new_result
+                })
+                .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
+        }
+        None => {
+            cfg.benchmarks
+                .iter()
+                .map(|b| benchmark(&ws.path, b, None))
+                .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
+        }
+    };
     let bench_success = bench_out.iter().all(|x| x.0.success());
     let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
 
-    Ok(TastingResult {
-        branch: branch,
-        commit_id: String::from(id),
-        commit_msg: String::from(msg),
-        commit_url: String::from(url),
-        build: build_success,
-        test: test_success,
-        bench: bench_success,
-        results: Some(bench_results),
-    })
+    Ok((Some(cfg),
+        TastingResult {
+            branch: branch,
+            commit: commit.clone(),
+            build: build_success,
+            test: test_success,
+            bench: bench_success,
+            results: Some(bench_results),
+        }))
 }
 
 fn test(workdir: &str) -> ExitStatus {

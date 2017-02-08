@@ -1,32 +1,56 @@
 use slack_hook::{Attachment, AttachmentBuilder, Field, PayloadBuilder, Slack, SlackText, SlackLink};
 use slack_hook::SlackTextContent::{Text, Link};
 
+use Push;
+use config::Config;
 use taste::{BenchmarkResult, TastingResult};
 
 pub struct SlackNotifier {
     conn: Slack,
     channel: String,
-    github_repo: String,
     verbose: bool,
 }
 
 impl SlackNotifier {
-    pub fn new(hook_url: &str, channel: &str, repo_url: &str, verbose: bool) -> SlackNotifier {
+    pub fn new(hook_url: &str, channel: &str, _repo_url: &str, verbose: bool) -> SlackNotifier {
         SlackNotifier {
             conn: Slack::new(hook_url).unwrap(),
             channel: String::from(channel),
-            github_repo: String::from(repo_url),
             verbose: verbose,
         }
     }
 
-    pub fn notify(&self, res: &TastingResult) -> Result<(), String> {
+    pub fn notify(&self,
+                  cfg: Option<&Config>,
+                  res: &TastingResult,
+                  push: &Push)
+                  -> Result<(), String> {
+        let mut text =
+            vec![Text("I've tasted _".into()),
+                 Text(format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into()),
+                 Link(SlackLink::new(&push.head_commit.url,
+                                     &format!("{}", push.head_commit.id)[0..6]))];
+        match push.pusher {
+            Some(ref p) => {
+                let alias = match cfg {
+                    Some(cfg) => {
+                        match cfg.slack_aliases.get(p) {
+                            None => p,
+                            Some(a) => a,
+                        }
+                    }
+                    None => p,
+                };
+                text.push(Text(format!("), pushed by @{}", alias).into()))
+            }
+            None => text.push(Text(format!(")").into())),
+        }
+        match res.branch {
+            Some(ref b) => text.push(Text(format!("to *{}*", b).into())),
+            None => (),
+        }
         let payload = PayloadBuilder::new()
-            .text(vec![Text("I've tasted commit _".into()),
-                       Text(format!("\"{}\"_ (", res.commit_msg.lines().next().unwrap()).into()),
-                       Link(SlackLink::new(&res.commit_url, &res.commit_id[0..6])),
-                       Text(format!(") from branch *{}*", res.branch).into())]
-                .as_slice())
+            .text(text.as_slice())
             .attachments(self.result_to_attachments(&res))
             .channel(self.channel.clone())
             .username("taster")
@@ -45,16 +69,6 @@ impl SlackNotifier {
             "danger"
         } else {
             "good"
-        };
-
-        let title = if !res.build {
-            "Build failure!"
-        } else if !res.test {
-            "Test failure!"
-        } else if !res.bench {
-            "Benchmark failure!"
-        } else {
-            "Performance results:"
         };
 
         let taste = if !res.build || !res.bench {

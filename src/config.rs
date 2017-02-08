@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Error, Read};
 use std::path::Path;
@@ -15,10 +16,15 @@ pub struct Benchmark {
     pub regression_threshold: f64,
 }
 
+pub struct Config {
+    pub benchmarks: Vec<Benchmark>,
+    pub slack_aliases: HashMap<String, String>,
+}
+
 pub fn parse_config(cfg: &Path,
                     def_imp_threshold: f64,
                     def_reg_threshold: f64)
-                    -> Result<Vec<Benchmark>, Error> {
+                    -> Result<Config, Error> {
     let mut f = try!(fs::File::open(cfg));
     let mut buf = String::new();
     try!(f.read_to_string(&mut buf));
@@ -57,6 +63,24 @@ pub fn parse_config(cfg: &Path,
             },
         }
     };
-    let benchmarks = value.iter().map(|t| to_bench(t)).collect();
-    Ok(benchmarks)
+
+    // Github <-> Slack username mappings
+    let slack_aliases = value.iter()
+        .filter(|t| t.0 == "slack-aliases")
+        .flat_map(|t| {
+            t.1
+                .as_table()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap())))
+        })
+        .collect::<HashMap<_, _>>();
+
+    // Benchmark definitions
+    let benchmarks = value.iter().filter(|t| t.0 != "slack-aliases").map(|t| to_bench(t)).collect();
+
+    Ok(Config {
+        benchmarks: benchmarks,
+        slack_aliases: slack_aliases,
+    })
 }

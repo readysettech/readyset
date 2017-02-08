@@ -1,8 +1,8 @@
 use auth::with_authentication;
 
 use git2;
-use git2::{AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, Oid, RemoteCallbacks,
-           Repository, ResetType};
+use git2::{AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, RemoteCallbacks, Repository,
+           ResetType};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -91,11 +91,11 @@ impl Workspace {
         })
     }
 
-    pub fn checkout_commit(&self, commit_id: &str) -> Result<(), String> {
+    pub fn checkout_commit(&self, commit_id: &git2::Oid) -> Result<(), String> {
         use std::error::Error;
         // N.B.: this will turn into a no-op if the workdir contains the wrong
         // repo, as the commit won't exist
-        let c = match self.repo.find_object(Oid::from_str(commit_id).unwrap(), None) {
+        let c = match self.repo.find_object(*commit_id, None) {
             Err(e) => return Err(String::from(e.description())),
             Ok(o) => o,
         };

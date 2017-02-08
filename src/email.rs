@@ -2,6 +2,8 @@ use lettre::email::EmailBuilder;
 use lettre::transport::smtp::SmtpTransportBuilder;
 use lettre::transport::EmailTransport;
 
+use Push;
+use config::Config;
 use taste::TastingResult;
 
 pub struct EmailNotifier {
@@ -19,7 +21,11 @@ impl EmailNotifier {
         }
     }
 
-    pub fn notify(&self, res: &TastingResult) -> Result<(), String> {
+    pub fn notify(&self,
+                  _cfg: Option<&Config>,
+                  _res: &TastingResult,
+                  push: &Push)
+                  -> Result<(), String> {
         // Unfortunately, we have to construct the transport here, since hyper forces us to accept
         // &self rather than &mut self, so we can't store the mailer in the `EmailNotifier` struct
         let mut mailer = SmtpTransportBuilder::localhost().unwrap().build();
@@ -28,7 +34,7 @@ impl EmailNotifier {
             .to(self.addr.as_str())
             .from("taster@tbilisi.csail.mit.edu")
             .body(&format!("Hello world from {}", self.github_repo))
-            .subject(&format!("[taster] Result for {}", res.commit_id))
+            .subject(&format!("[taster] Result for {}", push.head_commit.id))
             .build()
             .unwrap();
 
