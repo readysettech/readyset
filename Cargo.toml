@@ -8,6 +8,7 @@ web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcache"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
+b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
 
 [dependencies]
@@ -32,11 +33,14 @@ hdrsample = "2.1"
 postgres = { version = "0.11", optional = true }
 r2d2 = { version = "0.7", optional = true }
 r2d2_postgres = { version = "0.10", optional = true }
+# mssql
+futures-state-stream = { version = "0.1", optional = true }
+tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
 # mysql
 mysql = { version = "8.0", optional = true }
 r2d2_mysql = { version = "8.0", optional = true }
 # memcached
-memcache = {git="https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7dec2dfcd4cda76002d8c10b993263", optional = true }
+memcache = { git = "https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7dec2dfcd4cda76002d8c10b993263", optional = true }
 # netsoup
 futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
