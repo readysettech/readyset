@@ -57,7 +57,7 @@ take longer than a regular debug build.
 
 Once compiled, the benchmarker can be run with
 ```console
-$ target/release/vote --runtime 30 --prepopulate-articles 10000 soup://
+$ target/release/vote --runtime 30 --articles 10000 soup://
 ```
 
 ### Benchmarks against other targets
@@ -72,5 +72,7 @@ slower.
 |--------|--------------|------------|------
 | Embedded soup | *none* | `soup://` |
 | Soup over loopback | `b_netsoup` | `netsoup://127.0.0.1:7777` |
+| MySQL | `b_mysql` | `mysql://soup@127.0.0.1/bench_soup` | `soup` is the user, `bench_soup` the database -- note that the user must be allowed to drop and re-create the database.
+| SQL Server | `b_mssql` | `mssql://server=tcp:127.0.0.1,1433;user=soup;pwd=password;/bench_soup` | `soup` is the user, `password` their password, `bench_soup` the database -- note that the user must be allowed to drop and re-create the database.
 | PostgreSQL | `b_postgresql` | `postgresql://soup@127.0.0.1/bench_soup` | `soup` is the user, `bench_soup` the database -- note that the user must be allowed to drop and re-create the database.
 | memcached | `b_memcached` | `memcached://127.0.0.1:11211` | the benchmarker does not purge the cache before starting, so you may want to restart memcached before running.
