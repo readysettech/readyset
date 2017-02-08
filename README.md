@@ -3,14 +3,13 @@
 [![Build Status](https://travis-ci.com/mit-pdos/distributary.svg?token=BSd4zXamztCMoDZRewoH&branch=master)](https://travis-ci.com/mit-pdos/distributary)
 
 This repository provides an implementation of the data storage system
-model proposed in [Soup](https://github.com/mit-pdos/soup-paper).
+model proposed in [Soup](https://pdos.csail.mit.edu/projects/soup.html).
 
 At a high level, it takes a set of parameterized queries, and produces a
 data-flow graph that maintains materialized views for the output of
 those queries. This yields very high read throughput. Incremental
 maintenance of the views through the data-flow graph also yields high
-write throughput. See the papers in the repository above for further
-information.
+write throughput.
 
 ## Code
 
