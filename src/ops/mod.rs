@@ -18,6 +18,7 @@ use std::sync;
 pub enum Record {
     Positive(sync::Arc<Vec<query::DataType>>),
     Negative(sync::Arc<Vec<query::DataType>>),
+    DeleteRequest(usize, query::DataType),
 }
 
 impl Record {
@@ -25,6 +26,7 @@ impl Record {
         match *self {
             Record::Positive(ref v) |
             Record::Negative(ref v) => &v[..],
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 
@@ -40,6 +42,7 @@ impl Record {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }
@@ -50,6 +53,7 @@ impl Deref for Record {
         match *self {
             Record::Positive(ref r) |
             Record::Negative(ref r) => r,
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }
@@ -59,6 +63,7 @@ impl DerefMut for Record {
         match *self {
             Record::Positive(ref mut r) |
             Record::Negative(ref mut r) => r,
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }
@@ -205,7 +210,7 @@ pub mod test {
 
         pub fn add_base(&mut self, name: &str, fields: &[&str]) -> NodeAddress {
             use ops::base::Base;
-            let mut i: node::Type = Base {}.into();
+            let mut i: node::Type = Base::default().into();
             i.on_connected(&self.graph);
             let ni = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, ni, false);
@@ -312,6 +317,7 @@ pub mod test {
                 match data.into() {
                     Record::Positive(r) => state.insert(r),
                     Record::Negative(_) => unreachable!(),
+                    Record::DeleteRequest(..) => unreachable!(),
                 }
             } else {
                 assert!(false,

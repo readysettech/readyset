@@ -208,7 +208,8 @@ pub fn index(log: &Logger,
                 // this materialization doesn't have any primary key,
                 // so we assume it's not in use.
 
-                if graph[map[&n]].is_base() {
+                let ref node = graph[map[&n]];
+                if node.is_internal() && node.is_base() {
                     // but it's a base nodes!
                     // we must *always* materialize base nodes
                     // so, just make up some column to index on

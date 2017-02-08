@@ -132,8 +132,8 @@
 //! let mut mig = g.start_migration();
 //!
 //! // base types
-//! let article = mig.add_ingredient("article", &["id", "title"], Base {});
-//! let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+//! let article = mig.add_ingredient("article", &["id", "title"], Base::default());
+//! let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 //!
 //! // vote count is an aggregation over vote where we group by the second field ([1])
 //! let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
@@ -176,7 +176,7 @@
 //! # let mut g = Blender::new();
 //! # let article = {
 //! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"], Base {});
+//! # let article = mig.add_ingredient("article", &["id", "title"], Base::default());
 //! # mig.commit();
 //! # article
 //! # };
@@ -239,7 +239,7 @@
 //! # let mut g = Blender::new();
 //! # let vote = {
 //! # let mut mig = g.start_migration();
-//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 //! # mig.commit();
 //! # vote
 //! # };
@@ -359,6 +359,7 @@ mod backlog;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, NodeAddress, Mutator};
+pub use flow::node::StreamUpdate;
 pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use ops::Datas;
 pub use ops::base::Base;

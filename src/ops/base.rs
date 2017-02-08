@@ -6,7 +6,29 @@ use std::collections::HashMap;
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
 #[derive(Debug, Clone)]
-pub struct Base {}
+pub struct Base {
+    key_column: Option<usize>,
+    us: Option<NodeAddress>,
+}
+
+impl Base {
+    /// Create a base node operator.
+    pub fn new(key_column: usize) -> Self {
+        Base {
+            key_column: Some(key_column),
+            us: None,
+        }
+    }
+}
+
+impl Default for Base {
+    fn default() -> Self {
+        Base {
+            key_column: None,
+            us: None,
+        }
+    }
+}
 
 use flow::prelude::*;
 
@@ -24,17 +46,36 @@ impl Ingredient for Base {
     }
 
     fn will_query(&self, _: bool) -> bool {
-        false
+        self.key_column.is_some()
     }
 
     fn on_connected(&mut self, _: &Graph) {}
-    fn on_commit(&mut self, _: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {}
-    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
-        rs
+    fn on_commit(&mut self, us: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {
+        self.us = Some(us);
+    }
+    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, state: &StateMap) -> Records {
+        rs.into_iter().map(|r| match r {
+            Record::Positive(u) => Record::Positive(u),
+            Record::Negative(u) => Record::Negative(u),
+            Record::DeleteRequest(col, key) => {
+                assert_eq!(self.key_column, Some(col));
+
+                let db = state.get(self.us.as_ref().unwrap().as_local())
+                    .expect("base must have its own state materialized to support deletions");
+                let rows = db.lookup(col, &key);
+                assert_ne!(rows.len(), 0);
+
+                Record::Negative(rows[0].clone())
+            }
+        }).collect()
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
-        HashMap::new()
+    fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, usize> {
+        if self.key_column.is_some() {
+            [(n, self.key_column.unwrap())].iter().cloned().collect()
+        } else {
+            HashMap::new()
+        }
     }
 
     fn resolve(&self, _: usize) -> Option<Vec<(NodeAddress, usize)>> {

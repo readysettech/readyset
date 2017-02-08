@@ -706,6 +706,7 @@ impl Domain {
                                         match r {
                                             ops::Record::Positive(r) => state.insert(r),
                                             ops::Record::Negative(ref r) => state.remove(r),
+                                            ops::Record::DeleteRequest(..) => unreachable!(),
                                         }
                                     }
                                     debug!(self.log, "direct state absorption of batch"; "#" => i);

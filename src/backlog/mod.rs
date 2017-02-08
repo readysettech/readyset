@@ -50,7 +50,7 @@ impl WriteHandle {
                 Record::Negative(r) => {
                     self.handle.remove(key, r);
                 }
-
+                Record::DeleteRequest(..) => unreachable!(),
             }
         }
     }

@@ -287,6 +287,31 @@ impl Mutator {
             .unwrap();
         recv.recv().unwrap()
     }
+
+    /// Perform a non-transactional delete frome the base node this Mutator was generated for.
+    pub fn delete(&self, col: usize, key: query::DataType) {
+        self.tx.send(Message {
+            from: self.src,
+            to: self.addr,
+            data: vec![prelude::Record::DeleteRequest(col, key)].into(),
+            ts: None,
+            token: None,
+        }).unwrap()
+    }
+
+    /// Perform a transactional delete from the base node this Mutator was generated for.
+    pub fn transactional_delete(&self, col: usize, key: query::DataType, t: checktable::Token)
+                             -> checktable::TransactionResult {
+        let (send, recv) = mpsc::channel();
+        self.tx.send(Message {
+            from: self.src,
+            to: self.addr,
+            data: vec![prelude::Record::DeleteRequest(col, key)].into(),
+            ts: None,
+            token: Some((t, send)),
+        }).unwrap();
+        recv.recv().unwrap()
+    }
 }
 
 /// `Blender` is the core component of the alternate Soup implementation.
@@ -715,7 +740,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
-    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<prelude::Records> {
+    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
         self.reader_for(n).streamers.lock().unwrap().push(tx);
