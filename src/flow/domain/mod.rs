@@ -670,37 +670,39 @@ impl Domain {
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
-                'replay: for mut m in rx {
-                    // forward the current message through all local nodes
-                    for (i, ni) in nodes.iter().enumerate() {
-                        // process the current message in this node
-                        let mut n = self.nodes[ni.as_local()].borrow_mut();
-                        let u = n.process(m, &mut self.state, &self.nodes, false);
-                        drop(n);
+                'replay: for m in rx {
+                    if let ReplayMessage::Batch(mut m) = m {
+                        // forward the current message through all local nodes
+                        for (i, ni) in nodes.iter().enumerate() {
+                            // process the current message in this node
+                            let mut n = self.nodes[ni.as_local()].borrow_mut();
+                            let u = n.process(m, &mut self.state, &self.nodes, false);
+                            drop(n);
 
-                        if u.is_none() {
-                            continue 'replay;
+                            if u.is_none() {
+                                continue 'replay;
+                            }
+
+                            m = Message {
+                                from: *ni,
+                                to: *ni,
+                                data: u.unwrap().0,
+                                ts: None,
+                                token: None,
+                            };
+
+                            if i != nodes.len() - 1 {
+                                m.to = nodes[i + 1];
+                            } else {
+                                // to is overwritten by receiving domain. from doesn't need to be set
+                                // to the egress, because the ingress ignores it. setting it to this
+                                // node is basically just as correct.
+                            }
                         }
 
-                        m = Message {
-                            from: *ni,
-                            to: *ni,
-                            data: u.unwrap().0,
-                            ts: None,
-                            token: None,
-                        };
-
-                        if i != nodes.len() - 1 {
-                            m.to = nodes[i + 1];
-                        } else {
-                            // to is overwritten by receiving domain. from doesn't need to be set
-                            // to the egress, because the ingress ignores it. setting it to this
-                            // node is basically just as correct.
+                        if let Some(tx) = tx.as_mut() {
+                            tx.send(ReplayBatch::Partial(m)).unwrap();
                         }
-                    }
-
-                    if let Some(tx) = tx.as_mut() {
-                        tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
 
                     // NOTE: at this point, the downstream domain is probably busy handling our
@@ -738,7 +740,7 @@ impl Domain {
 
 use std::collections::hash_map;
 struct BatchedIterator {
-    rx: mpsc::IntoIter<ReplayBatch>,
+    rx: mpsc::Receiver<ReplayBatch>,
     state_iter: Option<hash_map::IntoIter<DataType, Vec<Arc<Vec<DataType>>>>>,
     to: NodeAddress,
     from: Option<NodeAddress>,
@@ -747,7 +749,7 @@ struct BatchedIterator {
 impl BatchedIterator {
     fn new(rx: mpsc::Receiver<ReplayBatch>, to: NodeAddress) -> Self {
         BatchedIterator {
-            rx: rx.into_iter(),
+            rx: rx,
             state_iter: None,
             to: to,
             from: None,
@@ -755,8 +757,13 @@ impl BatchedIterator {
     }
 }
 
+enum ReplayMessage {
+    Batch(Message),
+    Continue,
+}
+
 impl Iterator for BatchedIterator {
-    type Item = Message;
+    type Item = ReplayMessage;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(ref mut state_iter) = self.state_iter {
             let from = self.from.unwrap();
@@ -772,19 +779,20 @@ impl Iterator for BatchedIterator {
                 None
             } else {
                 use std::iter::FromIterator;
-                Some(Message {
+                Some(ReplayMessage::Batch(Message {
                     from: from,
                     to: to,
                     data: FromIterator::from_iter(rs.into_iter()),
                     ts: None,
                     token: None,
-                })
+                }))
             }
         } else {
-            match self.rx.next() {
-                None => None,
-                Some(ReplayBatch::Partial(m)) => Some(m),
-                Some(ReplayBatch::Full(from, state)) => {
+            match self.rx.try_recv() {
+                Err(mpsc::TryRecvError::Disconnected) => None,
+                Err(mpsc::TryRecvError::Empty) => Some(ReplayMessage::Continue),
+                Ok(ReplayBatch::Partial(m)) => Some(ReplayMessage::Batch(m)),
+                Ok(ReplayBatch::Full(from, state)) => {
                     self.from = Some(from);
                     self.state_iter = Some(state.into_iter());
                     self.next()
