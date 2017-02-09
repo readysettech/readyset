@@ -78,7 +78,7 @@ fn benchmark(workdir: &str,
                                 BenchmarkResult::Neutral(v, _) => v,
                             };
                             let new_result = if cfg.lower_is_better {
-                                if val >= old_val * (1.0 + cfg.regression_threshold)) {
+                                if val >= old_val * (1.0 + cfg.regression_threshold) {
                                     BenchmarkResult::Regression(val, (val / old_val) - 1.0)
                                 } else if val < old_val * (1.0 - cfg.improvement_threshold) {
                                     BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
