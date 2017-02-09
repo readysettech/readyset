@@ -12,7 +12,8 @@ use flow::domain::single::NodeDescriptor;
 use ops;
 use checktable;
 
-const BATCH_SIZE: usize = 1000;
+const BATCH_SIZE: usize = 128;
+const INTERBATCH_LIMIT: usize = 16;
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -447,7 +448,7 @@ impl Domain {
     }
 
     fn mid_replay_process(&mut self, rx: &mut mpsc::Receiver<Message>) {
-        let mut left = 1;
+        let mut left = INTERBATCH_LIMIT;
         while let Ok(m) = rx.try_recv() {
             // we know no transactions happen during migrations
             assert!(m.token.is_none());
