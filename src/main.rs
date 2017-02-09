@@ -79,15 +79,15 @@ pub fn main() {
         .arg(Arg::with_name("default_regression_reporting_threshold")
             .long("default_regression_reporting_threshold")
             .takes_value(true)
-            .default_value("0.9")
-            .help("Normalized performance threshold below which a result is considered a \
-                   regression that needs reporting."))
+            .default_value("0.1")
+            .help("Relative performance threshold below which a result is considered a \
+                   regression that needs reporting (0.1 = +/-10%)."))
         .arg(Arg::with_name("default_improvement_reporting_threshold")
             .long("default_improvement_reporting_threshold")
             .takes_value(true)
-            .default_value("1.1")
-            .help("Normalized performance threshold above which a result is considered an \
-                   improvement that needs reporting."))
+            .default_value("0.1")
+            .help("Relative performance threshold above which a result is considered an \
+                   improvement that needs reporting (0.1 = +/-10%)."))
         .arg(Arg::with_name("secret")
             .short("s")
             .long("secret")
