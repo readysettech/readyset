@@ -10,10 +10,16 @@ type QueryID = u64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recipe {
+    /// SQL queries represented in the recipe
     expressions: HashMap<QueryID, SqlQuery>,
+    /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
+    /// Recipe revision.
     version: usize,
+    /// Preceding recipe.
     prior: Option<Box<Recipe>>,
+    /// Maintains lower-level state, but not the graph itself. Lazily initialized.
+    inc: Option<SqlIncorporator>,
 }
 
 fn hash_query(q: &SqlQuery) -> QueryID {
@@ -32,6 +38,7 @@ impl Recipe {
             aliases: HashMap::default(),
             version: 0,
             prior: None,
+            inc: None,
         }
     }
 
@@ -54,11 +61,33 @@ impl Recipe {
             aliases: HashMap::default(),
             version: 0,
             prior: None,
+            inc: None,
         }
     }
 
-    pub fn activate(&self, mig: &mut Migration) -> Result<(), String> {
-        unimplemented!();
+    pub fn activate(&mut self, mig: &mut Migration) -> Result<(), String> {
+        let (added, _removed) = match self.prior {
+            None => self.compute_delta(&Recipe::blank()),
+            Some(ref pr) => {
+                // compute delta over prior recipe
+                self.compute_delta(pr)
+            }
+        };
+
+        // lazily instantiate `SqlIncorporator` if we don't have one already
+        match self.inc {
+            None => self.inc = Some(SqlIncorporator::default()),
+            Some(_) => (),
+        }
+
+        // add new queries to the Soup graph carried by `mig`, and reflect state in the
+        // incorporator in `inc`
+        for (_, q) in added {
+            self.inc.as_mut().unwrap().add_parsed_query(q, None, mig)?;
+        }
+
+        // TODO(malte): deal with removal.
+        Ok(())
     }
 
     /// Work out the delta between two recipes.
@@ -84,10 +113,13 @@ impl Recipe {
         (added_queries, removed_queries)
     }
 
-    pub fn extend(self, additions: &str) -> Result<Recipe, String> {
+    pub fn extend(mut self, additions: &str) -> Result<Recipe, String> {
         // parse and compute differences to current recipe
         let add_rp = Recipe::from_str(additions)?;
         let (added, _) = add_rp.compute_delta(&self);
+
+        // move the incorporator state from the old recipe to the new one
+        let prior_inc = self.inc.take();
 
         // build new recipe as clone of old one
         let mut new = Recipe {
@@ -96,6 +128,7 @@ impl Recipe {
             version: self.version + 1,
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
+            inc: prior_inc,
         };
 
         // apply changes
@@ -135,11 +168,15 @@ impl Recipe {
         Ok(parsed_queries.into_iter().map(|t| t.1.unwrap()).collect::<Vec<_>>())
     }
 
-    pub fn replace(self, mut new: Recipe) -> Result<Recipe, String> {
+    pub fn replace(mut self, mut new: Recipe) -> Result<Recipe, String> {
         // generate replacement recipe with correct version and lineage
         new.version = self.version + 1;
+        // retain the old incorporator but move it to the new recipe
+        let prior_inc = self.inc.take();
         // retain the old recipe for future reference
         new.prior = Some(Box::new(self));
+        // retain the previous `SqlIncorporator` state
+        new.inc = prior_inc;
 
         // return new recipe as replacement for self
         Ok(new)
@@ -212,5 +249,26 @@ mod tests {
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
         assert_eq!(r2.prior, Some(Box::new(r1_copy)));
+    }
+
+    #[test]
+    fn it_activates() {
+        use Blender;
+
+        let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
+        let mut r = Recipe::from_str(r_txt).unwrap();
+        assert_eq!(r.version, 0);
+        assert_eq!(r.expressions.len(), 1);
+        assert_eq!(r.prior, None);
+
+        let mut g = Blender::new();
+        {
+            let mut mig = g.start_migration();
+            assert!(r.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+        // source, base, ingress, ts-ingress, ts-egress
+        assert_eq!(g.graph().node_count(), 5);
+        println!("{}", g);
     }
 }
