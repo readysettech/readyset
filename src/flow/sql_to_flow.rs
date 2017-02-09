@@ -651,14 +651,14 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
         assert!("SELECT users.id from users;".to_flow_parts(&mut inc, None, &mut mig).is_ok());
-        // Should now have source, "users", and two nodes for the new selection: one filter node
-        // and one edge view node
-        assert_eq!(mig.graph().node_count(), 4);
+        // Should now have source, "users", two nodes for the new selection: one filter node
+        // and one edge view node, and a reader node.
+        assert_eq!(mig.graph().node_count(), 5);
 
         // Invalid query should fail parsing and add no nodes
         assert!("foo bar from whatever;".to_flow_parts(&mut inc, None, &mut mig).is_err());
         // Should still only have source, "users" and the two nodes for the above selection
-        assert_eq!(mig.graph().node_count(), 4);
+        assert_eq!(mig.graph().node_count(), 5);
     }
 
     #[test]
@@ -775,8 +775,8 @@ mod tests {
                           None,
                           &mut mig);
         assert!(res.is_ok());
-        // added the aggregation and the edge view
-        assert_eq!(mig.graph().node_count(), 4);
+        // added the aggregation and the edge view, and a reader
+        assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")]);
@@ -811,8 +811,8 @@ mod tests {
         // Try a simple COUNT function without a GROUP BY clause
         let res = inc.add_query("SELECT COUNT(*) AS count FROM votes;", None, &mut mig);
         assert!(res.is_ok());
-        // added the aggregation and the edge view
-        assert_eq!(mig.graph().node_count(), 4);
+        // added the aggregation and the edge view, and reader
+        assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"], &[]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
