@@ -539,6 +539,10 @@ impl SqlIncorporator {
                 ni = mig.add_ingredient(String::from(name),
                                         fields.as_slice(),
                                         Permute::new(*final_ni, projected_column_ids.as_slice()));
+                // We always materializes leaves of queries (at least currently)
+                // XXX(malte): this hard-codes the primary key to be the first column, since
+                // queries do not currently carry this information
+                mig.maintain(ni, 0);
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
             }
