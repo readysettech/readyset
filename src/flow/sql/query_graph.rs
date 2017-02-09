@@ -5,20 +5,20 @@ use std::collections::{HashMap, HashSet};
 use std::string::String;
 use std::vec::Vec;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionTree>,
     pub columns: Vec<Column>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum QueryGraphEdge {
     Join(Vec<ConditionTree>),
     GroupBy(Vec<Column>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraph {
     pub relations: HashMap<String, QueryGraphNode>,
     pub edges: HashMap<(String, String), QueryGraphEdge>,

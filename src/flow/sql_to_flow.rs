@@ -19,6 +19,7 @@ use std::vec::Vec;
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
+#[derive(Clone, Debug, PartialEq)]
 pub struct SqlIncorporator {
     write_schemas: HashMap<String, Vec<String>>,
     node_addresses: HashMap<String, NodeAddress>,
