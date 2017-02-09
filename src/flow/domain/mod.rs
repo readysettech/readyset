@@ -12,6 +12,8 @@ use flow::domain::single::NodeDescriptor;
 use ops;
 use checktable;
 
+const BATCH_SIZE: usize = 1000;
+
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
 
@@ -562,7 +564,7 @@ impl Domain {
                 // and then forward on tx (if there is one)
                 'chunks: for chunk in state.into_iter()
                     .flat_map(|(_, rs)| rs)
-                    .chunks(1000)
+                    .chunks(BATCH_SIZE)
                     .into_iter() {
                     use std::iter::FromIterator;
                     let chunk = Records::from_iter(chunk.into_iter());
@@ -768,10 +770,10 @@ impl Iterator for BatchedIterator {
         if let Some(ref mut state_iter) = self.state_iter {
             let from = self.from.unwrap();
             let to = self.to;
-            let mut rs = Vec::with_capacity(1000);
+            let mut rs = Vec::with_capacity(BATCH_SIZE);
             while let Some((_, next)) = state_iter.next() {
                 rs.extend(next);
-                if rs.len() >= 1000 {
+                if rs.len() >= BATCH_SIZE {
                     break;
                 }
             }
