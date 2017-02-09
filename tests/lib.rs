@@ -907,6 +907,72 @@ fn full_vote_migration() {
 }
 
 #[test]
+fn live_writes() {
+    use std::time::Duration;
+    use distributary::{Blender, Base, Aggregation, DataType};
+    let mut g = Blender::new();
+    let vc_state;
+    let vote;
+    let vc;
+    {
+        // migrate
+        let mut mig = g.start_migration();
+
+        // add vote base table
+        vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+
+        // add vote count
+        vc = mig.add_ingredient("votecount",
+                                &["id", "votes"],
+                                Aggregation::COUNT.over(vote, 0, &[1]));
+
+        vc_state = mig.maintain(vc, 0);
+
+        // start processing
+        mig.commit();
+    }
+    let add = g.get_mutator(vote);
+
+    let ids = 10000;
+    let votes = 7;
+
+    // continuously write to vote
+    let jh = thread::spawn(move || {
+        let user: DataType = 0.into();
+        for _ in 0..votes {
+            for i in 0..ids {
+                add.put(vec![user.clone(), i.into()]);
+            }
+        }
+    });
+
+    // let a few writes through to make migration take a while
+    thread::sleep(Duration::from_millis(10));
+
+    // now do a migration that's going to have to copy state
+    let mut mig = g.start_migration();
+    let vc2 = mig.add_ingredient("votecount2",
+                                 &["id", "votes"],
+                                 Aggregation::SUM.over(vc, 1, &[0]));
+    let vc2_state = mig.maintain(vc2, 0);
+    mig.commit();
+
+    // TODO: check that the writer did indeed complete writes during the migration
+
+    // wait for writer to finish
+    jh.join().unwrap();
+
+    // allow the system to catch up with the last writes
+    thread::sleep(Duration::from_millis(100));
+
+    // check that all writes happened the right number of times
+    for i in 0..ids {
+        assert_eq!(vc_state(&i.into()), Ok(vec![vec![i.into(), votes.into()]]));
+        assert_eq!(vc2_state(&i.into()), Ok(vec![vec![i.into(), votes.into()]]));
+    }
+}
+
+#[test]
 fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
