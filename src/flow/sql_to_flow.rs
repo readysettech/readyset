@@ -89,7 +89,7 @@ impl SqlIncorporator {
         }
     }
 
-    /// Incorporates a single query into the underlying `FlowGraph`. The `query` argument is a
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
     /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
     /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
     /// queries, and a deterministic, unique name is generated and returned otherwise.
@@ -102,6 +102,27 @@ impl SqlIncorporator {
                      mut mig: &mut Migration)
                      -> Result<(String, Vec<NodeAddress>), String> {
         query.to_flow_parts(self, name, &mut mig)
+    }
+
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
+    /// `SqlQuery` structure, and the `name` argument supplies an optional name for the query. If no
+    /// `name` is specified, the table name is used in the case of INSERT queries, and a deterministic,
+    /// unique name is generated and returned otherwise.
+    ///
+    /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
+    /// of `NodeAddress`es representing the nodes added to support the query.
+    pub fn add_parsed_query(&mut self,
+                            query: SqlQuery,
+                            name: Option<String>,
+                            mut mig: &mut Migration)
+                            -> Result<(String, Vec<NodeAddress>), String> {
+        let res = match name {
+            None => self.nodes_for_query(query, mig),
+            Some(n) => self.nodes_for_named_query(query, n, mig),
+        };
+        // TODO(malte): this currently always succeeds because `nodes_for_query` and
+        // `nodes_for_named_query` can't fail
+        Ok(res)
     }
 
     fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> (String, Vec<NodeAddress>) {
