@@ -374,6 +374,7 @@ pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::Filter;
 pub use query::DataType;
+pub use recipe::Recipe;
 
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.

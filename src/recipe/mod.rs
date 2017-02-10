@@ -8,6 +8,7 @@ use std::vec::Vec;
 
 type QueryID = u64;
 
+/// Represents a Soup recipe.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recipe {
     /// SQL queries represented in the recipe
@@ -32,6 +33,8 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 }
 
 impl Recipe {
+    /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
+    /// settings, and for temporary recipes.
     pub fn blank() -> Recipe {
         Recipe {
             expressions: HashMap::default(),
@@ -42,12 +45,18 @@ impl Recipe {
         }
     }
 
+    /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
+    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
+    /// it.
     pub fn from_str(recipe_text: &str) -> Result<Recipe, String> {
         // parse and compute differences to current recipe
         let parsed_queries = Recipe::parse(recipe_text)?;
         Ok(Recipe::from_queries(parsed_queries))
     }
 
+    /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
+    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
+    /// it.
     pub fn from_queries(qs: Vec<SqlQuery>) -> Recipe {
         let expressions = qs.iter()
             .map(|q| {
@@ -65,6 +74,9 @@ impl Recipe {
         }
     }
 
+    /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
+    /// This causes all necessary changes to said graph to be applied; however, it is the caller's
+    /// responsibility to call `mig.commit()` afterwards.
     pub fn activate(&mut self, mig: &mut Migration) -> Result<(), String> {
         let (added, _removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank()),
@@ -113,6 +125,10 @@ impl Recipe {
         (added_queries, removed_queries)
     }
 
+    /// Append the queries in the `additions` argument to this recipe. This will attempt to parse
+    /// `additions`, and if successful, will extend the recipe. No expressions are removed from the
+    /// recipe; use `replace` if removal of unused expressions is desired.
+    /// Consumes `self` and returns a replacement recipe.
     pub fn extend(mut self, additions: &str) -> Result<Recipe, String> {
         // parse and compute differences to current recipe
         let add_rp = Recipe::from_str(additions)?;
@@ -168,6 +184,10 @@ impl Recipe {
         Ok(parsed_queries.into_iter().map(|t| t.1.unwrap()).collect::<Vec<_>>())
     }
 
+    /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
+    /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
+    /// `new` will be removed.
+    /// Consumes `self` and returns a replacement recipe.
     pub fn replace(mut self, mut new: Recipe) -> Result<Recipe, String> {
         // generate replacement recipe with correct version and lineage
         new.version = self.version + 1;
