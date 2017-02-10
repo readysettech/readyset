@@ -19,7 +19,7 @@ pub enum SqlQuery {
 pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     // we process all queries in lowercase to avoid having to deal with capitalization in the
     // parser.
-    let q_bytes = String::from(input).into_bytes();
+    let q_bytes = String::from(input.trim()).into_bytes();
 
     // TODO(malte): appropriately pass through errors from nom
     match insertion(&q_bytes) {
@@ -50,5 +50,12 @@ mod tests {
         let mut h = DefaultHasher::new();
         res.unwrap().hash(&mut h);
         assert_eq!(format!("{:x}", h.finish()), "18c5663ec2a3a77b");
+    }
+
+    #[test]
+    fn trim_query() {
+        let qstring = "   INSERT INTO users VALUES (42, test);     ";
+        let res = parse_query(qstring);
+        assert!(res.is_ok());
     }
 }
