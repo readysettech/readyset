@@ -275,9 +275,6 @@ mod tests {
     #[test]
     fn it_activates_and_migrates() {
         use Blender;
-        use slog;
-        use slog_term;
-        use slog::DrainExt;
 
         let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
         let mut r = Recipe::from_str(r_txt).unwrap();
@@ -286,7 +283,6 @@ mod tests {
         assert_eq!(r.prior, None);
 
         let mut g = Blender::new();
-        g.log_with(slog::Logger::root(slog_term::streamer().full().build().fuse(), None));
         {
             let mut mig = g.start_migration();
             assert!(r.activate(&mut mig).is_ok());
