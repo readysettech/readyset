@@ -348,6 +348,10 @@ impl SqlIncorporator {
                 };
                 left_join_group[self.field_to_columnid(left_ni, &l_col.name).unwrap()] = i + 1;
                 right_join_group[self.field_to_columnid(right_ni, &r_col.name).unwrap()] = i + 1;
+                // we don't want to project both join columns, so drop the right-hand one
+                // (the reason not to project both is that (a) it's unnecessary, and (b) it
+                // confuses the index selection logic)
+                join_proj_config.remove(self.field_to_columnid(right_ni, &r_col.name).unwrap());
             }
             j = JoinBuilder::new(join_proj_config)
                 .from(left_ni, left_join_group)
