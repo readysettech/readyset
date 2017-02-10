@@ -700,15 +700,19 @@ impl Domain {
                                 break;
                             }
                             ReplayBatch::Partial(m) => {
-                                let state = self.state.get_mut(nodes[0].as_local()).unwrap();
-                                for r in m.data.into_iter() {
-                                    match r {
-                                        ops::Record::Positive(r) => state.insert(r),
-                                        ops::Record::Negative(ref r) => state.remove(r),
+                                {
+                                    let state = self.state.get_mut(nodes[0].as_local()).unwrap();
+                                    for r in m.data.into_iter() {
+                                        match r {
+                                            ops::Record::Positive(r) => state.insert(r),
+                                            ops::Record::Negative(ref r) => state.remove(r),
+                                        }
                                     }
+                                    debug!(self.log, "direct state absorption of batch"; "#" => i);
                                 }
-                                debug!(self.log, "direct state absorption of batch"; "#" => i);
-                                // TODO self.mid_replay_process(domain_rx);
+
+                                // don't hog the domain
+                                self.mid_replay_process(domain_rx);
                             }
                         }
                     }
