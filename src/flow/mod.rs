@@ -248,26 +248,32 @@ pub struct Mutator {
 impl Mutator {
     /// Perform a non-transactional write to the base node this Mutator was generated for.
     pub fn put(&self, u: Vec<query::DataType>) {
-            self.tx.send(Message {
-                    from: self.src,
-                    to: self.addr,
-                    data: vec![u].into(),
-                    ts: None,
-                    token: None,
-                }).unwrap()
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                data: vec![u].into(),
+                ts: None,
+                token: None,
+            })
+            .unwrap()
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put(&self, u: Vec<query::DataType>, t: checktable::Token)
+    pub fn transactional_put(&self,
+                             u: Vec<query::DataType>,
+                             t: checktable::Token)
                              -> checktable::TransactionResult {
         let (send, recv) = mpsc::channel();
-        self.tx.send(Message {
-            from: self.src,
-            to: self.addr,
-            data: vec![u].into(),
-            ts: None,
-            token: Some((t, send)),
-        }).unwrap();
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                data: vec![u].into(),
+                ts: None,
+                token: Some((t, send)),
+            })
+            .unwrap();
         recv.recv().unwrap()
     }
 }

@@ -119,9 +119,10 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
 
     let s = Server {
         put: ins.into_iter()
-            .map(|(ni, (nm, args, mutator))| (ni, (nm, args, Mutex::new(Box::new(move |v: Vec<DataType>|{
-                mutator.put(v)
-            }) as Box<_>))))
+            .map(|(ni, (nm, args, mutator))| {
+                (ni,
+                 (nm, args, Mutex::new(Box::new(move |v: Vec<DataType>| mutator.put(v)) as Box<_>)))
+            })
             .collect(),
         get: outs.into_iter()
             .map(|(ni, (nm, args, getter))| (ni, (nm, args, getter)))
