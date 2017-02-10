@@ -165,7 +165,7 @@ impl SqlIncorporator {
         let fields = Vec::from_iter(cols.iter().map(|c| c.name.clone()));
 
         // make the new base node and record its information
-        let na = mig.add_ingredient(st.table.name.clone(), fields.as_slice(), Base {});
+        let na = mig.add_ingredient(st.table.name.clone(), fields.as_slice(), Base::default());
         self.node_addresses.insert(name, na);
         self.node_fields.insert(na, fields);
         na

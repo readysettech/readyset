@@ -84,9 +84,9 @@ impl NodeDescriptor {
                 txs.retain(|tx| {
                     left -= 1;
                     if left == 0 {
-                            tx.send(data.take().unwrap())
+                            tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
                         } else {
-                            tx.send(data.clone().unwrap())
+                            tx.send(data.clone().unwrap().into_iter().map(|r| r.into()).collect())
                         }
                         .is_ok()
                 });
@@ -160,6 +160,7 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) {
         match *r {
             ops::Record::Positive(ref r) => state.insert(r.clone()),
             ops::Record::Negative(ref r) => state.remove(r),
+            ops::Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }

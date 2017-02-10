@@ -11,15 +11,40 @@ use std::ops::{Deref, DerefMut};
 use checktable;
 
 use query::DataType;
-use ops::{Records, Datas};
+use ops::{Record, Datas};
 use flow::domain;
 use flow::{Message, Ingredient, NodeAddress, Edge};
 
 use backlog;
 
+/// A StreamUpdate reflects the addition or deletion of a row from a reader node.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StreamUpdate {
+    /// Indicates the addition of a new row
+    AddRow(sync::Arc<Vec<DataType>>),
+    /// Indicates the removal of an existing row
+    DeleteRow(sync::Arc<Vec<DataType>>),
+}
+
+impl From<Record> for StreamUpdate {
+    fn from(other: Record) -> Self {
+        match other {
+            Record::Positive(u) => StreamUpdate::AddRow(u),
+            Record::Negative(u) => StreamUpdate::DeleteRow(u),
+            Record::DeleteRequest(..) => unreachable!(),
+        }
+    }
+}
+
+impl From<Vec<DataType>> for StreamUpdate {
+    fn from(other: Vec<DataType>) -> Self {
+        StreamUpdate::AddRow(sync::Arc::new(other))
+    }
+}
+
 #[derive(Clone)]
 pub struct Reader {
-    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Records>>>>,
+    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Vec<StreamUpdate>>>>>,
     pub state: Option<backlog::ReadHandle>,
     pub token_generator: Option<checktable::TokenGenerator>,
 }
