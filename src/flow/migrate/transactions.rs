@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
+use slog::Logger;
+
 fn add_time_egress(nodes: &mut Vec<(NodeIndex, bool)>, graph: &mut Graph) -> Vec<NodeIndex> {
     let new_base_nodes: Vec<_> = nodes.iter()
         .filter_map(|&(ni, new)| {
@@ -184,12 +186,14 @@ fn count_base_ingress(graph: &Graph,
         .collect()
 }
 
-pub fn finalize(graph: &Graph,
+pub fn finalize(log: &Logger,
+                graph: &Graph,
                 source: NodeIndex,
                 domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
                 control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
                 ts: i64) {
     for (domain, nodes) in domain_nodes {
+        trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ingress_from_base = count_base_ingress(graph, source, &nodes[..]);
         let ctx = control_txs.get_mut(&domain).unwrap();
         let _ = ctx.send(domain::Control::CompleteMigration(ts, ingress_from_base));

@@ -13,11 +13,22 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::time;
+
+use slog;
 
 pub mod domain;
 pub mod prelude;
 pub mod node;
 mod migrate;
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+macro_rules! dur_to_ns {
+    ($d:expr) => {{
+        let d = $d;
+        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
+    }}
+}
 
 pub type Edge = bool; // should the edge be materialized?
 
@@ -293,6 +304,8 @@ pub struct Blender {
     control_txs: HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
     data_txs: HashMap<domain::Index, mpsc::SyncSender<Message>>,
     time_txs: HashMap<domain::Index, mpsc::SyncSender<i64>>,
+
+    log: slog::Logger,
 }
 
 impl Default for Blender {
@@ -309,6 +322,8 @@ impl Default for Blender {
             control_txs: HashMap::default(),
             data_txs: HashMap::default(),
             time_txs: HashMap::default(),
+
+            log: slog::Logger::root(slog::Discard, None),
         }
     }
 }
@@ -319,13 +334,25 @@ impl Blender {
         Blender::default()
     }
 
+    /// Set the `Logger` to use for internal log messages.
+    ///
+    /// By default, all log messages are discarded.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
+    }
+
     /// Start setting up a new `Migration`.
     pub fn start_migration(&mut self) -> Migration {
+        info!(self.log, "starting migration");
+        let miglog = self.log.new(None);
         Migration {
             mainline: self,
             added: Default::default(),
             materialize: Default::default(),
             readers: Default::default(),
+
+            start: time::Instant::now(),
+            log: miglog,
         }
     }
 
@@ -393,6 +420,7 @@ impl Blender {
          -> Option<Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync>> {
 
         // reader should be a child of the given node
+        trace!(self.log, "creating reader"; "for" => node.as_global().index());
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
             .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
@@ -414,6 +442,7 @@ impl Blender {
         let node = &self.ingredients[n];
         let tx = self.data_txs[&node.domain()].clone();
 
+        trace!(self.log, "creating mutator"; "for" => n.index());
         Mutator {
             src: NodeAddress::make_global(self.source),
             tx: tx,
@@ -468,11 +497,15 @@ pub struct Migration<'a> {
     added: HashMap<NodeIndex, Option<domain::Index>>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
+
+    start: time::Instant,
+    log: slog::Logger,
 }
 
 impl<'a> Migration<'a> {
     /// Add a new (empty) domain to the graph
     pub fn add_domain(&mut self) -> domain::Index {
+        trace!(self.log, "creating new domain"; "domain" => self.mainline.ndomains);
         self.mainline.ndomains += 1;
         (self.mainline.ndomains - 1).into()
     }
@@ -495,6 +528,7 @@ impl<'a> Migration<'a> {
 
         // add to the graph
         let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i));
+        info!(self.log, "adding new node"; "node" => ni.index(), "type" => format!("{:?}", *self.mainline.ingredients[ni]));
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
@@ -532,6 +566,8 @@ impl<'a> Migration<'a> {
             .find_edge(*src.as_global(), *dst.as_global())
             .expect("asked to materialize non-existing edge");
 
+        debug!(self.log, "told to materialize"; "node" => src.as_global().index());
+
         let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
         if !*e {
             *e = true;
@@ -547,6 +583,7 @@ impl<'a> Migration<'a> {
     /// `n` must be have been added in this migration.
     pub fn assign_domain(&mut self, n: NodeAddress, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
+        debug!(self.log, "node manually assigned to domain"; "node" => n.as_global().index(), "domain" => d.index());
         assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
@@ -691,8 +728,11 @@ impl<'a> Migration<'a> {
     /// domains into the larger Soup graph. The returned map contains entry points through which
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(self) {
+        info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
         let mut new = HashSet::new();
 
+        let log = self.log;
+        let start = self.start;
         let mainline = self.mainline;
 
         // Make sure all new nodes are assigned to a domain
@@ -701,6 +741,7 @@ impl<'a> Migration<'a> {
                 // new node that doesn't belong to a domain
                 // create a new domain just for that node
                 // NOTE: this is the same code as in add_domain(), but we can't use self here
+                trace!(log, "node automatically added to domain"; "node" => node.index(), "domain" => mainline.ndomains);
                 mainline.ndomains += 1;
                 (mainline.ndomains - 1).into()
 
@@ -719,7 +760,7 @@ impl<'a> Migration<'a> {
 
         // Set up ingress and egress nodes
         let mut swapped =
-            migrate::routing::add(&mut mainline.ingredients, mainline.source, &mut new);
+            migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<_> =
@@ -769,9 +810,12 @@ impl<'a> Migration<'a> {
                 continue;
             }
 
+            let log = log.new(o!("domain" => domain.index()));
+
             // Give local addresses to every (new) node
             for &(ni, new) in nodes.iter() {
                 if new {
+                    debug!(log, "assigning local index"; "node" => ni.index(), "local" => nnodes);
                     mainline.ingredients[ni].set_addr(NodeAddress::make_local(nnodes));
                     nnodes += 1;
                 }
@@ -794,6 +838,7 @@ impl<'a> Migration<'a> {
             // Initialize each new node
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
+                    trace!(log, "initializing new node"; "node" => ni.index());
                     mainline.ingredients.node_weight_mut(ni).unwrap().on_commit(&remap);
                 }
             }
@@ -821,10 +866,12 @@ impl<'a> Migration<'a> {
 
         // Determine what nodes to materialize
         // NOTE: index will also contain the materialization information for *existing* domains
+        debug!(log, "calculating materializations");
         let index = domain_nodes.iter()
             .map(|(domain, nodes)| {
-                let mat = migrate::materialization::pick(&mainline.ingredients, &nodes[..]);
-                let idx = migrate::materialization::index(&mainline.ingredients, &nodes[..], mat);
+                use self::migrate::materialization::{pick, index};
+                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
+                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
                 (*domain, idx)
             })
             .collect();
@@ -832,7 +879,10 @@ impl<'a> Migration<'a> {
         let mut uninformed_domain_nodes = domain_nodes.clone();
         let (start_ts, end_ts) = mainline.checktable.lock().unwrap().claim_timestamp_pair();
 
+        info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
+
         // Boot up new domains (they'll ignore all updates for now)
+        debug!(log, "booting new domains");
         for domain in changed_domains {
             if mainline.control_txs.contains_key(&domain) {
                 // this is not a new domain
@@ -840,7 +890,8 @@ impl<'a> Migration<'a> {
             }
 
             // Start up new domain
-            let ctx = migrate::booting::boot_new(&mut mainline.ingredients,
+            let ctx = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                                 &mut mainline.ingredients,
                                                  uninformed_domain_nodes.remove(&domain).unwrap(),
                                                  mainline.checktable.clone(),
                                                  rxs.remove(&domain).unwrap(),
@@ -851,7 +902,9 @@ impl<'a> Migration<'a> {
         drop(rxs);
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
-        migrate::augmentation::inform(&mut mainline.ingredients,
+        debug!(log, "mutating existing domains");
+        migrate::augmentation::inform(&log,
+                                      &mut mainline.ingredients,
                                       mainline.source,
                                       &mut mainline.control_txs,
                                       uninformed_domain_nodes,
@@ -862,19 +915,26 @@ impl<'a> Migration<'a> {
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
-        migrate::routing::connect(&mut mainline.ingredients, &mainline.data_txs, &new);
+        info!(log, "bringing up inter-domain connections");
+        migrate::routing::connect(&log, &mut mainline.ingredients, &mainline.data_txs, &new);
 
         // And now, the last piece of the puzzle -- set up materializations
-        migrate::materialization::initialize(&mainline.ingredients,
+        info!(log, "initializing new materializations");
+        migrate::materialization::initialize(&log,
+                                             &mainline.ingredients,
                                              mainline.source,
                                              &new,
                                              index,
                                              &mut mainline.control_txs);
 
-        migrate::transactions::finalize(&mainline.ingredients,
+        info!(log, "finalizing migration");
+        migrate::transactions::finalize(&log,
+                                        &mainline.ingredients,
                                         mainline.source,
                                         domain_nodes,
                                         &mut mainline.control_txs,
                                         end_ts);
+
+        warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }
 }

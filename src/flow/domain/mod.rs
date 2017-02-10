@@ -3,17 +3,28 @@ use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
+use std::time;
 
 use std::collections::hash_map::Entry;
 
 use flow::prelude::*;
 use flow::domain::single::NodeDescriptor;
 
+use slog::Logger;
+
 use ops;
 use checktable;
 
 const BATCH_SIZE: usize = 128;
 const INTERBATCH_LIMIT: usize = 16;
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+macro_rules! dur_to_ns {
+    ($d:expr) => {{
+        let d = $d;
+        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
+    }}
+}
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -26,6 +37,12 @@ impl From<usize> for Index {
 
 impl Into<usize> for Index {
     fn into(self) -> usize {
+        self.0
+    }
+}
+
+impl Index {
+    pub fn index(&self) -> usize {
         self.0
     }
 }
@@ -65,6 +82,8 @@ pub struct Domain {
     nodes: DomainNodes,
     state: StateMap,
 
+    log: Logger,
+
     /// Map from timestamp to data buffered for that timestamp.
     buffered_transactions: HashMap<i64, BufferedTransaction>,
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
@@ -81,7 +100,8 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn new(nodes: DomainNodes,
+    pub fn new(log: Logger,
+               nodes: DomainNodes,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
@@ -100,6 +120,7 @@ impl Domain {
         Domain {
             nodes: nodes,
             state: StateMap::default(),
+            log: log,
             buffered_transactions: HashMap::new(),
             ingress_from_base: HashMap::new(),
             not_ready: not_ready,
@@ -297,6 +318,7 @@ impl Domain {
 
         let (ctx, crx) = mpsc::sync_channel(16);
 
+        info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
         thread::Builder::new()
             .name(format!("domain{}", name))
@@ -385,13 +407,19 @@ impl Domain {
     }
 
     fn replay_done(&mut self, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Message>) {
+        use std::time;
+
         self.not_ready.remove(&node);
-        let needed_draining = self.replaying_to.is_some() &&
-                              !self.replaying_to.as_ref().unwrap().1.is_empty();
+
+        let start = time::Instant::now();
+        let mut iterations = 0;
         while let Some((target, buffered)) = self.replaying_to.take() {
             assert_eq!(target, node);
             if buffered.is_empty() {
                 break;
+            }
+            if iterations == 0 {
+                info!(self.log, "starting backlog drain");
             }
 
             // some updates were propagated to this node during the migration. we need to replay
@@ -406,7 +434,7 @@ impl Domain {
             let switching = buffered.len() > 10;
             let mut even = true;
 
-            println!("draining {}", buffered.len());
+            debug!(self.log, "draining backlog"; "length" => buffered.len());
 
             // make sure any updates from rx that we handle, and that hit this node, are buffered
             // so we can get back to them later.
@@ -440,10 +468,12 @@ impl Domain {
                                &self.nodes,
                                true);
             }
+
+            iterations += 1;
         }
 
-        if needed_draining {
-            println!("done draining");
+        if iterations != 0 {
+            info!(self.log, "backlog drained"; "iterations" => iterations, "μs" => dur_to_ns!(start.elapsed()) / 1000);
         }
     }
 
@@ -476,6 +506,7 @@ impl Domain {
                     self.nodes.get_mut(&p).unwrap().borrow_mut().children.push(n.addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(n));
+                trace!(self.log, "new node incorporated"; "local" => addr.id());
             }
             Control::Ready(ni, index_on, ack) => {
                 if let Some(index_on) = index_on {
@@ -493,7 +524,9 @@ impl Domain {
                     // NOTE: just because index_on is None does *not* mean we're not materialized
                 }
 
+                trace!(self.log, "readying node"; "local" => ni.id());
                 self.replay_done(ni, domain_rx);
+                trace!(self.log, "replay finished"; "local" => ni.id());
 
                 // swap replayed reader nodes to expose new state
                 {
@@ -501,10 +534,13 @@ impl Domain {
                     let mut n = self.nodes[&ni].borrow_mut();
                     if let Type::Reader(ref mut w, _) = *n.inner {
                         if let Some(ref mut state) = *w {
+                            trace!(self.log, "swapping state"; "local" => ni.id());
                             state.swap();
+                            trace!(self.log, "state swapped"; "local" => ni.id());
                         }
                     }
                 }
+
 
                 drop(ack);
             }
@@ -520,6 +556,9 @@ impl Domain {
                 // check for stupidity
                 assert!(!nodes.is_empty());
 
+                let start = time::Instant::now();
+                info!(self.log, "starting replay");
+
                 // we know that nodes[0] is materialized, as the migration coordinator picks path
                 // that originate with materialized nodes. if this weren't the case, we wouldn't be
                 // able to do the replay, and the entire migration would fail.
@@ -532,18 +571,22 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .clone();
 
+                debug!(self.log, "current state cloned for replay"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
+
                 if nodes.len() == 1 {
                     // now, we can just send our entire state in one go, rather than chunk it. this
                     // will be much faster than iterating over the map one-by-one and cloning each
                     // record. furthermore, it allows the receiver to simply replace their current
                     // empty state with this state if it is not passing thorugh other nodes.
                     if let Some(tx) = tx {
+                        trace!(self.log, "sending full state");
                         tx.send(ReplayBatch::Full(nodes[0], state)).unwrap();
                     } else {
                         // replaying a single node has no purpose if there isn't someone we're
                         // sending to.
                         unreachable!()
                     }
+                    info!(self.log, "replay done using shortcut"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
                     return;
                 }
 
@@ -557,16 +600,18 @@ impl Domain {
                     // the sink node is in this domain. make sure we buffer any updates that get
                     // propagated to it during the migration (as they logically follow the state
                     // snapshot that is being replayed to it).
+                    trace!(self.log, "domain is also replay target");
                     self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
                                               Vec::new()));
                 }
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
-                'chunks: for chunk in state.into_iter()
+                'chunks: for (i, chunk) in state.into_iter()
                     .flat_map(|(_, rs)| rs)
                     .chunks(BATCH_SIZE)
-                    .into_iter() {
+                    .into_iter()
+                    .enumerate() {
                     use std::iter::FromIterator;
                     let chunk = Records::from_iter(chunk.into_iter());
                     let mut m = Message {
@@ -607,6 +652,7 @@ impl Domain {
                     }
 
                     if let Some(tx) = tx.as_mut() {
+                        trace!(self.log, "sending batch"; "#" => i, "[]" => m.data.len());
                         tx.send(ReplayBatch::Partial(m)).unwrap();
                     }
 
@@ -622,10 +668,15 @@ impl Domain {
                     // that follow the replay, but precede the ready.
                     self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
                 }
+
+                info!(self.log, "replay done"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
             }
             Control::ReplayThrough(nodes, rx, mut tx, ack) => {
                 // let coordinator know that we've entered replay loop
                 ack.send(()).unwrap();
+
+                let start = time::Instant::now();
+                info!(self.log, "ready for replay");
 
                 // a couple of shortcuts first...
                 // if nodes.len() == 1, we know we're an ingress node, and we can just stuff the
@@ -634,7 +685,7 @@ impl Domain {
                 if nodes.len() == 1 {
                     assert!(self.nodes[nodes[0].as_local()].borrow().is_ingress());
                     assert!(tx.is_none());
-                    for batch in rx {
+                    for (i, batch) in rx.into_iter().enumerate() {
                         match batch {
                             ReplayBatch::Full(_, state) => {
                                 // oh boy, we're in luck! we just sent the full state we need for
@@ -644,6 +695,7 @@ impl Domain {
                                 assert_eq!(self.state[nodes[0].as_local()].get_pkey(),
                                            state.get_pkey());
                                 self.state.insert(*nodes[0].as_local(), state);
+                                debug!(self.log, "direct state clone absorbed");
                                 break;
                             }
                             ReplayBatch::Partial(m) => {
@@ -654,10 +706,13 @@ impl Domain {
                                         ops::Record::Negative(ref r) => state.remove(r),
                                     }
                                 }
+                                debug!(self.log, "direct state absorption of batch"; "#" => i);
+                                // TODO self.mid_replay_process(domain_rx);
                             }
                         }
                     }
                     self.replay_done(*nodes[0].as_local(), domain_rx);
+                    info!(self.log, "replay completed using shortcut"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
                     return;
                 }
 
@@ -667,14 +722,18 @@ impl Domain {
                     // the sink node is in this domain. make sure we buffer any updates that get
                     // propagated to it during the migration (as they logically follow the state
                     // snapshot that is being replayed to it).
+                    trace!(self.log, "domain is replay target");
                     self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
                                               Vec::new()));
                 }
 
                 // process all records in state to completion within domain
                 // and then forward on tx (if there is one)
+                let mut i = 0;
                 'replay: for m in rx {
                     if let ReplayMessage::Batch(mut m) = m {
+                        debug!(self.log, "forwarding batch"; "#" => i);
+
                         // forward the current message through all local nodes
                         for (i, ni) in nodes.iter().enumerate() {
                             // process the current message in this node
@@ -704,8 +763,10 @@ impl Domain {
                         }
 
                         if let Some(tx) = tx.as_mut() {
+                            trace!(self.log, "sending batch"; "#" => m.data.len());
                             tx.send(ReplayBatch::Partial(m)).unwrap();
                         }
+                        i += 1;
                     }
 
                     // NOTE: at this point, the downstream domain is probably busy handling our
@@ -720,6 +781,8 @@ impl Domain {
                     // that follow the replay, but precede the ready.
                     self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
                 }
+
+                info!(self.log, "replay completed"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
             }
             Control::StartMigration(ts, channel) => {
                 let o = self.buffered_transactions

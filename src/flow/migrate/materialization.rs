@@ -15,6 +15,8 @@ use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use std::sync::mpsc;
 
+use slog::Logger;
+
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
     ($d:expr) => {{
@@ -23,7 +25,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
-pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
+pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
     let nodes: Vec<_> = nodes.iter()
         .map(|&(ni, new)| (ni, &graph[ni], new))
         .collect();
@@ -96,7 +98,7 @@ pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeInde
                 .any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
                 materialize.remove(n.addr().as_local());
-                println!("hoisting materialization past {}", n.addr());
+                trace!(log, "hoisting materialization"; "past" => ni.index());
 
                 // TODO: unclear if we need *all* our parents to be materialized. it's
                 // certainly the case for filter, which is our only use-case for now...
@@ -110,7 +112,8 @@ pub fn pick(graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeInde
     materialize
 }
 
-pub fn index(graph: &Graph,
+pub fn index(log: &Logger,
+             graph: &Graph,
              nodes: &[(NodeIndex, bool)],
              materialize: HashSet<LocalNodeIndex>)
              -> HashMap<LocalNodeIndex, usize> {
@@ -164,7 +167,7 @@ pub fn index(graph: &Graph,
                     // we *currently* only support keeping one materialization per node
                     assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
                     let col = cols.into_iter().next().unwrap();
-                    println!("adding index on column {:?} of view {:?}", col, v);
+                    info!(log, "adding index"; "node" => map[v.as_local()].index(), "col" => col);
                     *state = Some(col);
                 } else if let Some(node) = nodes.get(&v) {
                     // this node is not materialized
@@ -212,14 +215,15 @@ pub fn index(graph: &Graph,
                     return Some((n, 0));
                 }
 
-                println!("removing unnecessary materialization on {:?}", map[&n]);
+                info!(log, "removing unnecessary materialization"; "node" => map[&n].index());
                 None
             }
         })
         .collect()
 }
 
-pub fn initialize(graph: &Graph,
+pub fn initialize(log: &Logger,
+                  graph: &Graph,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
                   mut materialize: HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
@@ -261,6 +265,7 @@ pub fn initialize(graph: &Graph,
         // graph is actually fully operational.
         let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Option<usize>| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+            trace!(log, "readying node"; "node" => node.index());
             control_txs[&d]
                 .send(domain::Control::Ready(*n.addr().as_local(), index_on, ack_tx))
                 .unwrap();
@@ -268,12 +273,14 @@ pub fn initialize(graph: &Graph,
                 Err(mpsc::RecvError) => (),
                 _ => unreachable!(),
             }
+            trace!(log, "node ready"; "node" => node.index());
         };
 
         if graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .filter(|&ni| ni != source)
             .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
+            trace!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
             ready(control_txs, index_on);
         } else {
@@ -281,25 +288,33 @@ pub fn initialize(graph: &Graph,
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
+                trace!(log, "no need to replay non-materialized view"; "node" => node.index());
                 ready(control_txs, index_on);
                 continue;
             }
 
             // we have a parent that has data, so we need to replay and reconstruct
             let start = ::std::time::Instant::now();
-            reconstruct(graph, source, &materialize, control_txs, node, index_on);
+            let log = log.new(o!("node" => node.index()));
+            info!(log, "beginning reconstruction of {:?}", *graph[node]);
+            reconstruct(&log,
+                        graph,
+                        source,
+                        &materialize,
+                        control_txs,
+                        node,
+                        index_on);
+            debug!(log, "reconstruction started");
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
             ready(control_txs, None);
-            println!("reconstruction of {:?} {:?} took {}us",
-                     *graph[node],
-                     node,
-                     dur_to_ns!(start.elapsed()) / 1000);
+            info!(log, "reconstruction completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
         }
     }
 }
 
-pub fn reconstruct(graph: &Graph,
+pub fn reconstruct(log: &Logger,
+                   graph: &Graph,
                    source: NodeIndex,
                    materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
@@ -348,6 +363,9 @@ pub fn reconstruct(graph: &Graph,
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
+        // XXX XXX XXX: don't replay along paths with empty nodes
+        trace!(log, "replaying along path {:?}", path);
+
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
         let mut last_domain = None;
@@ -364,6 +382,8 @@ pub fn reconstruct(graph: &Graph,
                 segments.last_mut().unwrap().1.push(node);
             }
         }
+
+        debug!(log, "domain replay path is {:?}", segments);
 
         // next, daisy chain channels between them
         // this includes the final domain, which will automatically populate `node` during replay
@@ -386,6 +406,7 @@ pub fn reconstruct(graph: &Graph,
         let (wait_tx, wait_rx) = mpsc::sync_channel(0);
 
         // first, tell the root domain to start replaying
+        trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
         control_txs[&segments[0].0]
             .send(domain::Control::Replay(locals(0), root_tx, wait_tx.clone()))
             .unwrap();
@@ -408,6 +429,7 @@ pub fn reconstruct(graph: &Graph,
         //
         // by having [n] wait for [0..n-1], we know that this won't happen.
         wait_rx.recv().unwrap();
+        trace!(log, "root domain ready to replay");
 
         // next, replay through the later domains one by one, linking up the daisy-chain
         let mut seen = HashSet::new();
@@ -427,6 +449,7 @@ pub fn reconstruct(graph: &Graph,
                 Some(tx)
             };
 
+            trace!(log, "telling next domain about replay"; "domain" => domain.index());
             control_txs[domain]
                 .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx, wait_tx.clone()))
                 .unwrap();
@@ -434,6 +457,7 @@ pub fn reconstruct(graph: &Graph,
 
             // wait for this domain too -- see explanation above
             wait_rx.recv().unwrap();
+            trace!(log, "domain ready for replay");
         }
     }
 }
