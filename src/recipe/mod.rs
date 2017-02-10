@@ -271,4 +271,43 @@ mod tests {
         assert_eq!(g.graph().node_count(), 5);
         println!("{}", g);
     }
+
+    #[test]
+    fn it_activates_and_migrates() {
+        use Blender;
+        use slog;
+        use slog_term;
+        use slog::DrainExt;
+
+        let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
+        let mut r = Recipe::from_str(r_txt).unwrap();
+        assert_eq!(r.version, 0);
+        assert_eq!(r.expressions.len(), 1);
+        assert_eq!(r.prior, None);
+
+        let mut g = Blender::new();
+        g.log_with(slog::Logger::root(slog_term::streamer().full().build().fuse(), None));
+        {
+            let mut mig = g.start_migration();
+            assert!(r.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+        println!("{}", g);
+
+        let mut r_copy = r.clone();
+        // the incorporator is moved to the new recipe
+        r_copy.inc = None;
+
+        let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE a = 42;";
+        let mut r1 = r.extend(r1_txt).unwrap();
+        assert_eq!(r1.version, 1);
+        assert_eq!(r1.expressions.len(), 3);
+        assert_eq!(r1.prior, Some(Box::new(r_copy)));
+        {
+            let mut mig = g.start_migration();
+            assert!(r1.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+        println!("{}", g);
+    }
 }
