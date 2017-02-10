@@ -14,6 +14,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::cell;
 
+use slog::Logger;
+
 fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
     nodes.into_iter()
         .map(|(ni, _)| single::NodeDescriptor::new(graph, ni))
@@ -21,7 +23,8 @@ fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> Domain
         .collect()
 }
 
-pub fn boot_new(graph: &mut Graph,
+pub fn boot_new(log: Logger,
+                graph: &mut Graph,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 rx: mpsc::Receiver<Message>,
@@ -31,6 +34,6 @@ pub fn boot_new(graph: &mut Graph,
 
     let nodes = build_descriptors(graph, nodes);
 
-    let domain = domain::Domain::new(nodes, checktable, ts);
+    let domain = domain::Domain::new(log, nodes, checktable, ts);
     domain.boot(rx, timestamp_rx)
 }

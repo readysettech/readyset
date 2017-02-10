@@ -9,11 +9,21 @@ use std::collections::hash_map::Entry;
 use flow::prelude::*;
 use flow::domain::single::NodeDescriptor;
 
+use slog::Logger;
+
 use ops;
 use checktable;
 
 const BATCH_SIZE: usize = 128;
 const INTERBATCH_LIMIT: usize = 16;
+
+const NANOS_PER_SEC: u64 = 1_000_000_000;
+macro_rules! dur_to_ns {
+    ($d:expr) => {{
+        let d = $d;
+        d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
+    }}
+}
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
@@ -26,6 +36,12 @@ impl From<usize> for Index {
 
 impl Into<usize> for Index {
     fn into(self) -> usize {
+        self.0
+    }
+}
+
+impl Index {
+    pub fn index(&self) -> usize {
         self.0
     }
 }
@@ -65,6 +81,8 @@ pub struct Domain {
     nodes: DomainNodes,
     state: StateMap,
 
+    log: Logger,
+
     /// Map from timestamp to data buffered for that timestamp.
     buffered_transactions: HashMap<i64, BufferedTransaction>,
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
@@ -81,7 +99,8 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn new(nodes: DomainNodes,
+    pub fn new(log: Logger,
+               nodes: DomainNodes,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
@@ -100,6 +119,7 @@ impl Domain {
         Domain {
             nodes: nodes,
             state: StateMap::default(),
+            log: log,
             buffered_transactions: HashMap::new(),
             ingress_from_base: HashMap::new(),
             not_ready: not_ready,
@@ -297,6 +317,7 @@ impl Domain {
 
         let (ctx, crx) = mpsc::sync_channel(16);
 
+        info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
         thread::Builder::new()
             .name(format!("domain{}", name))
@@ -385,9 +406,12 @@ impl Domain {
     }
 
     fn replay_done(&mut self, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Message>) {
+        use std::time;
+
         self.not_ready.remove(&node);
-        let needed_draining = self.replaying_to.is_some() &&
-                              !self.replaying_to.as_ref().unwrap().1.is_empty();
+
+        let start = time::Instant::now();
+        let mut iterations = 0;
         while let Some((target, buffered)) = self.replaying_to.take() {
             assert_eq!(target, node);
             if buffered.is_empty() {
@@ -406,7 +430,7 @@ impl Domain {
             let switching = buffered.len() > 10;
             let mut even = true;
 
-            println!("draining {}", buffered.len());
+            debug!(self.log, "draining backlog"; "length" => buffered.len());
 
             // make sure any updates from rx that we handle, and that hit this node, are buffered
             // so we can get back to them later.
@@ -440,10 +464,12 @@ impl Domain {
                                &self.nodes,
                                true);
             }
+
+            iterations += 1;
         }
 
-        if needed_draining {
-            println!("done draining");
+        if iterations != 0 {
+            debug!(self.log, "backlog drained"; "iterations" => iterations, "μs" => dur_to_ns!(start.elapsed()) / 1000);
         }
     }
 

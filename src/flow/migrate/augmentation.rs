@@ -15,18 +15,25 @@ use std::sync::mpsc;
 use petgraph;
 use petgraph::graph::NodeIndex;
 
-pub fn inform(graph: &mut Graph,
+use slog::Logger;
+
+pub fn inform(log: &Logger,
+              graph: &mut Graph,
               source: NodeIndex,
               control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
               ts: i64) {
 
     for (domain, nodes) in nodes {
+        let log = log.new(o!("domain" => domain.index()));
         let ctx = control_txs.get_mut(&domain).unwrap();
 
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+
+        trace!(log, "informing domain of migration start");
         let _ = ctx.send(domain::Control::StartMigration(ts, ready_tx));
         let _ = ready_rx.recv();
+        trace!(log, "domain ready for migration");
 
         let old_nodes: HashSet<_> =
             nodes.iter().filter(|&&(_, new)| !new).map(|&(ni, _)| ni).collect();
@@ -51,6 +58,7 @@ pub fn inform(graph: &mut Graph,
                 .map(|n| *n.addr().as_local())
                 .collect();
 
+            trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(domain::Control::AddNode(node, old_parents)).unwrap();
         }
     }

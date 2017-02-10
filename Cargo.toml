@@ -16,6 +16,9 @@ itertools = "0.5"
 petgraph = "0.4"
 regex = "0.1"
 fnv = "1.0"
+slog = "1.5.2"
+#slog = { version = "1.5.2", features = ["max_level_trace", "release_max_level_warn"] }
+slog-term = "1.5.0"
 
 evmap = "0.1.1"
 
