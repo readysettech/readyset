@@ -294,7 +294,8 @@ mod tests {
         // the incorporator is moved to the new recipe
         r_copy.inc = None;
 
-        let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE a = 42;";
+        let r1_txt = "SELECT a FROM b;\n
+                      SELECT a, c FROM b WHERE a = 42;";
         let mut r1 = r.extend(r1_txt).unwrap();
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 3);
@@ -341,5 +342,4 @@ mod tests {
         }
         println!("{}", g);
     }
-
 }
