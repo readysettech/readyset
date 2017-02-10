@@ -492,6 +492,7 @@ impl Domain {
                 break;
             }
         }
+        trace!(self.log, "processed updates during replay"; "[]" => INTERBATCH_LIMIT - left);
     }
 
     fn handle_control(&mut self, c: Control, domain_rx: &mut mpsc::Receiver<Message>) {
