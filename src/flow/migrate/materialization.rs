@@ -145,7 +145,7 @@ pub fn index(log: &Logger,
                     //  - if it queries its ancestors when it is *not* materialized (implying that
                     //    it queries into its own output)
                     //
-                    //  unless we come up with a weird operators that *doesn't* need indices when
+                    //  unless we come up with a weird operator that *doesn't* need indices when
                     //  it is *not* materialized, but *does* when is, we can therefore just use
                     //  will_query(false) as an indicator of whether indices are necessary.
                     node.will_query(false)
