@@ -58,9 +58,10 @@ impl Ingredient for Base {
             Record::Positive(u) => Record::Positive(u),
             Record::Negative(u) => Record::Negative(u),
             Record::DeleteRequest(key) => {
+                let col = self.key_column.expect("base must have a key column to support deletions");
                 let db = state.get(self.us.as_ref().unwrap().as_local())
                     .expect("base must have its own state materialized to support deletions");
-                let rows = db.lookup(self.key_column.unwrap(), &key);
+                let rows = db.lookup(col, &key);
                 assert_eq!(rows.len(), 1);
 
                 Record::Negative(rows[0].clone())
