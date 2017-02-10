@@ -306,4 +306,40 @@ mod tests {
         }
         println!("{}", g);
     }
+
+    #[test]
+    fn it_activates_and_migrates_with_join() {
+        use Blender;
+
+        let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
+                     INSERT INTO b (r, s) VALUES (?, ?);\n";
+        let mut r = Recipe::from_str(r_txt).unwrap();
+        assert_eq!(r.version, 0);
+        assert_eq!(r.expressions.len(), 2);
+        assert_eq!(r.prior, None);
+
+        let mut g = Blender::new();
+        {
+            let mut mig = g.start_migration();
+            assert!(r.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+
+        let mut r_copy = r.clone();
+        // the incorporator is moved to the new recipe
+        r_copy.inc = None;
+
+        let r1_txt = "SELECT y, s FROM a, b WHERE a.x = b.r;";
+        let mut r1 = r.extend(r1_txt).unwrap();
+        assert_eq!(r1.version, 1);
+        assert_eq!(r1.expressions.len(), 3);
+        assert_eq!(r1.prior, Some(Box::new(r_copy)));
+        {
+            let mut mig = g.start_migration();
+            assert!(r1.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+        println!("{}", g);
+    }
+
 }
