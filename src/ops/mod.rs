@@ -18,7 +18,7 @@ use std::sync;
 pub enum Record {
     Positive(sync::Arc<Vec<query::DataType>>),
     Negative(sync::Arc<Vec<query::DataType>>),
-    DeleteRequest(usize, query::DataType),
+    DeleteRequest(query::DataType),
 }
 
 impl Record {

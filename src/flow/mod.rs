@@ -289,24 +289,24 @@ impl Mutator {
     }
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
-    pub fn delete(&self, col: usize, key: query::DataType) {
+    pub fn delete(&self, key: query::DataType) {
         self.tx.send(Message {
             from: self.src,
             to: self.addr,
-            data: vec![prelude::Record::DeleteRequest(col, key)].into(),
+            data: vec![prelude::Record::DeleteRequest(key)].into(),
             ts: None,
             token: None,
         }).unwrap()
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete(&self, col: usize, key: query::DataType, t: checktable::Token)
+    pub fn transactional_delete(&self, key: query::DataType, t: checktable::Token)
                              -> checktable::TransactionResult {
         let (send, recv) = mpsc::channel();
         self.tx.send(Message {
             from: self.src,
             to: self.addr,
-            data: vec![prelude::Record::DeleteRequest(col, key)].into(),
+            data: vec![prelude::Record::DeleteRequest(key)].into(),
             ts: None,
             token: Some((t, send)),
         }).unwrap();

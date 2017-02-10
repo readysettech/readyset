@@ -45,8 +45,8 @@ impl Ingredient for Base {
         true
     }
 
-    fn will_query(&self, _: bool) -> bool {
-        self.key_column.is_some()
+    fn will_query(&self, materialized: bool) -> bool {
+        !materialized && self.key_column.is_some()
     }
 
     fn on_connected(&mut self, _: &Graph) {}
@@ -57,13 +57,11 @@ impl Ingredient for Base {
         rs.into_iter().map(|r| match r {
             Record::Positive(u) => Record::Positive(u),
             Record::Negative(u) => Record::Negative(u),
-            Record::DeleteRequest(col, key) => {
-                assert_eq!(self.key_column, Some(col));
-
+            Record::DeleteRequest(key) => {
                 let db = state.get(self.us.as_ref().unwrap().as_local())
                     .expect("base must have its own state materialized to support deletions");
-                let rows = db.lookup(col, &key);
-                assert_ne!(rows.len(), 0);
+                let rows = db.lookup(self.key_column.unwrap(), &key);
+                assert_eq!(rows.len(), 1);
 
                 Record::Negative(rows[0].clone())
             }
@@ -72,7 +70,7 @@ impl Ingredient for Base {
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, usize> {
         if self.key_column.is_some() {
-            [(n, self.key_column.unwrap())].iter().cloned().collect()
+            Some((n, self.key_column.unwrap())).into_iter().collect()
         } else {
             HashMap::new()
         }
