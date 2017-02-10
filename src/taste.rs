@@ -72,10 +72,15 @@ fn benchmark(workdir: &str,
                     let new_result = match previous_result {
                         None => BenchmarkResult::Improvement(val, 0.0),
                         Some(prev_res) => {
-                            let old_val = match *prev_res.get(&bm_name).unwrap() {
-                                BenchmarkResult::Improvement(v, _) => v,
-                                BenchmarkResult::Regression(v, _) => v,
-                                BenchmarkResult::Neutral(v, _) => v,
+                            let old_val = match prev_res.get(&bm_name) {
+                                None => val,
+                                Some(pv) => {
+                                    match *pv {
+                                        BenchmarkResult::Improvement(v, _) => v,
+                                        BenchmarkResult::Regression(v, _) => v,
+                                        BenchmarkResult::Neutral(v, _) => v,
+                                    }
+                                }
                             };
                             let new_result = if cfg.lower_is_better {
                                 if val >= old_val * (1.0 + cfg.regression_threshold) {
