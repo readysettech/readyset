@@ -300,6 +300,7 @@ pub fn initialize(log: &Logger,
             reconstruct(&log,
                         graph,
                         source,
+                        &empty,
                         &materialize,
                         control_txs,
                         node,
@@ -316,6 +317,7 @@ pub fn initialize(log: &Logger,
 pub fn reconstruct(log: &Logger,
                    graph: &Graph,
                    source: NodeIndex,
+                   empty: &HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
                    control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
                    node: NodeIndex,
@@ -338,7 +340,7 @@ pub fn reconstruct(log: &Logger,
     //   4. tell the domain nearest to the root to start replaying
     //
     // so, first things first, let's find our closest materialized parents
-    let paths = trace(graph, source, node, materialized, vec![node]);
+    let paths = trace(graph, source, node, empty, materialized, vec![node]);
 
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
@@ -352,18 +354,16 @@ pub fn reconstruct(log: &Logger,
     }
 
     // TODO:
-    // technically, we can be a bit smarter here. for example, a join with a view we know is empty
-    // will always just be empty. a union with a 1-1 project does not need to be replayed through
-    // if it is not materialized. neither does an ingress node. unfortunately, skipping things this
-    // way would make `Message::to` and `Message::from` contain weird values, and cause breakage.
-    // The join trick we might be able to detect further up though.
+    // technically, we can be a bit smarter here. for example, a union with a 1-1 projection does
+    // not need to be replayed through if it is not materialized. neither does an ingress node.
+    // unfortunately, skipping things this way would make `Message::to` and `Message::from` contain
+    // weird values, and cause breakage.
 
     // set up channels for replay along each path
     for mut path in paths {
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        // XXX XXX XXX: don't replay along paths with empty nodes
         trace!(log, "replaying along path {:?}", path);
 
         // first, find out which domains we are crossing
@@ -465,6 +465,7 @@ pub fn reconstruct(log: &Logger,
 fn trace(graph: &Graph,
          source: NodeIndex,
          node: NodeIndex,
+         empty: &HashSet<NodeIndex>,
          materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
          path: Vec<NodeIndex>)
          -> Vec<Vec<NodeIndex>> {
@@ -494,8 +495,8 @@ fn trace(graph: &Graph,
             // for unions, we should replay *all* paths. for joins, we should only replay one path.
             // in particular, for a join, we should only replay the ancestor that yields the full
             // result-set (i.e., the left side of a left join).
-            assert!(graph[node].is_internal());
-            if let Some(picked_ancestor) = graph[node].replay_ancestor() {
+            assert!(n.is_internal());
+            if let Some(picked_ancestor) = n.replay_ancestor() {
                 // join, only replay picked ancestor
                 parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
             } else {
@@ -503,11 +504,23 @@ fn trace(graph: &Graph,
             }
         }
 
+        // there's no point in replaying parents that are empty
+        parents.retain(|&parent| !empty.contains(&parent));
+
+        // here's a funny case:
+        //
+        //  - if we're a join
+        //  - and there's only one ancestor left
+        //  - and that ancestor is *not* an outer join target
+        //
+        // we know the output will be empty!
+        // TODO
+
         parents.into_iter()
             .flat_map(|parent| {
                 let mut path = path.clone();
                 path.push(parent);
-                trace(graph, source, parent, materialized, path)
+                trace(graph, source, parent, empty, materialized, path)
             })
             .collect()
     }
