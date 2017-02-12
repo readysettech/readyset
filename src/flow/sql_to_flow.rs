@@ -19,6 +19,7 @@ use std::vec::Vec;
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
+#[derive(Clone, Debug, PartialEq)]
 pub struct SqlIncorporator {
     write_schemas: HashMap<String, Vec<String>>,
     node_addresses: HashMap<String, NodeAddress>,
@@ -89,7 +90,7 @@ impl SqlIncorporator {
         }
     }
 
-    /// Incorporates a single query into the underlying `FlowGraph`. The `query` argument is a
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
     /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
     /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
     /// queries, and a deterministic, unique name is generated and returned otherwise.
@@ -102,6 +103,27 @@ impl SqlIncorporator {
                      mut mig: &mut Migration)
                      -> Result<(String, Vec<NodeAddress>), String> {
         query.to_flow_parts(self, name, &mut mig)
+    }
+
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
+    /// `SqlQuery` structure, and the `name` argument supplies an optional name for the query. If no
+    /// `name` is specified, the table name is used in the case of INSERT queries, and a deterministic,
+    /// unique name is generated and returned otherwise.
+    ///
+    /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
+    /// of `NodeAddress`es representing the nodes added to support the query.
+    pub fn add_parsed_query(&mut self,
+                            query: SqlQuery,
+                            name: Option<String>,
+                            mut mig: &mut Migration)
+                            -> Result<(String, Vec<NodeAddress>), String> {
+        let res = match name {
+            None => self.nodes_for_query(query, mig),
+            Some(n) => self.nodes_for_named_query(query, n, mig),
+        };
+        // TODO(malte): this currently always succeeds because `nodes_for_query` and
+        // `nodes_for_named_query` can't fail
+        Ok(res)
     }
 
     fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> (String, Vec<NodeAddress>) {
@@ -517,6 +539,10 @@ impl SqlIncorporator {
                 ni = mig.add_ingredient(String::from(name),
                                         fields.as_slice(),
                                         Permute::new(*final_ni, projected_column_ids.as_slice()));
+                // We always materializes leaves of queries (at least currently)
+                // XXX(malte): this hard-codes the primary key to be the first column, since
+                // queries do not currently carry this information
+                mig.maintain(ni, 0);
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
             }
@@ -625,14 +651,14 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
         assert!("SELECT users.id from users;".to_flow_parts(&mut inc, None, &mut mig).is_ok());
-        // Should now have source, "users", and two nodes for the new selection: one filter node
-        // and one edge view node
-        assert_eq!(mig.graph().node_count(), 4);
+        // Should now have source, "users", two nodes for the new selection: one filter node
+        // and one edge view node, and a reader node.
+        assert_eq!(mig.graph().node_count(), 5);
 
         // Invalid query should fail parsing and add no nodes
         assert!("foo bar from whatever;".to_flow_parts(&mut inc, None, &mut mig).is_err());
         // Should still only have source, "users" and the two nodes for the above selection
-        assert_eq!(mig.graph().node_count(), 4);
+        assert_eq!(mig.graph().node_count(), 5);
     }
 
     #[test]
@@ -749,8 +775,8 @@ mod tests {
                           None,
                           &mut mig);
         assert!(res.is_ok());
-        // added the aggregation and the edge view
-        assert_eq!(mig.graph().node_count(), 4);
+        // added the aggregation and the edge view, and a reader
+        assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")]);
@@ -785,8 +811,8 @@ mod tests {
         // Try a simple COUNT function without a GROUP BY clause
         let res = inc.add_query("SELECT COUNT(*) AS count FROM votes;", None, &mut mig);
         assert!(res.is_ok());
-        // added the aggregation and the edge view
-        assert_eq!(mig.graph().node_count(), 4);
+        // added the aggregation and the edge view, and reader
+        assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"], &[]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));

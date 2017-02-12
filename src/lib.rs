@@ -327,6 +327,7 @@ extern crate serde_derive;
 
 #[macro_use]
 extern crate slog;
+extern crate slog_term;
 
 extern crate fnv;
 extern crate evmap;
@@ -356,6 +357,7 @@ mod flow;
 mod query;
 mod ops;
 mod backlog;
+mod recipe;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, NodeAddress, Mutator};
@@ -373,6 +375,7 @@ pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::Filter;
 pub use query::DataType;
+pub use recipe::Recipe;
 
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.

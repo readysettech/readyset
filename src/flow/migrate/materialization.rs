@@ -49,8 +49,10 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                     if i.should_materialize() ||
                        graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing)
                         .any(|e| *e.weight()) {
+                        trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
                         Some(*n.addr().as_local())
                     } else {
+                        trace!(log, "not materializing"; "node" => format!("{}", ni.index()));
                         None
                     }
                 }
@@ -63,6 +65,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
         .filter_map(|&(ni, n, _)| {
             if let flow::node::Type::Internal(..) = **n {
                 if n.will_query(materialize.contains(n.addr().as_local())) {
+                    trace!(log, "found querying child"; "node" => format!("{}", ni.index()));
                     return Some(ni);
                 }
             }
@@ -70,12 +73,14 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
         })
         .collect();
 
-
     for &(ni, n, _) in &nodes {
         if let flow::node::Type::Ingress = **n {
             if graph.neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                 .any(|child| inquisitive_children.contains(&child)) {
                 // we have children that may query us, so our output should be materialized
+                trace!(log,
+                       format!("querying children force materialization of node {}",
+                               ni.index()));
                 materialize.insert(*n.addr().as_local());
             }
         }
@@ -145,7 +150,7 @@ pub fn index(log: &Logger,
                     //  - if it queries its ancestors when it is *not* materialized (implying that
                     //    it queries into its own output)
                     //
-                    //  unless we come up with a weird operators that *doesn't* need indices when
+                    //  unless we come up with a weird operator that *doesn't* need indices when
                     //  it is *not* materialized, but *does* when is, we can therefore just use
                     //  will_query(false) as an indicator of whether indices are necessary.
                     node.will_query(false)

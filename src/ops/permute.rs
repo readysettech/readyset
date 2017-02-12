@@ -41,8 +41,8 @@ impl Ingredient for Permute {
         false
     }
 
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized
+    fn will_query(&self, _materialized: bool) -> bool {
+        false
     }
 
     fn on_connected(&mut self, g: &Graph) {
