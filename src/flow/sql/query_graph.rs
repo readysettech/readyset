@@ -2,6 +2,7 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldEx
 use nom_sql::SelectStatement;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
 
@@ -31,6 +32,21 @@ pub struct QuerySignature<'a> {
     pub hash: u64,
 }
 
+impl<'a> PartialEq for QuerySignature<'a> {
+    fn eq(&self, other: &QuerySignature) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl<'a> Eq for QuerySignature<'a> {}
+
+impl<'a> Hash for QuerySignature<'a> {
+    fn hash<H>(&self, state: &mut H)
+        where H: Hasher {
+            state.write_u64(self.hash)
+    }
+}
+
 impl QueryGraph {
     fn new() -> QueryGraph {
         QueryGraph {
@@ -43,7 +59,6 @@ impl QueryGraph {
     /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
     /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
     pub fn signature(&self) -> QuerySignature {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();

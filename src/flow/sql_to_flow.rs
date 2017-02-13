@@ -169,9 +169,7 @@ impl SqlIncorporator {
                 }
             }
             SqlQuery::Select(sq) => {
-                let (qg, nodes) = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
-                // Store the query graph for later reference
-                self.query_graphs.push(qg);
+                let nodes = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
                 // Return new nodes
                 (query_name, nodes)
             }
@@ -379,13 +377,23 @@ impl SqlIncorporator {
                                 st: &SelectStatement,
                                 name: &str,
                                 mig: &mut Migration)
-                                -> (QueryGraph, Vec<NodeAddress>) {
+                                -> Vec<NodeAddress> {
         use std::collections::HashMap;
 
         let qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
+
+        // Do we already have this exact query or a subset of it?
+        for existing_qg in self.query_graphs.iter() {
+            if existing_qg.signature() == qg.signature() {
+                // we already have this exact query, so we don't need to add anything
+                return vec![];
+            }
+        }
+        // If not, store the query graph for later reference
+        self.query_graphs.push(qg.clone());
 
         let nodes_added;
 
@@ -566,7 +574,7 @@ impl SqlIncorporator {
                 .chain(func_nodes.into_iter())
                 .collect();
         }
-        (qg, nodes_added)
+        nodes_added
     }
 }
 
@@ -799,6 +807,42 @@ mod tests {
         assert_eq!(edge_view.fields(), &["votes"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
     }
+
+    #[test]
+    fn it_reuses_identical_query() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish a base write type
+        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+                       None,
+                       &mut mig)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(mig.graph().node_count(), 2);
+        assert_eq!(get_node(&inc, &mig, "users").name(), "users");
+        assert_eq!(get_node(&inc, &mig, "users").fields(), &["id", "name"]);
+        assert_eq!(get_node(&inc, &mig, "users").description(), "B");
+
+        // Add a new query
+        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+
+        // Add the same query again
+        let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        let ncount = mig.graph().node_count();
+        // should have added no more nodes
+        assert_eq!(res.unwrap().1, vec![]);
+        assert_eq!(mig.graph().node_count(), ncount);
+    }
+
 
     #[test]
     // Activate when we have support for COUNT(*)
