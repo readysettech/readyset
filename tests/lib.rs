@@ -93,20 +93,10 @@ fn it_works_streaming() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // send a query to c
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // check that value was updated again
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
 
@@ -617,20 +607,10 @@ fn crossing_migration() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // send a query to c
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // check that value was updated again
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
 
@@ -717,20 +697,10 @@ fn domain_amend_migration() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // send a query to c
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]);
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
-
-    // check that value was updated again
     assert_eq!(cq.recv(), Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
 
