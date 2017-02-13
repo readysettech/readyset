@@ -254,6 +254,7 @@ pub struct Mutator {
     src: NodeAddress,
     tx: mpsc::SyncSender<Message>,
     addr: NodeAddress,
+    key_column: Option<usize>,
 }
 
 impl Mutator {
@@ -310,6 +311,45 @@ impl Mutator {
             ts: None,
             token: Some((t, send)),
         }).unwrap();
+        recv.recv().unwrap()
+    }
+
+    /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
+    /// was generated for.
+    pub fn update(&self, u: Vec<query::DataType>) {
+        let col = self.key_column
+            .expect("update operations can only be applied to base nodes with key columns");
+
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
+                ts: None,
+                token: None,
+            })
+            .unwrap()
+    }
+
+    /// Perform a transactional update (delete followed by put) to the base node this Mutator was
+    /// generated for.
+    pub fn transactional_update(&self,
+                                u: Vec<query::DataType>,
+                                t: checktable::Token)
+                                -> checktable::TransactionResult {
+        let col = self.key_column
+            .expect("update operations can only be applied to base nodes with key columns");
+
+        let (send, recv) = mpsc::channel();
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
+                ts: None,
+                token: Some((t, send)),
+            })
+            .unwrap();
         recv.recv().unwrap()
     }
 }
@@ -472,6 +512,7 @@ impl Blender {
             src: NodeAddress::make_global(self.source),
             tx: tx,
             addr: node.addr(),
+            key_column: self.ingredients[*base.as_global()].suggest_indexes(base).remove(&base),
         }
     }
 }

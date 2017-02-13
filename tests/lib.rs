@@ -13,7 +13,7 @@ fn it_works() {
     let (a,b, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::new(0));
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::new(0));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -57,6 +57,15 @@ fn it_works() {
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 4.into()]]));
+
+    // Update second record
+    mutb.update(vec![id.clone(), 6.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::new(0, 10_000_000));
+
+    // send a query to c
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 6.into()]]));
 }
 
 #[test]
