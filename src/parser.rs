@@ -49,15 +49,25 @@ mod tests {
     use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
 
+    use column::Column;
+    use table::Table;
+
     #[test]
     fn hash_query() {
         let qstring = "INSERT INTO users VALUES (42, test);";
         let res = parse_query(qstring);
         assert!(res.is_ok());
 
-        let mut h = DefaultHasher::new();
-        res.unwrap().hash(&mut h);
-        assert_eq!(format!("{:x}", h.finish()), "18c5663ec2a3a77b");
+        let expected = SqlQuery::Insert(InsertStatement {
+            table: Table::from("users"),
+            fields: vec![(Column::from("0"), "42".into()), (Column::from("1"), "test".into())],
+            ..Default::default()
+        });
+        let mut h0 = DefaultHasher::new();
+        let mut h1 = DefaultHasher::new();
+        res.unwrap().hash(&mut h0);
+        expected.hash(&mut h1);
+        assert_eq!(h0.finish(), h1.finish());
     }
 
     #[test]

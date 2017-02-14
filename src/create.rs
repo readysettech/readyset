@@ -247,8 +247,8 @@ mod tests {
 
     #[test]
     fn sql_types() {
-        let type0 = "bigint(20)";
-        let type1 = "varchar(255)";
+        let type0 = "bigint(20) unsigned";
+        let type1 = "varchar(255) binary";
 
         let res = type_identifier(type0.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Bigint(20));
