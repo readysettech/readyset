@@ -3,6 +3,7 @@ extern crate nom;
 
 pub use self::column::{Column, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
+pub use self::create::CreateTableStatement;
 pub use self::insert::InsertStatement;
 pub use self::parser::*;
 pub use self::select::SelectStatement;
@@ -15,6 +16,7 @@ mod caseless_tag;
 mod column;
 mod common;
 mod condition;
+mod create;
 mod insert;
 mod select;
 mod table;

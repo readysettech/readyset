@@ -2,11 +2,13 @@ use nom::IResult;
 use std::str;
 
 pub use common::{FieldExpression, Operator};
+use create::*;
 use insert::*;
 use select::*;
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum SqlQuery {
+    CreateTable(CreateTableStatement),
     Insert(InsertStatement),
     Select(SelectStatement),
 }
@@ -22,7 +24,13 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     let q_bytes = String::from(input.trim()).into_bytes();
 
     // TODO(malte): appropriately pass through errors from nom
+    match creation(&q_bytes) {
+        IResult::Done(_, o) => return Ok(SqlQuery::CreateTable(o)),
+        _ => (),
+    };
+
     match insertion(&q_bytes) {
+
         IResult::Done(_, o) => return Ok(SqlQuery::Insert(o)),
         _ => (),
     };
