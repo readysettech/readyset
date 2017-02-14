@@ -9,8 +9,6 @@ pub trait StarExpansion {
 impl StarExpansion for SqlQuery {
     fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
         match self {
-            // nothing to do for INSERTs, as they cannot have stars
-            SqlQuery::Insert(i) => SqlQuery::Insert(i),
             SqlQuery::Select(mut sq) => {
                 sq.fields = match sq.fields {
                     FieldExpression::All => {
@@ -27,6 +25,8 @@ impl StarExpansion for SqlQuery {
 
                 SqlQuery::Select(sq)
             }
+            // nothing to do for other query types, as they cannot have aliases
+            x => x,
         }
     }
 }

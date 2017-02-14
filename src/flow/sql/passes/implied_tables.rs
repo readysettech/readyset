@@ -97,8 +97,6 @@ impl ImpliedTableExpansion for SqlQuery {
 
         let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
         match self {
-            // nothing to do for INSERTs, as they cannot have implied tables
-            SqlQuery::Insert(i) => SqlQuery::Insert(i),
             SqlQuery::Select(mut sq) => {
                 // Expand within field list
                 sq.fields = match sq.fields {
@@ -117,6 +115,8 @@ impl ImpliedTableExpansion for SqlQuery {
 
                 SqlQuery::Select(sq)
             }
+            // nothing to do for other query types, as they cannot have aliases
+            x => x,
         }
     }
 }

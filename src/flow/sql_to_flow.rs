@@ -3,7 +3,7 @@ use flow::{NodeAddress, Migration};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
               FunctionExpression, Operator, SqlQuery};
-use nom_sql::{InsertStatement, SelectStatement};
+use nom_sql::SelectStatement;
 use ops;
 use ops::base::Base;
 use ops::join::Builder as JoinBuilder;
@@ -128,6 +128,7 @@ impl SqlIncorporator {
 
     fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> (String, Vec<NodeAddress>) {
         let name = match q {
+            SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::Insert(ref iq) => iq.table.name.clone(),
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
         };
@@ -150,22 +151,16 @@ impl SqlIncorporator {
             .expand_implied_tables(&self.write_schemas);
 
         let (name, new_nodes) = match q {
+            SqlQuery::CreateTable(ctq) => {
+                assert_eq!(query_name, ctq.table.name);
+                let ni = self.make_base_node(&ctq.table.name, &ctq.fields, &mut mig);
+                (query_name, vec![ni])
+            }
             SqlQuery::Insert(iq) => {
-                if self.write_schemas.contains_key(&iq.table.name) {
-                    println!("WARNING: base table for write type {} already exists: ignoring \
-                              query.",
-                             iq.table.name);
-                    (iq.table.name.clone(), vec![])
-                } else {
-                    assert_eq!(query_name, iq.table.name);
-                    let ni = self.make_base_node(&iq, &mut mig);
-                    self.write_schemas.insert(iq.table.name.clone(),
-                                              iq.fields
-                                                  .iter()
-                                                  .map(|&(ref c, _)| c.name.clone())
-                                                  .collect());
-                    (query_name, vec![ni])
-                }
+                assert_eq!(query_name, iq.table.name);
+                let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
+                let ni = self.make_base_node(&iq.table.name, &cols, &mut mig);
+                (query_name, vec![ni])
             }
             SqlQuery::Select(sq) => {
                 let (qg, nodes) = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
@@ -181,15 +176,25 @@ impl SqlIncorporator {
         (name, new_nodes)
     }
 
-    fn make_base_node(&mut self, st: &InsertStatement, mig: &mut Migration) -> NodeAddress {
-        let name = st.table.name.clone();
-        let (cols, _): (Vec<Column>, Vec<String>) = st.fields.iter().cloned().unzip();
+    fn make_base_node(&mut self,
+                      name: &str,
+                      cols: &Vec<Column>,
+                      mig: &mut Migration)
+                      -> NodeAddress {
+        if self.write_schemas.contains_key(name) {
+            println!("WARNING: base table for write type {} already exists: ignoring query.",
+                     name);
+            return self.node_addresses[name];
+        }
+
         let fields = Vec::from_iter(cols.iter().map(|c| c.name.clone()));
 
         // make the new base node and record its information
-        let na = mig.add_ingredient(st.table.name.clone(), fields.as_slice(), Base::default());
-        self.node_addresses.insert(name, na);
-        self.node_fields.insert(na, fields);
+        let na = mig.add_ingredient(name, fields.as_slice(), Base::default());
+        self.node_addresses.insert(String::from(name), na);
+        // TODO(malte): get rid of annoying duplication
+        self.node_fields.insert(na, fields.clone());
+        self.write_schemas.insert(String::from(name), fields);
         na
     }
 

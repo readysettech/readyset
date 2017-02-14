@@ -83,8 +83,6 @@ impl AliasRemoval for SqlQuery {
         let column_aliases = HashMap::new();
 
         match self {
-            // nothing to do for INSERTs, as they cannot have aliases
-            SqlQuery::Insert(i) => SqlQuery::Insert(i),
             SqlQuery::Select(mut sq) => {
                 // Collect table aliases
                 for t in &sq.tables {
@@ -125,6 +123,8 @@ impl AliasRemoval for SqlQuery {
                 };
                 SqlQuery::Select(sq)
             }
+            // nothing to do for other query types, as they cannot have aliases
+            x => x,
         }
     }
 }
