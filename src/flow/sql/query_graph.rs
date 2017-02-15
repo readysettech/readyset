@@ -6,6 +6,8 @@ use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
 
+use flow::sql::query_signature::QuerySignature;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
@@ -23,28 +25,6 @@ pub enum QueryGraphEdge {
 pub struct QueryGraph {
     pub relations: HashMap<String, QueryGraphNode>,
     pub edges: HashMap<(String, String), QueryGraphEdge>,
-}
-
-#[derive(Clone, Debug)]
-pub struct QuerySignature<'a> {
-    pub relations: HashSet<&'a str>,
-    pub attributes: HashSet<&'a Column>,
-    pub hash: u64,
-}
-
-impl<'a> PartialEq for QuerySignature<'a> {
-    fn eq(&self, other: &QuerySignature) -> bool {
-        self.hash == other.hash
-    }
-}
-
-impl<'a> Eq for QuerySignature<'a> {}
-
-impl<'a> Hash for QuerySignature<'a> {
-    fn hash<H>(&self, state: &mut H)
-        where H: Hasher {
-            state.write_u64(self.hash)
-    }
 }
 
 impl QueryGraph {

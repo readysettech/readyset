@@ -391,6 +391,11 @@ impl SqlIncorporator {
                 // we already have this exact query, so we don't need to add anything
                 return vec![];
             }
+            if existing_qg.signature().is_generalization_of(&qg.signature()) {
+                info!(mig.log,
+                      "candidate query graph for reuse: {:?}",
+                      existing_qg);
+            }
         }
         // If not, store the query graph for later reference
         self.query_graphs.push(qg.clone());
