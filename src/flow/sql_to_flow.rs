@@ -153,14 +153,20 @@ impl SqlIncorporator {
         let (name, new_nodes) = match q {
             SqlQuery::CreateTable(ctq) => {
                 assert_eq!(query_name, ctq.table.name);
-                let ni = self.make_base_node(&ctq.table.name, &ctq.fields, &mut mig);
-                (query_name, vec![ni])
+                let na = self.make_base_node(&ctq.table.name, &ctq.fields, &mut mig);
+                match na {
+                    None => (query_name, vec![]),
+                    Some(na) => (query_name, vec![na]),
+                }
             }
             SqlQuery::Insert(iq) => {
                 assert_eq!(query_name, iq.table.name);
                 let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let ni = self.make_base_node(&iq.table.name, &cols, &mut mig);
-                (query_name, vec![ni])
+                let na = self.make_base_node(&iq.table.name, &cols, &mut mig);
+                match na {
+                    None => (query_name, vec![]),
+                    Some(na) => (query_name, vec![na]),
+                }
             }
             SqlQuery::Select(sq) => {
                 let (qg, nodes) = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
@@ -180,11 +186,11 @@ impl SqlIncorporator {
                       name: &str,
                       cols: &Vec<Column>,
                       mig: &mut Migration)
-                      -> NodeAddress {
+                      -> Option<NodeAddress> {
         if self.write_schemas.contains_key(name) {
             println!("WARNING: base table for write type {} already exists: ignoring query.",
                      name);
-            return self.node_addresses[name];
+            return None;
         }
 
         let fields = Vec::from_iter(cols.iter().map(|c| c.name.clone()));
@@ -195,7 +201,7 @@ impl SqlIncorporator {
         // TODO(malte): get rid of annoying duplication
         self.node_fields.insert(na, fields.clone());
         self.write_schemas.insert(String::from(name), fields);
-        na
+        Some(na)
     }
 
     fn make_aggregation_node(&mut self,
