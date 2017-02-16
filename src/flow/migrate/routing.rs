@@ -50,6 +50,13 @@ pub fn add(log: &Logger,
     // so they know the true identifier of their parent in the graph.
     let mut swaps = HashMap::new();
 
+    // we also need to keep track of the ingress nodes we've added to each domain so that we don't
+    // end up with two ingress nodes for a given egress node. that would cause unnecessary
+    // cross-domain communication. this is domain => source => NodeIndex (of ingress). note that
+    // `source` here is actually the *egress* node. this is because by the time we add ingress
+    // nodes, we know our incoming edges have already been updated to point to the egress nodes.
+    let mut ingresses = HashMap::new();
+
     for node in topo_list {
         let domain = graph[node].domain();
 
@@ -57,23 +64,53 @@ pub fn add(log: &Logger,
         let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
             .collect(); // collect so we can mutate graph
 
+        // We then need to make sure that we're acting on up-to-date information about existing
+        // egress/ingress pairs. In particular, we want to know about egresses this node already
+        // has (and to which domains). In the process we also populate the information about
+        // ingress nodes in other domains that point here (those shouldn't be re-created if new
+        // nodes are created in the corresponding domains).
+        let mut egresses = HashMap::new();
+        for child in &children {
+            if !new.contains(child) {
+                continue;
+            }
+            if let node::Type::Egress(..) = *graph[*child] {
+                for ingress in graph.neighbors_directed(*child, petgraph::EdgeDirection::Outgoing) {
+                    // this egress already contains this node to the ingress' domain
+                    egresses.insert(graph[ingress].domain(), *child);
+                    // also keep track of the corresponding ingress node so we can re-use it
+                    ingresses.entry(graph[ingress].domain())
+                        .or_insert_with(HashMap::new)
+                        .insert(node, ingress);
+                }
+            }
+        }
+
         for child in children {
             let cdomain = graph[child].domain();
             if domain != cdomain {
                 // child is in a different domain
-                // create an egress node to handle that
-                // NOTE: technically, this doesn't need to mirror its parent, but meh
-                let proxy = graph[node].mirror(node::Type::Egress(Default::default()));
-                let egress = graph.add_node(proxy);
+                if !egresses.contains_key(&cdomain) {
+                    // create an egress node to handle that
+                    // NOTE: technically, this doesn't need to mirror its parent, but meh
+                    let proxy = graph[node].mirror(node::Type::Egress(Default::default()));
+                    let egress = graph.add_node(proxy);
+                    graph.add_edge(node, egress, false);
 
-                trace!(log, "adding cross-domain egress to new node"; "node" => node.index(), "egress" => egress.index());
+                    new.insert(egress);
+                    egresses.insert(cdomain, egress);
+
+                    trace!(log, "adding cross-domain egress to new node"; "node" => node.index(), "egress" => egress.index());
+                } else {
+                    trace!(log, "re-using cross-domain egress to new node"; "node" => node.index(), "egress" => egresses[&cdomain].index());
+                }
 
                 // we need to hook that node in between us and this child
+                let egress = egresses[&cdomain];
                 let old = graph.find_edge(node, child).unwrap();
                 let was_materialized = graph.remove_edge(old).unwrap();
-                graph.add_edge(node, egress, false);
                 graph.add_edge(egress, child, was_materialized);
-                new.insert(egress);
+                // this ends up being re-executed, but that's okay
                 swaps.entry(cdomain).or_insert_with(HashMap::new).insert(node, egress);
             }
         }
@@ -132,23 +169,40 @@ pub fn add(log: &Logger,
         }
 
         // Now that we know all our foreign parents are egress nodes, we can add ingress nodes.
+        // Note that by this time (due to the topological walk), we know that `ingresses` has been
+        // sufficiently populated to contain any relevant existing ingress nodes.
         for parent in parents {
-            // create our new ingress node
-            let mut ingress = graph[parent].mirror(node::Type::Ingress);
-            ingress.add_to(domain); // it belongs to this domain, not that of the parent
-            let ingress = graph.add_node(ingress);
-            new.insert(ingress);
 
-            if parent == source {
-                trace!(log, "adding source ingress"; "base" => node.index(), "ingress" => ingress.index());
+            // is there already an ingress node we can re-use?
+            let mut ingress =
+                ingresses.get(&domain).and_then(|ingresses| ingresses.get(&parent)).map(|ni| *ni);
+
+            if ingress.is_none() {
+                // nope -- create our new ingress node
+                let mut i = graph[parent].mirror(node::Type::Ingress);
+                i.add_to(domain); // it belongs to this domain, not that of the parent
+                let i = graph.add_node(i);
+                graph.add_edge(parent, i, false);
+
+                // we also now need to deal with this ingress node
+                new.insert(i);
+
+                if parent == source {
+                    trace!(log, "adding source ingress"; "base" => node.index(), "ingress" => i.index());
+                    // we don't re-use source ingress nodes
+                } else {
+                    trace!(log, "adding cross-domain ingress"; "to" => node.index(), "from" => parent.index(), "ingress" => i.index());
+                    ingresses.entry(domain).or_insert_with(HashMap::new).insert(parent, i);
+                }
+                ingress = Some(i);
             } else {
-                trace!(log, "adding cross-domain ingress"; "to" => node.index(), "from" => parent.index(), "ingress" => ingress.index());
+                trace!(log, "re-using cross-domain ingress"; "to" => node.index(), "from" => parent.index(), "ingress" => ingress.unwrap().index());
             }
+            let ingress = ingress.unwrap();
 
             // we need to hook the ingress node in between us and the parent
             let old = graph.find_edge(parent, node).unwrap();
             let was_materialized = graph.remove_edge(old).unwrap();
-            graph.add_edge(parent, ingress, false);
             graph.add_edge(ingress, node, was_materialized);
 
             // tracking swaps here is a bit tricky because we've already swapped the "true" parents

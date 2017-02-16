@@ -101,6 +101,52 @@ fn it_works_streaming() {
 }
 
 #[test]
+fn shared_interdomain_ancestor() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, bq, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+
+        let u = distributary::Union::new(emits.clone());
+        let b = mig.add_ingredient("b", &["a", "b"], u);
+        let bq = mig.stream(b);
+
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.stream(c);
+
+        let domain = mig.add_domain();
+        mig.assign_domain(b, domain);
+        mig.assign_domain(c, domain);
+        // domain now has two incoming edges from the same node in a different domain
+
+        mig.commit();
+        (a, bq, cq)
+    };
+
+    let muta = g.get_mutator(a);
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    muta.put(vec![id.clone(), 2.into()]);
+    assert_eq!(bq.recv_timeout(time::Duration::from_millis(100)),
+               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    assert_eq!(cq.recv_timeout(time::Duration::from_millis(100)),
+               Ok(vec![vec![id.clone(), 2.into()].into()]));
+
+    // update value again
+    muta.put(vec![id.clone(), 4.into()]);
+    assert_eq!(bq.recv_timeout(time::Duration::from_millis(100)),
+               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    assert_eq!(cq.recv_timeout(time::Duration::from_millis(100)),
+               Ok(vec![vec![id.clone(), 4.into()].into()]));
+}
+
+#[test]
 fn it_works_w_mat() {
     // set up graph
     let mut g = distributary::Blender::new();
