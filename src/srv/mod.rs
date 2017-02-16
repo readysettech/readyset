@@ -134,17 +134,13 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
     let s = Arc::new(s);
     let threads = (0..threads)
         .map(move |i| {
-            use futures::Future;
-
             let s = s.clone();
             let (tx, rx) = futures::sync::oneshot::channel();
             let jh = thread::Builder::new()
                 .name(format!("rpc{}", i))
                 .spawn(move || {
                     let mut core = reactor::Core::new().unwrap();
-                    s.listen(addr,
-                                tarpc::server::Options::default().handle(core.handle()))
-                        .wait()
+                    s.listen(addr, &core.handle(), tarpc::server::Options::default())
                         .unwrap();
 
                     match core.run(rx) {

@@ -1,5 +1,9 @@
 #[cfg(feature="web")]
 extern crate distributary;
+extern crate slog;
+extern crate slog_term;
+
+use slog::DrainExt;
 
 #[cfg(feature="web")]
 fn main() {
@@ -7,18 +11,19 @@ fn main() {
 
     // set up graph
     let mut g = distributary::Blender::new();
+    g.log_with(slog::Logger::root(slog_term::streamer().full().build().fuse(), None));
 
     {
         let mut mig = g.start_migration();
 
         // add article base node
-        let article = mig.add_ingredient("article", &["id", "user", "title", "url"], Base {});
+        let article = mig.add_ingredient("article", &["id", "user", "title", "url"], Base::default());
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base {});
+        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 
         // add a user account base table
-        mig.add_ingredient("user", &["id", "username", "hash"], Base {});
+        let user = mig.add_ingredient("user", &["id", "username", "hash"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("votecount",
@@ -38,9 +43,13 @@ fn main() {
 
         mig.maintain(awvc, 0);
         mig.maintain(karma, 0);
+
+        // commit migration
+        mig.commit();
     }
 
     web::run(g).unwrap();
+    loop {}
 }
 
 #[cfg(not(feature="web"))]

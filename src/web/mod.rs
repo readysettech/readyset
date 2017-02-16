@@ -1,12 +1,20 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
+use rustful::server::Global;
+use std::sync::Mutex;
+
 use flow::Blender;
 use query::DataType;
 use std::collections::HashMap;
 
-struct Endpoint<F> {
+struct GetEndpoint<F> {
     arguments: Vec<String>,
     f: F,
+}
+
+struct PutEndpoint<Mutator> {
+    arguments: Vec<String>,
+    mutator: Mutator,
 }
 
 /// Start exposing the given `FlowGraph` over HTTP.
@@ -30,9 +38,9 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
             .into_iter()
             .map(|(ni, n)| {
                 (n.name().to_owned(),
-                 Endpoint {
+                 PutEndpoint {
                      arguments: n.fields().iter().cloned().collect(),
-                     f: soup.get_putter(ni).0,
+                     mutator: soup.get_mutator(ni),
                  })
             })
             .collect();
@@ -40,7 +48,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
             .into_iter()
             .map(|(_, n, r)| {
                 (n.name().to_owned(),
-                 Endpoint {
+                 GetEndpoint {
                      arguments: n.fields().iter().cloned().collect(),
                      f: r.get_reader().unwrap(),
                  })
@@ -50,21 +58,20 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
     };
 
     for (path, ep) in ins.into_iter() {
-        use std::sync::Mutex;
-        let put = Mutex::new(ep.f);
+        let put = Mutex::new(Box::new(ep.mutator));
         let args = ep.arguments;
         insert_routes! {
             &mut router => {
                 path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    let ts = put.lock().unwrap()(args.iter().map(|arg| {
+                    let ts = put.lock().unwrap().put((args.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {
                             json[&**arg].as_string().unwrap().into()
                         }
-                    }).collect::<Vec<DataType>>());
+                    })).collect::<Vec<DataType>>());
                     res.headers_mut().set(ContentType::json());
                     res.send(format!("{}", ts.to_json()));
                 }) as Box<Handler>,
@@ -104,6 +111,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
     Server {
             handlers: router,
             host: 8080.into(),
+            global: Global::from(Box::new(Mutex::new(soup))),
             ..Server::default()
         }
         .run()
