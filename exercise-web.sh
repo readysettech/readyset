@@ -35,16 +35,10 @@ json() {
 	fi
 }
 
-echo "All"
-curl -s localhost:8080/awvc | json
+#echo "All"
+#curl -s localhost:8080/awvc | json
 echo "Where id=1"
-curl -s "localhost:8080/awvc?id=1" | json
-echo "Where title=world"
-curl -s "localhost:8080/awvc?title=world" | json
-echo "Where id=1 && title=hello"
-curl -s "localhost:8080/awvc?id=1&title=hello" | json
-echo "Where id=2 && title=hello"
-curl -s "localhost:8080/awvc?id=2&title=hello" | json
+curl -s "localhost:8080/awvc?key=1" | json
 
 kill "$pid" 2>/dev/null >/dev/null
 wait "$pid" 2>/dev/null >/dev/null
