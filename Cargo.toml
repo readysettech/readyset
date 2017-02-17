@@ -78,3 +78,7 @@ path = "benchmarks/bank.rs"
 [[bin]]
 name = "vote"
 path = "benchmarks/vote.rs"
+
+[[bin]]
+name = "multitail"
+path = "benchmarks/multitail.rs"
