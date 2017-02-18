@@ -38,6 +38,7 @@ pub struct Message {
     pub from: NodeAddress,
     pub to: NodeAddress,
     pub data: prelude::Records,
+    pub replay: Option<(prelude::Tag, bool, Option<prelude::State>)>,
     pub ts: Option<(i64, NodeIndex)>,
     pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>,
 }
@@ -273,6 +274,7 @@ impl Mutator {
             .send(Message {
                 from: self.src,
                 to: self.addr,
+                replay: None,
                 data: vec![u].into(),
                 ts: None,
                 token: None,
@@ -290,6 +292,7 @@ impl Mutator {
             .send(Message {
                 from: self.src,
                 to: self.addr,
+                replay: None,
                 data: vec![u].into(),
                 ts: None,
                 token: Some((t, send)),
@@ -300,26 +303,34 @@ impl Mutator {
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
     pub fn delete(&self, key: query::DataType) {
-        self.tx.send(Message {
-            from: self.src,
-            to: self.addr,
-            data: vec![prelude::Record::DeleteRequest(key)].into(),
-            ts: None,
-            token: None,
-        }).unwrap()
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                replay: None,
+                data: vec![prelude::Record::DeleteRequest(key)].into(),
+                ts: None,
+                token: None,
+            })
+            .unwrap()
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete(&self, key: query::DataType, t: checktable::Token)
-                             -> checktable::TransactionResult {
+    pub fn transactional_delete(&self,
+                                key: query::DataType,
+                                t: checktable::Token)
+                                -> checktable::TransactionResult {
         let (send, recv) = mpsc::channel();
-        self.tx.send(Message {
-            from: self.src,
-            to: self.addr,
-            data: vec![prelude::Record::DeleteRequest(key)].into(),
-            ts: None,
-            token: Some((t, send)),
-        }).unwrap();
+        self.tx
+            .send(Message {
+                from: self.src,
+                to: self.addr,
+                replay: None,
+                data: vec![prelude::Record::DeleteRequest(key)].into(),
+                ts: None,
+                token: Some((t, send)),
+            })
+            .unwrap();
         recv.recv().unwrap()
     }
 
@@ -333,6 +344,7 @@ impl Mutator {
             .send(Message {
                 from: self.src,
                 to: self.addr,
+                replay: None,
                 data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
                 ts: None,
                 token: None,
@@ -354,6 +366,7 @@ impl Mutator {
             .send(Message {
                 from: self.src,
                 to: self.addr,
+                replay: None,
                 data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
                 ts: None,
                 token: Some((t, send)),

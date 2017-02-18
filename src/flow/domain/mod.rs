@@ -16,7 +16,6 @@ use ops;
 use checktable;
 
 const BATCH_SIZE: usize = 128;
-const INTERBATCH_LIMIT: usize = 16;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -47,19 +46,11 @@ impl Index {
     }
 }
 
-pub enum ReplayBatch {
-    Full(NodeAddress, State),
-    Partial(Message),
-}
-
 pub enum Control {
     AddNode(NodeDescriptor, Vec<LocalNodeIndex>),
     Ready(LocalNodeIndex, Option<usize>, mpsc::SyncSender<()>),
-    ReplayThrough(Vec<NodeAddress>,
-                  mpsc::Receiver<ReplayBatch>,
-                  Option<mpsc::SyncSender<ReplayBatch>>,
-                  mpsc::SyncSender<()>),
-    Replay(Vec<NodeAddress>, Option<mpsc::SyncSender<ReplayBatch>>, mpsc::SyncSender<()>),
+    SetupReplayPath(Tag, Vec<NodeAddress>, Option<mpsc::SyncSender<()>>, mpsc::SyncSender<()>),
+    Replay(Tag, NodeAddress, mpsc::SyncSender<()>),
     PrepareState(LocalNodeIndex, usize),
 
     /// At the start of a migration, flush pending transactions then notify blender.
@@ -77,6 +68,8 @@ enum BufferedTransaction {
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
 }
+
+type InjectCh = Arc<Mutex<mpsc::SyncSender<Message>>>;
 
 pub struct Domain {
     nodes: DomainNodes,
@@ -97,6 +90,7 @@ pub struct Domain {
     checktable: Arc<Mutex<checktable::CheckTable>>,
 
     replaying_to: Option<(LocalNodeIndex, Vec<Message>)>,
+    replay_paths: HashMap<Tag, (Vec<NodeAddress>, Option<mpsc::SyncSender<()>>)>,
 }
 
 impl Domain {
@@ -127,6 +121,7 @@ impl Domain {
             ts: ts,
             checktable: checktable,
             replaying_to: None,
+            replay_paths: HashMap::new(),
         }
     }
 
@@ -179,6 +174,7 @@ impl Domain {
                 let m = Message {
                     from: me,
                     to: n.children[i],
+                    replay: None,
                     data: data,
                     ts: ts,
                     token: token,
@@ -243,6 +239,7 @@ impl Domain {
             let m = Message {
                 from: n.borrow().addr(), // TODO: message should be from actual parent, not self.
                 to: n.borrow().addr(),
+                replay: None,
                 data: data,
                 ts: ts,
                 token: None,
@@ -329,16 +326,21 @@ impl Domain {
                 let secondary_rx = &mut rx as *mut _;
                 let secondary_rx = unsafe { &mut *secondary_rx };
 
+                let (inject_tx, inject_rx) = mpsc::sync_channel(1);
+                let inject_tx = Arc::new(Mutex::new(inject_tx));
+
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
                 let mut rx_handle = sel.handle(&rx);
                 let mut timestamp_rx_handle = sel.handle(&timestamp_rx);
                 let mut control_rx_handle = sel.handle(&crx);
+                let mut inject_rx_handle = sel.handle(&inject_rx);
 
                 unsafe {
                     rx_handle.add();
                     timestamp_rx_handle.add();
                     control_rx_handle.add();
+                    inject_rx_handle.add();
                 }
 
                 loop {
@@ -348,7 +350,7 @@ impl Domain {
                         if control.is_err() {
                             return;
                         }
-                        self.handle_control(control.unwrap(), secondary_rx);
+                        self.handle_control(control.unwrap(), secondary_rx, inject_tx.clone());
                     } else if id == timestamp_rx_handle.id() {
                         let ts = timestamp_rx_handle.recv();
                         if ts.is_err() {
@@ -361,43 +363,18 @@ impl Domain {
                         assert!(o.is_none());
 
                         self.apply_transactions();
+                    } else if id == inject_rx_handle.id() {
+                        let m = inject_rx_handle.recv();
+                        if m.is_err() {
+                            return;
+                        }
+                        self.handle_message(m.unwrap(), secondary_rx, inject_tx.clone());
                     } else if id == rx_handle.id() {
                         let m = rx_handle.recv();
                         if m.is_err() {
                             return;
                         }
-                        let mut m = m.unwrap();
-
-                        if let Some((token, send)) = m.token.take() {
-                            let ingress = self.nodes[m.to.as_local()].borrow();
-                            // TODO: is this the correct node?
-                            let base_node =
-                                self.nodes[ingress.children[0].as_local()].borrow().index;
-                            let result = self.checktable
-                                .lock()
-                                .unwrap()
-                                .claim_timestamp(&token, base_node, &m.data);
-                            match result {
-                                checktable::TransactionResult::Committed(i) => {
-                                    m.ts = Some((i, base_node));
-                                    m.token = None;
-                                    let _ = send.send(result);
-                                }
-                                checktable::TransactionResult::Aborted => {
-                                    let _ = send.send(result);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        match m.ts {
-                            None => {
-                                self.dispatch_(m, true);
-                            }
-                            Some(_) => {
-                                self.buffer_transaction(m);
-                            }
-                        }
+                        self.handle_message(m.unwrap(), secondary_rx, inject_tx.clone());
                     }
                 }
             })
@@ -406,9 +383,186 @@ impl Domain {
         ctx
     }
 
-    fn replay_done(&mut self, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Message>) {
+    fn handle_message(&mut self,
+                      mut m: Message,
+                      domain_rx: &mut mpsc::Receiver<Message>,
+                      inject: InjectCh) {
+        if m.replay.is_some() {
+            if let Some((tag, ni)) = self.handle_replay(m, inject) {
+                self.replay_done(tag, ni, domain_rx);
+                trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
+            }
+            return;
+        }
+
+        if let Some((token, send)) = m.token.take() {
+            let ingress = self.nodes[m.to.as_local()].borrow();
+            // TODO: is this the correct node?
+            let base_node = self.nodes[ingress.children[0].as_local()].borrow().index;
+            let result = self.checktable
+                .lock()
+                .unwrap()
+                .claim_timestamp(&token, base_node, &m.data);
+            match result {
+                checktable::TransactionResult::Committed(i) => {
+                    m.ts = Some((i, base_node));
+                    m.token = None;
+                    let _ = send.send(result);
+                }
+                checktable::TransactionResult::Aborted => {
+                    let _ = send.send(result);
+                    return;
+                }
+            }
+        }
+
+        match m.ts {
+            None => {
+                self.dispatch_(m, true);
+            }
+            Some(_) => {
+                self.buffer_transaction(m);
+            }
+        }
+    }
+
+    fn handle_replay(&mut self, mut m: Message, inject: InjectCh) -> Option<(Tag, LocalNodeIndex)> {
+        debug_assert!(m.replay.is_some());
+        let replay = m.replay.take().unwrap();
+        let tag = replay.0;
+        let last = replay.1;
+        m.replay = Some((tag, last, None));
+
+        assert!(replay.2.is_none() || m.data.is_empty());
+        assert!(replay.2.is_none() || last);
+        let &mut (ref nodes, ref mut done) = self.replay_paths.get_mut(&tag).unwrap();
+
+        // the replay source doesn't know who it is replaying to, so we need to set to correctly
+        m.to = nodes[0];
+
+        if replay.2.is_some() && nodes.len() == 1 {
+            let state = replay.2.unwrap();
+
+            // we've been given a state dump, and only have a single node in this domain that needs
+            // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
+            let node = nodes[0];
+            if done.is_some() {
+                // oh boy, we're in luck! we're replaying into one of our nodes, and were just
+                // given the entire state. no need to process or anything, just move in the state
+                // and we're done.
+                // TODO: fall back to regular replay here
+                assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
+                self.state.insert(*node.as_local(), state);
+                debug!(self.log, "direct state clone absorbed");
+                return Some((tag, *node.as_local()));
+            } else {
+                use flow::node::Type;
+                // if we're not terminal, and the domain only has a single node, that node *has* to
+                // be an egress node (since we're relaying to another domain).
+                let mut n = self.nodes[node.as_local()].borrow_mut();
+                if let Type::Egress(..) = *n.inner {
+                    // we can just forward the state to the next domain without doing anything with
+                    // it.
+                    // TODO: egress node needs to know to only forward to *one* domain!
+                    n.process(m, &mut self.state, &self.nodes, false);
+                    drop(n);
+                } else {
+                    unreachable!();
+                }
+            }
+            return None;
+        }
+
+        if let Some(state) = replay.2 {
+            use std::thread;
+
+            // we're been given an entire state snapshot, but we need to digest it piece by piece
+            // spawn off a thread to do that chunking.
+            let log = self.log.new(None);
+            thread::Builder::new()
+                .name(format!("replay{}.{}",
+                              self.nodes.iter().next().unwrap().borrow().domain().index(),
+                              m.from))
+                .spawn(move || {
+                    use itertools::Itertools;
+
+                    let from = m.from;
+                    let to = m.to;
+
+                    let start = time::Instant::now();
+                    debug!(log, "starting state chunker"; "node" => from.as_local().id());
+
+                    let iter = state.into_iter()
+                        .flat_map(|(_, rs)| rs)
+                        .chunks(BATCH_SIZE);
+                    let mut iter = iter
+                        .into_iter()
+                        .enumerate()
+                        .peekable();
+
+                    // process all records in state to completion within domain
+                    // and then forward on tx (if there is one)
+                    while let Some((i, chunk)) = iter.next() {
+                        use std::iter::FromIterator;
+                        let chunk = Records::from_iter(chunk.into_iter());
+                        let m = Message {
+                            from: from,
+                            to: to, // to will be overwritten by receiver
+                            replay: Some((tag, iter.peek().is_none(), None)),
+                            data: chunk,
+                            ts: None,
+                            token: None,
+                        };
+
+                        trace!(log, "sending batch"; "#" => i, "[]" => m.data.len());
+                        inject.lock().unwrap().send(m).unwrap();
+                    }
+
+                    debug!(log, "state chunker finished"; "node" => from.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
+                }).unwrap();
+            return None;
+        }
+
+        debug!(self.log, "replaying batch"; "#" => m.data.len());
+
+        // forward the current message through all local nodes
+        for (i, ni) in nodes.iter().enumerate() {
+            // process the current message in this node
+            let mut n = self.nodes[ni.as_local()].borrow_mut();
+            let u = n.process(m, &mut self.state, &self.nodes, false);
+            drop(n);
+
+            if u.is_none() || i == nodes.len() - 1 {
+                // the last condition is just to early-terminate so we don't unnecessarily
+                // construct the last Message that is then immediately dropped.
+                break;
+            }
+
+            // NOTE: the if above guarantees that nodes[i+1] will never go out of bounds
+            m = Message {
+                from: *ni,
+                to: nodes[i + 1],
+                replay: Some((replay.0, last, None)),
+                data: u.unwrap().0,
+                ts: None,
+                token: None,
+            };
+        }
+
+        if last && done.is_some() {
+            let ni = *nodes.last().unwrap().as_local();
+            trace!(self.log, "last batch received"; "local" => ni.id());
+            return Some((tag, ni));
+        }
+
+        None
+    }
+
+    fn replay_done(&mut self, tag: Tag, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Message>) {
         use std::time;
 
+        // node is now ready, and should start accepting "real" updates
+        trace!(self.log, "readying node"; "local" => node.id());
         self.not_ready.remove(&node);
 
         let start = time::Instant::now();
@@ -475,28 +629,19 @@ impl Domain {
         if iterations != 0 {
             info!(self.log, "backlog drained"; "iterations" => iterations, "μs" => dur_to_ns!(start.elapsed()) / 1000);
         }
-    }
 
-    fn mid_replay_process(&mut self, rx: &mut mpsc::Receiver<Message>) {
-        let mut left = INTERBATCH_LIMIT;
-        while let Ok(m) = rx.try_recv() {
-            // we know no transactions happen during migrations
-            assert!(m.token.is_none());
-            assert!(m.ts.is_none());
-
-            self.dispatch_(m, true);
-
-            // don't process too many things
-            left -= 1;
-            if left == 0 {
-                break;
-            }
+        if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| p.1.as_mut()) {
+            info!(self.log, "acknowledging replay completed");
+            done_tx.send(()).unwrap();
+        } else {
+            unreachable!()
         }
-        trace!(self.log, "processed updates during replay"; "[]" => INTERBATCH_LIMIT - left);
     }
 
-    fn handle_control(&mut self, c: Control, domain_rx: &mut mpsc::Receiver<Message>) {
-        use itertools::Itertools;
+    fn handle_control(&mut self,
+                      c: Control,
+                      domain_rx: &mut mpsc::Receiver<Message>,
+                      inject: InjectCh) {
         match c {
             Control::AddNode(n, parents) => {
                 use std::cell;
@@ -520,14 +665,14 @@ impl Domain {
                         }
                     };
                     s.set_pkey(index_on);
-                    self.state.insert(ni, s);
+                    assert!(self.state.insert(ni, s).is_none());
                 } else {
                     // NOTE: just because index_on is None does *not* mean we're not materialized
                 }
 
-                trace!(self.log, "readying node"; "local" => ni.id());
-                self.replay_done(ni, domain_rx);
-                trace!(self.log, "replay finished"; "local" => ni.id());
+                if self.not_ready.remove(&ni) {
+                    trace!(self.log, "readying empty node"; "local" => ni.id());
+                }
 
                 // swap replayed reader nodes to expose new state
                 {
@@ -542,7 +687,6 @@ impl Domain {
                     }
                 }
 
-
                 drop(ack);
             }
             Control::PrepareState(ni, on) => {
@@ -550,17 +694,26 @@ impl Domain {
                 state.set_pkey(on);
                 self.state.insert(ni, state);
             }
-            Control::Replay(nodes, mut tx, ack) => {
-                // let coordinator know that we've entered replay loop
+            Control::SetupReplayPath(tag, nodes, done, ack) => {
+                // let coordinator know that we've registered the tagged path
                 ack.send(()).unwrap();
 
-                // check for stupidity
-                assert!(!nodes.is_empty());
+                if done.is_some() {
+                    info!(self.log, "tag" => tag.id(); "told about terminating replay path {:?}", nodes);
+                    self.replaying_to = Some((*nodes.last().unwrap().as_local(), vec![]));
+                } else {
+                    info!(self.log, "tag" => tag.id(); "told about replay path {:?}", nodes);
+                }
+                self.replay_paths.insert(tag, (nodes, done));
+            }
+            Control::Replay(tag, node, ack) => {
+                // let coordinator know that we've entered replay loop
+                ack.send(()).unwrap();
 
                 let start = time::Instant::now();
                 info!(self.log, "starting replay");
 
-                // we know that nodes[0] is materialized, as the migration coordinator picks path
+                // we know that the node is materialized, as the migration coordinator picks path
                 // that originate with materialized nodes. if this weren't the case, we wouldn't be
                 // able to do the replay, and the entire migration would fail.
                 //
@@ -568,227 +721,25 @@ impl Domain {
                 // incoming updates to the domain without disturbing the state that is being
                 // replayed.
                 let state: State = self.state
-                    .get(nodes[0].as_local())
+                    .get(node.as_local())
                     .expect("migration replay path started with non-materialized node")
                     .clone();
 
                 debug!(self.log, "current state cloned for replay"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
 
-                if nodes.len() == 1 {
-                    // now, we can just send our entire state in one go, rather than chunk it. this
-                    // will be much faster than iterating over the map one-by-one and cloning each
-                    // record. furthermore, it allows the receiver to simply replace their current
-                    // empty state with this state if it is not passing thorugh other nodes.
-                    if let Some(tx) = tx {
-                        trace!(self.log, "sending full state");
-                        tx.send(ReplayBatch::Full(nodes[0], state)).unwrap();
-                    } else {
-                        // replaying a single node has no purpose if there isn't someone we're
-                        // sending to.
-                        unreachable!()
-                    }
-                    info!(self.log, "replay done using shortcut"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
-                    return;
+                let m = Message {
+                    from: node,
+                    to: node,
+                    replay: Some((tag, true, Some(state))),
+                    data: Vec::<Vec<DataType>>::new().into(),
+                    ts: None,
+                    token: None,
+                };
+
+                if let Some((tag, ni)) = self.handle_replay(m, inject) {
+                    self.replay_done(tag, ni, domain_rx);
+                    trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
                 }
-
-                // TODO: in the special case where nodes.len() == 2 and tx.is_none(), and we
-                // literally just need a copy of the state, we could early-terminate here.
-
-                // since we must have more than one node, this is safe
-                let init_to = nodes[1];
-
-                if tx.is_none() {
-                    // the sink node is in this domain. make sure we buffer any updates that get
-                    // propagated to it during the migration (as they logically follow the state
-                    // snapshot that is being replayed to it).
-                    trace!(self.log, "domain is also replay target");
-                    self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
-                                              Vec::new()));
-                }
-
-                // process all records in state to completion within domain
-                // and then forward on tx (if there is one)
-                'chunks: for (i, chunk) in state.into_iter()
-                    .flat_map(|(_, rs)| rs)
-                    .chunks(BATCH_SIZE)
-                    .into_iter()
-                    .enumerate() {
-                    use std::iter::FromIterator;
-                    let chunk = Records::from_iter(chunk.into_iter());
-                    let mut m = Message {
-                        from: nodes[0],
-                        to: init_to,
-                        data: chunk,
-                        ts: None,
-                        token: None,
-                    };
-
-                    // forward the current chunk through all local nodes
-                    for (i, ni) in nodes.iter().enumerate().skip(1) {
-                        // process the current chunk in this node
-                        let mut n = self.nodes[ni.as_local()].borrow_mut();
-                        assert!(ni != &nodes[0]);
-                        let u = n.process(m, &mut self.state, &self.nodes, false);
-                        drop(n);
-
-                        if u.is_none() {
-                            continue 'chunks;
-                        }
-
-                        m = Message {
-                            from: *ni,
-                            to: *ni,
-                            data: u.unwrap().0,
-                            ts: None,
-                            token: None,
-                        };
-
-                        if i != nodes.len() - 1 {
-                            m.to = nodes[i + 1];
-                        } else {
-                            // to is overwritten by receiving domain. from doesn't need to be set
-                            // to the egress, because the ingress ignores it. setting it to this
-                            // node is basically just as correct.
-                        }
-                    }
-
-                    if let Some(tx) = tx.as_mut() {
-                        trace!(self.log, "sending batch"; "#" => i, "[]" => m.data.len());
-                        tx.send(ReplayBatch::Partial(m)).unwrap();
-                    }
-
-                    // NOTE: at this point, the downstream domain is probably busy handling our
-                    // replayed message. We take this opportunity to process some updates from our
-                    // upstream.
-                    // TODO: don't do this for the last batch?
-                    self.mid_replay_process(domain_rx);
-                }
-
-                if tx.is_none() {
-                    // we must mark the node as ready immediately, otherwise it might miss updates
-                    // that follow the replay, but precede the ready.
-                    self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
-                }
-
-                info!(self.log, "replay done"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
-            }
-            Control::ReplayThrough(nodes, rx, mut tx, ack) => {
-                // let coordinator know that we've entered replay loop
-                ack.send(()).unwrap();
-
-                let start = time::Instant::now();
-                info!(self.log, "ready for replay");
-
-                // a couple of shortcuts first...
-                // if nodes.len() == 1, we know we're an ingress node, and we can just stuff the
-                // state directly into it. we *also* know that that ingress is the node whose state
-                // is being rebuilt.
-                if nodes.len() == 1 {
-                    assert!(self.nodes[nodes[0].as_local()].borrow().is_ingress());
-                    assert!(tx.is_none());
-                    for (i, batch) in rx.into_iter().enumerate() {
-                        match batch {
-                            ReplayBatch::Full(_, state) => {
-                                // oh boy, we're in luck! we just sent the full state we need for
-                                // this node. no need to process or anything, just move in the
-                                // state and we're done.
-                                // TODO: fall back to regular replay here
-                                assert_eq!(self.state[nodes[0].as_local()].get_pkey(),
-                                           state.get_pkey());
-                                self.state.insert(*nodes[0].as_local(), state);
-                                debug!(self.log, "direct state clone absorbed");
-                                break;
-                            }
-                            ReplayBatch::Partial(m) => {
-                                {
-                                    let state = self.state.get_mut(nodes[0].as_local()).unwrap();
-                                    for r in m.data.into_iter() {
-                                        match r {
-                                            ops::Record::Positive(r) => state.insert(r),
-                                            ops::Record::Negative(ref r) => state.remove(r),
-                                            ops::Record::DeleteRequest(..) => unreachable!(),
-                                        }
-                                    }
-                                    debug!(self.log, "direct state absorption of batch"; "#" => i);
-                                }
-
-                                // don't hog the domain
-                                self.mid_replay_process(domain_rx);
-                            }
-                        }
-                    }
-                    self.replay_done(*nodes[0].as_local(), domain_rx);
-                    info!(self.log, "replay completed using shortcut"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
-                    return;
-                }
-
-                let rx = BatchedIterator::new(rx, nodes[0]);
-
-                if tx.is_none() {
-                    // the sink node is in this domain. make sure we buffer any updates that get
-                    // propagated to it during the migration (as they logically follow the state
-                    // snapshot that is being replayed to it).
-                    trace!(self.log, "domain is replay target");
-                    self.replaying_to = Some((*nodes.last().as_ref().unwrap().as_local(),
-                                              Vec::new()));
-                }
-
-                // process all records in state to completion within domain
-                // and then forward on tx (if there is one)
-                let mut i = 0;
-                'replay: for m in rx {
-                    if let ReplayMessage::Batch(mut m) = m {
-                        debug!(self.log, "forwarding batch"; "#" => i);
-
-                        // forward the current message through all local nodes
-                        for (i, ni) in nodes.iter().enumerate() {
-                            // process the current message in this node
-                            let mut n = self.nodes[ni.as_local()].borrow_mut();
-                            let u = n.process(m, &mut self.state, &self.nodes, false);
-                            drop(n);
-
-                            if u.is_none() {
-                                continue 'replay;
-                            }
-
-                            m = Message {
-                                from: *ni,
-                                to: *ni,
-                                data: u.unwrap().0,
-                                ts: None,
-                                token: None,
-                            };
-
-                            if i != nodes.len() - 1 {
-                                m.to = nodes[i + 1];
-                            } else {
-                                // to is overwritten by receiving domain. from doesn't need to be set
-                                // to the egress, because the ingress ignores it. setting it to this
-                                // node is basically just as correct.
-                            }
-                        }
-
-                        if let Some(tx) = tx.as_mut() {
-                            trace!(self.log, "sending batch"; "#" => m.data.len());
-                            tx.send(ReplayBatch::Partial(m)).unwrap();
-                        }
-                        i += 1;
-                    }
-
-                    // NOTE: at this point, the downstream domain is probably busy handling our
-                    // replayed message. We take this opportunity to process some updates from our
-                    // upstream.
-                    // TODO: don't do this for the last batch?
-                    self.mid_replay_process(domain_rx);
-                }
-
-                if tx.is_none() {
-                    // we must mark the node as ready immediately, otherwise it might miss updates
-                    // that follow the replay, but precede the ready.
-                    self.replay_done(*nodes.last().unwrap().as_local(), domain_rx);
-                }
-
-                info!(self.log, "replay completed"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
             }
             Control::StartMigration(ts, channel) => {
                 let o = self.buffered_transactions
@@ -805,70 +756,6 @@ impl Domain {
                 assert!(o.is_none());
                 assert_eq!(ts, self.ts + 1);
                 self.apply_transactions();
-            }
-        }
-    }
-}
-
-use std::collections::hash_map;
-struct BatchedIterator {
-    rx: mpsc::Receiver<ReplayBatch>,
-    state_iter: Option<hash_map::IntoIter<DataType, Vec<Arc<Vec<DataType>>>>>,
-    to: NodeAddress,
-    from: Option<NodeAddress>,
-}
-
-impl BatchedIterator {
-    fn new(rx: mpsc::Receiver<ReplayBatch>, to: NodeAddress) -> Self {
-        BatchedIterator {
-            rx: rx,
-            state_iter: None,
-            to: to,
-            from: None,
-        }
-    }
-}
-
-enum ReplayMessage {
-    Batch(Message),
-    Continue,
-}
-
-impl Iterator for BatchedIterator {
-    type Item = ReplayMessage;
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(ref mut state_iter) = self.state_iter {
-            let from = self.from.unwrap();
-            let to = self.to;
-            let mut rs = Vec::with_capacity(BATCH_SIZE);
-            while let Some((_, next)) = state_iter.next() {
-                rs.extend(next);
-                if rs.len() >= BATCH_SIZE {
-                    break;
-                }
-            }
-            if rs.is_empty() {
-                None
-            } else {
-                use std::iter::FromIterator;
-                Some(ReplayMessage::Batch(Message {
-                    from: from,
-                    to: to,
-                    data: FromIterator::from_iter(rs.into_iter()),
-                    ts: None,
-                    token: None,
-                }))
-            }
-        } else {
-            match self.rx.try_recv() {
-                Err(mpsc::TryRecvError::Disconnected) => None,
-                Err(mpsc::TryRecvError::Empty) => Some(ReplayMessage::Continue),
-                Ok(ReplayBatch::Partial(m)) => Some(ReplayMessage::Batch(m)),
-                Ok(ReplayBatch::Full(from, state)) => {
-                    self.from = Some(from);
-                    self.state_iter = Some(state.into_iter());
-                    self.next()
-                }
             }
         }
     }
