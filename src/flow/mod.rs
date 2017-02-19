@@ -54,7 +54,7 @@ impl LocalNodeIndex {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 enum NodeAddress_ {
     Global(NodeIndex),
     Local(LocalNodeIndex), // XXX: maybe include domain here?
@@ -62,9 +62,18 @@ enum NodeAddress_ {
 
 /// `NodeAddress` is a unique identifier that can be used to refer to nodes in the graph across
 /// migrations.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 pub struct NodeAddress {
     addr: NodeAddress_, // wrap the enum so people can't create these accidentally
+}
+
+impl fmt::Debug for NodeAddress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.addr {
+            NodeAddress_::Global(ref ni) => write!(f, "NodeAddress::Global({})", ni.index()),
+            NodeAddress_::Local(ref li) => write!(f, "NodeAddress::Local({})", li.id()),
+        }
+    }
 }
 
 impl NodeAddress {
