@@ -441,8 +441,6 @@ impl Domain {
         m.to = nodes[0];
 
         if replay.2.is_some() && nodes.len() == 1 {
-            let state = replay.2.unwrap();
-
             // we've been given a state dump, and only have a single node in this domain that needs
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
             let node = nodes[0];
@@ -451,6 +449,7 @@ impl Domain {
                 // given the entire state. no need to process or anything, just move in the state
                 // and we're done.
                 // TODO: fall back to regular replay here
+                let state = replay.2.unwrap();
                 assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
                 self.state.insert(*node.as_local(), state);
                 debug!(self.log, "direct state clone absorbed");
@@ -461,10 +460,11 @@ impl Domain {
                 // be an egress node (since we're relaying to another domain).
                 let mut n = self.nodes[node.as_local()].borrow_mut();
                 if let Type::Egress { .. } = *n.inner {
-                    // we can just forward the state to the next domain without doing anything with
-                    // it.
-                    // TODO: egress node needs to know to only forward to *one* domain!
+                    // we can forward the state to the next domain without doing anything with it.
+                    m.replay = Some(replay);
+                    debug!(self.log, "doing bulk egress forward");
                     n.process(m, &mut self.state, &self.nodes, false);
+                    debug!(self.log, "bulk egress forward completed");
                     drop(n);
                 } else {
                     unreachable!();

@@ -104,7 +104,7 @@ impl NodeDescriptor {
                 // we need to find the ingress node following this egress according to the path
                 // with replay.tag, and then forward this message only on the channel corresponding
                 // to that ingress node.
-                let replay_to = m.replay.map(|r| {
+                let replay_to = m.replay.as_ref().map(|r| {
                     tags.lock()
                         .unwrap()
                         .get(&r.0)
@@ -112,7 +112,7 @@ impl NodeDescriptor {
                         .expect("egress node told about replay message, but not on replay path")
                 });
 
-                let ts = m.ts;
+                let mut replay = m.replay;
                 let mut u = Some(m.data); // so we can use .take()
                 for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
                     let mut take = txi == txn;
@@ -134,7 +134,7 @@ impl NodeDescriptor {
                     tx.send(Message {
                             from: NodeAddress::make_global(self.index),
                             to: dst,
-                            replay: None,
+                            replay: replay.take(),
                             data: data,
                             ts: m.ts,
                             token: None,
