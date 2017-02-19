@@ -145,9 +145,8 @@ impl NodeDescriptor {
                         break;
                     }
                 }
-
-                debug_assert!(u.is_some() || self.children.is_empty());
-                u.map(|update| (update, ts, None))
+                debug_assert!(u.is_none());
+                None
             }
             flow::node::Type::Internal(ref mut i) => {
                 let ts = m.ts;
