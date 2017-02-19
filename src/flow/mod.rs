@@ -903,7 +903,7 @@ impl<'a> Migration<'a> {
             // Give local addresses to every (new) node
             for &(ni, new) in nodes.iter() {
                 if new {
-                    debug!(log, "assigning local index"; "node" => ni.index(), "local" => nnodes);
+                    debug!(log, "assigning local index"; "type" => format!("{:?}", *mainline.ingredients[ni]), "node" => ni.index(), "local" => nnodes);
                     mainline.ingredients[ni].set_addr(NodeAddress::make_local(nnodes));
                     nnodes += 1;
                 }
