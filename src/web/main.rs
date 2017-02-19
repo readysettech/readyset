@@ -3,8 +3,6 @@ extern crate distributary;
 extern crate slog;
 extern crate slog_term;
 
-use slog::DrainExt;
-
 #[cfg(feature="web")]
 fn main() {
     use distributary::*;
