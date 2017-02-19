@@ -1,8 +1,7 @@
 use nom_sql::parser as sql_parser;
 use flow::{NodeAddress, Migration};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              FunctionExpression, Operator, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, SqlQuery};
 use nom_sql::SelectStatement;
 use ops;
 use ops::base::Base;
@@ -39,6 +38,12 @@ impl Default for SqlIncorporator {
             num_queries: 0,
         }
     }
+}
+
+/// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
+enum GroupedNodeType {
+    Aggregation(ops::grouped::aggregate::Aggregation),
+    Extremum(ops::grouped::extremum::Extremum),
 }
 
 impl SqlIncorporator {
@@ -204,14 +209,14 @@ impl SqlIncorporator {
         Some(na)
     }
 
-    fn make_aggregation_node(&mut self,
-                             name: &str,
-                             computed_col_name: &str,
-                             over: (NodeAddress, usize), // address, column ID
-                             group_by: &[Column],
-                             agg: ops::grouped::aggregate::Aggregation,
-                             mig: &mut Migration)
-                             -> NodeAddress {
+    fn make_grouped_node(&mut self,
+                         name: &str,
+                         computed_col_name: &str,
+                         over: (NodeAddress, usize), // address, column ID
+                         group_by: &[Column],
+                         node_type: GroupedNodeType,
+                         mig: &mut Migration)
+                         -> NodeAddress {
         let parent_ni = over.0;
 
         // Resolve column IDs in parent
@@ -226,9 +231,19 @@ impl SqlIncorporator {
         combined_columns.push(String::from(computed_col_name));
 
         // make the new operator and record its metadata
-        let na = mig.add_ingredient(String::from(name),
-                                    combined_columns.as_slice(),
-                                    agg.over(parent_ni, over_col_indx, group_col_indx.as_slice()));
+        let na = match node_type {
+            GroupedNodeType::Aggregation(agg) => {
+                mig.add_ingredient(String::from(name),
+                                   combined_columns.as_slice(),
+                                   agg.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
+            }
+            GroupedNodeType::Extremum(extr) => {
+                mig.add_ingredient(String::from(name),
+                                   combined_columns.as_slice(),
+
+                                   extr.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
+            }
+        };
         self.node_addresses.insert(String::from(name), na);
         self.node_fields.insert(na, combined_columns);
         na
@@ -242,8 +257,11 @@ impl SqlIncorporator {
                           mig: &mut Migration)
                           -> NodeAddress {
         use ops::grouped::aggregate::Aggregation;
+        use ops::grouped::extremum::Extremum;
+        use nom_sql::FunctionExpression::*;
+        use nom_sql::FieldExpression::*;
 
-        let mut mknode = |cols: &Vec<Column>, t: Aggregation| {
+        let mut mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
             // No support for multi-columns functions at this point
             assert_eq!(cols.len(), 1);
 
@@ -257,29 +275,27 @@ impl SqlIncorporator {
             };
             let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
 
-            self.make_aggregation_node(name,
-                                       &func_col.name,
-                                       (parent_ni, over_col_indx),
-                                       group_cols,
-                                       t,
-                                       mig)
+            self.make_grouped_node(name,
+                                   &func_col.name,
+                                   (parent_ni, over_col_indx),
+                                   group_cols,
+                                   t,
+                                   mig)
         };
 
         let func = func_col.function.as_ref().unwrap();
         match *func {
-            FunctionExpression::Sum(FieldExpression::Seq(ref cols)) => {
-                mknode(cols, Aggregation::SUM)
-            }
-            FunctionExpression::Count(FieldExpression::Seq(ref cols)) => {
-                mknode(cols, Aggregation::COUNT)
-            }
-            FunctionExpression::Count(FieldExpression::All) => {
+            Sum(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::SUM)),
+            Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            Count(All) => {
                 // XXX(malte): we will need a special operator here, since COUNT(*) refers to all
                 // rows in the group (if we have a GROUP BY) or table/view (if we don't). As such,
                 // there is no "over" column, but our aggregation operators' API requires one to be
                 // specified.
                 unimplemented!()
             }
+            Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
+            Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
             _ => unimplemented!(),
         }
     }
