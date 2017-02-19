@@ -440,16 +440,31 @@ impl Domain {
         // the replay source doesn't know who it is replaying to, so we need to set to correctly
         m.to = nodes[0];
 
-        if replay.2.is_some() && nodes.len() == 1 {
+        // we may be able to just absorb all the state in one go if we're lucky!
+        let mut can_handle_directly = replay.2.is_some() && nodes.len() == 1;
+        if can_handle_directly {
+            // unfortunately, if this is a reader node, we can't just copy in the state
+            // since State and Reader use different internal data structures
+            // TODO: can we do better?
+            use flow::node::Type;
+            let n = self.nodes[nodes[0].as_local()].borrow();
+            if let Type::Reader(..) = *n.inner {
+                can_handle_directly = false;
+            }
+        }
+
+        if can_handle_directly {
             // we've been given a state dump, and only have a single node in this domain that needs
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
             let node = nodes[0];
+
             if done.is_some() {
                 // oh boy, we're in luck! we're replaying into one of our nodes, and were just
                 // given the entire state. no need to process or anything, just move in the state
                 // and we're done.
                 // TODO: fall back to regular replay here
                 let state = replay.2.unwrap();
+                debug!(self.log, "absorbing state clone"; "node" => node.as_local().id());
                 assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
                 self.state.insert(*node.as_local(), state);
                 debug!(self.log, "direct state clone absorbed");
@@ -466,11 +481,11 @@ impl Domain {
                     n.process(m, &mut self.state, &self.nodes, false);
                     debug!(self.log, "bulk egress forward completed");
                     drop(n);
+                    return None;
                 } else {
                     unreachable!();
                 }
             }
-            return None;
         }
 
         if let Some(state) = replay.2 {
