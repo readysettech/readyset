@@ -424,7 +424,7 @@ pub fn reconstruct(log: &Logger,
 
         // first, tell all the domains about the replay path
         let mut seen = HashSet::new();
-        for (i, &(ref domain, _)) in segments.iter().enumerate() {
+        for (i, &(ref domain, ref nodes)) in segments.iter().enumerate() {
             // TODO:
             //  a domain may appear multiple times in this list if a path crosses into the same
             //  domain more than once. currently, that will cause a deadlock.
@@ -445,6 +445,14 @@ pub fn reconstruct(log: &Logger,
                 assert!(done_tx.is_some());
                 if let domain::Control::SetupReplayPath(_, _, ref mut done, _) = setup {
                     *done = done_tx.take();
+                }
+            } else {
+                // the last node *must* be an egress node since there's a later domain
+                if let flow::node::Type::Egress { ref tags, .. } = *graph[*nodes.last().unwrap()] {
+                    let mut tags = tags.lock().unwrap();
+                    tags.insert(tag, segments[i + 1].1[0].into());
+                } else {
+                    unreachable!();
                 }
             }
 

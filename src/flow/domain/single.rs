@@ -94,44 +94,56 @@ impl NodeDescriptor {
                 // readers never have children
                 None
             }
-            flow::node::Type::Egress(ref txs) => {
+            flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
 
-                if let Some(ref replay) = m.replay {
-                    // TODO: we need to find the ingress node following this egress according to
-                    // the path with replay.tag, and then forward this message only on the channel
-                    // corresponding to that ingress node. unfortunately, we don't currently have
-                    // that information here (we only have the tag)...
-                    // TODO TODO TODO TODO TODO TODO
-                    unimplemented!();
-                }
+                debug_assert!(self.children.is_empty());
+
+                // we need to find the ingress node following this egress according to the path
+                // with replay.tag, and then forward this message only on the channel corresponding
+                // to that ingress node.
+                let replay_to = m.replay.map(|r| {
+                    tags.lock()
+                        .unwrap()
+                        .get(&r.0)
+                        .map(|n| *n)
+                        .expect("egress node told about replay message, but not on replay path")
+                });
 
                 let ts = m.ts;
                 let mut u = Some(m.data); // so we can use .take()
-                for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
-                    if txi == txn && self.children.is_empty() {
-                            tx.send(Message {
-                                // the ingress node knows where it should go
-                                from: NodeAddress::make_global(self.index),
-                                to: dst,
-                                replay: None,
-                                data: u.take().unwrap(),
-                                ts: m.ts,
-                                token: None,
-                            })
+                for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
+                    let mut take = txi == txn;
+                    if let Some(replay_to) = replay_to.as_ref() {
+                        if replay_to == globaddr {
+                            take = true;
                         } else {
-                            tx.send(Message {
-                                from: NodeAddress::make_global(self.index),
-                                to: dst,
-                                replay: None,
-                                data: u.clone().unwrap(),
-                                ts: m.ts,
-                                token: None,
-                            })
+                            continue;
                         }
+                    }
+
+                    // avoid cloning if this is last send
+                    let data = if take {
+                        u.take().unwrap()
+                    } else {
+                        u.clone().unwrap()
+                    };
+
+                    tx.send(Message {
+                            from: NodeAddress::make_global(self.index),
+                            to: dst,
+                            replay: None,
+                            data: data,
+                            ts: m.ts,
+                            token: None,
+                        })
                         .unwrap();
+
+                    if take {
+                        break;
+                    }
                 }
 
                 debug_assert!(u.is_some() || self.children.is_empty());

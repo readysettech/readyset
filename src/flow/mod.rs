@@ -113,9 +113,9 @@ impl Into<usize> for NodeAddress {
     }
 }
 
-impl From<usize> for NodeAddress {
-    fn from(o: usize) -> Self {
-        NodeAddress { addr: NodeAddress_::Global(NodeIndex::new(o)) }
+impl From<NodeIndex> for NodeAddress {
+    fn from(o: NodeIndex) -> Self {
+        NodeAddress { addr: NodeAddress_::Global(o) }
     }
 }
 

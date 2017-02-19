@@ -460,7 +460,7 @@ impl Domain {
                 // if we're not terminal, and the domain only has a single node, that node *has* to
                 // be an egress node (since we're relaying to another domain).
                 let mut n = self.nodes[node.as_local()].borrow_mut();
-                if let Type::Egress(..) = *n.inner {
+                if let Type::Egress { .. } = *n.inner {
                     // we can just forward the state to the next domain without doing anything with
                     // it.
                     // TODO: egress node needs to know to only forward to *one* domain!

@@ -74,7 +74,7 @@ pub fn add(log: &Logger,
             if !new.contains(child) {
                 continue;
             }
-            if let node::Type::Egress(..) = *graph[*child] {
+            if let node::Type::Egress { .. } = *graph[*child] {
                 for ingress in graph.neighbors_directed(*child, petgraph::EdgeDirection::Outgoing) {
                     // this egress already contains this node to the ingress' domain
                     egresses.insert(graph[ingress].domain(), *child);
@@ -93,7 +93,10 @@ pub fn add(log: &Logger,
                 if !egresses.contains_key(&cdomain) {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
-                    let proxy = graph[node].mirror(node::Type::Egress(Default::default()));
+                    let proxy = graph[node].mirror(node::Type::Egress {
+                        tags: Default::default(),
+                        txs: Default::default(),
+                    });
                     let egress = graph.add_node(proxy);
                     graph.add_edge(node, egress, false);
 
@@ -138,7 +141,7 @@ pub fn add(log: &Logger,
             // since we are traversing in topological order, egress nodes should have been added to
             // all our parents, and our incoming edges should have been updated. if that *isn't*
             // the case for a given parent, it must be a pre-existing parent.
-            if let node::Type::Egress(..) = *graph[*parent] {
+            if let node::Type::Egress { .. } = *graph[*parent] {
                 continue;
             }
 
@@ -148,7 +151,10 @@ pub fn add(log: &Logger,
 
             let egress = egress.unwrap_or_else(|| {
                 // no, okay, so we need to add an egress for that other node,
-                let proxy = graph[*parent].mirror(node::Type::Egress(Default::default()));
+                let proxy = graph[*parent].mirror(node::Type::Egress{
+                    txs: Default::default(),
+                    tags: Default::default()
+                });
                 let egress = graph.add_node(proxy);
 
                 trace!(log, "adding cross-domain egress to existing node"; "node" => parent.index(), "egress" => egress.index());
@@ -241,11 +247,11 @@ pub fn connect(log: &Logger,
 
         for egress in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             match *graph[egress] {
-                node::Type::Egress(ref txs) => {
+                node::Type::Egress { ref txs, .. } => {
                     trace!(log, "connecting"; "egress" => egress.index(), "ingress" => node.index());
                     txs.lock()
                         .unwrap()
-                        .push((n.addr(), data_txs[&n.domain()].clone()));
+                        .push((node.into(), n.addr(), data_txs[&n.domain()].clone()));
                     continue;
                 }
                 node::Type::Source => continue,
