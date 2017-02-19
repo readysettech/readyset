@@ -490,7 +490,7 @@ impl Domain {
                     let to = m.to;
 
                     let start = time::Instant::now();
-                    debug!(log, "starting state chunker"; "node" => from.as_local().id());
+                    debug!(log, "starting state chunker"; "node" => to.as_local().id());
 
                     let iter = state.into_iter()
                         .flat_map(|(_, rs)| rs)
@@ -518,7 +518,7 @@ impl Domain {
                         inject.lock().unwrap().send(m).unwrap();
                     }
 
-                    debug!(log, "state chunker finished"; "node" => from.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
+                    debug!(log, "state chunker finished"; "node" => to.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
                 }).unwrap();
             return None;
         }
