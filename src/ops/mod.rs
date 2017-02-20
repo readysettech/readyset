@@ -8,6 +8,7 @@ pub mod union;
 pub mod identity;
 pub mod gatedid;
 pub mod filter;
+pub mod topk;
 
 use flow::data::DataType;
 use std::ops::{Deref, DerefMut};
