@@ -10,7 +10,7 @@ use std::collections::HashMap;
 fn it_works() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let (a,b, cq) = {
+    let (a, b, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::new(0));
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::new(0));
@@ -238,7 +238,8 @@ fn it_works_deletion() {
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
     muta.delete(2.into());
-    assert_eq!(cq.recv(), Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
+    assert_eq!(cq.recv(),
+               Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }
 
 #[test]
