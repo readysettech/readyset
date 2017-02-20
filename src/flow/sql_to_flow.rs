@@ -146,6 +146,7 @@ impl SqlIncorporator {
                              mut mig: &mut Migration)
                              -> (String, Vec<NodeAddress>) {
         use flow::sql::passes::alias_removal::AliasRemoval;
+        use flow::sql::passes::count_star_rewrite::CountStarRewrite;
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
@@ -153,7 +154,8 @@ impl SqlIncorporator {
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
             .expand_stars(&self.write_schemas)
-            .expand_implied_tables(&self.write_schemas);
+            .expand_implied_tables(&self.write_schemas)
+            .rewrite_count_star(&self.write_schemas);
 
         let (name, new_nodes) = match q {
             SqlQuery::CreateTable(ctq) => {
@@ -288,18 +290,19 @@ impl SqlIncorporator {
             Sum(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::SUM)),
             Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
             Count(All) => {
-                // XXX(malte): we will need a special operator here, since COUNT(*) refers to all
-                // rows in the group (if we have a GROUP BY) or table/view (if we don't). As such,
-                // there is no "over" column, but our aggregation operators' API requires one to be
-                // specified.
-                unimplemented!()
+                // XXX(malte): there is no "over" column, but our aggregation operators' API
+                // requires one to be specified, so we earlier rewrote it to use the first parent
+                // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
+                // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
+                // rows including those with NULL values, and we don't have a mechanism to do that
+                // (but we also don't have a NULL value, so maybe we're okay).
+                panic!("COUNT(*) should have been rewritten earlier!")
             }
             Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
             Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
             _ => unimplemented!(),
         }
     }
-
 
     fn make_projection_helper(&mut self,
                               name: &str,
@@ -321,8 +324,8 @@ impl SqlIncorporator {
                 cols.last().unwrap()
             }
             Count(All) => {
-                // pick an arbitrary column to compute over
-                unimplemented!()
+                // see comment re COUNT(*) rewriting in make_aggregation_node
+                panic!("COUNT(*) should have been rewritten earlier!")
             }
             _ => panic!("invalid aggregation function"),
         };
@@ -927,6 +930,43 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"], &[]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.fields(), &["grp", "count"]);
+        assert_eq!(agg_view.description(), format!("|*| γ[1]"));
+        // check edge view -- note that it's not actually currently possible to read from
+        // this for a lack of key (the value would be the key)
+        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
+        assert_eq!(edge_view.fields(), &["count"]);
+        assert_eq!(edge_view.description(), format!("π[1]"));
+    }
+
+    #[test]
+    fn it_incorporates_aggregation_count_star() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish a base write type
+        assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
+                       None,
+                       &mut mig)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(mig.graph().node_count(), 2);
+        assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
+        assert_eq!(get_node(&inc, &mig, "votes").fields(), &["aid", "userid"]);
+        assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
+        // Try a simple COUNT function without a GROUP BY clause
+        let res = inc.add_query("SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        // added the aggregation, a project helper, the edge view, and reader
+        assert_eq!(mig.graph().node_count(), 5);
+        // check aggregation view
+        let qid = query_id_hash(&["computed_columns", "votes"],
+                                &[&Column::from("votes.userid")]);
+        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
