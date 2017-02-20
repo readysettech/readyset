@@ -921,11 +921,10 @@ mod tests {
         assert_eq!(mig.graph().node_count(), 6);
         // check project helper node
         let qid = query_id_hash(&["computed_columns", "votes"], &[]);
-        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2_prj_hlpr", qid));
-        assert_eq!(agg_view.fields(), &["userid", "grp"]);
-        assert_eq!(agg_view.description(), format!("π[1, lit: 0]"));
+        let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n2_prj_hlpr", qid));
+        assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
+        assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
         // check aggregation view
-        let qid = query_id_hash(&["computed_columns", "votes"], &[]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.fields(), &["grp", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
