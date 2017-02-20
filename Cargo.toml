@@ -10,6 +10,7 @@ b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
+b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcache"]
 
 [dependencies]
 itertools = "0.5"
