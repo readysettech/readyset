@@ -73,12 +73,12 @@ path = "src/web/sql_main.rs"
 
 [[bin]]
 name = "bank"
-path = "benchmarks/bank.rs"
+path = "benchmarks/bank/bank.rs"
 
 [[bin]]
 name = "vote"
-path = "benchmarks/vote.rs"
+path = "benchmarks/vote/vote.rs"
 
 [[bin]]
 name = "multitail"
-path = "benchmarks/multitail.rs"
+path = "benchmarks/multitail/multitail.rs"
