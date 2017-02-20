@@ -569,12 +569,10 @@ impl SqlIncorporator {
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
                                 // Generate the right function nodes for all relevant columns in
                                 // the "computed_columns" node
-                                // TODO(malte): I think we don't need to record the group columns
-                                // with the function since there can only be one GROUP BY in each
-                                // query, but I should verify this.
-                                // TODO(malte): what about computed columns without a GROUP BY?
-                                // XXX(malte): ensure that the GROUP BY columns are all on the same
-                                // (and correct) table assert!(computed_cols_cgn.columns.all());
+                                // TODO(malte): there can only be one GROUP BY in each query, but
+                                // the columns can come from different tables. In that case, we
+                                // would need to generate an Agg-Join-Agg sequence for each pair of
+                                // tables involved.
                                 for fn_col in &computed_cols_cgn.columns {
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
