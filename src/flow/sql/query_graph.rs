@@ -2,8 +2,11 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldEx
 use nom_sql::SelectStatement;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
+
+use flow::sql::query_signature::QuerySignature;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
@@ -24,13 +27,6 @@ pub struct QueryGraph {
     pub edges: HashMap<(String, String), QueryGraphEdge>,
 }
 
-#[derive(Clone, Debug)]
-pub struct QuerySignature<'a> {
-    pub relations: HashSet<&'a str>,
-    pub attributes: HashSet<&'a Column>,
-    pub hash: u64,
-}
-
 impl QueryGraph {
     fn new() -> QueryGraph {
         QueryGraph {
@@ -43,7 +39,6 @@ impl QueryGraph {
     /// for identical sets of relations and attributes covered (as per Finkelstein algorithm),
     /// while `relations` and `attributes` as `HashSet`s that allow for efficient subset checks.
     pub fn signature(&self) -> QuerySignature {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
