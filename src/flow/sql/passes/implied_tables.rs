@@ -57,37 +57,62 @@ fn rewrite_conditional<F>(translate_column: &F, ce: ConditionExpression) -> Cond
 
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
+        use nom_sql::FunctionExpression::*;
+
+        let find_table = |f: &Column| -> Option<String> {
+            let mut matches = write_schemas.iter()
+                .filter_map(|(t, ws)| {
+                    let num_matching = ws.iter()
+                        .filter(|c| **c == f.name)
+                        .count();
+                    assert!(num_matching <= 1);
+                    if num_matching == 1 {
+                        Some((*t).clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<String>>();
+            if matches.len() > 1 {
+                panic!("Ambiguous column {} specified. Matching tables: {:?}",
+                       f.name,
+                       matches);
+            } else if matches.is_empty() {
+                panic!("Failed to resolve table for column named {}", f.name);
+            } else {
+                // exactly one match
+                Some(matches.pop().unwrap())
+            }
+        };
+
         let translate_column = |mut f: Column| -> Column {
             f.table = match f.table {
                 None => {
-                    if f.function.is_some() {
-                        // There is no implied table (other than "self") for anonymous function
-                        // columns
-                        None
-                    } else {
-                        let mut matches = write_schemas.iter()
-                            .filter_map(|(t, ws)| {
-                                let num_matching = ws.iter()
-                                    .filter(|c| **c == f.name)
-                                    .count();
-                                assert!(num_matching <= 1);
-                                if num_matching == 1 {
-                                    Some((*t).clone())
-                                } else {
+                    match f.function {
+                        Some(ref mut f) => {
+                            // There is no implied table (other than "self") for anonymous function
+                            // columns, but we have to peek inside the function to expand implied
+                            // tables in its specification
+                            match *f {
+                                Avg(ref mut fe) |
+                                Count(ref mut fe) |
+                                Sum(ref mut fe) |
+                                Min(ref mut fe) |
+                                Max(ref mut fe) |
+                                GroupConcat(ref mut fe) => {
+                                    match *fe {
+                                        FieldExpression::Seq(ref mut fields) => {
+                                            for f in fields.iter_mut() {
+                                                f.table = find_table(f);
+                                            }
+                                        }
+                                        _ => (),
+                                    }
                                     None
                                 }
-                            })
-                            .collect::<Vec<String>>();
-                        if matches.len() > 1 {
-                            panic!("Ambiguous column {} specified. Matching tables: {:?}",
-                                   f.name,
-                                   matches);
-                        } else if matches.is_empty() {
-                            panic!("Failed to resolve table for column named {}", f.name);
-                        } else {
-                            // exactly one match
-                            Some(matches.pop().unwrap())
+                            }
                         }
+                        None => find_table(&f),
                     }
                 }
                 Some(x) => Some(x),

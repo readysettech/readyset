@@ -3,6 +3,7 @@ pub mod grouped;
 pub mod join;
 pub mod latest;
 pub mod permute;
+pub mod project;
 pub mod union;
 pub mod identity;
 pub mod gatedid;

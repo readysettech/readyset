@@ -1,8 +1,7 @@
 use nom_sql::parser as sql_parser;
 use flow::{NodeAddress, Migration};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              FunctionExpression, Operator, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, SqlQuery};
 use nom_sql::SelectStatement;
 use ops;
 use ops::base::Base;
@@ -39,6 +38,12 @@ impl Default for SqlIncorporator {
             num_queries: 0,
         }
     }
+}
+
+/// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
+enum GroupedNodeType {
+    Aggregation(ops::grouped::aggregate::Aggregation),
+    Extremum(ops::grouped::extremum::Extremum),
 }
 
 impl SqlIncorporator {
@@ -141,6 +146,7 @@ impl SqlIncorporator {
                              mut mig: &mut Migration)
                              -> (String, Vec<NodeAddress>) {
         use flow::sql::passes::alias_removal::AliasRemoval;
+        use flow::sql::passes::count_star_rewrite::CountStarRewrite;
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
@@ -148,7 +154,8 @@ impl SqlIncorporator {
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
             .expand_stars(&self.write_schemas)
-            .expand_implied_tables(&self.write_schemas);
+            .expand_implied_tables(&self.write_schemas)
+            .rewrite_count_star(&self.write_schemas);
 
         let (name, new_nodes) = match q {
             SqlQuery::CreateTable(ctq) => {
@@ -169,9 +176,7 @@ impl SqlIncorporator {
                 }
             }
             SqlQuery::Select(sq) => {
-                let (qg, nodes) = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
-                // Store the query graph for later reference
-                self.query_graphs.push(qg);
+                let nodes = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
                 // Return new nodes
                 (query_name, nodes)
             }
@@ -204,18 +209,18 @@ impl SqlIncorporator {
         Some(na)
     }
 
-    fn make_aggregation_node(&mut self,
-                             name: &str,
-                             computed_col_name: &str,
-                             over: &Column,
-                             group_by: &[Column],
-                             agg: ops::grouped::aggregate::Aggregation,
-                             mig: &mut Migration)
-                             -> NodeAddress {
-        let parent_ni = self.address_for(over.table.as_ref().unwrap());
+    fn make_grouped_node(&mut self,
+                         name: &str,
+                         computed_col_name: &str,
+                         over: (NodeAddress, usize), // address, column ID
+                         group_by: &[Column],
+                         node_type: GroupedNodeType,
+                         mig: &mut Migration)
+                         -> NodeAddress {
+        let parent_ni = over.0;
 
         // Resolve column IDs in parent
-        let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
+        let over_col_indx = over.1;
         let group_col_indx = group_by.iter()
             .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
             .collect::<Vec<_>>();
@@ -226,9 +231,19 @@ impl SqlIncorporator {
         combined_columns.push(String::from(computed_col_name));
 
         // make the new operator and record its metadata
-        let na = mig.add_ingredient(String::from(name),
-                                    combined_columns.as_slice(),
-                                    agg.over(parent_ni, over_col_indx, group_col_indx.as_slice()));
+        let na = match node_type {
+            GroupedNodeType::Aggregation(agg) => {
+                mig.add_ingredient(String::from(name),
+                                   combined_columns.as_slice(),
+                                   agg.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
+            }
+            GroupedNodeType::Extremum(extr) => {
+                mig.add_ingredient(String::from(name),
+                                   combined_columns.as_slice(),
+
+                                   extr.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
+            }
+        };
         self.node_addresses.insert(String::from(name), na);
         self.node_fields.insert(na, combined_columns);
         na
@@ -238,47 +253,116 @@ impl SqlIncorporator {
                           name: &str,
                           func_col: &Column,
                           group_cols: &[Column],
+                          parent: Option<NodeAddress>, // XXX(malte): nasty hack for non-grouped funcs
                           mig: &mut Migration)
                           -> NodeAddress {
         use ops::grouped::aggregate::Aggregation;
+        use ops::grouped::extremum::Extremum;
+        use nom_sql::FunctionExpression::*;
+        use nom_sql::FieldExpression::*;
+
+        let mut mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
+            // No support for multi-columns functions at this point
+            assert_eq!(cols.len(), 1);
+
+            let over = cols.iter().next().unwrap();
+            let parent_ni = match parent {
+                // If no explicit parent node is specified, we extract the base node from the
+                // "over" column's specification
+                None => self.address_for(over.table.as_ref().unwrap()),
+                // We have an explicit parent node (likely a projection helper), so use that
+                Some(ni) => ni,
+            };
+            let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
+
+            self.make_grouped_node(name,
+                                   &func_col.name,
+                                   (parent_ni, over_col_indx),
+                                   group_cols,
+                                   t,
+                                   mig)
+        };
 
         let func = func_col.function.as_ref().unwrap();
         match *func {
-            FunctionExpression::Sum(FieldExpression::Seq(ref cols)) => {
-                // No support for multi-columns counts
-                assert_eq!(cols.len(), 1);
-
-                // println!("SUM over {:?}", over);
-                let over = cols.iter().next().unwrap();
-                self.make_aggregation_node(name,
-                                           &func_col.name,
-                                           over,
-                                           group_cols,
-                                           Aggregation::SUM,
-                                           mig)
+            Sum(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::SUM)),
+            Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            Count(All) => {
+                // XXX(malte): there is no "over" column, but our aggregation operators' API
+                // requires one to be specified, so we earlier rewrote it to use the first parent
+                // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
+                // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
+                // rows including those with NULL values, and we don't have a mechanism to do that
+                // (but we also don't have a NULL value, so maybe we're okay).
+                panic!("COUNT(*) should have been rewritten earlier!")
             }
-            FunctionExpression::Count(FieldExpression::Seq(ref cols)) => {
-                // No support for multi-columns counts
-                assert_eq!(cols.len(), 1);
-
-                // println!("COUNT over {:?}", over);
-                let over = cols.iter().next().unwrap();
-                self.make_aggregation_node(name,
-                                           &func_col.name,
-                                           over,
-                                           group_cols,
-                                           Aggregation::COUNT,
-                                           mig)
-            }
-            FunctionExpression::Count(FieldExpression::All) => {
-                // XXX(malte): we will need a special operator here, since COUNT(*) refers to all
-                // rows in the group (if we have a GROUP BY) or table/view (if we don't). As such,
-                // there is no "over" column, but our aggregation operators' API requires one to be
-                // specified.
-                unimplemented!()
-            }
+            Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
+            Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
             _ => unimplemented!(),
         }
+    }
+
+    fn make_projection_helper(&mut self,
+                              name: &str,
+                              computed_col: &Column,
+                              mig: &mut Migration)
+                              -> NodeAddress {
+        use nom_sql::FunctionExpression::*;
+        use nom_sql::FieldExpression::*;
+
+        let fn_col = match *computed_col.function.as_ref().unwrap() {
+            Avg(Seq(ref cols)) |
+            Count(Seq(ref cols)) |
+            GroupConcat(Seq(ref cols)) |
+            Max(Seq(ref cols)) |
+            Min(Seq(ref cols)) |
+            Sum(Seq(ref cols)) => {
+                // TODO(malte): we only support a single column argument at this point
+                assert_eq!(cols.len(), 1);
+                cols.last().unwrap()
+            }
+            Count(All) => {
+                // see comment re COUNT(*) rewriting in make_aggregation_node
+                panic!("COUNT(*) should have been rewritten earlier!")
+            }
+            _ => panic!("invalid aggregation function"),
+        };
+
+        self.make_project_node(name,
+                               fn_col.table.as_ref().unwrap(),
+                               vec![fn_col],
+                               vec![("grp", DataType::Number(0))],
+                               mig)
+    }
+
+    fn make_project_node(&mut self,
+                         name: &str,
+                         parent_name: &str,
+                         proj_cols: Vec<&Column>,
+                         literals: Vec<(&str, DataType)>,
+                         mig: &mut Migration)
+                         -> NodeAddress {
+        use ops::project::Project;
+
+        let parent_ni = self.address_for(&parent_name);
+        //assert!(proj_cols.iter().all(|c| c.table == parent_name));
+        let proj_col_ids: Vec<usize> = proj_cols.iter()
+            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
+            .collect();
+
+        let mut col_names: Vec<String> =
+            proj_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        let (literal_names, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
+        col_names.extend(literal_names.into_iter().map(String::from));
+
+        let n = mig.add_ingredient(String::from(name),
+                                   col_names.as_slice(),
+                                   Project::new(parent_ni,
+                                                proj_col_ids.as_slice(),
+                                                Some(literal_values)));
+        self.node_addresses.insert(String::from(name), n);
+        self.node_fields.insert(n, col_names);
+        n
     }
 
     fn make_filter_and_project_nodes(&mut self,
@@ -379,13 +463,28 @@ impl SqlIncorporator {
                                 st: &SelectStatement,
                                 name: &str,
                                 mig: &mut Migration)
-                                -> (QueryGraph, Vec<NodeAddress>) {
+                                -> Vec<NodeAddress> {
         use std::collections::HashMap;
 
         let qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
+
+        // Do we already have this exact query or a subset of it?
+        for existing_qg in self.query_graphs.iter() {
+            if existing_qg.signature() == qg.signature() {
+                // we already have this exact query, so we don't need to add anything
+                return vec![];
+            }
+            if existing_qg.signature().is_generalization_of(&qg.signature()) {
+                info!(mig.log,
+                      "candidate query graph for reuse: {:?}",
+                      existing_qg);
+            }
+        }
+        // If not, store the query graph for later reference
+        self.query_graphs.push(qg.clone());
 
         let nodes_added;
 
@@ -476,44 +575,52 @@ impl SqlIncorporator {
                 None => (),
                 Some(computed_cols_cgn) => {
                     // Function columns with GROUP BY clause
+                    let mut grouped_fn_columns = HashSet::new();
                     for e in qg.edges.values() {
                         match *e {
                             QueryGraphEdge::Join(_) => (),
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
                                 // Generate the right function nodes for all relevant columns in
                                 // the "computed_columns" node
-                                // TODO(malte): I think we don't need to record the group columns
-                                // with the function since there can only be one GROUP BY in each
-                                // query, but I should verify this.
-                                // TODO(malte): what about computed columns without a GROUP BY?
-                                // XXX(malte): ensure that the GROUP BY columns are all on the same
-                                // (and correct) table assert!(computed_cols_cgn.columns.all());
+                                // TODO(malte): there can only be one GROUP BY in each query, but
+                                // the columns can come from different tables. In that case, we
+                                // would need to generate an Agg-Join-Agg sequence for each pair of
+                                // tables involved.
                                 for fn_col in &computed_cols_cgn.columns {
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
                                                                               i),
                                                                      fn_col,
                                                                      gb_cols,
+                                                                     None,
                                                                      mig);
                                     func_nodes.push(ni);
+                                    grouped_fn_columns.insert(fn_col);
                                     i += 1;
                                 }
                             }
                         }
                     }
-                    // TODO: Function columns without GROUP BY
-                    for fn_col in computed_cols_cgn.columns
+                    // Function columns without GROUP BY
+                    for computed_col in computed_cols_cgn.columns
                         .iter()
-                        .filter(|c| match c.function {
-                            Some(FunctionExpression::Count(FieldExpression::All)) => true,
-                            _ => false,
-                        })
+                        .filter(|c| !grouped_fn_columns.contains(c))
                         .collect::<Vec<_>>() {
-                        let ni =
-                            self.make_function_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
-                                                    fn_col,
-                                                    &[],
-                                                    mig);
+
+                        let agg_node_name = &format!("q_{:x}_n{}", qg.signature().hash, i);
+
+                        // slightly messy hack: if there are no group columns, we make one up by adding an extra
+                        // projection node
+                        let proj_name = format!("{}_prj_hlpr", agg_node_name);
+                        let proj = self.make_projection_helper(&proj_name, computed_col, mig);
+                        let bogo_group_col = Column::from(format!("{}.grp", proj_name).as_str());
+                        func_nodes.push(proj);
+
+                        let ni = self.make_function_node(agg_node_name,
+                                                         computed_col,
+                                                         &[bogo_group_col],
+                                                         Some(proj),
+                                                         mig);
                         func_nodes.push(ni);
                         i += 1;
                     }
@@ -529,6 +636,7 @@ impl SqlIncorporator {
                 } else if !func_nodes.is_empty() {
                     // XXX(malte): This won't work if (a) there are multiple function nodes in the
                     // query, or (b) computed columns are used within JOIN clauses
+                    assert!(func_nodes.len() <= 2);
                     func_nodes.last().unwrap()
                 } else {
                     assert!(filter_nodes.len() == 1);
@@ -566,7 +674,7 @@ impl SqlIncorporator {
                 .chain(func_nodes.into_iter())
                 .collect();
         }
-        (qg, nodes_added)
+        nodes_added
     }
 }
 
@@ -801,8 +909,42 @@ mod tests {
     }
 
     #[test]
-    // Activate when we have support for COUNT(*)
-    #[ignore]
+    fn it_reuses_identical_query() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish a base write type
+        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+                       None,
+                       &mut mig)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(mig.graph().node_count(), 2);
+        assert_eq!(get_node(&inc, &mig, "users").name(), "users");
+        assert_eq!(get_node(&inc, &mig, "users").fields(), &["id", "name"]);
+        assert_eq!(get_node(&inc, &mig, "users").description(), "B");
+
+        // Add a new query
+        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+
+        // Add the same query again
+        let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        let ncount = mig.graph().node_count();
+        // should have added no more nodes
+        assert_eq!(res.unwrap().1, vec![]);
+        assert_eq!(mig.graph().node_count(), ncount);
+    }
+
+
+    #[test]
     fn it_incorporates_aggregation_no_group_by() {
         // set up graph
         let mut g = Blender::new();
@@ -820,19 +962,63 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "votes").fields(), &["aid", "userid"]);
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
         // Try a simple COUNT function without a GROUP BY clause
-        let res = inc.add_query("SELECT COUNT(*) AS count FROM votes;", None, &mut mig);
+        let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;",
+                                None,
+                                &mut mig);
         assert!(res.is_ok());
-        // added the aggregation and the edge view, and reader
-        assert_eq!(mig.graph().node_count(), 5);
-        // check aggregation view
+        // added the aggregation, a project helper, the edge view, and reader
+        assert_eq!(mig.graph().node_count(), 6);
+        // check project helper node
         let qid = query_id_hash(&["computed_columns", "votes"], &[]);
+        let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n2_prj_hlpr", qid));
+        assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
+        assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
+        // check aggregation view
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["count"]);
+        assert_eq!(agg_view.fields(), &["grp", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
-        // check edge view
+        // check edge view -- note that it's not actually currently possible to read from
+        // this for a lack of key (the value would be the key)
         let edge_view = get_node(&inc, &mig, &res.unwrap().0);
         assert_eq!(edge_view.fields(), &["count"]);
-        assert_eq!(edge_view.description(), format!("π[0]"));
+        assert_eq!(edge_view.description(), format!("π[1]"));
+    }
+
+    #[test]
+    fn it_incorporates_aggregation_count_star() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish a base write type
+        assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
+                       None,
+                       &mut mig)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(mig.graph().node_count(), 2);
+        assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
+        assert_eq!(get_node(&inc, &mig, "votes").fields(), &["aid", "userid"]);
+        assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
+        // Try a simple COUNT function without a GROUP BY clause
+        let res = inc.add_query("SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        // added the aggregation, a project helper, the edge view, and reader
+        assert_eq!(mig.graph().node_count(), 5);
+        // check aggregation view
+        let qid = query_id_hash(&["computed_columns", "votes"],
+                                &[&Column::from("votes.userid")]);
+        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        assert_eq!(agg_view.fields(), &["userid", "count"]);
+        assert_eq!(agg_view.description(), format!("|*| γ[1]"));
+        // check edge view -- note that it's not actually currently possible to read from
+        // this for a lack of key (the value would be the key)
+        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
+        assert_eq!(edge_view.fields(), &["count"]);
+        assert_eq!(edge_view.description(), format!("π[1]"));
     }
 
     #[test]
