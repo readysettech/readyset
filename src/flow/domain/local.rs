@@ -157,6 +157,14 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.values()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.state.len()
+    }
+
     pub fn lookup(&self, key: usize, value: &T) -> &[Arc<Vec<T>>] {
         debug_assert_ne!(self.pkey,
                          usize::max_value(),

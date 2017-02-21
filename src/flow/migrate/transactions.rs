@@ -50,7 +50,7 @@ fn add_time_egress(nodes: &mut Vec<(NodeIndex, bool)>, graph: &mut Graph) -> Vec
 /// `TimestampIngress` nodes.
 pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
                       graph: &mut Graph,
-                      time_txs: &HashMap<domain::Index, mpsc::SyncSender<i64>>) {
+                      txs: &HashMap<domain::Index, mpsc::SyncSender<Packet>>) {
 
     // For every *new* base node, add a TimeEgress node after it so that it can communicate to
     // other domains about a new assigned timestamp. This is to ensure that every domain learns
@@ -113,7 +113,7 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
             continue;
         }
 
-        let tx = time_txs[domain].clone();
+        let tx = txs[domain].clone();
         let t = node::Type::TimestampIngress(Arc::new(Mutex::new(tx)));
         let mut proxy = node::Node::new::<_, Vec<String>, _>("time-node", vec![], t);
         proxy.add_to(*domain);
@@ -135,7 +135,7 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
                 .next()
                 .expect("ts egress must be child of base node");
 
-            let mut txs = arc.lock().unwrap();
+            let mut te_txs = arc.lock().unwrap();
             for &(domain, ingress) in &new_time_ingress {
                 // is this egress' base node already connected to this domain somehow?
                 let connected =
@@ -147,7 +147,7 @@ pub fn add_time_nodes(nodes: &mut HashMap<domain::Index, Vec<(NodeIndex, bool)>>
                     continue;
                 }
 
-                txs.push(time_txs[&domain].clone());
+                te_txs.push(txs[&domain].clone());
                 add_to.push(ingress);
             }
         }
@@ -190,13 +190,16 @@ pub fn finalize(log: &Logger,
                 graph: &Graph,
                 source: NodeIndex,
                 domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
-                control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
-                ts: i64) {
+                txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
+                at: i64) {
     for (domain, nodes) in domain_nodes {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ingress_from_base = count_base_ingress(graph, source, &nodes[..]);
-        let ctx = control_txs.get_mut(&domain).unwrap();
-        let _ = ctx.send(domain::Control::CompleteMigration(ts, ingress_from_base));
+        let ctx = txs.get_mut(&domain).unwrap();
+        let _ = ctx.send(Packet::CompleteMigration {
+            at: at,
+            ingress_from_base: ingress_from_base,
+        });
     }
 
 }

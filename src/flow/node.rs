@@ -13,7 +13,8 @@ use checktable;
 use query::DataType;
 use ops::{Record, Datas};
 use flow::domain;
-use flow::{Message, Ingredient, NodeAddress, Edge};
+use flow::{Ingredient, NodeAddress, Edge};
+use flow::payload::Packet;
 use flow::migrate::materialization::Tag;
 
 use backlog;
@@ -116,11 +117,11 @@ pub enum Type {
     Ingress,
     Internal(Box<Ingredient>),
     Egress {
-        txs: sync::Arc<sync::Mutex<Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Message>)>>>,
+        txs: sync::Arc<sync::Mutex<Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>>>,
         tags: sync::Arc<sync::Mutex<HashMap<Tag, NodeAddress>>>,
     },
-    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
-    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
+    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<Packet>>>),
+    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<Packet>>>>),
     Reader(Option<backlog::WriteHandle>, Reader),
     Source,
 }

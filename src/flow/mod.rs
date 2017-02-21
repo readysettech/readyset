@@ -20,6 +20,7 @@ use slog;
 pub mod domain;
 pub mod prelude;
 pub mod node;
+pub mod payload;
 mod migrate;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -31,17 +32,6 @@ macro_rules! dur_to_ns {
 }
 
 pub type Edge = bool; // should the edge be materialized?
-
-/// A Message exchanged over an edge in the graph.
-#[derive(Clone)]
-pub struct Message {
-    pub from: NodeAddress,
-    pub to: NodeAddress,
-    pub data: prelude::Records,
-    pub replay: Option<(prelude::Tag, bool, Option<prelude::State>)>,
-    pub ts: Option<(i64, NodeIndex)>,
-    pub token: Option<(checktable::Token, mpsc::Sender<checktable::TransactionResult>)>,
-}
 
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
@@ -262,7 +252,7 @@ pub trait Ingredient
 #[derive(Clone)]
 pub struct Mutator {
     src: NodeAddress,
-    tx: mpsc::SyncSender<Message>,
+    tx: mpsc::SyncSender<payload::Packet>,
     addr: NodeAddress,
     key_column: Option<usize>,
 }
@@ -271,13 +261,9 @@ impl Mutator {
     /// Perform a non-transactional write to the base node this Mutator was generated for.
     pub fn put(&self, u: Vec<query::DataType>) {
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Message {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![u].into(),
-                ts: None,
-                token: None,
             })
             .unwrap()
     }
@@ -289,13 +275,10 @@ impl Mutator {
                              -> checktable::TransactionResult {
         let (send, recv) = mpsc::channel();
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Transaction {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![u].into(),
-                ts: None,
-                token: Some((t, send)),
+                state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
         recv.recv().unwrap()
@@ -304,13 +287,9 @@ impl Mutator {
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
     pub fn delete(&self, key: query::DataType) {
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Message {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![prelude::Record::DeleteRequest(key)].into(),
-                ts: None,
-                token: None,
             })
             .unwrap()
     }
@@ -322,13 +301,10 @@ impl Mutator {
                                 -> checktable::TransactionResult {
         let (send, recv) = mpsc::channel();
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Transaction {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![prelude::Record::DeleteRequest(key)].into(),
-                ts: None,
-                token: Some((t, send)),
+                state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
         recv.recv().unwrap()
@@ -341,13 +317,9 @@ impl Mutator {
             .expect("update operations can only be applied to base nodes with key columns");
 
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Message {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
-                ts: None,
-                token: None,
             })
             .unwrap()
     }
@@ -363,13 +335,10 @@ impl Mutator {
 
         let (send, recv) = mpsc::channel();
         self.tx
-            .send(Message {
-                from: self.src,
-                to: self.addr,
-                replay: None,
+            .send(payload::Packet::Transaction {
+                link: payload::Link::new(self.src, self.addr),
                 data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
-                ts: None,
-                token: Some((t, send)),
+                state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
         recv.recv().unwrap()
@@ -388,9 +357,7 @@ pub struct Blender {
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
 
-    control_txs: HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
-    data_txs: HashMap<domain::Index, mpsc::SyncSender<Message>>,
-    time_txs: HashMap<domain::Index, mpsc::SyncSender<i64>>,
+    txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
 
     log: slog::Logger,
 }
@@ -406,9 +373,7 @@ impl Default for Blender {
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
 
-            control_txs: HashMap::default(),
-            data_txs: HashMap::default(),
-            time_txs: HashMap::default(),
+            txs: HashMap::default(),
 
             log: slog::Logger::root(slog::Discard, None),
         }
@@ -527,7 +492,7 @@ impl Blender {
             .next()
             .unwrap();
         let node = &self.ingredients[n];
-        let tx = self.data_txs[&node.domain()].clone();
+        let tx = self.txs[&node.domain()].clone();
 
         trace!(self.log, "creating mutator"; "for" => n.index());
         Mutator {
@@ -866,27 +831,20 @@ impl<'a> Migration<'a> {
             });
 
         let mut rxs = HashMap::new();
-        let mut time_rxs = HashMap::new();
 
-        // Set up control and data channels for new domains
+        // Set up input channels for new domains
         for domain in domain_nodes.keys() {
-            if !mainline.data_txs.contains_key(domain) {
+            if !mainline.txs.contains_key(domain) {
                 let (tx, rx) = mpsc::sync_channel(10);
                 rxs.insert(*domain, rx);
-                mainline.data_txs.insert(*domain, tx);
-            }
-
-            if !mainline.time_txs.contains_key(domain) {
-                let (tx, rx) = mpsc::sync_channel(10);
-                time_rxs.insert(*domain, rx);
-                mainline.time_txs.insert(*domain, tx);
+                mainline.txs.insert(*domain, tx);
             }
         }
 
         // Add transactional time nodes
         migrate::transactions::add_time_nodes(&mut domain_nodes,
                                               &mut mainline.ingredients,
-                                              &mainline.time_txs);
+                                              &mainline.txs);
 
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
@@ -972,20 +930,18 @@ impl<'a> Migration<'a> {
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
         for domain in changed_domains {
-            if mainline.control_txs.contains_key(&domain) {
+            if !rxs.contains_key(&domain) {
                 // this is not a new domain
                 continue;
             }
 
             // Start up new domain
-            let ctx = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
-                                                 &mut mainline.ingredients,
-                                                 uninformed_domain_nodes.remove(&domain).unwrap(),
-                                                 mainline.checktable.clone(),
-                                                 rxs.remove(&domain).unwrap(),
-                                                 time_rxs.remove(&domain).unwrap(),
-                                                 start_ts);
-            mainline.control_txs.insert(domain, ctx);
+            migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                       &mut mainline.ingredients,
+                                       uninformed_domain_nodes.remove(&domain).unwrap(),
+                                       mainline.checktable.clone(),
+                                       rxs.remove(&domain).unwrap(),
+                                       start_ts);
         }
         drop(rxs);
 
@@ -994,7 +950,7 @@ impl<'a> Migration<'a> {
         migrate::augmentation::inform(&log,
                                       &mut mainline.ingredients,
                                       mainline.source,
-                                      &mut mainline.control_txs,
+                                      &mut mainline.txs,
                                       uninformed_domain_nodes,
                                       start_ts);
 
@@ -1004,7 +960,7 @@ impl<'a> Migration<'a> {
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
         info!(log, "bringing up inter-domain connections");
-        migrate::routing::connect(&log, &mut mainline.ingredients, &mainline.data_txs, &new);
+        migrate::routing::connect(&log, &mut mainline.ingredients, &mainline.txs, &new);
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
@@ -1013,16 +969,25 @@ impl<'a> Migration<'a> {
                                              mainline.source,
                                              &new,
                                              index,
-                                             &mut mainline.control_txs);
+                                             &mut mainline.txs);
 
         info!(log, "finalizing migration");
         migrate::transactions::finalize(&log,
                                         &mainline.ingredients,
                                         mainline.source,
                                         domain_nodes,
-                                        &mut mainline.control_txs,
+                                        &mut mainline.txs,
                                         end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
+    }
+}
+
+impl Drop for Blender {
+    fn drop(&mut self) {
+        for (_, tx) in &mut self.txs {
+            // don't unwrap, because given domain may already have terminated
+            drop(tx.send(payload::Packet::Quit));
+        }
     }
 }

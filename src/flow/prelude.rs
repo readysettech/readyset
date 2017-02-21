@@ -6,7 +6,7 @@ pub use flow::LocalNodeIndex;
 pub use flow::node::Node;
 use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
-pub use flow::Message;
+pub use flow::payload::{Link, Packet};
 pub use flow::migrate::materialization::Tag;
 use flow::domain::single;
 use std::cell;

@@ -233,7 +233,7 @@ pub fn add(log: &Logger,
 
 pub fn connect(log: &Logger,
                graph: &mut Graph,
-               data_txs: &HashMap<domain::Index, mpsc::SyncSender<Message>>,
+               main_txs: &HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                new: &HashSet<NodeIndex>) {
 
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -251,7 +251,7 @@ pub fn connect(log: &Logger,
                     trace!(log, "connecting"; "egress" => egress.index(), "ingress" => node.index());
                     txs.lock()
                         .unwrap()
-                        .push((node.into(), n.addr(), data_txs[&n.domain()].clone()));
+                        .push((node.into(), n.addr(), main_txs[&n.domain()].clone()));
                     continue;
                 }
                 node::Type::Source => continue,
