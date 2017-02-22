@@ -356,10 +356,7 @@ impl Domain {
                 self.buffer_transaction(m);
             }
             m @ Packet::Replay { .. } => {
-                if let Some((tag, ni)) = self.handle_replay(m, inject_tx) {
-                    self.replay_done(tag, ni, domain_rx);
-                    trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
-                }
+                self.handle_replay(m, domain_rx, inject_tx);
             }
             Packet::Timestamp(ts) => {
                 let o = BufferedTransaction::RemoteTransaction;
@@ -390,7 +387,7 @@ impl Domain {
 
                 if done_tx.is_some() {
                     info!(self.log, "tag" => tag.id(); "told about terminating replay path {:?}", path);
-                    self.replaying_to = Some((*path.last().unwrap().as_local(), vec![]));
+                    // NOTE: we set self.replaying_to when we first receive a replay with this tag
                 } else {
                     info!(self.log, "tag" => tag.id(); "told about replay path {:?}", path);
                 }
@@ -424,10 +421,7 @@ impl Domain {
                     data: ReplayData::StateCopy(state),
                 };
 
-                if let Some((tag, ni)) = self.handle_replay(m, inject_tx) {
-                    self.replay_done(tag, ni, domain_rx);
-                    trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
-                }
+                self.handle_replay(m, domain_rx, inject_tx);
             }
             Packet::Ready { node, index, ack } => {
                 if let Some(index) = index {
@@ -485,9 +479,25 @@ impl Domain {
         }
     }
 
-    fn handle_replay(&mut self, m: Packet, inject: &mut InjectCh) -> Option<(Tag, LocalNodeIndex)> {
+    fn handle_replay(&mut self,
+                     m: Packet,
+                     domain_rx: &mut mpsc::Receiver<Packet>,
+                     inject_tx: &mut InjectCh) {
+        let mut finished = None;
+        let mut playback = None;
         if let Packet::Replay { mut link, tag, last, data } = m {
             let &mut (ref path, ref mut done_tx) = self.replay_paths.get_mut(&tag).unwrap();
+
+            if done_tx.is_some() && self.replaying_to.is_none() {
+                // this is the first message we receive for this tagged replay path. only at this
+                // point should we start buffering messages for the target node. since the node is
+                // not yet marked ready, all previous messages for this node will automatically be
+                // discarded by dispatch(). the reason we should ignore all messages preceeding the
+                // first replay message is that those have already been accounted for in the state
+                // we are being replayed. if we buffered them and applied them after all the state
+                // has been replayed, we would double-apply those changes, which is bad.
+                self.replaying_to = Some((*path.last().unwrap().as_local(), vec![]));
+            }
 
             // we may be able to just absorb all the state in one go if we're lucky!
             let mut can_handle_directly = path.len() == 1;
@@ -519,7 +529,7 @@ impl Domain {
                         assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
                         self.state.insert(*node.as_local(), state);
                         debug!(self.log, "direct state clone absorbed");
-                        Some((tag, *node.as_local()))
+                        finished = Some((tag, *node.as_local()));
                     } else if can_handle_directly {
                         use flow::node::Type;
                         // if we're not terminal, and the domain only has a single node, that node
@@ -538,7 +548,6 @@ impl Domain {
                             n.process(p, &mut self.state, &self.nodes, false);
                             debug!(self.log, "bulk egress forward completed");
                             drop(n);
-                            None
                         } else {
                             unreachable!();
                         }
@@ -557,28 +566,31 @@ impl Domain {
                         };
 
                         debug!(self.log, "empty full state replay conveyed");
-                        if let Err(_) = inject.try_send(p) {
-                            // FIXME
-                            // it *can* happen that inject is full if multiple replays are going on
-                            // at the same time. in that case, we need to do the send later, either
-                            // by spinning up a thread to do it in the background, or by storing it
-                            // somewhere that the main event loop will pick it up from.
-                            // for now, let's just not deal with it.
-                            unimplemented!()
-                        } else {
-                            None
-                        }
+                        playback = Some(p);
                     } else {
                         use std::thread;
 
-                        // we're been given an entire state snapshot, but we need to digest it piece by
-                        // piece spawn off a thread to do that chunking.
-                        let log = self.log.new(None);
-                        let inject = inject.clone();
+                        // we're been given an entire state snapshot, but we need to digest it
+                        // piece by piece spawn off a thread to do that chunking. however, before
+                        // we spin off that thread, we need to send a single Replay message to tell
+                        // the target domain to start buffering everything that follows. we can't
+                        // do that inside the thread, because by the time that thread is scheduled,
+                        // we may already have processed some other messages that are not yet a
+                        // part of state.
+                        let p = Packet::Replay {
+                            tag: tag,
+                            link: Link::new(path[0], path[0]), // to will be overwritten by receiver
+                            last: false,
+                            data: ReplayData::Records(Vec::<Record>::new().into()),
+                        };
+                        playback = Some(p);
+
                         // the sender doesn't know about us, it only knows about local nodes
                         // so we need to set the path correctly for process() to later work right
                         link.dst = path[0];
 
+                        let log = self.log.new(None);
+                        let inject_tx = inject_tx.clone();
                         thread::Builder::new()
                         .name(format!("replay{}.{}",
                                       self.nodes.iter().next().unwrap().borrow().domain().index(),
@@ -616,12 +628,11 @@ impl Domain {
                                 };
 
                                 trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                inject.send(p).unwrap();
+                                inject_tx.send(p).unwrap();
                             }
 
                             debug!(log, "state chunker finished"; "node" => to.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
                         }).unwrap();
-                        None
                     }
                 }
                 ReplayData::Records(data) => {
@@ -672,14 +683,20 @@ impl Domain {
                     if last && done_tx.is_some() {
                         let ni = *path.last().unwrap().as_local();
                         debug!(self.log, "last batch received"; "local" => ni.id());
-                        return Some((tag, ni));
+                        finished = Some((tag, ni));
                     }
-
-                    None
                 }
             }
         } else {
             unreachable!();
+        }
+
+        if let Some(p) = playback {
+            self.handle(p, domain_rx, inject_tx);
+        }
+        if let Some((tag, ni)) = finished {
+            self.replay_done(tag, ni, domain_rx);
+            trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
         }
     }
 
