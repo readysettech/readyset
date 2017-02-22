@@ -4,6 +4,7 @@ use query;
 use std::sync;
 use std::iter;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use flow::prelude::*;
 
@@ -254,9 +255,7 @@ impl Ingredient for Joiner {
         false
     }
 
-    fn replay_ancestor(&self) -> Option<NodeAddress> {
-        use std::collections::HashSet;
-
+    fn replay_ancestor(&self, empty: &HashSet<NodeAddress>) -> Option<NodeAddress> {
         // we want to replay an ancestor that we are *not* doing an outer join against
         // it's not *entirely* clear how to extract that from self.join, but we'll use the
         // following heuristic: find an ancestor that is never performed an outer join against.
@@ -269,6 +268,14 @@ impl Ingredient for Joiner {
             }
         }
         assert!(!options.is_empty());
+
+        // we may have multiple options in the case of an inner join
+        // if any of them are empty, choose that one, since our output is also empty!
+        for &option in &options {
+            if empty.contains(option) {
+                return Some(*option);
+            }
+        }
         options.into_iter().next().cloned()
     }
 

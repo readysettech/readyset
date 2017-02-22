@@ -144,7 +144,7 @@ pub trait Ingredient
     fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 
-    fn replay_ancestor(&self) -> Option<NodeAddress> {
+    fn replay_ancestor(&self, &HashSet<NodeAddress>) -> Option<NodeAddress> {
         None
     }
 

@@ -528,9 +528,13 @@ fn trace(graph: &Graph,
             // in particular, for a join, we should only replay the ancestor that yields the full
             // result-set (i.e., the left side of a left join).
             assert!(n.is_internal());
-            if let Some(picked_ancestor) = n.replay_ancestor() {
+            // find empty parents
+            let empty: HashSet<_> = parents.iter()
+                .filter(|ni| empty.contains(ni))
+                .map(|ni| graph[*ni].addr())
+                .collect();
+            if let Some(picked_ancestor) = n.replay_ancestor(&empty) {
                 // join, only replay picked ancestor
-                // TODO: make sure we "choose" to replay empty ancestors if there is one
                 // NOTE: this is a *non-deterministic* choice
                 parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
             } else {
@@ -540,15 +544,6 @@ fn trace(graph: &Graph,
 
         // there's no point in replaying parents that are empty
         parents.retain(|&parent| !empty.contains(&parent));
-
-        // here's a funny case:
-        //
-        //  - if we're a join
-        //  - and there's only one ancestor left
-        //  - and that ancestor is *not* an outer join target
-        //
-        // we know the output will be empty!
-        // TODO
 
         parents.into_iter()
             .flat_map(|parent| {
