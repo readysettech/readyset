@@ -109,6 +109,12 @@ impl From<NodeIndex> for NodeAddress {
     }
 }
 
+impl From<usize> for NodeAddress {
+    fn from(o: usize) -> Self {
+        NodeAddress::from(NodeIndex::new(o))
+    }
+}
+
 impl fmt::Display for NodeAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.addr {
