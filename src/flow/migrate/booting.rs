@@ -27,13 +27,9 @@ pub fn boot_new(log: Logger,
                 graph: &mut Graph,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
-                rx: mpsc::Receiver<Message>,
-                timestamp_rx: mpsc::Receiver<i64>,
-                ts: i64)
-                -> mpsc::SyncSender<domain::Control> {
-
+                rx: mpsc::Receiver<Packet>,
+                ts: i64) {
     let nodes = build_descriptors(graph, nodes);
-
     let domain = domain::Domain::new(log, nodes, checktable, ts);
-    domain.boot(rx, timestamp_rx)
+    domain.boot(rx)
 }

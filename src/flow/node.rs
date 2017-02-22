@@ -13,7 +13,9 @@ use checktable;
 use query::DataType;
 use ops::{Record, Datas};
 use flow::domain;
-use flow::{Message, Ingredient, NodeAddress, Edge};
+use flow::{Ingredient, NodeAddress, Edge};
+use flow::payload::Packet;
+use flow::migrate::materialization::Tag;
 
 use backlog;
 
@@ -114,9 +116,12 @@ impl DerefMut for NodeHandle {
 pub enum Type {
     Ingress,
     Internal(Box<Ingredient>),
-    Egress(sync::Arc<sync::Mutex<Vec<(NodeAddress, mpsc::SyncSender<Message>)>>>),
-    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<i64>>>),
-    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<i64>>>>),
+    Egress {
+        txs: sync::Arc<sync::Mutex<Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>>>,
+        tags: sync::Arc<sync::Mutex<HashMap<Tag, NodeAddress>>>,
+    },
+    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<Packet>>>),
+    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<Packet>>>>),
     Reader(Option<backlog::WriteHandle>, Reader),
     Source,
 }
@@ -148,7 +153,9 @@ impl Type {
             .collect();
 
         match *self {
-            Type::Ingress | Type::Reader(..) | Type::Egress(..) => {
+            Type::Ingress |
+            Type::Reader(..) |
+            Type::Egress { .. } => {
                 assert_eq!(parents.len(), 1);
                 graph[parents[0]].base_columns(column, graph, parents[0])
             }
@@ -192,7 +199,7 @@ impl fmt::Debug for Type {
         match *self {
             Type::Source => write!(f, "source node"),
             Type::Ingress => write!(f, "ingress node"),
-            Type::Egress(..) => write!(f, "egress node"),
+            Type::Egress { .. } => write!(f, "egress node"),
             Type::TimestampIngress(..) => write!(f, "time ingress node"),
             Type::TimestampEgress(..) => write!(f, "time egress node"),
             Type::Reader(..) => write!(f, "reader node"),
@@ -287,10 +294,13 @@ impl Node {
 
     pub fn take(&mut self) -> Node {
         let inner = match *self.inner {
-            Type::Egress(ref txs) => {
+            Type::Egress { ref tags, ref txs } => {
                 // egress nodes can still be modified externally if subgraphs are added
                 // so we just make a new one with a clone of the Mutex-protected Vec
-                Type::Egress(txs.clone())
+                Type::Egress {
+                    txs: txs.clone(),
+                    tags: tags.clone(),
+                }
             }
             Type::Reader(ref mut w, ref r) => {
                 // reader nodes can still be modified externally if txs are added
@@ -337,7 +347,7 @@ impl Node {
         match *self.inner {
             Type::Source => write!(f, "(source)"),
             Type::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
-            Type::Egress(..) => write!(f, "{{ {} | (egress) }}", idx.index()),
+            Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
             Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
             Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
@@ -372,7 +382,7 @@ impl Node {
     }
 
     pub fn is_egress(&self) -> bool {
-        if let Type::Egress(..) = *self.inner {
+        if let Type::Egress { .. } = *self.inner {
             true
         } else {
             false
@@ -399,7 +409,8 @@ impl Node {
     /// its domain.
     pub fn is_output(&self) -> bool {
         match *self.inner {
-            Type::Egress(..) | Type::Reader(..) => true,
+            Type::Egress { .. } |
+            Type::Reader(..) => true,
             _ => false,
         }
     }

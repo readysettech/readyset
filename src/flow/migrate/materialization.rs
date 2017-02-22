@@ -25,6 +25,18 @@ macro_rules! dur_to_ns {
     }}
 }
 
+use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
+static TAG_GENERATOR: AtomicUsize = ATOMIC_USIZE_INIT;
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct Tag(u32);
+
+impl Tag {
+    pub fn id(&self) -> u32 {
+        self.0
+    }
+}
+
 pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
     let nodes: Vec<_> = nodes.iter()
         .map(|&(ni, new)| (ni, &graph[ni], new))
@@ -233,7 +245,7 @@ pub fn initialize(log: &Logger,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
                   mut materialize: HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
-                  control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>) {
+                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>) {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
     while let Some(node) = topo.next(&*graph) {
@@ -269,11 +281,15 @@ pub fn initialize(log: &Logger,
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |control_txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Option<usize>| {
+        let ready = |txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Option<usize>| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             trace!(log, "readying node"; "node" => node.index());
-            control_txs[&d]
-                .send(domain::Control::Ready(*n.addr().as_local(), index_on, ack_tx))
+            txs[&d]
+                .send(Packet::Ready {
+                    node: *n.addr().as_local(),
+                    index: index_on,
+                    ack: ack_tx,
+                })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -288,14 +304,14 @@ pub fn initialize(log: &Logger,
             // all parents are empty, so we can materialize it immediately
             trace!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
-            ready(control_txs, index_on);
+            ready(txs, index_on);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
                 trace!(log, "no need to replay non-materialized view"; "node" => node.index());
-                ready(control_txs, index_on);
+                ready(txs, index_on);
                 continue;
             }
 
@@ -308,13 +324,13 @@ pub fn initialize(log: &Logger,
                         source,
                         &empty,
                         &materialize,
-                        control_txs,
+                        txs,
                         node,
                         index_on);
             debug!(log, "reconstruction started");
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
-            ready(control_txs, None);
+            ready(txs, None);
             info!(log, "reconstruction completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
         }
     }
@@ -325,7 +341,7 @@ pub fn reconstruct(log: &Logger,
                    source: NodeIndex,
                    empty: &HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
-                   control_txs: &mut HashMap<domain::Index, mpsc::SyncSender<domain::Control>>,
+                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                    node: NodeIndex,
                    index_on: Option<usize>) {
 
@@ -354,8 +370,11 @@ pub fn reconstruct(log: &Logger,
         let index_on = index_on.expect("all non-reader nodes must have a state key");
 
         // tell the domain in question to create an empty state for the node in question
-        control_txs[&graph[node].domain()]
-            .send(domain::Control::PrepareState(*graph[node].addr().as_local(), index_on))
+        txs[&graph[node].domain()]
+            .send(Packet::PrepareState {
+                node: *graph[node].addr().as_local(),
+                index: index_on,
+            })
             .unwrap();
     }
 
@@ -370,7 +389,8 @@ pub fn reconstruct(log: &Logger,
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        trace!(log, "replaying along path {:?}", path);
+        let tag = Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32);
+        trace!(log, "tag" => tag.id(); "replaying along path {:?}", path);
 
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
@@ -382,64 +402,36 @@ pub fn reconstruct(log: &Logger,
                 last_domain = Some(domain);
             }
 
-            if graph[node].is_egress() {
-                // we don't want replayed records to spill out into data channels
-            } else {
-                segments.last_mut().unwrap().1.push(node);
-            }
+            segments.last_mut().unwrap().1.push(node);
         }
 
         debug!(log, "domain replay path is {:?}", segments);
 
-        // next, daisy chain channels between them
-        // this includes the final domain, which will automatically populate `node` during replay
-        let (root_tx, mut next_rx) = mpsc::sync_channel(10);
-        let root_tx = if segments.len() == 1 {
-            // no channels needed
-            None
-        } else {
-            Some(root_tx)
-        };
-
         let locals = |i: usize| -> Vec<NodeAddress> {
-            segments[i]
-                .1
-                .iter()
-                .map(|&ni| graph[ni].addr())
-                .collect::<Vec<_>>()
+            if i == 0 {
+                // we're not replaying through the starter node
+                segments[i]
+                    .1
+                    .iter()
+                    .skip(1)
+                    .map(|&ni| graph[ni].addr())
+                    .collect::<Vec<_>>()
+            } else {
+                segments[i]
+                    .1
+                    .iter()
+                    .map(|&ni| graph[ni].addr())
+                    .collect::<Vec<_>>()
+            }
         };
 
-        let (wait_tx, wait_rx) = mpsc::sync_channel(0);
+        let (wait_tx, wait_rx) = mpsc::sync_channel(segments.len());
+        let (done_tx, done_rx) = mpsc::sync_channel(1);
+        let mut main_done_tx = Some(done_tx);
 
-        // first, tell the root domain to start replaying
-        trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
-        control_txs[&segments[0].0]
-            .send(domain::Control::Replay(locals(0), root_tx, wait_tx.clone()))
-            .unwrap();
-
-        // wait for the root to start replay.
-        //
-        // NOTE:
-        // this is crucial to prevent deadlock.
-        // if we *didn't* do this, we could run into the following situation:
-        //
-        //  - next domain in chain (let's call it [1]) receives ReplayThrough
-        //  - [1] enters replay loop (and crucially, stops running its main loop)
-        //  - [0] continues receiving records on its data channel
-        //  - [0] processes those records all the way to egress node connected to [1]
-        //  - [0] fills up channel between [0] egress and [1] ingress since [1] isn't reading
-        //  - [0] blocks on said channel
-        //
-        // now, [1] is blocking on [0] reading from its control channel, and [0] is blocking on [1]
-        // reading from its data channel. deadlock. yay!
-        //
-        // by having [n] wait for [0..n-1], we know that this won't happen.
-        wait_rx.recv().unwrap();
-        trace!(log, "root domain ready to replay");
-
-        // next, replay through the later domains one by one, linking up the daisy-chain
+        // first, tell all the domains about the replay path
         let mut seen = HashSet::new();
-        for (i, &(ref domain, _)) in segments.iter().skip(1).enumerate() {
+        for (i, &(ref domain, ref nodes)) in segments.iter().enumerate() {
             // TODO:
             //  a domain may appear multiple times in this list if a path crosses into the same
             //  domain more than once. currently, that will cause a deadlock.
@@ -447,24 +439,58 @@ pub fn reconstruct(log: &Logger,
                     "a-b-a domain replays are not yet supported");
             seen.insert(*domain);
 
-            let (tx, rx) = mpsc::sync_channel(10);
-            let tx = if i == segments.len() - 1 - 1 {
-                // last segment shouldn't emit anything
-                None
-            } else {
-                Some(tx)
+            let locals = locals(i);
+            if locals.is_empty() {
+                // first domain may *only* have the starter state
+                assert_eq!(i, 0);
+                continue;
+            }
+
+            let mut setup = Packet::SetupReplayPath {
+                tag: tag,
+                path: locals,
+                done_tx: None,
+                ack: wait_tx.clone(),
             };
+            if i == segments.len() - 1 {
+                // last domain should report when it's done
+                assert!(main_done_tx.is_some());
+                if let Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
+                    *done_tx = main_done_tx.take();
+                }
+            } else {
+                // the last node *must* be an egress node since there's a later domain
+                if let flow::node::Type::Egress { ref tags, .. } = *graph[*nodes.last().unwrap()] {
+                    let mut tags = tags.lock().unwrap();
+                    tags.insert(tag, segments[i + 1].1[0].into());
+                } else {
+                    unreachable!();
+                }
+            }
 
-            trace!(log, "telling next domain about replay"; "domain" => domain.index());
-            control_txs[domain]
-                .send(domain::Control::ReplayThrough(locals(i + 1), next_rx, tx, wait_tx.clone()))
-                .unwrap();
-            next_rx = rx;
-
-            // wait for this domain too -- see explanation above
-            wait_rx.recv().unwrap();
-            trace!(log, "domain ready for replay");
+            trace!(log, "telling domain about replay path"; "domain" => domain.index());
+            txs[domain].send(setup).unwrap();
         }
+
+        // wait for them all to have seen that message
+        for _ in &segments {
+            wait_rx.recv().unwrap();
+        }
+        trace!(log, "all domains ready for replay");
+
+        // next, tell the first domain to start playing
+        trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
+        txs[&segments[0].0]
+            .send(Packet::StartReplay {
+                tag: tag,
+                from: graph[segments[0].1[0]].addr(),
+                ack: wait_tx.clone(),
+            })
+            .unwrap();
+
+        // and finally, wait for the last domain to finish the replay
+        trace!(log, "waiting for done message from target"; "domain" => segments.last().unwrap().0.index());
+        done_rx.recv().unwrap();
     }
 }
 
@@ -504,6 +530,8 @@ fn trace(graph: &Graph,
             assert!(n.is_internal());
             if let Some(picked_ancestor) = n.replay_ancestor() {
                 // join, only replay picked ancestor
+                // TODO: make sure we "choose" to replay empty ancestors if there is one
+                // NOTE: this is a *non-deterministic* choice
                 parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
             } else {
                 // union; just replay all

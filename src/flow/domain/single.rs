@@ -1,11 +1,7 @@
+use ops;
 use flow;
 use petgraph::graph::NodeIndex;
 use flow::prelude::*;
-
-use ops;
-use checktable;
-
-use std::sync;
 
 macro_rules! broadcast {
     ($from:expr, $handoffs:ident, $m:expr, $children:expr) => {{
@@ -49,26 +45,25 @@ impl NodeDescriptor {
     }
 
     pub fn process(&mut self,
-                   m: Message,
+                   mut m: Packet,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    swap: bool)
-                   -> Option<(Records,
-                              Option<(i64, NodeIndex)>,
-                              Option<(checktable::Token,
-                                      sync::mpsc::Sender<checktable::TransactionResult>)>)> {
+                   -> Packet {
 
+        use flow::payload::TransactionState;
         let addr = *self.addr().as_local();
         match *self.inner {
             flow::node::Type::Ingress => {
-                materialize(&m.data, state.get_mut(&addr));
-                Some((m.data, m.ts, m.token))
+                materialize(m.data(), state.get_mut(&addr));
+                m
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
-                    state.add(m.data.iter().cloned());
-                    if m.ts.is_some() {
-                        state.update_ts(m.ts.unwrap().0);
+                    state.add(m.data().iter().cloned());
+                    if let Packet::Transaction { state: TransactionState::Committed(ts, _), .. } =
+                        m {
+                        state.update_ts(ts);
                     }
 
                     if swap {
@@ -76,7 +71,7 @@ impl NodeDescriptor {
                     }
                 }
 
-                let mut data = Some(m.data); // so we can .take() for last tx
+                let mut data = Some(m.take_data()); // so we can .take() for last tx
                 let mut txs = r.streamers.lock().unwrap();
                 let mut left = txs.len();
 
@@ -92,54 +87,74 @@ impl NodeDescriptor {
                 });
 
                 // readers never have children
-                None
+                Packet::None
             }
-            flow::node::Type::Egress(ref txs) => {
+            flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
 
-                let ts = m.ts;
-                let mut u = Some(m.data); // so we can use .take()
-                for (txi, &mut (dst, ref mut tx)) in txs.iter_mut().enumerate() {
-                    if txi == txn && self.children.is_empty() {
-                            tx.send(Message {
-                                // the ingress node knows where it should go
-                                from: NodeAddress::make_global(self.index),
-                                to: dst,
-                                data: u.take().unwrap(),
-                                ts: m.ts,
-                                token: None,
-                            })
-                        } else {
-                            tx.send(Message {
-                                from: NodeAddress::make_global(self.index),
-                                to: dst,
-                                data: u.clone().unwrap(),
-                                ts: m.ts,
-                                token: None,
-                            })
-                        }
-                        .unwrap();
-                }
+                debug_assert!(self.children.is_empty());
 
-                debug_assert!(u.is_some() || self.children.is_empty());
-                u.map(|update| (update, ts, None))
-            }
-            flow::node::Type::Internal(ref mut i) => {
-                let ts = m.ts;
-                let u = i.on_input(m.from, m.data, nodes, state);
-                materialize(&u, state.get_mut(&addr));
-                Some((u, ts, None))
-            }
-            flow::node::Type::TimestampEgress(ref txs) => {
-                if let Some((ts, _)) = m.ts {
-                    let txs = txs.lock().unwrap();
-                    for tx in txs.iter() {
-                        tx.send(ts).unwrap();
+                // we need to find the ingress node following this egress according to the path
+                // with replay.tag, and then forward this message only on the channel corresponding
+                // to that ingress node.
+                let replay_to = if let Packet::Replay { tag, .. } = m {
+                    Some(tags.lock()
+                        .unwrap()
+                        .get(&tag)
+                        .map(|n| *n)
+                        .expect("egress node told about replay message, but not on replay path"))
+                } else {
+                    None
+                };
+
+                let mut m = Some(m); // so we can use .take()
+                for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
+                    let mut take = txi == txn;
+                    if let Some(replay_to) = replay_to.as_ref() {
+                        if replay_to == globaddr {
+                            take = true;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    // avoid cloning if this is last send
+                    let mut m = if take {
+                        m.take().unwrap()
+                    } else {
+                        // we know this is a data (not a replay)
+                        // because, a replay will force a take
+                        m.as_ref().map(|m| m.clone_data()).unwrap()
+                    };
+
+                    m.link_mut().src = NodeAddress::make_global(self.index);
+                    m.link_mut().dst = dst;
+
+                    tx.send(m).unwrap();
+
+                    if take {
+                        break;
                     }
                 }
-                None
+                debug_assert!(m.is_none());
+                Packet::None
+            }
+            flow::node::Type::Internal(ref mut i) => {
+                let from = m.link().src;
+                m.map_data(|data| i.on_input(from, data, nodes, state));
+                materialize(m.data(), state.get_mut(&addr));
+                m
+            }
+            flow::node::Type::TimestampEgress(ref txs) => {
+                if let Packet::Transaction { state: TransactionState::Committed(ts, _), .. } = m {
+                    let txs = txs.lock().unwrap();
+                    for tx in txs.iter() {
+                        tx.send(Packet::Timestamp(ts)).unwrap();
+                    }
+                }
+                Packet::None
             }
             flow::node::Type::TimestampIngress(..) |
             flow::node::Type::Source => unreachable!(),
