@@ -5,11 +5,12 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [features]
 web = ["rustful", "rustc-serialize"]
-b_memcached = ["memcache"]
+b_memcached = ["memcached-rs"]
 b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
 b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
+b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcached-rs"]
 
 [dependencies]
 itertools = "0.5"
@@ -43,7 +44,7 @@ tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
 mysql = { version = "8.0", optional = true }
 r2d2_mysql = { version = "8.0", optional = true }
 # memcached
-memcache = { git = "https://github.com/aisk/rust-memcache.git", rev = "f2df617a8a7dec2dfcd4cda76002d8c10b993263", optional = true }
+memcached-rs = { version = "0.1.2", optional = true }
 # netsoup
 futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
@@ -73,12 +74,12 @@ path = "src/web/sql_main.rs"
 
 [[bin]]
 name = "bank"
-path = "benchmarks/bank.rs"
+path = "benchmarks/bank/bank.rs"
 
 [[bin]]
 name = "vote"
-path = "benchmarks/vote.rs"
+path = "benchmarks/vote/vote.rs"
 
 [[bin]]
 name = "multitail"
-path = "benchmarks/multitail.rs"
+path = "benchmarks/multitail/multitail.rs"
