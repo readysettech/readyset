@@ -1108,34 +1108,48 @@ fn state_replay_migration_query() {
 }
 
 #[test]
-#[ignore]
 fn tpc_w() {
     use std::io::Read;
     use std::fs::File;
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut inc = distributary::SqlIncorporator::default();
-    let mut mig = g.start_migration();
+    let mut r = distributary::Recipe::blank();
+    {
+        let mut mig = g.start_migration();
 
-    let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
-    let mut s = String::new();
+        let mut f = File::open("tests/tpc-w-queries.txt").unwrap();
+        let mut s = String::new();
 
-    // Load queries
-    f.read_to_string(&mut s).unwrap();
-    let lines: Vec<String> = s.lines()
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-            String::from(l) + "\n"
-        } else {
-            String::from(l)
-        })
-        .collect();
+        // Load queries
+        f.read_to_string(&mut s).unwrap();
+        let lines: Vec<String> = s.lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            })
+            .collect();
 
-    // Add them one by one
-    for (i, q) in lines.iter().enumerate() {
-        println!("{}: {}", i, q);
-        println!("{:?}", inc.add_query(q, None, &mut mig));
-        // println!("{}", inc.graph);
+        // Add them one by one
+        for (i, q) in lines.iter().enumerate() {
+            println!("{}: {}", i, q);
+            let or = r.clone();
+            r = match r.extend(q) {
+                Ok(mut nr) => {
+                    nr.activate(&mut mig);
+                    nr
+                }
+                Err(e) => {
+                    println!("{:?}", e);
+                    or
+                }
+            }
+        }
+
+        mig.commit();
     }
+
+    println!("{}", g);
 }
