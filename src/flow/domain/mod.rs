@@ -511,6 +511,21 @@ impl Domain {
                     can_handle_directly = false;
                 }
             }
+            // if the key columns of the state and the target state differ, we cannot use the
+            // state directly, even if it is otherwise suitable. Note that we need to check
+            // `can_handle_directly` again here because it will have been changed for reader
+            // nodes above, and this check only applies to non-reader nodes.
+            if can_handle_directly && done_tx.is_some() {
+                if let ReplayData::StateCopy(ref state) = data {
+                    let local_pkey = self.state[path[0].as_local()].get_pkey();
+                    if local_pkey != state.get_pkey() {
+                        debug!(self.log, "cannot use state directly, so falling back to regular replay";
+                               "node" => path[0].as_local().id(), "src pkey" => state.get_pkey(),
+                               "dst pkey" => local_pkey);
+                        can_handle_directly = false;
+                    }
+                }
+            }
 
             // TODO: if StateCopy debug_assert!(last);
             // TODO
@@ -523,7 +538,6 @@ impl Domain {
                         // oh boy, we're in luck! we're replaying into one of our nodes, and were just
                         // given the entire state. no need to process or anything, just move in the
                         // state and we're done.
-                        // TODO: fall back to regular replay here
                         let node = path[0];
                         debug!(self.log, "absorbing state clone"; "node" => node.as_local().id());
                         assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
