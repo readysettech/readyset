@@ -1,43 +1,12 @@
 extern crate distributary;
 
+mod backend;
+
 use std::{thread, time};
-use std::collections::HashMap;
+use distributary::{Blender, Recipe};
+use backend::Backend;
 
-use distributary::{Blender, DataType, Mutator, Recipe};
-
-type Datas = Vec<Vec<DataType>>;
-type Getter = Box<Fn(&DataType) -> Result<Datas, ()> + Send + Sync>;
-
-struct Backend {
-    getters: HashMap<String, Getter>,
-    mutators: HashMap<String, Mutator>,
-    recipe: Recipe,
-    soup: Blender,
-}
-
-impl Backend {
-    fn put(&mut self, kind: &str, data: Vec<DataType>) -> Result<(), String> {
-        let mtr = self.mutators
-            .entry(String::from(kind))
-            .or_insert(self.soup.get_mutator(self.recipe.node_addr_for(kind)?));
-
-        mtr.put(data);
-        Ok(())
-    }
-
-    fn get(&mut self, kind: &str, key: DataType) -> Result<Datas, String> {
-        let get_fn = self.getters
-            .entry(String::from(kind))
-            .or_insert(self.soup.get_getter(self.recipe.node_addr_for(kind)?).unwrap());
-
-        match get_fn(&key) {
-            Ok(records) => Ok(records),
-            Err(_) => Err(format!("GET for {} failed!", kind)),
-        }
-    }
-}
-
-fn load_recipe() -> Result<Box<Backend>, String> {
+fn load_recipe() -> Result<Backend, String> {
     // inline recipe definition
     let sql = "# write types (SQL type names are ignored)
                CREATE TABLE Article (aid int, title varchar(255), \
@@ -57,16 +26,8 @@ fn load_recipe() -> Result<Box<Backend>, String> {
     {
         let mut mig = soup.start_migration();
 
-        // remove comment lines
-        let lines: Vec<String> = sql.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(String::from)
-            .collect();
-        let rp_txt = lines.join("\n");
-
         // install recipe
-        recipe = match Recipe::from_str(&rp_txt) {
+        recipe = match Recipe::from_str(&sql) {
             Ok(mut recipe) => {
                 recipe.activate(&mut mig)?;
                 recipe
@@ -74,16 +35,11 @@ fn load_recipe() -> Result<Box<Backend>, String> {
             Err(e) => return Err(e),
         };
 
-        // Commit the migration (brings up new graph)
+        // brings up new graph for processing
         mig.commit();
     }
 
-    Ok(Box::new(Backend {
-        getters: HashMap::default(),
-        mutators: HashMap::default(),
-        recipe: recipe,
-        soup: soup,
-    }))
+    Ok(Backend::new(soup, recipe))
 }
 
 fn main() {
