@@ -61,7 +61,7 @@ impl SqlIncorporator {
     }
 
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
-    fn address_for(&self, name: &str) -> NodeAddress {
+    pub fn address_for(&self, name: &str) -> NodeAddress {
         match self.node_addresses.get(name) {
             None => panic!("node {} unknown!", name),
             Some(na) => *na,

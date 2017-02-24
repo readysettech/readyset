@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use {SqlIncorporator, Migration};
+use {SqlIncorporator, Migration, NodeAddress};
 
 use std::collections::HashMap;
 use std::str;
@@ -45,6 +45,15 @@ impl Recipe {
             version: 0,
             prior: None,
             inc: None,
+        }
+    }
+
+    /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
+    pub fn node_addr_for(&self, name: &str) -> Result<NodeAddress, String> {
+        // TODO(malte): better error handling
+        match self.inc {
+            Some(ref inc) => Ok(inc.address_for(name)),
+            None => Err(String::from("Recipe not applied")),
         }
     }
 
