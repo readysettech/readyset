@@ -1,0 +1,13 @@
+# Basic Soup recipe for news aggregator application
+
+# ------------------------
+# write types (note that SQL types are currently ignored in practice)
+#
+CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
+CREATE TABLE Vote (aid int, uid int);
+
+# ------------------------
+# read expressions
+#
+VoteCount: SELECT Vote.aid, COUNT(uid) AS votes FROM Vote GROUP BY Vote.aid;
+ArticleWithVoteCount: SELECT Article.aid, title, url, VoteCount.votes AS votes FROM Article, VoteCount WHERE Article.aid = VoteCount.aid AND Article.aid = ?;

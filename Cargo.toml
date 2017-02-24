@@ -65,6 +65,9 @@ debug=true
 name = "distributary"
 path = "src/lib.rs"
 
+[[example]]
+name = "basic-recipe"
+
 [[bin]]
 name = "web"
 path = "src/web/main.rs"
