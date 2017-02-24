@@ -4,14 +4,13 @@ version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-afterparty = { git = "https://github.com/softprops/afterparty", revision = "7dee2840bd2176098d7b180079ffe8a69ac721bf" }
+afterparty = { git = "https://github.com/ms705/afterparty", revision = "ec77c1f9dd5cae01a78f67ccadbb8a9a15484961" }
 clap = "2.13"
 env_logger = "0.3"
-# openssl-sys version conflicts force us to use an old version of git2
-git2 = "0.5.2"
-hyper = "0.9"
-lettre = "0.6.1"
+git2 = "0.6.4"
+hyper = "0.10"
+lettre = "0.6.2"
 log = "0.3"
 regex = "0.1.80"
-slack-hook = "0.2"
+slack-hook = { git = "https://github.com/ms705/rust-slack.git" }
 toml = "0.2.1"
