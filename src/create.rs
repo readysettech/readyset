@@ -23,10 +23,13 @@ pub enum SqlType {
     Tinyint(u16),
     Tinyblob,
     Blob,
+    Double,
     Real,
     Tinytext,
     Mediumtext,
     Text,
+    Date,
+    Timestamp,
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {
@@ -47,6 +50,10 @@ named!(pub type_identifier<&[u8], SqlType>,
           chain!(
               caseless_tag!("mediumtext"),
               || { SqlType::Mediumtext }
+          )
+        | chain!(
+              caseless_tag!("timestamp"),
+              || { SqlType::Timestamp }
           )
         | chain!(
               caseless_tag!("tinyblob"),
@@ -78,8 +85,18 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Bigint(len_as_u16(len)) }
           )
         | chain!(
+              caseless_tag!("double") ~
+              multispace? ~
+              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              || { SqlType::Double }
+          )
+        | chain!(
               caseless_tag!("blob"),
               || { SqlType::Blob }
+          )
+        | chain!(
+              caseless_tag!("date"),
+              || { SqlType::Date }
           )
         | chain!(
               caseless_tag!("real") ~
@@ -100,10 +117,13 @@ named!(pub type_identifier<&[u8], SqlType>,
           )
         | chain!(
               caseless_tag!("int") ~
-              len: delimited!(tag!("("), digit, tag!(")")) ~
+              len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
               multispace? ~
               signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
-              || { SqlType::Int(len_as_u16(len)) }
+              || { SqlType::Int(match len {
+                  Some(len) => len_as_u16(len),
+                  None => 32 as u16,
+              }) }
           )
     )
 );
