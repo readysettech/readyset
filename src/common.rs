@@ -190,8 +190,8 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
 /// Parse logical operators
 named!(pub binary_logical_operator<&[u8], Operator>,
     alt_complete!(
-           map!(caseless_tag!("and"), |_| Operator::And)
-         | map!(caseless_tag!("or"), |_| Operator::Or)
+           map!(delimited!(opt!(multispace), caseless_tag!("and"), multispace), |_| Operator::And)
+         | map!(delimited!(opt!(multispace), caseless_tag!("or"), multispace), |_| Operator::Or)
     )
 );
 

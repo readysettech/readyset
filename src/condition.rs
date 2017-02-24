@@ -91,9 +91,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
         remainder: many0!(
             complete!(
                 chain!(
-                    log_op: delimited!(opt!(multispace),
-                                       binary_logical_operator,
-                                       opt!(multispace)) ~
+                    log_op: binary_logical_operator ~
                     right_expr: condition_expr,
                     || {
                         (log_op, right_expr)
