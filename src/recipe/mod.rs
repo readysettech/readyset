@@ -11,8 +11,8 @@ type QueryID = u64;
 /// Represents a Soup recipe.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recipe {
-    /// SQL queries represented in the recipe
-    expressions: HashMap<QueryID, SqlQuery>,
+    /// SQL queries represented in the recipe. Value tuple is (name, query).
+    expressions: HashMap<QueryID, (Option<String>, SqlQuery)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
@@ -60,20 +60,27 @@ impl Recipe {
     /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    pub fn from_queries(qs: Vec<SqlQuery>) -> Recipe {
+    pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>) -> Recipe {
+        let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
-        let expressions = qs.iter()
-            .map(|q| {
-                let qid = hash_query(q);
+        let expressions = qs.into_iter()
+            .map(|(n, q)| {
+                let qid = hash_query(&q);
                 expression_order.push(qid);
-                (qid.into(), q.clone())
+                match n {
+                    None => (),
+                    Some(ref name) => {
+                        aliases.insert(name.clone(), qid);
+                    }
+                }
+                (qid.into(), (n, q))
             })
-            .collect::<HashMap<QueryID, SqlQuery>>();
+            .collect::<HashMap<QueryID, (Option<String>, SqlQuery)>>();
 
         Recipe {
             expressions: expressions,
             expression_order: expression_order,
-            aliases: HashMap::default(),
+            aliases: aliases,
             version: 0,
             prior: None,
             inc: None,
@@ -83,8 +90,10 @@ impl Recipe {
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(&mut self, mig: &mut Migration) -> Result<(), String> {
-        let (added, _removed) = match self.prior {
+    pub fn activate(&mut self,
+                    mig: &mut Migration)
+                    -> Result<HashMap<String, NodeAddress>, String> {
+        let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank()),
             Some(ref pr) => {
                 // compute delta over prior recipe
@@ -99,14 +108,21 @@ impl Recipe {
         }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
-        // incorporator in `inc`
+        // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
+        // returned to the caller (who may use them to obtain mutators and getters)
+        let mut new_nodes = HashMap::default();
         for qid in added {
-            let q = self.expressions[&qid].clone();
-            self.inc.as_mut().unwrap().add_parsed_query(q, None, mig)?;
+            let (n, q) = self.expressions[&qid].clone();
+            let (qn, _) = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            new_nodes.insert(qn.clone(), self.node_addr_for(&qn).unwrap());
         }
 
         // TODO(malte): deal with removal.
-        Ok(())
+        for _ in removed {
+            unimplemented!()
+        }
+
+        Ok(new_nodes)
     }
 
     /// Work out the delta between two recipes.
@@ -164,7 +180,7 @@ impl Recipe {
         Ok(new)
     }
 
-    fn parse(recipe_text: &str) -> Result<Vec<SqlQuery>, String> {
+    fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery)>, String> {
         let lines: Vec<String> = recipe_text.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
@@ -175,21 +191,33 @@ impl Recipe {
             .collect();
 
         let parsed_queries = lines.iter()
-            .map(|ref q| (q.clone(), sql_parser::parse_query(q)))
+            .map(|ref q| {
+                let r: Vec<&str> = q.splitn(2, ":").collect();
+                if r.len() == 2 {
+                    // named query
+                    let q = r[1];
+                    let name = Some(String::from(r[0]));
+                    (name, q.clone(), sql_parser::parse_query(q))
+                } else {
+                    // unnamed query
+                    let q = r[0];
+                    (None, q.clone(), sql_parser::parse_query(q))
+                }
+            })
             .collect::<Vec<_>>();
 
-        if !parsed_queries.iter().all(|pq| pq.1.is_ok()) {
+        if !parsed_queries.iter().all(|pq| pq.2.is_ok()) {
             println!("Failed to parse recipe!");
             for pq in parsed_queries {
-                match pq.1 {
-                    Err(e) => println!("Query \"{}\", parse error: {}", pq.0, e),
+                match pq.2 {
+                    Err(e) => println!("Query \"{}\", parse error: {}", pq.1, e),
                     Ok(_) => (),
                 }
             }
             return Err(String::from("Failed to parse recipe!"));
         }
 
-        Ok(parsed_queries.into_iter().map(|t| t.1.unwrap()).collect::<Vec<_>>())
+        Ok(parsed_queries.into_iter().map(|t| (t.0, t.2.unwrap())).collect::<Vec<_>>())
     }
 
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
