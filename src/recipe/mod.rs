@@ -13,6 +13,8 @@ type QueryID = u64;
 pub struct Recipe {
     /// SQL queries represented in the recipe
     expressions: HashMap<QueryID, SqlQuery>,
+    /// Addition order for the recipe expressions
+    expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
     /// Recipe revision.
@@ -38,6 +40,7 @@ impl Recipe {
     pub fn blank() -> Recipe {
         Recipe {
             expressions: HashMap::default(),
+            expression_order: Vec::default(),
             aliases: HashMap::default(),
             version: 0,
             prior: None,
@@ -58,15 +61,18 @@ impl Recipe {
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
     pub fn from_queries(qs: Vec<SqlQuery>) -> Recipe {
+        let mut expression_order = Vec::new();
         let expressions = qs.iter()
             .map(|q| {
                 let qid = hash_query(q);
+                expression_order.push(qid);
                 (qid.into(), q.clone())
             })
             .collect::<HashMap<QueryID, SqlQuery>>();
 
         Recipe {
             expressions: expressions,
+            expression_order: expression_order,
             aliases: HashMap::default(),
             version: 0,
             prior: None,
@@ -94,7 +100,8 @@ impl Recipe {
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`
-        for (_, q) in added {
+        for qid in added {
+            let q = self.expressions[&qid].clone();
             self.inc.as_mut().unwrap().add_parsed_query(q, None, mig)?;
         }
 
@@ -106,19 +113,17 @@ impl Recipe {
     /// Returns two sets of `QueryID` -> `SqlQuery` mappings:
     /// (1) those queries present in `self`, but not in `other`; and
     /// (2) those queries present in `other` , but not in `self`.
-    fn compute_delta(&self,
-                     other: &Recipe)
-                     -> (HashMap<QueryID, SqlQuery>, HashMap<QueryID, SqlQuery>) {
-        let mut added_queries: HashMap<QueryID, SqlQuery> = HashMap::new();
-        let mut removed_queries = HashMap::new();
-        for (qid, q) in self.expressions.iter() {
+    fn compute_delta(&self, other: &Recipe) -> (Vec<QueryID>, Vec<QueryID>) {
+        let mut added_queries: Vec<QueryID> = Vec::new();
+        let mut removed_queries = Vec::new();
+        for qid in self.expression_order.iter() {
             if !other.expressions.contains_key(qid) {
-                added_queries.insert(*qid, q.clone());
+                added_queries.push(*qid);
             }
         }
-        for (qid, q) in other.expressions.iter() {
+        for qid in other.expression_order.iter() {
             if !self.expressions.contains_key(qid) {
-                removed_queries.insert(*qid, q.clone());
+                removed_queries.push(*qid);
             }
         }
 
@@ -140,6 +145,7 @@ impl Recipe {
         // build new recipe as clone of old one
         let mut new = Recipe {
             expressions: self.expressions.clone(),
+            expression_order: self.expression_order.clone(),
             aliases: self.aliases.clone(),
             version: self.version + 1,
             // retain the old recipe for future reference
@@ -148,8 +154,10 @@ impl Recipe {
         };
 
         // apply changes
-        for (qid, q) in added {
+        for qid in added {
+            let q = add_rp.expressions[&qid].clone();
             new.expressions.insert(qid, q);
+            new.expression_order.push(qid);
         }
 
         // return new recipe as replacement for self
@@ -223,8 +231,8 @@ mod tests {
         let (added, removed) = r1.compute_delta(&r0);
         assert_eq!(added.len(), 2);
         assert_eq!(removed.len(), 0);
-        assert_eq!(added[&q0_id], q0);
-        assert_eq!(added[&q1_id], q1);
+        assert_eq!(added[0], q0_id);
+        assert_eq!(added[1], q1_id);
 
         // delta with oneself should be nothing
         let (added, removed) = r1.compute_delta(&r1);
@@ -241,8 +249,8 @@ mod tests {
         let (added, removed) = r2.compute_delta(&r1);
         assert_eq!(added.len(), 1);
         assert_eq!(removed.len(), 1);
-        assert_eq!(added[&q2_id], q2);
-        assert_eq!(removed[&q1_id], q1);
+        assert_eq!(added[0], q2_id);
+        assert_eq!(removed[0], q1_id);
     }
 
     #[test]
