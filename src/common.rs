@@ -125,10 +125,14 @@ named!(pub column_identifier<&[u8], Column>,
                     || { tbl_name }
                 )
             ) ~
-            column: map_res!(sql_identifier, str::from_utf8),
+            column: map_res!(sql_identifier, str::from_utf8) ~
+            alias: opt!(as_alias),
             || {
                 Column {
-                    name: String::from(column),
+                    name: match alias {
+                        Some(a) => String::from(a),
+                        None => String::from(column),
+                    },
                     table: match table {
                         None => None,
                         Some(t) => Some(String::from(t)),

@@ -325,6 +325,27 @@ mod tests {
     }
 
     #[test]
+    fn column_alias() {
+        let qstring1 = "select name as TagName from PaperTag;";
+        let qstring2 = "select PaperTag.name as TagName from PaperTag;";
+
+        let res1 = selection(qstring1.as_bytes());
+        assert_eq!(res1.clone().unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PaperTag")],
+                       fields: FieldExpression::Seq(vec![Column::from("TagName")]),
+                       ..Default::default()
+                   });
+        let res2 = selection(qstring2.as_bytes());
+        assert_eq!(res2.clone().unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PaperTag")],
+                       fields: FieldExpression::Seq(vec![Column::from("PaperTag.TagName")]),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
     fn distinct() {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
