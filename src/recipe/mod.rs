@@ -61,8 +61,16 @@ impl Recipe {
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
     pub fn from_str(recipe_text: &str) -> Result<Recipe, String> {
+        // remove comment lines
+        let lines: Vec<String> = recipe_text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
+            .map(String::from)
+            .collect();
+        let cleaned_recipe_text = lines.join("\n");
+
         // parse and compute differences to current recipe
-        let parsed_queries = Recipe::parse(recipe_text)?;
+        let parsed_queries = Recipe::parse(&cleaned_recipe_text)?;
         Ok(Recipe::from_queries(parsed_queries))
     }
 
