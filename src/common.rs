@@ -4,6 +4,7 @@ use std::str;
 use std::str::FromStr;
 
 use column::{Column, FunctionExpression};
+use keywords::sql_keyword;
 use table::Table;
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -147,7 +148,15 @@ named!(pub column_identifier<&[u8], Column>,
 
 /// Parses a SQL identifier (alphanumeric and "_").
 named!(pub sql_identifier<&[u8], &[u8]>,
-    take_while1!(is_sql_identifier)
+    alt_complete!(
+          chain!(
+                not!(peek!(sql_keyword)) ~
+                ident: take_while1!(is_sql_identifier),
+                || { ident }
+          )
+        | delimited!(tag!("`"), take_while1!(is_sql_identifier), tag!("`"))
+        | delimited!(tag!("'"), take_while1!(is_sql_identifier), tag!("'"))
+    )
 );
 
 /// Parse an unsigned integer.
@@ -314,11 +323,15 @@ mod tests {
         let id2 = b"f_o_o";
         let id3 = b"foo12";
         let id4 = b":fo oo";
+        let id5 = b"primary ";
+        let id6 = b"`primary`";
 
         assert!(sql_identifier(id1).is_done());
         assert!(sql_identifier(id2).is_done());
         assert!(sql_identifier(id3).is_done());
         assert!(sql_identifier(id4).is_err());
+        assert!(sql_identifier(id5).is_err());
+        assert!(sql_identifier(id6).is_done());
     }
 
     #[test]
