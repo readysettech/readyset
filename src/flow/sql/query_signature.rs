@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn it_generalizes() {
-        use flow::sql::query_graph::{to_query_graph, QueryGraph};
+        use flow::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
         let qa = parse_query("SELECT a.c1, b.c3 FROM a, b WHERE a.c1 = b.c1 AND a.c2 = 42;")

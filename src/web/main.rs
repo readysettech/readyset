@@ -24,7 +24,7 @@ fn main() {
         let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 
         // add a user account base table
-        let user = mig.add_ingredient("user", &["id", "username", "hash"], Base::default());
+        let _user = mig.add_ingredient("user", &["id", "username", "hash"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("votecount",
