@@ -132,21 +132,23 @@ named!(pub type_identifier<&[u8], SqlType>,
 named!(pub key_specification<&[u8], ()>,
     alt_complete!(
           chain!(
-              caseless_tag!("unique key") ~
-              multispace ~
-              name: opt!(sql_identifier) ~
+              caseless_tag!("primary key") ~
               multispace? ~
-              column: delimited!(tag!("("), field_list, tag!(")")),
+              column: delimited!(tag!("("), field_list, tag!(")")) ~
+              opt!(complete!(chain!(
+                          multispace ~
+                          caseless_tag!("autoincrement"),
+                          || {}
+                   ))
+              ),
               || {}
           )
         | chain!(
-              caseless_tag!("primary key") ~
-              multispace ~
-              //name: sql_identifier ~
-              //multispace ~
-              column: delimited!(tag!("("), column_identifier, tag!(")")) ~
+              caseless_tag!("unique key") ~
               multispace? ~
-              caseless_tag!("autoincrement"),
+              name: opt!(sql_identifier) ~
+              multispace? ~
+              column: delimited!(tag!("("), field_list, tag!(")")),
               || {}
           )
     )
@@ -158,20 +160,24 @@ named!(pub field_specification_list<&[u8], Vec<Column> >,
        many1!(
            complete!(chain!(
                fieldname: column_identifier ~
-               multispace ~
-               fieldtype: type_identifier ~
+               fieldtype: opt!(complete!(chain!(multispace ~
+                                      type_identifier ~
+                                      multispace?,
+                                      || {}
+                               ))
+               ) ~
                // XXX(malte): some of these are mutually exclusive...
-               opt!(chain!(multispace? ~
+               opt!(complete!(chain!(multispace? ~
                            caseless_tag!("not null") ~
                            multispace?,
                            || {}
-                    )
+                    ))
                ) ~
-               opt!(chain!(multispace? ~
+               opt!(complete!(chain!(multispace? ~
                            caseless_tag!("auto_increment") ~
                            multispace?,
                            || {}
-                    )
+                    ))
                ) ~
                opt!(complete!(
                        chain!(
