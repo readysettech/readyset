@@ -70,6 +70,14 @@ fn tpcw_test_queries() {
 }
 
 #[test]
+fn tpcw_test_tables() {
+    let res = test_queries_from_file(Path::new("tests/tpc-w-tables.txt"), "TPC-W tables");
+    assert!(res.is_ok());
+    // There are 10 tables
+    assert_eq!(res.unwrap(), 10);
+}
+
+#[test]
 fn finkelstein82_test_queries() {
     assert!(test_queries_from_file(Path::new("tests/finkelstein82.txt"), "Finkelstein 1982")
         .is_ok())
