@@ -44,7 +44,7 @@ pub fn is_fp_number(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == '.' as u8
 }
 
-/// Parses a SQL identifier (alphanumeric and "_").
+/// Parses a floating point number (very badly).
 named!(pub fp_number<&[u8], &[u8]>,
 // f64::from_str(&format!("{}.{}", integral, fractional)).unwrap()
 //      integral: map_res!(take_while1!(is_digit), str::from_utf8) ~
