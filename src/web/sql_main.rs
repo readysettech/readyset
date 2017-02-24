@@ -33,21 +33,19 @@ fn main() {
             .unwrap();
 
         // add vote count
-        let vc =
-            inc.add_query("SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
-                           Some("vc".into()),
-                           &mut mig)
-                .unwrap();
+        inc.add_query("SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
+                       Some("vc".into()),
+                       &mut mig)
+            .unwrap();
 
         println!("done vc");
 
         // add final join -- joins on first field of each input
-        let awvc =
-            inc.add_query("SELECT article.id, article.user, title, url, vc.votes FROM article, \
+        inc.add_query("SELECT article.id, article.user, title, url, vc.votes FROM article, \
                             vc WHERE article.id = vc.id;",
-                           Some("awvc".into()),
-                           &mut mig)
-                .unwrap();
+                       Some("awvc".into()),
+                       &mut mig)
+            .unwrap();
 
         println!("done awvc");
 
