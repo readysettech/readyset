@@ -261,7 +261,7 @@ mod tests {
         let q0_id = hash_query(&q0);
         let q1_id = hash_query(&q1);
 
-        let pq_a = vec![q0.clone(), q1.clone()];
+        let pq_a = vec![(None, q0.clone()), (None, q1.clone())];
         let r1 = Recipe::from_queries(pq_a);
 
         // delta from empty recipe
@@ -279,7 +279,7 @@ mod tests {
         // bring on a new query set
         let q2 = sql_parser::parse_query("SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
-        let pq_b = vec![q0, q2.clone()];
+        let pq_b = vec![(None, q0), (None, q2.clone())];
         let r2 = Recipe::from_queries(pq_b);
 
         // delta should show addition and removal
