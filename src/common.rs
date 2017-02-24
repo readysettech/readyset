@@ -105,13 +105,7 @@ named!(pub column_identifier<&[u8], Column>,
     alt_complete!(
         chain!(
             function: column_function ~
-            alias: opt!(chain!(
-                multispace ~
-                caseless_tag!("as") ~
-                multispace ~
-                alias: map_res!(sql_identifier, str::from_utf8),
-                || { alias }
-            )),
+            alias: opt!(as_alias),
             || {
                 Column {
                     name: match alias {
@@ -217,6 +211,19 @@ named!(pub unary_negation_operator<&[u8], Operator>,
     )
 );
 
+/// Parse rule for AS-based aliases for SQL entities.
+named!(pub as_alias<&[u8], &str>,
+    complete!(
+        chain!(
+            multispace ~
+            caseless_tag!("as") ~
+            multispace ~
+            alias: map_res!(sql_identifier, str::from_utf8),
+            || { alias }
+        )
+    )
+);
+
 /// Parse rule for a comma-separated list.
 named!(pub field_list<&[u8], Vec<Column> >,
        many0!(
@@ -295,19 +302,14 @@ named!(pub value_list<&[u8], Vec<&str> >,
 named!(pub table_reference<&[u8], Table>,
     chain!(
         table: map_res!(sql_identifier, str::from_utf8) ~
-        alias: opt!(
-            complete!(chain!(
-                multispace ~
-                caseless_tag!("as") ~
-                multispace ~
-                alias: map_res!(sql_identifier, str::from_utf8),
-                || { String::from(alias) }
-            ))
-        ),
+        alias: opt!(as_alias),
         || {
             Table {
                 name: String::from(table),
-                alias: alias,
+                alias: match alias {
+                    Some(a) => Some(String::from(a)),
+                    None => None,
+                }
             }
         }
     )
