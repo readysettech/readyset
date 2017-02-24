@@ -9,7 +9,7 @@ fn main() {
     let mut g = distributary::Blender::new();
 
     // let's add SQL queries, rather than building the graph by hand
-    let mut inc = SqlIncorporator::new();
+    let mut inc = SqlIncorporator::default();
 
     {
         // migrate from the empty recipe to below
