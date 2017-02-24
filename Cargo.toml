@@ -4,7 +4,7 @@ version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-afterparty = { git = "https://github.com/ms705/afterparty.git" }
+afterparty = { git = "https://github.com/softprops/afterparty", revision = "7dee2840bd2176098d7b180079ffe8a69ac721bf" }
 clap = "2.13"
 env_logger = "0.3"
 # openssl-sys version conflicts force us to use an old version of git2
