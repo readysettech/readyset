@@ -55,6 +55,7 @@ impl SlackNotifier {
             .channel(self.channel.clone())
             .username("taster")
             .icon_emoji(":tea:")
+            .link_names(true)
             .build()
             .unwrap();
 
