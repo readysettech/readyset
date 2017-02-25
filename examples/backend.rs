@@ -21,7 +21,7 @@ impl Backend {
         }
     }
 
-    pub fn put(&mut self, kind: &str, data: Vec<DataType>) -> Result<(), String> {
+    pub fn put(&mut self, kind: &str, data: &[DataType]) -> Result<(), String> {
         let mtr = self.mutators
             .entry(String::from(kind))
             .or_insert(self.soup.get_mutator(self.recipe.node_addr_for(kind)?));
@@ -30,12 +30,14 @@ impl Backend {
         Ok(())
     }
 
-    pub fn get(&mut self, kind: &str, key: DataType) -> Result<Datas, String> {
+    pub fn get<I>(&mut self, kind: &str, key: I) -> Result<Datas, String>
+        where I: Into<DataType>
+    {
         let get_fn = self.getters
             .entry(String::from(kind))
             .or_insert(self.soup.get_getter(self.recipe.node_addr_for(kind)?).unwrap());
 
-        match get_fn(&key) {
+        match get_fn(&key.into()) {
             Ok(records) => Ok(records),
             Err(_) => Err(format!("GET for {} failed!", kind)),
         }

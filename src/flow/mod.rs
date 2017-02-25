@@ -265,25 +265,26 @@ pub struct Mutator {
 
 impl Mutator {
     /// Perform a non-transactional write to the base node this Mutator was generated for.
-    pub fn put(&self, u: Vec<query::DataType>) {
+    pub fn put<V>(&self, u: V)
+        where V: Into<Vec<query::DataType>>
+    {
         self.tx
             .send(payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![u].into(),
+                data: vec![u.into()].into(),
             })
             .unwrap()
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put(&self,
-                             u: Vec<query::DataType>,
-                             t: checktable::Token)
-                             -> checktable::TransactionResult {
+    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> checktable::TransactionResult
+        where V: Into<Vec<query::DataType>>
+    {
         let (send, recv) = mpsc::channel();
         self.tx
             .send(payload::Packet::Transaction {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![u].into(),
+                data: vec![u.into()].into(),
                 state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
@@ -291,25 +292,29 @@ impl Mutator {
     }
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
-    pub fn delete(&self, key: query::DataType) {
+    pub fn delete<I>(&self, key: I)
+        where I: Into<query::DataType>
+    {
         self.tx
             .send(payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(key)].into(),
+                data: vec![prelude::Record::DeleteRequest(key.into())].into(),
             })
             .unwrap()
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete(&self,
-                                key: query::DataType,
-                                t: checktable::Token)
-                                -> checktable::TransactionResult {
+    pub fn transactional_delete<I>(&self,
+                                   key: I,
+                                   t: checktable::Token)
+                                   -> checktable::TransactionResult
+        where I: Into<query::DataType>
+    {
         let (send, recv) = mpsc::channel();
         self.tx
             .send(payload::Packet::Transaction {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(key)].into(),
+                data: vec![prelude::Record::DeleteRequest(key.into())].into(),
                 state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
@@ -318,10 +323,13 @@ impl Mutator {
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
-    pub fn update(&self, u: Vec<query::DataType>) {
+    pub fn update<V>(&self, u: V)
+        where V: Into<Vec<query::DataType>>
+    {
         let col = self.key_column
             .expect("update operations can only be applied to base nodes with key columns");
 
+        let u = u.into();
         self.tx
             .send(payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
@@ -332,13 +340,16 @@ impl Mutator {
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
     /// generated for.
-    pub fn transactional_update(&self,
-                                u: Vec<query::DataType>,
-                                t: checktable::Token)
-                                -> checktable::TransactionResult {
+    pub fn transactional_update<V>(&self,
+                                   u: V,
+                                   t: checktable::Token)
+                                   -> checktable::TransactionResult
+        where V: Into<Vec<query::DataType>>
+    {
         let col = self.key_column
             .expect("update operations can only be applied to base nodes with key columns");
 
+        let u = u.into();
         let (send, recv) = mpsc::channel();
         self.tx
             .send(payload::Packet::Transaction {

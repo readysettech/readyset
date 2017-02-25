@@ -237,7 +237,7 @@ fn it_works_deletion() {
     // delete first value
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
-    muta.delete(2.into());
+    muta.delete(2);
     assert_eq!(cq.recv(),
                Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }
