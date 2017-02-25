@@ -22,7 +22,7 @@ pub struct SqlIncorporator {
     write_schemas: HashMap<String, Vec<String>>,
     node_addresses: HashMap<String, NodeAddress>,
     node_fields: HashMap<NodeAddress, Vec<String>>,
-    query_graphs: Vec<QueryGraph>,
+    query_graphs: Vec<(QueryGraph, NodeAddress)>,
     num_queries: usize,
 }
 
@@ -470,7 +470,7 @@ impl SqlIncorporator {
         };
 
         // Do we already have this exact query or a subset of it?
-        for existing_qg in self.query_graphs.iter() {
+        for &(ref existing_qg, ref na) in self.query_graphs.iter() {
             if existing_qg.signature() == qg.signature() {
                 // we already have this exact query, so we don't need to add anything
                 return vec![];
@@ -481,8 +481,6 @@ impl SqlIncorporator {
                       existing_qg);
             }
         }
-        // If not, store the query graph for later reference
-        self.query_graphs.push(qg.clone());
 
         let nodes_added;
 
@@ -624,7 +622,6 @@ impl SqlIncorporator {
                         func_nodes.push(ni);
                         i += 1;
                     }
-
                 }
             }
 
@@ -666,6 +663,9 @@ impl SqlIncorporator {
                 self.node_fields.insert(ni, fields);
             }
             new_filter_nodes.push(ni);
+
+            // Finally, store the query graph and the corresponding `NodeAddress`
+            self.query_graphs.push((qg.clone(), ni));
 
             // finally, we output all the nodes we generated
             nodes_added = new_filter_nodes.into_iter()
