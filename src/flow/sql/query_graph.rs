@@ -54,14 +54,19 @@ impl QueryGraph {
             r.hash(&mut hasher);
         }
 
+        // Collect attributes from predicates and projected columns
         let mut attrs = HashSet::<&Column>::new();
         let mut attrs_vec = Vec::<&Column>::new();
+        let mut proj_columns = Vec::<&Column>::new();
         for n in self.relations.values() {
             for p in &n.predicates {
                 for c in &p.contained_columns() {
                     attrs_vec.push(c);
                     attrs.insert(c);
                 }
+            }
+            for c in &n.columns {
+                proj_columns.push(c);
             }
         }
         for e in self.edges.values() {
@@ -87,6 +92,12 @@ impl QueryGraph {
         attrs_vec.sort();
         for a in &attrs_vec {
             a.hash(&mut hasher);
+        }
+
+        // Compute projected columns part of hash
+        proj_columns.sort();
+        for c in proj_columns {
+            c.hash(&mut hasher);
         }
 
         QuerySignature {
