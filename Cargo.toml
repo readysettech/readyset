@@ -98,3 +98,7 @@ path = "benchmarks/vote/vote.rs"
 [[bin]]
 name = "multitail"
 path = "benchmarks/multitail/multitail.rs"
+
+[[bin]]
+name = "tpc_w"
+path = "benchmarks/tpc_w/tpc_w.rs"
