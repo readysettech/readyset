@@ -142,4 +142,4 @@ verifyDBConsistencyCustId: SELECT c_id FROM customer;
 # verifyDBConsistency.itemId
 verifyDBConsistencyItemId: SELECT i_id FROM item;
 # verifyDBConsistency.addrId
-verifyDBConsistencyAddrId: SELECT addr_id FROM address;
+#verifyDBConsistencyAddrId: SELECT addr_id FROM address;
