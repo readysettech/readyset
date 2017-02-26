@@ -728,6 +728,7 @@ mod tests {
     use flow::Migration;
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
+    use nom_sql::{FieldExpression, FunctionExpression};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
@@ -738,13 +739,16 @@ mod tests {
     /// Helper to compute a query ID hash via the same method as in `QueryGraph::signature()`.
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
-    fn query_id_hash(tables: &[&str], columns: &[&Column]) -> u64 {
+    fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
-        for t in tables.iter() {
-            t.hash(&mut hasher);
+        for r in relations.iter() {
+            r.hash(&mut hasher);
+        }
+        for a in attrs.iter() {
+            a.hash(&mut hasher);
         }
         for c in columns.iter() {
             c.hash(&mut hasher);
@@ -816,7 +820,11 @@ mod tests {
         let q = inc.add_query(q, None, &mut mig);
         assert!(q.is_ok());
         let qid = query_id_hash(&["articles", "users"],
-                                &[&Column::from("articles.author"), &Column::from("users.id")]);
+                                &[&Column::from("articles.author"), &Column::from("users.id")],
+                                &[&Column::from("articles.author"),
+                                  &Column::from("articles.title"),
+                                  &Column::from("users.id"),
+                                  &Column::from("users.name")]);
         // permute node 1 (for articles)
         let new_view1 = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(new_view1.fields(), &["title", "author"]);
@@ -854,7 +862,9 @@ mod tests {
                                 &mut mig);
         assert!(res.is_ok());
 
-        let qid = query_id_hash(&["users"], &[&Column::from("users.id")]);
+        let qid = query_id_hash(&["users"],
+                                &[&Column::from("users.id")],
+                                &[&Column::from("users.name")]);
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
@@ -893,11 +903,19 @@ mod tests {
                           None,
                           &mut mig);
         assert!(res.is_ok());
+        println!("{:?}", res);
         // added the aggregation and the edge view, and a reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[&Column::from("votes.aid")]);
+                                &[&Column::from("votes.aid")],
+                                &[&Column {
+                                    name: String::from("votes"),
+                                    table: None,
+                                    function: Some(FunctionExpression::Count(
+                                            FieldExpression::Seq(
+                                                vec![Column::from("votes.userid")]))),
+                                }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
@@ -968,7 +986,14 @@ mod tests {
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 6);
         // check project helper node
-        let qid = query_id_hash(&["computed_columns", "votes"], &[]);
+        let qid = query_id_hash(&["computed_columns", "votes"], &[],
+                                &[&Column {
+                                    name: String::from("count"),
+                                    table: None,
+                                    function: Some(FunctionExpression::Count(
+                                            FieldExpression::Seq(
+                                                vec![Column::from("votes.userid")]))),
+                                }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n2_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
@@ -1009,7 +1034,14 @@ mod tests {
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[&Column::from("votes.userid")]);
+                                &[&Column::from("votes.userid")],
+                                &[&Column {
+                                    name: String::from("count"),
+                                    table: None,
+                                    function: Some(FunctionExpression::Count(
+                                            FieldExpression::Seq(
+                                                vec![Column::from("votes.aid")]))),
+                                }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
