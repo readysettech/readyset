@@ -492,6 +492,7 @@ impl SqlIncorporator {
         {
             // 1. Generate the necessary filter node for each relation node in the query graph.
             let mut filter_nodes = HashMap::<String, Vec<NodeAddress>>::new();
+            let mut new_filter_nodes = Vec::new();
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be
             // added in a different order every time, which will yield different node identifiers
             // and make it difficult for applications to check what's going on.
@@ -511,7 +512,8 @@ impl SqlIncorporator {
                                                                               i),
                                                                      qgn,
                                                                      mig);
-                        filter_nodes.insert((*rel).clone(), fns);
+                        filter_nodes.insert((*rel).clone(), fns.clone());
+                        new_filter_nodes.extend(fns);
                     } else {
                         // otherwise, just record the node index of the base node for the relation
                         // that is being selected from
@@ -665,11 +667,10 @@ impl SqlIncorporator {
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
             }
-            filter_nodes.insert(String::from(name), vec![ni]);
+            new_filter_nodes.push(ni);
 
             // finally, we output all the nodes we generated
-            nodes_added = filter_nodes.into_iter()
-                .flat_map(|(_, n)| n.into_iter())
+            nodes_added = new_filter_nodes.into_iter()
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
                 .collect();
