@@ -175,6 +175,11 @@ pub trait Ingredient
         false
     }
 
+    /// Saves incoming records to the log if this is a base type.
+    fn persist_to_log(&self, _: &ops::Records) {
+        unreachable!();
+    }
+
     /// Produce a compact, human-readable description of this node.
     ///
     ///  Symbol   Description
@@ -840,7 +845,6 @@ impl<'a> Migration<'a> {
                 trace!(log, "node automatically added to domain"; "node" => node.index(), "domain" => mainline.ndomains);
                 mainline.ndomains += 1;
                 (mainline.ndomains - 1).into()
-
             });
             mainline.ingredients[node].add_to(domain);
             new.insert(node);

@@ -11,6 +11,7 @@ pub mod filter;
 pub mod topk;
 
 use flow::data::DataType;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync;
 
@@ -20,6 +21,17 @@ pub enum Record {
     Positive(sync::Arc<Vec<DataType>>),
     Negative(sync::Arc<Vec<DataType>>),
     DeleteRequest(Vec<DataType>),
+}
+
+impl fmt::Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            // TODO(jmftrindade): Retrieve timestamps.
+            Record::Positive(..) => write!(f, "positive: {:?}", self.rec()),
+            Record::Negative(..) => write!(f, "negative: {:?}", self.rec()),
+            Record::DeleteRequest(..) => write!(f, "delete request")
+        }
+    }
 }
 
 impl Record {
