@@ -1,4 +1,10 @@
+// TODO(jmftrindade): Put persistent log code behind a feature flag?
+use snowflake::ProcessUniqueId;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::BufWriter;
+use std::io::prelude::*;
+use std::path::Path;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -9,6 +15,8 @@ use std::collections::HashMap;
 pub struct Base {
     key_column: Option<usize>,
     us: Option<NodeAddress>,
+    // This id is unique within the same process.
+    unique_id: ProcessUniqueId,
 }
 
 impl Base {
@@ -17,6 +25,7 @@ impl Base {
         Base {
             key_column: Some(key_column),
             us: None,
+            unique_id: ProcessUniqueId::new(),
         }
     }
 }
@@ -26,6 +35,7 @@ impl Default for Base {
         Base {
             key_column: None,
             us: None,
+            unique_id: ProcessUniqueId::new(),
         }
     }
 }
@@ -59,6 +69,10 @@ impl Ingredient for Base {
                 _: &DomainNodes,
                 state: &StateMap)
                 -> Records {
+
+        // Write incoming records to log before processing them.
+        self.persist_to_log(&rs);
+
         rs.into_iter()
             .map(|r| match r {
                 Record::Positive(u) => Record::Positive(u),
@@ -93,6 +107,24 @@ impl Ingredient for Base {
         true
     }
 
+    fn persist_to_log(&self, records: &Records) {
+        // One file per base type.
+        let log_filename = format!("/tmp/soup-{}.log", self.unique_id);
+
+        // TODO(jmftrindade): Keep file handle around during this base's lifetime?
+        let log_file = open_persistent_log(&log_filename);
+        let mut log_writer = BufWriter::new(&log_file);
+
+        for record in records.iter() {
+            let log_entry = format!("{}\n", record);
+            match log_writer.write_all(log_entry.as_bytes()) {
+                Ok(_) => {},
+                Err(reason) => println!("Could not write to persistent log: {}, reason: {}",
+                                        log_filename, reason)
+            }
+        }
+    }
+
     fn description(&self) -> String {
         "B".into()
     }
@@ -100,4 +132,21 @@ impl Ingredient for Base {
     fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
         unreachable!();
     }
+}
+
+fn open_persistent_log(log_path: &String) -> File {
+    let path = Path::new(log_path);
+    let display = path.display();
+
+    let file = match OpenOptions::new()
+        .read(false)
+        .append(true)
+        .write(true)
+        .create(true)
+        .open(path) {
+        Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
+                              display, reason),
+        Ok(file) => file,
+    };
+    file
 }
