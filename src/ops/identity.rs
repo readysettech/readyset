@@ -76,10 +76,9 @@ mod tests {
 
     #[test]
     fn it_forwards() {
-        use query;
         let mut g = setup(false);
 
-        let left: Vec<query::DataType> = vec![1.into(), "a".into()];
+        let left: Vec<DataType> = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 

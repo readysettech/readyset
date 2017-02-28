@@ -1,9 +1,9 @@
 pub mod sql_to_flow;
+pub mod data;
 mod sql;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
-use query;
 use ops;
 use checktable;
 
@@ -216,9 +216,9 @@ pub trait Ingredient
 
     fn query_through<'a>(&self,
                          _column: usize,
-                         _value: &'a query::DataType,
+                         _value: &'a prelude::DataType,
                          _states: &'a prelude::StateMap)
-                         -> Option<Box<Iterator<Item = &'a Arc<Vec<query::DataType>>> + 'a>> {
+                         -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         None
     }
 
@@ -229,10 +229,10 @@ pub trait Ingredient
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
                   column: usize,
-                  value: &'a query::DataType,
+                  value: &'a prelude::DataType,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
-                  -> Option<Box<Iterator<Item = &'a Arc<Vec<query::DataType>>> + 'a>> {
+                  -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         states.get(parent.as_local())
             .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
             .or_else(|| {
@@ -266,7 +266,7 @@ pub struct Mutator {
 impl Mutator {
     /// Perform a non-transactional write to the base node this Mutator was generated for.
     pub fn put<V>(&self, u: V)
-        where V: Into<Vec<query::DataType>>
+        where V: Into<Vec<prelude::DataType>>
     {
         self.tx
             .send(payload::Packet::Message {
@@ -278,7 +278,7 @@ impl Mutator {
 
     /// Perform a transactional write to the base node this Mutator was generated for.
     pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> checktable::TransactionResult
-        where V: Into<Vec<query::DataType>>
+        where V: Into<Vec<prelude::DataType>>
     {
         let (send, recv) = mpsc::channel();
         self.tx
@@ -293,7 +293,7 @@ impl Mutator {
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
     pub fn delete<I>(&self, key: I)
-        where I: Into<query::DataType>
+        where I: Into<prelude::DataType>
     {
         self.tx
             .send(payload::Packet::Message {
@@ -308,7 +308,7 @@ impl Mutator {
                                    key: I,
                                    t: checktable::Token)
                                    -> checktable::TransactionResult
-        where I: Into<query::DataType>
+        where I: Into<prelude::DataType>
     {
         let (send, recv) = mpsc::channel();
         self.tx
@@ -324,7 +324,7 @@ impl Mutator {
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
     pub fn update<V>(&self, u: V)
-        where V: Into<Vec<query::DataType>>
+        where V: Into<Vec<prelude::DataType>>
     {
         let col = self.key_column
             .expect("update operations can only be applied to base nodes with key columns");
@@ -344,7 +344,7 @@ impl Mutator {
                                    u: V,
                                    t: checktable::Token)
                                    -> checktable::TransactionResult
-        where V: Into<Vec<query::DataType>>
+        where V: Into<Vec<prelude::DataType>>
     {
         let col = self.key_column
             .expect("update operations can only be applied to base nodes with key columns");
@@ -486,7 +486,7 @@ impl Blender {
     pub fn get_getter
         (&self,
          node: NodeAddress)
-         -> Option<Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync>> {
+         -> Option<Box<Fn(&prelude::DataType) -> Result<ops::Datas, ()> + Send + Sync>> {
 
         // reader should be a child of the given node
         trace!(self.log, "creating reader"; "for" => node.as_global().index());
@@ -717,7 +717,7 @@ impl<'a> Migration<'a> {
     pub fn maintain(&mut self,
                     n: NodeAddress,
                     key: usize)
-                    -> Box<Fn(&query::DataType) -> Result<ops::Datas, ()> + Send + Sync> {
+                    -> Box<Fn(&prelude::DataType) -> Result<ops::Datas, ()> + Send + Sync> {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -748,7 +748,7 @@ impl<'a> Migration<'a> {
         (&mut self,
          n: NodeAddress,
          key: usize)
-         -> Box<Fn(&query::DataType) -> Result<(ops::Datas, checktable::Token), ()> + Send + Sync> {
+         -> Box<Fn(&prelude::DataType) -> Result<(ops::Datas, checktable::Token), ()> + Send + Sync> {
         self.ensure_reader_for(n);
         self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];
@@ -767,7 +767,7 @@ impl<'a> Migration<'a> {
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
             let generator = inner.token_generator.clone().unwrap();
-            Box::new(move |q: &query::DataType| -> Result<(ops::Datas, checktable::Token), ()> {
+            Box::new(move |q: &prelude::DataType| -> Result<(ops::Datas, checktable::Token), ()> {
                 arc.find_and(q,
                               |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
                     .map(|(res, ts)| {

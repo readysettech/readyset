@@ -1,5 +1,3 @@
-use query;
-
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
 
@@ -77,7 +75,7 @@ impl GroupConcat {
                              })
     }
 
-    fn build(&self, rec: &[query::DataType]) -> String {
+    fn build(&self, rec: &[DataType]) -> String {
         let mut s = String::with_capacity(self.slen);
         for tc in &self.components {
             match *tc {
@@ -86,11 +84,11 @@ impl GroupConcat {
                 }
                 TextComponent::Column(i) => {
                     match rec[i] {
-                        query::DataType::Text(ref val) => {
+                        DataType::Text(ref val) => {
                             s.push_str(&*val);
                         }
-                        query::DataType::Number(ref n) => s.push_str(&n.to_string()),
-                        query::DataType::None => unreachable!(),
+                        DataType::Number(ref n) => s.push_str(&n.to_string()),
+                        DataType::None => unreachable!(),
                     }
                 }
             }
@@ -133,11 +131,11 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn zero(&self) -> Option<query::DataType> {
-        Some(query::DataType::from(""))
+    fn zero(&self) -> Option<DataType> {
+        Some(DataType::from(""))
     }
 
-    fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
         let v = self.build(r);
         if pos {
             Modify::Add(v)
@@ -146,7 +144,7 @@ impl GroupedOperation for GroupConcat {
         }
     }
 
-    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
         use std::collections::BTreeSet;
         use std::iter::FromIterator;
 
@@ -156,7 +154,7 @@ impl GroupedOperation for GroupConcat {
         // efficient by splitting into a BTree, which maintains sorting while
         // supporting efficient add/remove.
 
-        let current = if let Some(&query::DataType::Text(ref s)) = current {
+        let current = if let Some(&DataType::Text(ref s)) = current {
             s
         } else {
             unreachable!();

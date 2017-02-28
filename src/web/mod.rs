@@ -4,7 +4,7 @@ use rustful::server::Global;
 use std::sync::Mutex;
 
 use flow::Blender;
-use query::DataType;
+use flow::data::DataType;
 use std::collections::HashMap;
 
 struct GetEndpoint<F> {

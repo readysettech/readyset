@@ -1,5 +1,4 @@
 use ops;
-use query;
 
 use std::fmt;
 use std::collections::HashSet;
@@ -55,14 +54,14 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// If some, this is used to determine what zero-record to revoke when the first record for a
     /// group arrives, as well as to initialize the fold value when a query is performed. Otherwise,
     /// no record is revoked when the first record arrives for a group.
-    fn zero(&self) -> Option<query::DataType>;
+    fn zero(&self) -> Option<DataType>;
 
     /// Extract the aggregation value from a single record.
-    fn to_diff(&self, record: &[query::DataType], is_positive: bool) -> Self::Diff;
+    fn to_diff(&self, record: &[DataType], is_positive: bool) -> Self::Diff;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value. When the group is empty, current is set to the zero value.
-    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType;
+    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType;
 
     fn description(&self) -> String;
 }

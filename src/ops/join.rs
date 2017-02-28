@@ -1,5 +1,4 @@
 use ops;
-use query;
 
 use std::sync;
 use std::iter;
@@ -189,10 +188,10 @@ pub struct Joiner {
 
 impl Joiner {
     fn join<'a>(&'a self,
-                left: (NodeAddress, sync::Arc<Vec<query::DataType>>),
+                left: (NodeAddress, sync::Arc<Vec<DataType>>),
                 domain: &DomainNodes,
                 states: &StateMap)
-                -> Box<Iterator<Item = Vec<query::DataType>> + 'a> {
+                -> Box<Iterator<Item = Vec<DataType>> + 'a> {
 
         // NOTE: this only works for two-way joins
         let other = *self.join.keys().find(|&other| other != &left.0).unwrap();
@@ -210,7 +209,7 @@ impl Joiner {
                     .iter()
                     .map(|&(source, column)| {
                         if source == other {
-                            query::DataType::None
+                            DataType::None
                         } else {
                             // this clone is unnecessary
                             left.1[column].clone()
@@ -537,7 +536,7 @@ mod tests {
         // and should have the correct values from the provided left
         assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
         // and None for the remaining column
-        assert!(rs.iter().any(|r| r.rec()[2] == query::DataType::None));
+        assert!(rs.iter().any(|r| r.rec()[2] == DataType::None));
 
         forward_non_weird(j, l, r);
     }

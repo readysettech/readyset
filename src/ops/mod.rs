@@ -9,21 +9,20 @@ pub mod identity;
 pub mod gatedid;
 pub mod filter;
 
-use query;
-
+use flow::data::DataType;
 use std::ops::{Deref, DerefMut};
 use std::sync;
 
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Record {
-    Positive(sync::Arc<Vec<query::DataType>>),
-    Negative(sync::Arc<Vec<query::DataType>>),
-    DeleteRequest(query::DataType),
+    Positive(sync::Arc<Vec<DataType>>),
+    Negative(sync::Arc<Vec<DataType>>),
+    DeleteRequest(DataType),
 }
 
 impl Record {
-    pub fn rec(&self) -> &[query::DataType] {
+    pub fn rec(&self) -> &[DataType] {
         match *self {
             Record::Positive(ref v) |
             Record::Negative(ref v) => &v[..],
@@ -39,7 +38,7 @@ impl Record {
         }
     }
 
-    pub fn extract(self) -> (sync::Arc<Vec<query::DataType>>, bool) {
+    pub fn extract(self) -> (sync::Arc<Vec<DataType>>, bool) {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
@@ -49,7 +48,7 @@ impl Record {
 }
 
 impl Deref for Record {
-    type Target = sync::Arc<Vec<query::DataType>>;
+    type Target = sync::Arc<Vec<DataType>>;
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) |
@@ -69,20 +68,20 @@ impl DerefMut for Record {
     }
 }
 
-impl From<sync::Arc<Vec<query::DataType>>> for Record {
-    fn from(other: sync::Arc<Vec<query::DataType>>) -> Self {
+impl From<sync::Arc<Vec<DataType>>> for Record {
+    fn from(other: sync::Arc<Vec<DataType>>) -> Self {
         Record::Positive(other)
     }
 }
 
-impl From<Vec<query::DataType>> for Record {
-    fn from(other: Vec<query::DataType>) -> Self {
+impl From<Vec<DataType>> for Record {
+    fn from(other: Vec<DataType>) -> Self {
         Record::Positive(sync::Arc::new(other))
     }
 }
 
-impl From<(Vec<query::DataType>, bool)> for Record {
-    fn from(other: (Vec<query::DataType>, bool)) -> Self {
+impl From<(Vec<DataType>, bool)> for Record {
+    fn from(other: (Vec<DataType>, bool)) -> Self {
         if other.1 {
             Record::Positive(sync::Arc::new(other.0))
         } else {
@@ -105,9 +104,9 @@ impl FromIterator<Record> for Records {
         Records(iter.into_iter().collect())
     }
 }
-impl FromIterator<sync::Arc<Vec<query::DataType>>> for Records {
+impl FromIterator<sync::Arc<Vec<DataType>>> for Records {
     fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = sync::Arc<Vec<query::DataType>>>
+        where I: IntoIterator<Item = sync::Arc<Vec<DataType>>>
     {
         Records(iter.into_iter().map(Record::Positive).collect())
     }
@@ -122,7 +121,7 @@ impl IntoIterator for Records {
 }
 
 /// Represents a set of records returned from a query.
-pub type Datas = Vec<Vec<query::DataType>>;
+pub type Datas = Vec<Vec<DataType>>;
 
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Records(Vec<Record>);
@@ -152,19 +151,19 @@ impl Into<Records> for Vec<Record> {
     }
 }
 
-impl Into<Records> for Vec<sync::Arc<Vec<query::DataType>>> {
+impl Into<Records> for Vec<sync::Arc<Vec<DataType>>> {
     fn into(self) -> Records {
         Records(self.into_iter().map(|r| r.into()).collect())
     }
 }
 
-impl Into<Records> for Vec<Vec<query::DataType>> {
+impl Into<Records> for Vec<Vec<DataType>> {
     fn into(self) -> Records {
         Records(self.into_iter().map(|r| r.into()).collect())
     }
 }
 
-impl Into<Records> for Vec<(Vec<query::DataType>, bool)> {
+impl Into<Records> for Vec<(Vec<DataType>, bool)> {
     fn into(self) -> Records {
         Records(self.into_iter().map(|r| r.into()).collect())
     }
@@ -180,7 +179,6 @@ pub mod test {
     use flow::prelude::*;
     use flow::domain::single;
     use flow::node;
-    use query;
 
     use petgraph::graph::NodeIndex;
 
@@ -300,7 +298,7 @@ pub mod test {
                 .collect();
         }
 
-        pub fn seed(&mut self, base: NodeAddress, data: Vec<query::DataType>) {
+        pub fn seed(&mut self, base: NodeAddress, data: Vec<DataType>) {
             assert!(self.nut.is_some(), "seed must happen after set_op");
 
             // base here is some identifier that was returned by Self::add_base.

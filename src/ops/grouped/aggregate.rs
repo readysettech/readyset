@@ -1,5 +1,3 @@
-use query;
-
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
 
@@ -72,16 +70,16 @@ impl GroupedOperation for Aggregator {
         &self.group[..]
     }
 
-    fn zero(&self) -> Option<query::DataType> {
+    fn zero(&self) -> Option<DataType> {
         Some(0i64.into())
     }
 
-    fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
         match self.op {
             Aggregation::COUNT if pos => 1,
             Aggregation::COUNT => -1,
             Aggregation::SUM => {
-                let v = if let query::DataType::Number(n) = r[self.over] {
+                let v = if let DataType::Number(n) = r[self.over] {
                     n
                 } else {
                     unreachable!();
@@ -91,8 +89,8 @@ impl GroupedOperation for Aggregator {
         }
     }
 
-    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
-        if let Some(&query::DataType::Number(n)) = current {
+    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
+        if let Some(&DataType::Number(n)) = current {
             diffs.into_iter().fold(n, |n, d| n + d).into()
         } else {
             unreachable!();

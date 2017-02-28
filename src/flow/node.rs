@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use checktable;
 
-use query::DataType;
+use flow::data::DataType;
 use ops::{Record, Datas};
 use flow::domain;
 use flow::{Ingredient, NodeAddress, Edge};

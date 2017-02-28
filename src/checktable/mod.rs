@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
-use query::DataType;
 use flow::prelude::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

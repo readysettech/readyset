@@ -1,5 +1,3 @@
-use query;
-
 use ops::grouped::GroupedOperation;
 use ops::grouped::GroupedOperator;
 
@@ -76,12 +74,12 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn zero(&self) -> Option<query::DataType> {
+    fn zero(&self) -> Option<DataType> {
         None
     }
 
-    fn to_diff(&self, r: &[query::DataType], pos: bool) -> Self::Diff {
-        let v = if let query::DataType::Number(n) = r[self.over] {
+    fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
+        let v = if let DataType::Number(n) = r[self.over] {
             n
         } else {
             unreachable!();
@@ -94,15 +92,15 @@ impl GroupedOperation for ExtremumOperator {
         }
     }
 
-    fn apply(&self, current: Option<&query::DataType>, diffs: Vec<Self::Diff>) -> query::DataType {
+    fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
-        if let Some(&query::DataType::Number(n)) = current {
+        if let Some(&DataType::Number(n)) = current {
             extreme_values.push(n);
         };
 
-        let is_extreme_value = |x: i64| if let Some(&query::DataType::Number(n)) = current {
+        let is_extreme_value = |x: i64| if let Some(&DataType::Number(n)) = current {
             match self.op {
                 Extremum::MAX => x >= n,
                 Extremum::MIN => x <= n,

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync;
 
 use flow::prelude::*;
-use query::DataType;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone)]
@@ -132,7 +131,6 @@ mod tests {
     use super::*;
 
     use ops;
-    use query::DataType;
 
     fn setup(materialized: bool, filters: Option<&[Option<DataType>]>) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -146,10 +144,9 @@ mod tests {
 
     #[test]
     fn it_forwards_nofilter() {
-        use query;
         let mut g = setup(false, Some(&[None, None]));
 
-        let mut left: Vec<query::DataType>;
+        let mut left: Vec<DataType>;
 
         left = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
@@ -163,10 +160,9 @@ mod tests {
 
     #[test]
     fn it_forwards() {
-        use query;
         let mut g = setup(false, None);
 
-        let mut left: Vec<query::DataType>;
+        let mut left: Vec<DataType>;
 
         left = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
@@ -180,10 +176,9 @@ mod tests {
 
     #[test]
     fn it_forwards_mfilter() {
-        use query;
         let mut g = setup(false, Some(&[Some(1.into()), Some("a".into())]));
 
-        let mut left: Vec<query::DataType>;
+        let mut left: Vec<DataType>;
 
         left = vec![1.into(), "a".into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());

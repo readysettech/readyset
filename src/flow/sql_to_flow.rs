@@ -7,7 +7,7 @@ use ops;
 use ops::base::Base;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
-use query::DataType;
+use flow::data::DataType;
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;

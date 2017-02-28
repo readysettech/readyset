@@ -1,4 +1,3 @@
-use query::DataType;
 use flow::prelude::*;
 use flow;
 
@@ -13,7 +12,7 @@ use std::thread;
 
 /// Available RPC methods
 pub mod ext {
-    use query::DataType;
+    use flow::data::DataType;
     use std::collections::HashMap;
     service! {
         /// Query the given `view` for all records whose columns match the given values.

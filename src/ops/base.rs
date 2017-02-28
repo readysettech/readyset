@@ -53,20 +53,28 @@ impl Ingredient for Base {
     fn on_commit(&mut self, us: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {
         self.us = Some(us);
     }
-    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, state: &StateMap) -> Records {
-        rs.into_iter().map(|r| match r {
-            Record::Positive(u) => Record::Positive(u),
-            Record::Negative(u) => Record::Negative(u),
-            Record::DeleteRequest(key) => {
-                let col = self.key_column.expect("base must have a key column to support deletions");
-                let db = state.get(self.us.as_ref().unwrap().as_local())
-                    .expect("base must have its own state materialized to support deletions");
-                let rows = db.lookup(col, &key);
-                assert_eq!(rows.len(), 1);
+    fn on_input(&mut self,
+                _: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                state: &StateMap)
+                -> Records {
+        rs.into_iter()
+            .map(|r| match r {
+                Record::Positive(u) => Record::Positive(u),
+                Record::Negative(u) => Record::Negative(u),
+                Record::DeleteRequest(key) => {
+                    let col = self.key_column
+                        .expect("base must have a key column to support deletions");
+                    let db = state.get(self.us.as_ref().unwrap().as_local())
+                        .expect("base must have its own state materialized to support deletions");
+                    let rows = db.lookup(col, &key);
+                    assert_eq!(rows.len(), 1);
 
-                Record::Negative(rows[0].clone())
-            }
-        }).collect()
+                    Record::Negative(rows[0].clone())
+                }
+            })
+            .collect()
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, usize> {
