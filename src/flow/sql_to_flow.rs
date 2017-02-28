@@ -469,10 +469,16 @@ impl SqlIncorporator {
             Err(e) => panic!(e),
         };
 
+        debug!(mig.log,
+               format!("Making nodes for query named \"{}\"", name));
+
         // Do we already have this exact query or a subset of it?
         for &(ref existing_qg, ref na) in self.query_graphs.iter() {
             if existing_qg.signature() == qg.signature() {
                 // we already have this exact query, so we don't need to add anything
+                info!(mig.log,
+                      "skipping query \"{}\" as an exact equivalent already exists",
+                      name);
                 return vec![];
             }
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
@@ -662,6 +668,7 @@ impl SqlIncorporator {
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
             }
+            debug!(mig.log, format!("Added final node for query named \"{}\"", name); "node" => ni.as_global().index());
             new_filter_nodes.push(ni);
 
             // Finally, store the query graph and the corresponding `NodeAddress`
