@@ -117,7 +117,7 @@ getCAddr: SELECT c_addr_id FROM customer WHERE customer.c_id = ?;
 # enterAddress.id
 enterAddressId: SELECT co_id FROM country WHERE co_name = ?;
 # enterAddress.match
-enterAddressMatch: SELECT addr_id FROM address WHERE addr_street1 = ? AND addr_street2 = ? AND addr_city = ? AND addr_state = ? AND addr_zip = ? AND addr_co_id = ?;
+#enterAddressMatch: SELECT addr_id FROM address WHERE addr_street1 = ? AND addr_street2 = ? AND addr_city = ? AND addr_state = ? AND addr_zip = ? AND addr_co_id = ?;
 # enterAddress.insert
 INSERT into address (addr_id, addr_street1, addr_street2, addr_city, addr_state, addr_zip, addr_co_id) VALUES (?, ?, ?, ?, ?, ?, ?);
 # enterAddress.maxId
@@ -142,4 +142,4 @@ verifyDBConsistencyCustId: SELECT c_id FROM customer;
 # verifyDBConsistency.itemId
 verifyDBConsistencyItemId: SELECT i_id FROM item;
 # verifyDBConsistency.addrId
-#verifyDBConsistencyAddrId: SELECT addr_id FROM address;
+verifyDBConsistencyAddrId: SELECT addr_id FROM address;
