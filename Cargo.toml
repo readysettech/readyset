@@ -57,8 +57,11 @@ serde_derive = { version = "0.9", optional = true }
 # for web
 rustc-serialize = { version = "0.3", optional = true }
 
-# for unique ids
+# for unique ids used to name a base's persistent log
 snowflake = "1.2.0"
+
+# for serialization of records to JSON using serde
+serde_json = "0.9.8"
 
 [dependencies.rustful]
 version = "0.9"

@@ -1,9 +1,9 @@
-// TODO(jmftrindade): Put persistent log code behind a feature flag?
+// TODO(jmftrindade): Put the writing to disk behind a runtime command-line flag.
+use serde_json;
 use snowflake::ProcessUniqueId;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::BufWriter;
-use std::io::prelude::*;
 use std::path::Path;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
@@ -11,11 +11,18 @@ use std::path::Path;
 /// These nodes perform no computation, and their job is merely to persist all received updates and
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Base {
     primary_key: Option<Vec<usize>>,
+    persistent_log_writer: Option<BufWriter<File>>,
     us: Option<NodeAddress>,
+
     // This id is unique within the same process.
+    //
+    // TODO(jmftrindade): Figure out the story here.  While ProcessUniqueId is guaranteed to be
+    // unique within the same process, the assignment of ids is not deterministic across multiple
+    // process runs. This is just a tuple of 2 monotonically increasing counters: the first is per
+    // process, and the second is "within" that process.
     unique_id: ProcessUniqueId,
 }
 
@@ -24,9 +31,61 @@ impl Base {
     pub fn new(primary_key: Vec<usize>) -> Self {
         Base {
             primary_key: Some(primary_key),
+            persistent_log_writer: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
         }
+    }
+
+    /// Write records to persistent log.
+    fn persist_to_log(&mut self, records: &Records) {
+        if self.persistent_log_writer.is_none() {
+            self.persistent_log_writer = Some(self.create_log_writer());
+        }
+
+        serde_json::to_writer(&mut self.persistent_log_writer.as_mut().unwrap(), &records).unwrap();
+    }
+
+    /// Open persistent log and returned a buffered writer to it if successful.
+    fn create_log_writer(&self) -> BufWriter<File> {
+        match self.us {
+            Some(us) => {
+                // Check whether NodeAddress is global or local?
+                let log_filename = format!("/tmp/soup-{}-{}.json", us, self.unique_id);
+                let path = Path::new(&log_filename);
+
+                let file = match OpenOptions::new()
+                    .read(false)
+                    .append(true)
+                    .write(true)
+                    .create(true)
+                    .open(path) {
+                    Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
+                                          path.display(), reason),
+                    Ok(file) => file,
+                };
+                BufWriter::new(file)
+            },
+            None => {
+                panic!("Unable to open persistent log file: no address available for Base node.");
+            }
+        }
+    }
+}
+
+/// A Base clone must have a different unique_id so that no two copies write to the same file.
+/// Resetting the writer to None in the original copy is not enough to guarantee that, as the
+/// original object can still re-open the log file on-demand from Base::persist_to_log.
+impl Clone for Base {
+    fn clone(&self) -> Base {
+        let new_base = Base {
+            key_column: self.key_column,
+            persistent_log_writer: None,
+            unique_id: ProcessUniqueId::new(),
+            us: self.us,
+        };
+
+        new_base
     }
 }
 
@@ -36,6 +95,7 @@ impl Default for Base {
             primary_key: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
+            persistent_log_writer: None,
         }
     }
 }
@@ -110,24 +170,6 @@ impl Ingredient for Base {
         true
     }
 
-    fn persist_to_log(&self, records: &Records) {
-        // One file per base type.
-        let log_filename = format!("/tmp/soup-{}.log", self.unique_id);
-
-        // TODO(jmftrindade): Keep file handle around during this base's lifetime?
-        let log_file = open_persistent_log(&log_filename);
-        let mut log_writer = BufWriter::new(&log_file);
-
-        for record in records.iter() {
-            let log_entry = format!("{}\n", record);
-            match log_writer.write_all(log_entry.as_bytes()) {
-                Ok(_) => {},
-                Err(reason) => println!("Could not write to persistent log: {}, reason: {}",
-                                        log_filename, reason)
-            }
-        }
-    }
-
     fn description(&self) -> String {
         "B".into()
     }
@@ -135,21 +177,4 @@ impl Ingredient for Base {
     fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
         unreachable!();
     }
-}
-
-fn open_persistent_log(log_path: &String) -> File {
-    let path = Path::new(log_path);
-    let display = path.display();
-
-    let file = match OpenOptions::new()
-        .read(false)
-        .append(true)
-        .write(true)
-        .create(true)
-        .open(path) {
-        Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
-                              display, reason),
-        Ok(file) => file,
-    };
-    file
 }

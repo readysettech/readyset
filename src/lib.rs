@@ -356,7 +356,7 @@ extern crate futures;
 #[cfg(feature="b_netsoup")]
 extern crate tokio_core;
 
-// TODO(jmftrindade): Feature flag?
+extern crate serde_json;
 extern crate snowflake;
 
 mod checktable;
