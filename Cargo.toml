@@ -11,7 +11,7 @@ b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins"]
 b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcached-rs"]
-default = ["web", "b_netsoup", "serde", "serde_derive"]
+default = ["web", "b_netsoup"]
 
 [dependencies]
 itertools = "0.5"
@@ -51,8 +51,8 @@ futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
 tarpc = {git="https://github.com/google/tarpc.git", optional = true}
 tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
-serde = { version = "0.9", optional = true }
-serde_derive = { version = "0.9", optional = true }
+serde = { version = "0.9" }
+serde_derive = { version = "0.9" }
 
 # for web
 rustful = { version = "0.9", optional = true }
