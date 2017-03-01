@@ -73,17 +73,57 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
         })
         .collect();
 
-    let inquisitive_children: HashSet<_> = nodes.iter()
-        .filter_map(|&(ni, n, _)| {
+    let mut inquisitive_children = HashSet::new();
+    {
+        let mark_parent_inquisitive_or_materialize =
+            |ni: NodeIndex,
+             materialize: &mut HashSet<flow::LocalNodeIndex>,
+             inquisitive_children: &mut HashSet<NodeIndex>|
+             -> Option<NodeIndex> {
+                let n = &graph[ni];
+                if let flow::node::Type::Internal(ref nn) = **n {
+                    if !materialize.contains(n.addr().as_local()) {
+                        if nn.can_query_through() {
+                            trace!(log, "parent can be queried through, mark it as querying";
+                                   "node" => format!("{}", ni.index()));
+                            inquisitive_children.insert(ni);
+                            // continue backtracking
+                            return Some(ni);
+                        } else {
+                            // we can't query through this internal node, so materialize it
+                            trace!(log, "parent can't be queried through, so materialize it";
+                                   "node" => format!("{}", ni.index()));
+                            materialize.insert(*n.addr().as_local());
+                        }
+                    }
+                }
+                None
+            };
+        for &(ni, n, _) in nodes.iter() {
             if let flow::node::Type::Internal(..) = **n {
                 if n.will_query(materialize.contains(n.addr().as_local())) {
                     trace!(log, "found querying child"; "node" => format!("{}", ni.index()));
-                    return Some(ni);
+                    inquisitive_children.insert(ni);
+                    // track child back to an ingress, marking any unmaterialized nodes on the path as
+                    // inquisitive as long as we can query through them
+                    let mut q = vec![ni];
+                    while !q.is_empty() {
+                        let ni = q.pop().unwrap();
+                        for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                            let next =
+                                mark_parent_inquisitive_or_materialize(ni,
+                                                                       &mut materialize,
+                                                                       &mut inquisitive_children);
+                            match next {
+                                Some(next_ni) => q.push(next_ni),
+                                None => continue,
+                            }
+                        }
+                    }
                 }
             }
-            None
-        })
-        .collect();
+        }
+    }
 
     for &(ni, n, _) in &nodes {
         if let flow::node::Type::Ingress = **n {
