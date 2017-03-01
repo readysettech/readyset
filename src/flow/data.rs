@@ -8,8 +8,7 @@ use arccstr::ArcCStr;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
-#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone)]
-#[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
+#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
     /// An empty value.
     None,

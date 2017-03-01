@@ -16,8 +16,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync;
 
 /// A record is a single positive or negative data record with an associated time stamp.
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Record {
     Positive(sync::Arc<Vec<DataType>>),
     Negative(sync::Arc<Vec<DataType>>),
@@ -137,8 +136,7 @@ impl IntoIterator for Records {
 /// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<DataType>>;
 
-#[derive(Clone, Default, PartialEq, Debug)]
-#[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Records(Vec<Record>);
 
 impl Deref for Records {
