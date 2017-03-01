@@ -46,7 +46,6 @@ impl Base {
     /// Open persistent log and initialize a buffered writer to it if successful.
     fn ensure_log_writer(&mut self) {
         let us = self.us.expect("on_input should never be called before on_commit");
-        ;
 
         if self.persistent_log_writer.is_none() {
             // Check whether NodeAddress is global or local?
