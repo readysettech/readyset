@@ -169,11 +169,6 @@ pub trait Ingredient
         false
     }
 
-    /// Saves incoming records to the log if this is a base type.
-    fn persist_to_log(&self, _: &ops::Records) {
-        unreachable!();
-    }
-
     /// Produce a compact, human-readable description of this node.
     ///
     ///  Symbol   Description
