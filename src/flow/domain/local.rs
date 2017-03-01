@@ -99,7 +99,7 @@ use fnv::FnvHashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone)]
 pub enum KeyType<'a, T: 'a> {
     Single(&'a T),
     Double(&'a (T, T)),
@@ -134,12 +134,12 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup(&self, key: KeyType<T>) -> Option<&Vec<Arc<Vec<T>>>> {
-        match (*self, key) {
-            (KeyedState::Single(ref m), KeyType::Single(k)) => m.get(k),
-            (KeyedState::Double(ref m), KeyType::Double(k)) => m.get(k),
-            (KeyedState::Tri(ref m), KeyType::Tri(k)) => m.get(k),
-            (KeyedState::Quad(ref m), KeyType::Quad(k)) => m.get(k),
+    pub fn lookup(&self, key: &KeyType<T>) -> Option<&Vec<Arc<Vec<T>>>> {
+        match (self, key) {
+            (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
+            (&KeyedState::Double(ref m), &KeyType::Double(k)) => m.get(k),
+            (&KeyedState::Tri(ref m), &KeyType::Tri(k)) => m.get(k),
+            (&KeyedState::Quad(ref m), &KeyType::Quad(k)) => m.get(k),
             _ => unreachable!(),
         }
     }
@@ -185,7 +185,7 @@ impl<T: Hash + Eq + Clone> State<T> {
             return;
         }
 
-        if !self.state.is_empty() || !self.state[0].1.is_empty() {
+        if !self.state.is_empty() && !self.state[0].1.is_empty() {
             // we'd need to *construct* the index!
             unimplemented!();
         }
@@ -193,7 +193,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.push((Vec::from(columns), columns.into()));
     }
 
-    pub fn get_keys(&self) -> Vec<Vec<usize>> {
+    pub fn keys(&self) -> Vec<Vec<usize>> {
         self.state.iter().map(|s| &s.0).cloned().collect()
     }
 
@@ -202,7 +202,12 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn insert(&mut self, r: Arc<Vec<T>>) {
-        for s in &self.state {
+        let mut rclones = Vec::with_capacity(self.state.len());
+        rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
+        rclones.push(r);
+
+        for s in &mut self.state {
+            let r = rclones.swap_remove(0);
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     // treat this specially to avoid the extra Vec
@@ -240,7 +245,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn remove(&mut self, r: &[T]) {
-        for s in &self.state {
+        for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
@@ -279,7 +284,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
-        for &(ref cols, ref state) in &self.state {
+        for &(_, ref state) in &self.state {
             if let KeyedState::Single(ref map) = *state {
                 return map.values();
             }
@@ -300,7 +305,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
-    pub fn lookup(&self, columns: &[usize], key: KeyType<T>) -> &[Arc<Vec<T>>] {
+    pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> &[Arc<Vec<T>>] {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {

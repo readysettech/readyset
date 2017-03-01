@@ -196,7 +196,8 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             // find the current value for this group
             let db = state.get(self.us.as_ref().unwrap().as_local())
                 .expect("grouped operators must have their own state materialized");
-            let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+            let rs = db.lookup(&[self.pkey_out],
+                               &KeyType::Single(group[self.pkey_in].as_ref().unwrap()));
             debug_assert!(rs.len() <= 1, "a group had more than 1 result");
             let old = rs.get(0);
 

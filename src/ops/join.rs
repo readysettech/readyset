@@ -199,7 +199,11 @@ impl Joiner {
         let target = &this.against[&other];
 
         // send the parameters to start the query.
-        let rx: Vec<_> = self.lookup(other, target.on.1, &left.1[target.on.0], domain, states)
+        let rx: Vec<_> = self.lookup(other,
+                    &[target.on.1],
+                    &KeyType::Single(&left.1[target.on.0]),
+                    domain,
+                    states)
             .expect("joins must have inputs materialized")
             .cloned()
             .collect();

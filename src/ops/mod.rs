@@ -253,7 +253,7 @@ pub mod test {
             let idx = self.graph[ni].suggest_indexes(local);
             for (tbl, col) in idx {
                 if let Some(ref mut s) = self.states.get_mut(tbl.as_local()) {
-                    s.set_pkey(col);
+                    s.add_key(&[col]);
                 }
             }
             // and get rid of states we don't need

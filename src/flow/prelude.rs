@@ -13,6 +13,7 @@ use std::cell;
 use flow::domain::local;
 pub type DomainNodes = local::Map<cell::RefCell<single::NodeDescriptor>>;
 pub use flow::data::DataType;
+pub use flow::domain::local::KeyType;
 pub type StateMap = local::Map<State>;
 pub use ops::{Records, Record};
 pub type State = local::State<DataType>;

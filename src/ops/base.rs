@@ -68,7 +68,7 @@ impl Ingredient for Base {
                         .expect("base must have a key column to support deletions");
                     let db = state.get(self.us.as_ref().unwrap().as_local())
                         .expect("base must have its own state materialized to support deletions");
-                    let rows = db.lookup(col, &key);
+                    let rows = db.lookup(&[col], &KeyType::Single(&key));
                     assert_eq!(rows.len(), 1);
 
                     Record::Negative(rows[0].clone())

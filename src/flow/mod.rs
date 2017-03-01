@@ -215,8 +215,8 @@ pub trait Ingredient
     }
 
     fn query_through<'a>(&self,
-                         _column: usize,
-                         _value: &'a prelude::DataType,
+                         _columns: &[usize],
+                         _key: &prelude::KeyType<prelude::DataType>,
                          _states: &'a prelude::StateMap)
                          -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         None
@@ -228,19 +228,19 @@ pub trait Ingredient
     /// Only addresses of the type `NodeAddress::Local` may be used in this function.
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
-                  column: usize,
-                  value: &'a prelude::DataType,
+                  columns: &[usize],
+                  key: &prelude::KeyType<prelude::DataType>,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
                   -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         states.get(parent.as_local())
-            .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
+            .map(move |state| Box::new(state.lookup(columns, key).iter()) as Box<_>)
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
                 let parent = domain.get(parent.as_local()).unwrap().borrow();
                 if parent.is_internal() {
-                    parent.query_through(column, value, states)
+                    parent.query_through(columns, key, states)
                 } else {
                     None
                 }
