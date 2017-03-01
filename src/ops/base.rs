@@ -39,36 +39,33 @@ impl Base {
 
     /// Write records to persistent log.
     fn persist_to_log(&mut self, records: &Records) {
-        if self.persistent_log_writer.is_none() {
-            self.persistent_log_writer = Some(self.create_log_writer());
-        }
-
+        self.ensure_log_writer();
         serde_json::to_writer(&mut self.persistent_log_writer.as_mut().unwrap(), &records).unwrap();
     }
 
-    /// Open persistent log and returned a buffered writer to it if successful.
-    fn create_log_writer(&self) -> BufWriter<File> {
-        match self.us {
-            Some(us) => {
-                // Check whether NodeAddress is global or local?
-                let log_filename = format!("/tmp/soup-{}-{}.json", us, self.unique_id);
-                let path = Path::new(&log_filename);
+    /// Open persistent log and initialize a buffered writer to it if successful.
+    fn ensure_log_writer(&mut self) {
+        let us = self.us.expect("on_input should never be called before on_commit");
+        ;
 
-                let file = match OpenOptions::new()
-                    .read(false)
-                    .append(true)
-                    .write(true)
-                    .create(true)
-                    .open(path) {
-                    Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
-                                          path.display(), reason),
-                    Ok(file) => file,
-                };
-                BufWriter::new(file)
-            },
-            None => {
-                panic!("Unable to open persistent log file: no address available for Base node.");
-            }
+        if self.persistent_log_writer.is_none() {
+            // Check whether NodeAddress is global or local?
+            let log_filename = format!("/tmp/soup-{}-{}.json", us, self.unique_id);
+            let path = Path::new(&log_filename);
+
+            // TODO(jmftrindade): Current semantics is to overwrite an existing log. Once we
+            // have recovery code, we obviously do not want to overwrite this log before recovering.
+            let file = match OpenOptions::new()
+                .read(false)
+                .append(false)
+                .write(true)
+                .create(true)
+                .open(path) {
+                Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
+                                      path.display(), reason),
+                Ok(file) => file,
+            };
+            self.persistent_log_writer = Some(BufWriter::new(file));
         }
     }
 }
@@ -78,14 +75,12 @@ impl Base {
 /// original object can still re-open the log file on-demand from Base::persist_to_log.
 impl Clone for Base {
     fn clone(&self) -> Base {
-        let new_base = Base {
+        Base {
             key_column: self.key_column,
             persistent_log_writer: None,
             unique_id: ProcessUniqueId::new(),
             us: self.us,
-        };
-
-        new_base
+        }
     }
 }
 
