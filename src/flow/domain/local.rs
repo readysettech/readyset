@@ -115,11 +115,29 @@ enum KeyedState<T: Eq + Hash> {
     Quad(FnvHashMap<(T, T, T, T), Vec<Arc<Vec<T>>>>),
 }
 
-impl<'a, T: Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
+impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
     fn from(other: &'a [T]) -> Self {
         match other.len() {
             0 => unreachable!(),
             1 => KeyType::Single(&other[0]),
+            2 => KeyType::Double((other[0].clone(), other[1].clone())),
+            3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
+            4 => {
+                KeyType::Quad((other[0].clone(),
+                               other[1].clone(),
+                               other[2].clone(),
+                               other[3].clone()))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [&'a T]> for KeyType<'a, T> {
+    fn from(other: &'a [&'a T]) -> Self {
+        match other.len() {
+            0 => unreachable!(),
+            1 => KeyType::Single(other[0]),
             2 => KeyType::Double((other[0].clone(), other[1].clone())),
             3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
             4 => {
