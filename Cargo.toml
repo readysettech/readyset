@@ -55,8 +55,13 @@ serde = { version = "0.9", optional = true }
 serde_derive = { version = "0.9", optional = true }
 
 # for web
-rustful = { version = "0.9", optional = true }
 rustc-serialize = { version = "0.3", optional = true }
+
+[dependencies.rustful]
+version = "0.9"
+default-features = false
+features = ["rustc_json_body", "multipart"]
+optional = true
 
 [profile.release]
 debug=true
