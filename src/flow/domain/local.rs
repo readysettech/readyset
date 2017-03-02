@@ -102,9 +102,9 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum KeyType<'a, T: 'a> {
     Single(&'a T),
-    Double(&'a (T, T)),
-    Tri(&'a (T, T, T)),
-    Quad(&'a (T, T, T, T)),
+    Double((T, T)),
+    Tri((T, T, T)),
+    Quad((T, T, T, T)),
 }
 
 #[derive(Clone)]
@@ -113,6 +113,24 @@ enum KeyedState<T: Eq + Hash> {
     Double(FnvHashMap<(T, T), Vec<Arc<Vec<T>>>>),
     Tri(FnvHashMap<(T, T, T), Vec<Arc<Vec<T>>>>),
     Quad(FnvHashMap<(T, T, T, T), Vec<Arc<Vec<T>>>>),
+}
+
+impl<'a, T: Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
+    fn from(other: &'a [T]) -> Self {
+        match other.len() {
+            0 => unreachable!(),
+            1 => KeyType::Single(&other[0]),
+            2 => KeyType::Double((other[0].clone(), other[1].clone())),
+            3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
+            4 => {
+                KeyType::Quad((other[0].clone(),
+                               other[1].clone(),
+                               other[2].clone(),
+                               other[3].clone()))
+            }
+            _ => unimplemented!(),
+        }
+    }
 }
 
 impl<T: Eq + Hash> KeyedState<T> {
@@ -137,9 +155,9 @@ impl<T: Eq + Hash> KeyedState<T> {
     pub fn lookup(&self, key: &KeyType<T>) -> Option<&Vec<Arc<Vec<T>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
-            (&KeyedState::Double(ref m), &KeyType::Double(k)) => m.get(k),
-            (&KeyedState::Tri(ref m), &KeyType::Tri(k)) => m.get(k),
-            (&KeyedState::Quad(ref m), &KeyType::Quad(k)) => m.get(k),
+            (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
+            (&KeyedState::Tri(ref m), &KeyType::Tri(ref k)) => m.get(k),
+            (&KeyedState::Quad(ref m), &KeyType::Quad(ref k)) => m.get(k),
             _ => unreachable!(),
         }
     }

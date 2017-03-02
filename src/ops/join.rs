@@ -350,7 +350,7 @@ impl Ingredient for Joiner {
             .collect()
     }
 
-    fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index all join fields
         self.join
             .iter()
@@ -364,7 +364,7 @@ impl Ingredient for Joiner {
             })
             // we now have (NodeAddress, usize) for every join column.
             .fold(HashMap::new(), |mut hm, (node, col)| {
-                hm.entry(*node).or_insert(col);
+                hm.entry(*node).or_insert(vec![col]);
                 hm
             })
     }
@@ -550,8 +550,8 @@ mod tests {
         use std::collections::HashMap;
         let me = NodeAddress::mock_global(2.into());
         let (j, l, r) = setup(false);
-        let hm: HashMap<_, _> = vec![(l, 0) /* join column for left */,
-                                     (r, 0) /* join column for right */]
+        let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
+                                     (r, vec![0]) /* join column for right */]
             .into_iter()
             .collect();
         assert_eq!(j.node().suggest_indexes(me), hm);

@@ -112,9 +112,9 @@ impl Ingredient for Latest {
         out.into()
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index all key columns
-        Some((this, self.key[0])).into_iter().collect()
+        Some((this, self.key.clone())).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
@@ -256,7 +256,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], 1);
+        assert_eq!(idx[&me], vec![1]);
     }
 
 

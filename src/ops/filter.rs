@@ -73,7 +73,7 @@ impl Ingredient for Filter {
         rs
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         HashMap::new()
     }
 

@@ -133,7 +133,7 @@ pub fn index(log: &Logger,
              graph: &Graph,
              nodes: &[(NodeIndex, bool)],
              materialize: HashSet<LocalNodeIndex>)
-             -> HashMap<LocalNodeIndex, usize> {
+             -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
 
     let map: HashMap<_, _> =
         nodes.iter().map(|&(ni, _)| (*graph[ni].addr().as_local(), ni)).collect();
@@ -141,7 +141,8 @@ pub fn index(log: &Logger,
         .map(|&(ni, new)| (&graph[ni], new))
         .collect();
 
-    let mut state: HashMap<_, Option<usize>> = materialize.into_iter().map(|n| (n, None)).collect();
+    let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
+        materialize.into_iter().map(|n| (n, None)).collect();
 
     // Now let's talk indices.
     //
@@ -178,14 +179,11 @@ pub fn index(log: &Logger,
         let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
-            for (v, cols) in leftover_indices.drain() {
+            for (v, idxs) in leftover_indices.drain() {
                 if let Some(mut state) = state.get_mut(v.as_local()) {
                     // this node is materialized! add the indices!
-                    // we *currently* only support keeping one materialization per node
-                    assert_eq!(cols.len(), 1, "conflicting index requirements for {}", v);
-                    let col = cols.into_iter().next().unwrap();
-                    info!(log, "adding index"; "node" => map[v.as_local()].index(), "col" => col);
-                    *state = Some(col);
+                    info!(log, "adding indices"; "node" => map[v.as_local()].index(), "cols" => format!("{:?}", idxs));
+                    *state = Some(idxs.into_iter().collect());
                 } else if let Some(node) = nodes.get(&v) {
                     // this node is not materialized
                     // we need to push the index up to its ancestor(s)
@@ -196,19 +194,20 @@ pub fn index(log: &Logger,
                     }
 
                     assert!(node.is_internal());
-                    for col in cols {
-                        let really = node.resolve(col);
-                        if let Some(really) = really {
-                            // the index should instead be placed on the corresponding
-                            // columns of this view's inputs
-                            for (v, col) in really {
-                                tmp.entry(v).or_insert_with(HashSet::new).insert(col);
-                            }
-                        } else {
-                            // this view is materialized, so we should index this column
-                            indices.entry(v).or_insert_with(HashSet::new).insert(col);
-                        }
-                    }
+                    // TODO: push indices up through views (do we even need this)?
+                    // for idx in idxs {
+                    //     let really = node.resolve(col);
+                    //     if let Some(really) = really {
+                    //         // the index should instead be placed on the corresponding
+                    //         // columns of this view's inputs
+                    //         for (v, col) in really {
+                    //             tmp.entry(v).or_insert_with(HashSet::new).insert(col);
+                    //         }
+                    //     } else {
+                    //         // this view is materialized, so we should index this column
+                    //         indices.entry(v).or_insert_with(HashSet::new).insert(col);
+                    //     }
+                    // }
                 } else {
                     unreachable!("node suggested index outside domain");
                 }
@@ -230,7 +229,7 @@ pub fn index(log: &Logger,
                     // but it's a base nodes!
                     // we must *always* materialize base nodes
                     // so, just make up some column to index on
-                    return Some((n, 0));
+                    return Some((n, vec![vec![0]]));
                 }
 
                 info!(log, "removing unnecessary materialization"; "node" => map[&n].index());
@@ -244,7 +243,8 @@ pub fn initialize(log: &Logger,
                   graph: &Graph,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
-                  mut materialize: HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
+                  mut materialize: HashMap<domain::Index,
+                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>) {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -267,8 +267,14 @@ pub fn initialize(log: &Logger,
 
         let index_on = materialize.get_mut(&d)
             .and_then(|ss| ss.get(n.addr().as_local()))
-            .cloned();
-        let mut has_state = index_on.is_some();
+            .cloned()
+            .map(|idxs| {
+                // we've been told to materialize a node using 0 indices
+                assert!(!idxs.is_empty());
+                idxs
+            })
+            .unwrap_or_else(Vec::new);
+        let mut has_state = !index_on.is_empty();
 
         if let flow::node::Type::Reader(_, ref r) = **n {
             if r.state.is_some() {
@@ -281,7 +287,7 @@ pub fn initialize(log: &Logger,
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Option<usize>| {
+        let ready = |txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Vec<Vec<usize>>| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
@@ -330,7 +336,7 @@ pub fn initialize(log: &Logger,
             debug!(log, "reconstruction started");
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
-            ready(txs, None);
+            ready(txs, vec![]);
             info!(log, "reconstruction completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
         }
     }
@@ -340,10 +346,11 @@ pub fn reconstruct(log: &Logger,
                    graph: &Graph,
                    source: NodeIndex,
                    empty: &HashSet<NodeIndex>,
-                   materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
+                   materialized: &HashMap<domain::Index,
+                                          HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                    node: NodeIndex,
-                   index_on: Option<usize>) {
+                   index_on: Vec<Vec<usize>>) {
 
     // okay, so here's the situation: `node` is a node that
     //
@@ -367,7 +374,8 @@ pub fn reconstruct(log: &Logger,
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
     } else {
-        let index_on = index_on.expect("all non-reader nodes must have a state key");
+        assert!(!index_on.is_empty(),
+                "all non-reader nodes must have a state key");
 
         // tell the domain in question to create an empty state for the node in question
         txs[&graph[node].domain()]
@@ -494,13 +502,13 @@ pub fn reconstruct(log: &Logger,
     }
 }
 
-fn trace(graph: &Graph,
-         source: NodeIndex,
-         node: NodeIndex,
-         empty: &HashSet<NodeIndex>,
-         materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, usize>>,
-         path: Vec<NodeIndex>)
-         -> Vec<Vec<NodeIndex>> {
+fn trace<T>(graph: &Graph,
+            source: NodeIndex,
+            node: NodeIndex,
+            empty: &HashSet<NodeIndex>,
+            materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
+            path: Vec<NodeIndex>)
+            -> Vec<Vec<NodeIndex>> {
 
     if node == source {
         unreachable!("base node was not materialized!");

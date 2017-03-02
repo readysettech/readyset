@@ -63,7 +63,7 @@ impl Ingredient for GatedIdentity {
         rs
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // TODO
         HashMap::new()
     }

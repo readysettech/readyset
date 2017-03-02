@@ -127,6 +127,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         self.cols = srcn.fields().len();
         self.group.extend(self.inner.group_by().iter().cloned());
         if self.group.len() != 1 {
+            // TODO: multi-key now supported
             unimplemented!();
         }
         // primary key is the first (and only) group by key
@@ -255,9 +256,9 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         out.into()
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index by our primary key
-        Some((this, self.pkey_out)).into_iter().collect()
+        Some((this, vec![self.pkey_out])).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
