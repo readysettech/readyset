@@ -933,7 +933,9 @@ impl<'a> Migration<'a> {
         let index = domain_nodes.iter()
             .map(|(domain, nodes)| {
                 use self::migrate::materialization::{pick, index};
+                debug!(log, "picking materializations"; "domain" => domain.index());
                 let mat = pick(&log, &mainline.ingredients, &nodes[..]);
+                debug!(log, "deriving indices"; "domain" => domain.index());
                 let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
                 (*domain, idx)
             })

@@ -242,6 +242,7 @@ pub fn index(log: &Logger,
                             // the index should instead be placed on the corresponding
                             // columns of this view's inputs
                             for (v, col) in really {
+                                trace!(log, "pushing up index into column {} of {}", col, v);
                                 tmp.entry(v).or_insert_with(HashSet::new).insert(col);
                             }
                         } else {
