@@ -86,9 +86,10 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
             DataType::Text(ref s) => s.to_string_lossy(),
             DataType::TinyText(ref bts) => {
                 if bts[7] == 0 {
-                    use std::ffi::CStr;
                     // NULL terminated CStr
-                    CStr::from_bytes_with_nul(&bts[..]).unwrap().to_string_lossy()
+                    use std::ffi::CStr;
+                    let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
+                    CStr::from_bytes_with_nul(&bts[0..null]).unwrap().to_string_lossy()
                 } else {
                     // String is exactly eight bytes
                     String::from_utf8_lossy(&bts[..])
@@ -124,9 +125,13 @@ impl Into<i64> for DataType {
 
 impl From<String> for DataType {
     fn from(s: String) -> Self {
-        if s.as_bytes().len() <= 8 {
+        let len = s.as_bytes().len();
+        if len <= 8 {
             let mut bytes = [0; 8];
-            bytes.copy_from_slice(s.as_bytes());
+            if len != 0 {
+                let bts = &mut bytes[0..len];
+                bts.copy_from_slice(s.as_bytes());
+            }
             DataType::TinyText(bytes)
         } else {
             DataType::Text(ArcCStr::from(s))
