@@ -7,9 +7,12 @@ use std::time;
 
 use std::collections::hash_map::Entry;
 
+use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
+
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayData};
 pub use flow::domain::single::NodeDescriptor;
+use flow::statistics;
 
 use slog::Logger;
 
@@ -79,6 +82,12 @@ pub struct Domain {
 
     replaying_to: Option<(LocalNodeIndex, Vec<Packet>)>,
     replay_paths: HashMap<Tag, (Vec<NodeAddress>, Option<mpsc::SyncSender<()>>)>,
+
+    total_time: Timer<SimpleTracker, RealTime>,
+    total_ptime: Timer<SimpleTracker, ThreadTime>,
+    wait_time: Timer<SimpleTracker, RealTime>,
+    process_times: TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
+    process_ptimes: TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
 }
 
 impl Domain {
@@ -110,6 +119,11 @@ impl Domain {
             checktable: checktable,
             replaying_to: None,
             replay_paths: HashMap::new(),
+            total_time: Timer::new(),
+            total_ptime: Timer::new(),
+            wait_time: Timer::new(),
+            process_times: TimerSet::new(),
+            process_ptimes: TimerSet::new(),
         }
     }
 
@@ -118,6 +132,8 @@ impl Domain {
                     replaying_to: &mut Option<(LocalNodeIndex, Vec<Packet>)>,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
+                    process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
+                    process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
                     enable_output: bool)
                     -> HashMap<NodeAddress, Vec<ops::Record>> {
 
@@ -135,7 +151,11 @@ impl Domain {
         }
 
         let mut n = nodes[me.as_local()].borrow_mut();
+        process_times.start(*me.as_local());
+        process_ptimes.start(*me.as_local());
         let m = n.process(m, states, nodes, true);
+        process_ptimes.stop();
+        process_times.stop();
         drop(n);
 
         match m {
@@ -177,6 +197,8 @@ impl Domain {
                                                  replaying_to,
                                                  states,
                                                  nodes,
+                                                 process_times,
+                                                 process_ptimes,
                                                  enable_output) {
                     output_messages.entry(k).or_insert_with(Vec::new).append(&mut v);
                 }
@@ -205,6 +227,8 @@ impl Domain {
                        &mut self.replaying_to,
                        &mut self.state,
                        &self.nodes,
+                       &mut self.process_times,
+                       &mut self.process_ptimes,
                        enable_output)
     }
 
@@ -245,9 +269,13 @@ impl Domain {
                 continue;
             }
 
+            self.process_times.start(*addr.as_local());
+            self.process_ptimes.start(*addr.as_local());
             self.nodes[addr.as_local()]
                 .borrow_mut()
                 .process(m, &mut self.state, &self.nodes, true);
+            self.process_ptimes.stop();
+            self.process_times.stop();
             assert_eq!(n.borrow().children.len(), 0);
         }
     }
@@ -473,6 +501,32 @@ impl Domain {
                 assert!(o.is_none());
                 assert_eq!(at, self.ts + 1);
                 self.apply_transactions();
+            }
+            Packet::GetStatistics(sender) => {
+                let domain_stats = statistics::DomainStats {
+                    total_time: self.total_time.num_nanoseconds(),
+                    total_ptime: self.total_ptime.num_nanoseconds(),
+                    wait_time: self.wait_time.num_nanoseconds(),
+                };
+
+                let node_stats = self.nodes.iter().filter_map(|nd| {
+                    let ref n: NodeDescriptor = *nd.borrow();
+                    let local_index: LocalNodeIndex = *n.addr().as_local();
+                    let node_index: NodeIndex = n.index;
+
+                    let time = self.process_times.num_nanoseconds(local_index);
+                    let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                    if time.is_some() && ptime.is_some() {
+                        Some((node_index, statistics::NodeStats{
+                            process_time: time.unwrap(),
+                            process_ptime: ptime.unwrap(),
+                        }))
+                    } else {
+                        None
+                    }
+                }).collect();
+
+                sender.send((domain_stats, node_stats)).unwrap();
             }
             Packet::None => unreachable!("None packets should never be sent around"),
             Packet::Quit => unreachable!("Quit messages are handled by event loop"),
@@ -777,6 +831,8 @@ impl Domain {
                                    &mut None,
                                    &mut self.state,
                                    &self.nodes,
+                                   &mut self.process_times,
+                                   &mut self.process_ptimes,
                                    true);
                 } else {
                     // no transactions allowed here since we're still in a migration
@@ -826,8 +882,13 @@ impl Domain {
                     inject_rx_handle.add();
                 }
 
+                self.total_time.start();
+                self.total_ptime.start();
                 loop {
+                    self.wait_time.start();
                     let id = sel.wait();
+                    self.wait_time.stop();
+
                     let m = if id == rx_handle.id() {
                         rx_handle.recv()
                     } else if id == inject_rx_handle.id() {

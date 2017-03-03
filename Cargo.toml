@@ -12,6 +12,7 @@ b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
 b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcached-rs"]
 default = ["web", "b_netsoup"]
+profiling = ["timekeeper/default"]
 
 [dependencies]
 itertools = "0.5"
@@ -62,6 +63,10 @@ version = "0.9"
 default-features = false
 features = ["rustc_json_body", "multipart"]
 optional = true
+
+[dependencies.timekeeper]
+version = "0.2.4"
+default-features = false
 
 [profile.release]
 debug=true

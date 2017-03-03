@@ -3,6 +3,7 @@ use petgraph;
 use flow;
 use checktable;
 use flow::domain;
+use flow::statistics;
 use flow::prelude::*;
 
 use std::fmt;
@@ -125,6 +126,10 @@ pub enum Packet {
         at: i64,
         ingress_from_base: HashMap<petgraph::graph::NodeIndex, usize>,
     },
+
+    /// Request that a domain send usage statistics on the given sender.
+    GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
+                                    HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
 
     /// Notify a domain about a timestamp it would otherwise have missed.
     ///

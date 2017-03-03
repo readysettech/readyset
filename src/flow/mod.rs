@@ -21,6 +21,7 @@ pub mod domain;
 pub mod prelude;
 pub mod node;
 pub mod payload;
+pub mod statistics;
 mod migrate;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -517,6 +518,24 @@ impl Blender {
             tx: tx,
             addr: node.addr(),
             key_column: self.ingredients[*base.as_global()].suggest_indexes(base).remove(&base),
+        }
+    }
+
+    /// Get statistics about the time spent processing different parts of the graph.
+    pub fn get_statistics(&mut self) -> statistics::GraphStats {
+        // TODO: request stats from domains in parallel.
+        let domains = self.txs.iter().map(|(di, s)|{
+            let (tx, rx) = mpsc::sync_channel(1);
+            s.send(payload::Packet::GetStatistics(tx)).unwrap();
+
+            let (domain_stats, node_stats) = rx.recv().unwrap();
+            let node_map = node_stats.into_iter().map(|(ni, ns)| (NodeAddress::make_global(ni), ns)).collect();
+
+            (*di, (domain_stats, node_map))
+        }).collect();
+
+        statistics::GraphStats {
+            domains: domains,
         }
     }
 }
