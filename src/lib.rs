@@ -331,6 +331,7 @@ extern crate slog_term;
 
 extern crate fnv;
 extern crate evmap;
+extern crate arccstr;
 
 extern crate itertools;
 extern crate petgraph;

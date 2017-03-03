@@ -158,7 +158,7 @@ mod tests {
 
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         let additional = if add {
-            Some(vec![DataType::Text(sync::Arc::new(String::from("hello"))), DataType::Number(42)])
+            Some(vec![DataType::from("hello"), DataType::Number(42)])
         } else {
             None
         };

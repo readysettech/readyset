@@ -23,6 +23,7 @@ slog = "1.5.2"
 slog-term = "1.5.0"
 
 evmap = "0.2.0"
+arccstr = "0.1.1"
 
 spmc = "0.2.1"
 nom_sql = { git = "https://github.com/ms705/nom-sql.git" }

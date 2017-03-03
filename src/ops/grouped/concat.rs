@@ -84,8 +84,11 @@ impl GroupConcat {
                 }
                 TextComponent::Column(i) => {
                     match rec[i] {
-                        DataType::Text(ref val) => {
-                            s.push_str(&*val);
+                        DataType::Text(..) |
+                        DataType::TinyText(..) => {
+                            use std::borrow::Cow;
+                            let text: Cow<str> = (&rec[i]).into();
+                            s.push_str(&*text);
                         }
                         DataType::Number(ref n) => s.push_str(&n.to_string()),
                         DataType::None => unreachable!(),
@@ -154,10 +157,11 @@ impl GroupedOperation for GroupConcat {
         // efficient by splitting into a BTree, which maintains sorting while
         // supporting efficient add/remove.
 
-        let current = if let Some(&DataType::Text(ref s)) = current {
-            s
-        } else {
-            unreachable!();
+        use std::borrow::Cow;
+        let current: Cow<str> = match current {
+            Some(dt @ &DataType::Text(..)) |
+            Some(dt @ &DataType::TinyText(..)) => dt.into(),
+            _ => unreachable!(),
         };
         let clen = current.len();
 
