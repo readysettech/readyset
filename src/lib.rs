@@ -336,6 +336,7 @@ extern crate itertools;
 extern crate petgraph;
 extern crate regex;
 extern crate nom_sql;
+extern crate timekeeper;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;
