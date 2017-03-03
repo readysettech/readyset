@@ -11,7 +11,7 @@ b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
 b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcached-rs"]
-default = ["web", "b_netsoup"]
+default = []#["web", "b_netsoup"] # https://github.com/serde-rs/serde/issues/800
 
 [dependencies]
 itertools = "0.5"
