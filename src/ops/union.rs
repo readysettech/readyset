@@ -98,7 +98,7 @@ impl Ingredient for Union {
             .collect()
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index nothing (?)
         HashMap::new()
     }

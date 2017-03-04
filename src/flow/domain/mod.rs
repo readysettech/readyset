@@ -406,7 +406,9 @@ impl Domain {
             }
             Packet::PrepareState { node, index } => {
                 let mut state = State::default();
-                state.set_pkey(index);
+                for idx in index {
+                    state.add_key(&idx[..]);
+                }
                 self.state.insert(node, state);
             }
             Packet::SetupReplayPath { tag, path, done_tx, ack } => {
@@ -452,7 +454,7 @@ impl Domain {
                 self.handle_replay(m, domain_rx, inject_tx);
             }
             Packet::Ready { node, index, ack } => {
-                if let Some(index) = index {
+                if !index.is_empty() {
                     let mut s = {
                         let n = self.nodes[&node].borrow();
                         if n.is_internal() && n.is_base() {
@@ -461,7 +463,9 @@ impl Domain {
                             State::default()
                         }
                     };
-                    s.set_pkey(index);
+                    for idx in index {
+                        s.add_key(&idx[..]);
+                    }
                     assert!(self.state.insert(node, s).is_none());
                 } else {
                     // NOTE: just because index_on is None does *not* mean we're not materialized
@@ -571,11 +575,12 @@ impl Domain {
             // nodes above, and this check only applies to non-reader nodes.
             if can_handle_directly && done_tx.is_some() {
                 if let ReplayData::StateCopy(ref state) = data {
-                    let local_pkey = self.state[path[0].as_local()].get_pkey();
-                    if local_pkey != state.get_pkey() {
+                    let local_pkey = self.state[path[0].as_local()].keys();
+                    if local_pkey != state.keys() {
                         debug!(self.log, "cannot use state directly, so falling back to regular replay";
-                               "node" => path[0].as_local().id(), "src pkey" => state.get_pkey(),
-                               "dst pkey" => local_pkey);
+                               "node" => path[0].as_local().id(),
+                               "src keys" => format!("{:?}", state.keys()),
+                               "dst keys" => format!("{:?}", local_pkey));
                         can_handle_directly = false;
                     }
                 }
@@ -594,7 +599,7 @@ impl Domain {
                         // state and we're done.
                         let node = path[0];
                         debug!(self.log, "absorbing state clone"; "node" => node.as_local().id());
-                        assert_eq!(self.state[node.as_local()].get_pkey(), state.get_pkey());
+                        assert_eq!(self.state[node.as_local()].keys(), state.keys());
                         self.state.insert(*node.as_local(), state);
                         debug!(self.log, "direct state clone absorbed");
                         finished = Some((tag, *node.as_local()));

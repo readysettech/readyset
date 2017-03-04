@@ -73,7 +73,7 @@ impl Ingredient for Filter {
         rs
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         HashMap::new()
     }
 
@@ -101,13 +101,13 @@ impl Ingredient for Filter {
     }
 
     fn query_through<'a>(&self,
-                         column: usize,
-                         value: &'a DataType,
+                         columns: &[usize],
+                         key: &KeyType<DataType>,
                          states: &'a StateMap)
                          -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>> {
         states.get(self.src.as_local()).map(|state| {
             let f = self.filter.clone();
-            Box::new(state.lookup(column, value).iter().filter(move |r| {
+            Box::new(state.lookup(columns, key).iter().filter(move |r| {
                 r.iter().enumerate().all(|(i, d)| {
                     // check if this filter matches
                     if let Some(ref f) = f[i] {

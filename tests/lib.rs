@@ -50,7 +50,7 @@ fn it_works() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // Delete first record
-    muta.delete(id.clone());
+    muta.delete(vec![id.clone()]);
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -237,7 +237,7 @@ fn it_works_deletion() {
     // delete first value
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
-    muta.delete(2);
+    muta.delete(vec![2.into()]);
     assert_eq!(cq.recv(),
                Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }

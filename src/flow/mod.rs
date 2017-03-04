@@ -159,7 +159,10 @@ pub trait Ingredient
     fn will_query(&self, materialized: bool) -> bool;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
-    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, usize>;
+    ///
+    /// Note that a vector of length > 1 for any one node means that that node should be given a
+    /// *compound* key, *not* that multiple columns should be independently indexed.
+    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
@@ -216,8 +219,8 @@ pub trait Ingredient
     }
 
     fn query_through<'a>(&self,
-                         _column: usize,
-                         _value: &'a prelude::DataType,
+                         _columns: &[usize],
+                         _key: &prelude::KeyType<prelude::DataType>,
                          _states: &'a prelude::StateMap)
                          -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         None
@@ -229,19 +232,19 @@ pub trait Ingredient
     /// Only addresses of the type `NodeAddress::Local` may be used in this function.
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
-                  column: usize,
-                  value: &'a prelude::DataType,
+                  columns: &[usize],
+                  key: &prelude::KeyType<prelude::DataType>,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
                   -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         states.get(parent.as_local())
-            .map(move |state| Box::new(state.lookup(column, value).iter()) as Box<_>)
+            .map(move |state| Box::new(state.lookup(columns, key).iter()) as Box<_>)
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
                 let parent = domain.get(parent.as_local()).unwrap().borrow();
                 if parent.is_internal() {
-                    parent.query_through(column, value, states)
+                    parent.query_through(columns, key, states)
                 } else {
                     None
                 }
@@ -261,7 +264,7 @@ pub struct Mutator {
     src: NodeAddress,
     tx: mpsc::SyncSender<payload::Packet>,
     addr: NodeAddress,
-    key_column: Option<usize>,
+    primary_key: Vec<usize>,
 }
 
 impl Mutator {
@@ -294,7 +297,7 @@ impl Mutator {
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
     pub fn delete<I>(&self, key: I)
-        where I: Into<prelude::DataType>
+        where I: Into<Vec<prelude::DataType>>
     {
         self.tx
             .send(payload::Packet::Message {
@@ -309,7 +312,7 @@ impl Mutator {
                                    key: I,
                                    t: checktable::Token)
                                    -> checktable::TransactionResult
-        where I: Into<prelude::DataType>
+        where I: Into<Vec<prelude::DataType>>
     {
         let (send, recv) = mpsc::channel();
         self.tx
@@ -327,14 +330,20 @@ impl Mutator {
     pub fn update<V>(&self, u: V)
         where V: Into<Vec<prelude::DataType>>
     {
-        let col = self.key_column
-            .expect("update operations can only be applied to base nodes with key columns");
+        assert!(!self.primary_key.is_empty(),
+                "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
         self.tx
             .send(payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
+                data: vec![prelude::Record::DeleteRequest(self.primary_key
+                               .iter()
+                               .map(|&col| &u[col])
+                               .cloned()
+                               .collect()),
+                           u.into()]
+                    .into(),
             })
             .unwrap()
     }
@@ -347,15 +356,21 @@ impl Mutator {
                                    -> checktable::TransactionResult
         where V: Into<Vec<prelude::DataType>>
     {
-        let col = self.key_column
-            .expect("update operations can only be applied to base nodes with key columns");
+        assert!(!self.primary_key.is_empty(),
+                "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
         let (send, recv) = mpsc::channel();
         self.tx
             .send(payload::Packet::Transaction {
                 link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(u[col].clone()), u.into()].into(),
+                data: vec![prelude::Record::DeleteRequest(self.primary_key
+                               .iter()
+                               .map(|&col| &u[col])
+                               .cloned()
+                               .collect()),
+                           u.into()]
+                    .into(),
                 state: payload::TransactionState::Pending(t, send),
             })
             .unwrap();
@@ -517,7 +532,10 @@ impl Blender {
             src: NodeAddress::make_global(self.source),
             tx: tx,
             addr: node.addr(),
-            key_column: self.ingredients[*base.as_global()].suggest_indexes(base).remove(&base),
+            primary_key: self.ingredients[*base.as_global()]
+                .suggest_indexes(base)
+                .remove(&base)
+                .unwrap_or_else(Vec::new),
         }
     }
 

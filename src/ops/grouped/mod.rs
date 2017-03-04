@@ -1,7 +1,6 @@
 use ops;
 
 use std::fmt;
-use std::collections::HashSet;
 use std::collections::HashMap;
 use std::sync;
 
@@ -75,11 +74,9 @@ pub struct GroupedOperator<T: GroupedOperation> {
     us: Option<NodeAddress>,
     cols: usize,
 
-    pkey_in: usize, // column in our input that is our primary key
-    pkey_out: usize, // column in our output that is our primary key
-
     // precomputed datastructures
-    group: HashSet<usize>,
+    group_by: Vec<usize>,
+    out_key: Vec<usize>,
     colfix: Vec<usize>,
 }
 
@@ -89,12 +86,10 @@ impl<T: GroupedOperation> GroupedOperator<T> {
             src: src,
             inner: op,
 
-            pkey_out: usize::max_value(),
-            pkey_in: usize::max_value(),
-
             us: None,
             cols: 0,
-            group: HashSet::new(),
+            group_by: Vec::new(),
+            out_key: Vec::new(),
             colfix: Vec::new(),
         }
     }
@@ -125,22 +120,16 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
         // group by all columns
         self.cols = srcn.fields().len();
-        self.group.extend(self.inner.group_by().iter().cloned());
-        if self.group.len() != 1 {
-            unimplemented!();
-        }
-        // primary key is the first (and only) group by key
-        self.pkey_in = *self.group.iter().next().unwrap();
-        // what output column does this correspond to?
-        // well, the first one given that we currently only have one group by
-        // and that group by comes first.
-        self.pkey_out = 0;
+        self.group_by.extend(self.inner.group_by().iter().cloned());
+        self.group_by.sort();
+        // cache the range of our output keys
+        self.out_key = (0..self.group_by.len()).collect();
 
         // build a translation mechanism for going from output columns to input columns
         let colfix: Vec<_> = (0..self.cols)
             .into_iter()
             .filter_map(|col| {
-                if self.group.contains(&col) {
+                if self.group_by.iter().any(|c| c == &col) {
                     // since the generated value goes at the end,
                     // this is the n'th output value
                     Some(col)
@@ -181,7 +170,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             let val = self.inner.to_diff(&rec[..], rec.is_positive());
             let group = rec.iter()
                 .enumerate()
-                .map(|(i, v)| if self.group.contains(&i) {
+                .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
                     Some(v)
                 } else {
                     None
@@ -196,7 +185,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             // find the current value for this group
             let db = state.get(self.us.as_ref().unwrap().as_local())
                 .expect("grouped operators must have their own state materialized");
-            let rs = db.lookup(self.pkey_out, group[self.pkey_in].as_ref().unwrap());
+            let rs = db.lookup(&self.out_key[..], &KeyType::from(&group[..]));
             debug_assert!(rs.len() <= 1, "a group had more than 1 result");
             let old = rs.get(0);
 
@@ -217,7 +206,6 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                 None => {
                     // emit positive, which is group + new.
                     let rec: Vec<_> = group.into_iter()
-                        .filter_map(|v| v)
                         .cloned()
                         .chain(Some(new.into()).into_iter())
                         .collect();
@@ -229,7 +217,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                 Some(current) => {
                     // construct prefix of output record used for both - and +
                     let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend(group.into_iter().filter_map(|v| v).cloned());
+                    rec.extend(group.into_iter().cloned());
 
                     // revoke old value
                     if old.is_none() {
@@ -254,9 +242,9 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         out.into()
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, usize> {
+    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         // index by our primary key
-        Some((this, self.pkey_out)).into_iter().collect()
+        Some((this, self.out_key.clone())).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

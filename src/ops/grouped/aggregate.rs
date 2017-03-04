@@ -127,6 +127,16 @@ mod tests {
         g
     }
 
+    fn setup_multicolumn(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y", "z"]);
+        g.set_op("identity",
+                 &["x", "z", "ys"],
+                 Aggregation::COUNT.over(s, 1, &[0, 2]),
+                 mat);
+        g
+    }
+
     #[test]
     fn it_describes() {
         let s = NodeAddress::mock_global(0.into());
@@ -278,6 +288,107 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn it_groups_by_multiple_columns() {
+        let mut c = setup_multicolumn(true);
+
+        let u: ops::Record = vec![1.into(), 1.into(), 2.into()].into();
+
+        // first row for a group should emit -0 and +1 for the group (1, 1)
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            ops::Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 0.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: ops::Record = vec![2.into(), 1.into(), 2.into()].into();
+
+        // first row for a second group should emit -0 and +1 for that new group
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            ops::Record::Negative(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 0.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: ops::Record = vec![1.into(), 1.into(), 2.into()].into();
+
+        // second row for a group should emit -1 and +2
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            ops::Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 2.into());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = (vec![1.into(), 1.into(), 2.into()], false);
+
+        // negative row for a group should emit -2 and +1
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            ops::Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 2.into());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            ops::Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], 2.into());
+                assert_eq!(r[2], 1.into());
+            }
+            _ => unreachable!(),
+        }
+    }
+
     // TODO: also test SUM
 
     #[test]
@@ -291,7 +402,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], 0);
+        assert_eq!(idx[&me], vec![0]);
     }
 
     #[test]

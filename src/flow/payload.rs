@@ -77,7 +77,7 @@ pub enum Packet {
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
         node: flow::LocalNodeIndex,
-        index: usize,
+        index: Vec<Vec<usize>>,
     },
 
     /// Inform domain about a new replay path.
@@ -99,7 +99,7 @@ pub enum Packet {
     /// updates.
     Ready {
         node: flow::LocalNodeIndex,
-        index: Option<usize>,
+        index: Vec<Vec<usize>>,
         ack: mpsc::SyncSender<()>,
     },
 
