@@ -329,7 +329,7 @@ impl SqlIncorporator {
         self.make_project_node(name,
                                fn_col.table.as_ref().unwrap(),
                                vec![fn_col],
-                               vec![("grp", DataType::Number(0))],
+                               vec![("grp", DataType::from(0 as i32))],
                                mig)
     }
 

@@ -90,7 +90,9 @@ impl GroupConcat {
                             let text: Cow<str> = (&rec[i]).into();
                             s.push_str(&*text);
                         }
-                        DataType::Number(ref n) => s.push_str(&n.to_string()),
+                        DataType::Int(ref n) => s.push_str(&n.to_string()),
+                        DataType::BigInt(ref n) => s.push_str(&n.to_string()),
+                        DataType::Real((ref i, ref f)) => s.push_str(&format!("{}.{}", i, f)),
                         DataType::None => unreachable!(),
                     }
                 }

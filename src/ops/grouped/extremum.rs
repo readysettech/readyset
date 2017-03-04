@@ -79,10 +79,10 @@ impl GroupedOperation for ExtremumOperator {
     }
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
-        let v = if let DataType::Number(n) = r[self.over] {
-            n
-        } else {
-            unreachable!();
+        let v = match r[self.over] {
+            DataType::Int(n) => n as i64,
+            DataType::BigInt(n) => n,
+            _ => unreachable!(),
         };
 
         if pos {
@@ -96,11 +96,20 @@ impl GroupedOperation for ExtremumOperator {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<i64> = vec![];
-        if let Some(&DataType::Number(n)) = current {
-            extreme_values.push(n);
+        if let Some(data) = current {
+            match *data {
+                DataType::Int(n) => extreme_values.push(n as i64),
+                DataType::BigInt(n) => extreme_values.push(n),
+                _ => unreachable!(),
+            }
         };
 
-        let is_extreme_value = |x: i64| if let Some(&DataType::Number(n)) = current {
+        let is_extreme_value = |x: i64| if let Some(data) = current {
+            let n = match *data {
+                DataType::Int(n) => n as i64,
+                DataType::BigInt(n) => n,
+                _ => unreachable!(),
+            };
             match self.op {
                 Extremum::MAX => x >= n,
                 Extremum::MIN => x <= n,

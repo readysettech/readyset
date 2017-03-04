@@ -79,10 +79,10 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT if pos => 1,
             Aggregation::COUNT => -1,
             Aggregation::SUM => {
-                let v = if let DataType::Number(n) = r[self.over] {
-                    n
-                } else {
-                    unreachable!();
+                let v = match r[self.over] {
+                    DataType::Int(n) => n as i64,
+                    DataType::BigInt(n) => n,
+                    _ => unreachable!(),
                 };
                 if pos { v } else { 0i64 - v }
             }
@@ -90,7 +90,12 @@ impl GroupedOperation for Aggregator {
     }
 
     fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType {
-        if let Some(&DataType::Number(n)) = current {
+        if let Some(data) = current {
+            let n = match *data {
+                DataType::Int(n) => n as i64,
+                DataType::BigInt(n) => n,
+                _ => unreachable!(),
+            };
             diffs.into_iter().fold(n, |n, d| n + d).into()
         } else {
             unreachable!();

@@ -13,12 +13,14 @@ use arccstr::ArcCStr;
 pub enum DataType {
     /// A placeholder value -- is considered equal to every other `DataType` value.
     None,
-    /// A numeric value.
-    Number(i64),
-
+    /// A 32-bit numeric value.
+    Int(i32),
+    /// A 64-bit numeric value.
+    BigInt(i64),
+    /// A fixed point real value.
+    Real((i32, i16)),
     /// A reference-counted string-like value.
     Text(ArcCStr),
-
     /// A tiny string that fits in a pointer
     TinyText([u8; 8]),
 }
@@ -40,9 +42,12 @@ impl DataType {
 #[cfg(feature="web")]
 impl ToJson for DataType {
     fn to_json(&self) -> Json {
+        use std::str::FromStr;
         match *self {
             DataType::None => Json::Null,
-            DataType::Number(n) => Json::I64(n),
+            DataType::Int(n) => Json::I64(n as i64),
+            DataType::BigInt(n) => Json::I64(n),
+            DataType::Real((i, f)) => Json::F64(f64::from_str(&format!("{}.{}", i, f)).unwrap()),
             DataType::Text(..) |
             DataType::TinyText(..) => Json::String(self.into()),
         }
@@ -61,7 +66,13 @@ impl PartialEq for DataType {
         match (self, other) {
             (&DataType::Text(ref a), &DataType::Text(ref b)) => a == b,
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
-            (&DataType::Number(ref a), &DataType::Number(ref b)) => a == b,
+            (&DataType::Int(ref a), &DataType::Int(ref b)) => a == b,
+            (&DataType::Int(ref a), &DataType::BigInt(ref b)) => *a as i64 == *b,
+            (&DataType::BigInt(ref a), &DataType::Int(ref b)) => *a == *b as i64,
+            (&DataType::BigInt(ref a), &DataType::BigInt(ref b)) => a == b,
+            (&DataType::Real((ref ai, ref af)), &DataType::Real((ref bi, ref bf))) => {
+                ai == bi && af == bf
+            }
             _ => false,
         }
     }
@@ -69,13 +80,24 @@ impl PartialEq for DataType {
 
 impl From<i64> for DataType {
     fn from(s: i64) -> Self {
-        DataType::Number(s)
+        DataType::BigInt(s)
     }
 }
 
 impl From<i32> for DataType {
     fn from(s: i32) -> Self {
-        DataType::Number(s as i64)
+        DataType::Int(s as i32)
+    }
+}
+
+impl From<f64> for DataType {
+    fn from(f: f64) -> Self {
+        if f.is_nan() {
+            panic!();
+        } else {
+            let (i, f, s) = f.integer_decode();
+            DataType::Real(((s as i64 * i as i64) as i32, f))
+        }
     }
 }
 
@@ -115,7 +137,7 @@ impl Into<String> for DataType {
 
 impl Into<i64> for DataType {
     fn into(self) -> i64 {
-        if let DataType::Number(s) = self {
+        if let DataType::BigInt(s) = self {
             s
         } else {
             unreachable!();
@@ -155,7 +177,9 @@ impl fmt::Display for DataType {
                 let text: Cow<str> = self.into();
                 write!(f, "\"{}\"", text)
             }
-            DataType::Number(n) => write!(f, "{}", n),
+            DataType::Int(n) => write!(f, "{}", n),
+            DataType::BigInt(n) => write!(f, "{}", n),
+            DataType::Real((i, frac)) => write!(f, "{}", format!("{}.{}", i, frac)),
         }
     }
 }
