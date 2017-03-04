@@ -15,6 +15,7 @@ default = ["web", "b_netsoup"]
 profiling = ["timekeeper/default"]
 
 [dependencies]
+chrono = "0.3.0"
 itertools = "0.5"
 petgraph = "0.4"
 regex = "0.1"
