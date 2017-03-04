@@ -134,7 +134,8 @@ impl From<String> for DataType {
             }
             DataType::TinyText(bytes)
         } else {
-            DataType::Text(ArcCStr::from(s))
+            use std::convert::TryFrom;
+            DataType::Text(ArcCStr::try_from(s).unwrap())
         }
     }
 }
