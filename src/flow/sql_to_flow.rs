@@ -12,7 +12,6 @@ use flow::data::DataType;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::str;
-use std::sync::Arc;
 use std::vec::Vec;
 
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
@@ -89,8 +88,7 @@ impl SqlIncorporator {
             };
             let num_columns = self.fields_for(*na).len();
             let mut filter = vec![None; num_columns];
-            filter[self.field_to_columnid(*na, &l.name).unwrap()] =
-                Some(DataType::Text(Arc::new(r)));
+            filter[self.field_to_columnid(*na, &l.name).unwrap()] = Some(DataType::from(r));
             filter
         }
     }

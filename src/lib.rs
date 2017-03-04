@@ -317,6 +317,7 @@
 #![feature(mpsc_select)]
 #![feature(pub_restricted)]
 #![feature(conservative_impl_trait)]
+#![feature(try_from)]
 #![deny(missing_docs)]
 #![cfg_attr(feature="b_netsoup", feature(plugin))]
 #![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]
@@ -331,6 +332,7 @@ extern crate slog_term;
 
 extern crate fnv;
 extern crate evmap;
+extern crate arccstr;
 
 extern crate itertools;
 extern crate petgraph;
