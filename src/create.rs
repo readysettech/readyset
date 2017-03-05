@@ -12,6 +12,7 @@ use table::Table;
 pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<Column>,
+    pub keys: Option<Vec<TableKey>>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -30,6 +31,13 @@ pub enum SqlType {
     Text,
     Date,
     Timestamp,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub enum TableKey {
+    PrimaryKey(Vec<Column>),
+    UniqueKey(Option<String>, Vec<Column>),
+    Key(String, Vec<Column>),
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {
@@ -128,32 +136,57 @@ named!(pub type_identifier<&[u8], SqlType>,
     )
 );
 
-/// Parse rule for key specifications.
-named!(pub key_specification<&[u8], ()>,
+/// Parse rule for an individual key specification.
+named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
           chain!(
               caseless_tag!("primary key") ~
               multispace? ~
-              column: delimited!(tag!("("), field_list, tag!(")")) ~
+              columns: delimited!(tag!("("), field_list, tag!(")")) ~
               opt!(complete!(chain!(
                           multispace ~
                           caseless_tag!("autoincrement"),
-                          || {}
+                          || { }
                    ))
               ),
-              || {}
+              || { TableKey::PrimaryKey(columns) }
           )
         | chain!(
               caseless_tag!("unique key") ~
               multispace? ~
               name: opt!(sql_identifier) ~
               multispace? ~
-              column: delimited!(tag!("("), field_list, tag!(")")),
-              || {}
+              columns: delimited!(tag!("("), field_list, tag!(")")),
+              || {
+                  match name {
+                      Some(name) => {
+                          let n = String::from(str::from_utf8(name).unwrap());
+                          TableKey::UniqueKey(Some(n), columns)
+                      },
+                      None => TableKey::UniqueKey(None, columns),
+                  }
+              }
           )
     )
 );
 
+/// Parse rule for a comma-separated list.
+named!(pub key_specification_list<&[u8], Vec<TableKey>>,
+       many1!(
+           complete!(chain!(
+               key: key_specification ~
+               opt!(
+                   complete!(chain!(
+                       multispace? ~
+                       tag!(",") ~
+                       multispace?,
+                       || {}
+                   ))
+               ),
+               || { key }
+           ))
+       )
+);
 
 /// Parse rule for a comma-separated list.
 named!(pub field_specification_list<&[u8], Vec<Column> >,
@@ -216,16 +249,13 @@ named!(pub creation<&[u8], CreateTableStatement>,
         multispace ~
         table: table_reference ~
         multispace ~
-        fields: chain!(
-                tag!("(") ~
-                multispace? ~
-                fields: field_specification_list ~
-                multispace? ~
-                opt!(key_specification) ~
-                multispace? ~
-                tag!(")"),
-                || { fields }
-            ) ~
+        tag!("(") ~
+        multispace? ~
+        fields: field_specification_list ~
+        multispace? ~
+        keys: opt!(key_specification_list) ~
+        multispace? ~
+        tag!(")") ~
         multispace? ~
         // XXX(malte): wrap the two below in a permutation! rule that permits arbitrary ordering
         opt!(
@@ -260,6 +290,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
             CreateTableStatement {
                 table: table,
                 fields: fields,
+                keys: keys,
             }
         }
     ))
@@ -317,6 +348,40 @@ mod tests {
                    CreateTableStatement {
                        table: Table::from("user_newtalk"),
                        fields: vec![Column::from("user_id"), Column::from("user_ip")],
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn keys() {
+        // simple primary key
+        let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
+                       PRIMARY KEY (id));";
+
+        let res = creation(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   CreateTableStatement {
+                       table: Table::from("users"),
+                       fields: vec![Column::from("id"),
+                                    Column::from("name"),
+                                    Column::from("email")],
+                       keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
+                       ..Default::default()
+                   });
+
+        // named unique key
+        let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
+                       UNIQUE KEY id_k (id));";
+
+        let res = creation(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   CreateTableStatement {
+                       table: Table::from("users"),
+                       fields: vec![Column::from("id"),
+                                    Column::from("name"),
+                                    Column::from("email")],
+                       keys: Some(vec![TableKey::UniqueKey(Some(String::from("id_k")),
+                                                           vec![Column::from("id")])]),
                        ..Default::default()
                    });
     }
