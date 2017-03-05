@@ -14,7 +14,8 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct Base {
     key_column: Option<usize>,
-    persistent_log_writer: Option<BufWriter<File>>,
+    durability: BaseDurabilityLevel,
+    persistent_log: Option<BufWriter<File>>,
     us: Option<NodeAddress>,
 
     // This id is unique within the same process.
@@ -26,12 +27,29 @@ pub struct Base {
     unique_id: ProcessUniqueId,
 }
 
+/// Specifies the level of durability that this base node should offer. Stronger guarantees imply a
+/// reduced write performance.
+#[derive(Clone, Copy, Debug)]
+pub enum BaseDurabilityLevel {
+    /// No durability at all: records aren't written to a log.
+    None,
+    /// Buffered writes: records are accumulated in an in-memory buffer and occasionally flushed to
+    /// the persistent log, which may itself buffer in the file system. Results in large batched
+    /// writes, but offers no durability guarantees on crashes.
+    Buffered,
+    /// Synchronous writes: forces every record to be written to disk before it is emitted further
+    /// into the data-flow graph. Strong guarantees (writes are never lost), but high performance
+    /// penalty.
+    SyncImmediately,
+}
+
 impl Base {
     /// Create a base node operator.
-    pub fn new(key_column: usize) -> Self {
+    pub fn new(key_column: usize, durability: BaseDurabilityLevel) -> Self {
         Base {
             key_column: Some(key_column),
-            persistent_log_writer: None,
+            durability: durability,
+            persistent_log: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
         }
@@ -39,15 +57,34 @@ impl Base {
 
     /// Write records to persistent log.
     fn persist_to_log(&mut self, records: &Records) {
-        self.ensure_log_writer();
-        serde_json::to_writer(&mut self.persistent_log_writer.as_mut().unwrap(), &records).unwrap();
+        match self.durability {
+            BaseDurabilityLevel::None => panic!("tried to persist non-durable base node!"),
+            BaseDurabilityLevel::Buffered => {
+                self.ensure_log_writer();
+                serde_json::to_writer(&mut self.persistent_log.as_mut().unwrap(), &records)
+                    .unwrap();
+            }
+            BaseDurabilityLevel::SyncImmediately => {
+                self.ensure_log_writer();
+                serde_json::to_writer(&mut self.persistent_log.as_mut().unwrap(), &records)
+                    .unwrap();
+                // XXX(malte): we must deconstruct the BufWriter in order to get at the contained
+                // File (on which we can invoke sync_data(), only to then reassemble it
+                // immediately. I suspect this will work best if we flush after accumulating
+                // batches of writes.
+                let file = self.persistent_log.take().unwrap().into_inner().unwrap();
+                // need to drop as sync_data returns Result<()> and forces use
+                drop(file.sync_data());
+                self.persistent_log = Some(BufWriter::new(file));
+            }
+        }
     }
 
     /// Open persistent log and initialize a buffered writer to it if successful.
     fn ensure_log_writer(&mut self) {
         let us = self.us.expect("on_input should never be called before on_commit");
 
-        if self.persistent_log_writer.is_none() {
+        if self.persistent_log.is_none() {
             // Check whether NodeAddress is global or local?
             let log_filename = format!("/tmp/soup-{}-{}.json", us, self.unique_id);
             let path = Path::new(&log_filename);
@@ -60,11 +97,14 @@ impl Base {
                 .write(true)
                 .create(true)
                 .open(path) {
-                Err(reason) => panic!("Unable to open persistent log file {}, reason: {}",
-                                      path.display(), reason),
+                Err(reason) => {
+                    panic!("Unable to open persistent log file {}, reason: {}",
+                           path.display(),
+                           reason)
+                }
                 Ok(file) => file,
             };
-            self.persistent_log_writer = Some(BufWriter::new(file));
+            self.persistent_log = Some(BufWriter::new(file));
         }
     }
 }
@@ -76,7 +116,8 @@ impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
             key_column: self.key_column,
-            persistent_log_writer: None,
+            durability: self.durability,
+            persistent_log: None,
             unique_id: ProcessUniqueId::new(),
             us: self.us,
         }
@@ -89,7 +130,8 @@ impl Default for Base {
             key_column: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
-            persistent_log_writer: None,
+            durability: BaseDurabilityLevel::Buffered,
+            persistent_log: None,
         }
     }
 }
@@ -123,8 +165,12 @@ impl Ingredient for Base {
                 _: &DomainNodes,
                 state: &StateMap)
                 -> Records {
-        // Write incoming records to log before processing them.
-        self.persist_to_log(&rs);
+        // Write incoming records to log before processing them if we are a durable node.
+        match self.durability {
+            BaseDurabilityLevel::Buffered |
+            BaseDurabilityLevel::SyncImmediately => self.persist_to_log(&rs),
+            BaseDurabilityLevel::None => (),
+        }
 
         rs.into_iter()
             .map(|r| match r {
