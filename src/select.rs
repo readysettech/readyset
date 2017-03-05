@@ -192,6 +192,29 @@ mod tests {
     }
 
     #[test]
+    fn more_involved_select() {
+        let qstring = "SELECT users.id, users.name FROM users;";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("users")],
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("id"),
+                                                             table: Some(String::from("users")),
+                                                             function: None,
+                                                         },
+                                                         Column {
+                                                             name: String::from("name"),
+                                                             table: Some(String::from("users")),
+                                                             function: None,
+                                                         }]),
+                       ..Default::default()
+                   });
+    }
+
+
+    #[test]
     fn select_all() {
         let qstring = "SELECT * FROM users;";
 
@@ -474,6 +497,42 @@ mod tests {
                        group_by: Some(GroupByClause {
                            columns: vec![Column::from("aid")],
                            having: None,
+                       }),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn moderately_complex_selection() {
+        let qstring = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND \
+                       item.i_subject = ? ORDER BY item.i_title limit 50;";
+
+        let res = selection(qstring.as_bytes());
+        let expected_where_cond = Some(LogicalOp(ConditionTree {
+            left: Some(Box::new(ComparisonOp(ConditionTree {
+                left: Some(Box::new(Base(Field(Column::from("item.i_a_id"))))),
+                right: Some(Box::new(Base(Field(Column::from("author.a_id"))))),
+                operator: Operator::Equal,
+            }))),
+            right: Some(Box::new(ComparisonOp(ConditionTree {
+                left: Some(Box::new(Base(Field(Column::from("item.i_subject"))))),
+                right: Some(Box::new(Base(Placeholder))),
+                operator: Operator::Equal,
+            }))),
+            operator: Operator::And,
+        }));
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("item"), Table::from("author")],
+                       fields: FieldExpression::All,
+                       where_clause: expected_where_cond,
+                       order: Some(OrderClause {
+                           columns: vec![Column::from("item.i_title")],
+                           order: OrderType::OrderAscending,
+                       }),
+                       limit: Some(LimitClause {
+                           limit: 50,
+                           offset: 0,
                        }),
                        ..Default::default()
                    });
