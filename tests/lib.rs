@@ -12,8 +12,12 @@ fn it_works() {
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::new(0));
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::new(0));
+        let a = mig.add_ingredient("a",
+                            &["a", "b"],
+                            distributary::Base::new(0, distributary::BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b",
+                            &["a", "b"],
+                            distributary::Base::new(0, distributary::BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -210,8 +214,12 @@ fn it_works_deletion() {
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::new(1));
-        let b = mig.add_ingredient("b", &["_", "x", "y"], distributary::Base::new(2));
+        let a = mig.add_ingredient("a",
+                            &["x", "y"],
+                            distributary::Base::new(1, distributary::BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b",
+                            &["_", "x", "y"],
+                            distributary::Base::new(2, distributary::BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
