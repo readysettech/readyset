@@ -48,6 +48,11 @@ impl Recipe {
         }
     }
 
+    /// Return active aliases for expressions
+    pub fn aliases(&self) -> Vec<&str> {
+        self.aliases.keys().map(String::as_str).collect()
+    }
+
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
     pub fn node_addr_for(&self, name: &str) -> Result<NodeAddress, String> {
         // TODO(malte): better error handling
