@@ -28,7 +28,7 @@ pub enum OrderType {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct OrderClause {
-    pub cols: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
+    pub columns: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
     pub order: OrderType,
 }
 
@@ -112,7 +112,7 @@ named!(order_clause<&[u8], OrderClause>,
         ),
     || {
         OrderClause {
-            cols: order_expr,
+            columns: order_expr,
             order: match ordering {
                 None => OrderType::OrderAscending,
                 Some(ref o) => o.clone(),
@@ -284,15 +284,15 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            cols: columns(&["name"]),
+            columns: columns(&["name"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord2 = OrderClause {
-            cols: columns(&["name", "age"]),
+            columns: columns(&["name", "age"]),
             order: OrderType::OrderDescending,
         };
         let expected_ord3 = OrderClause {
-            cols: columns(&["name"]),
+            columns: columns(&["name"]),
             order: OrderType::OrderAscending,
         };
 
