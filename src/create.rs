@@ -4,7 +4,7 @@ use std::str;
 use std::str::FromStr;
 
 use common::{column_identifier, field_list, sql_identifier, statement_terminator, table_reference,
-             value_list};
+             value_list, SqlType, TableKey};
 use column::Column;
 use table::Table;
 
@@ -13,31 +13,6 @@ pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<Column>,
     pub keys: Option<Vec<TableKey>>,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq)]
-pub enum SqlType {
-    Char(u16),
-    Varchar(u16),
-    Int(u16),
-    Bigint(u16),
-    Tinyint(u16),
-    Tinyblob,
-    Blob,
-    Double,
-    Real,
-    Tinytext,
-    Mediumtext,
-    Text,
-    Date,
-    Timestamp,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq)]
-pub enum TableKey {
-    PrimaryKey(Vec<Column>),
-    UniqueKey(Option<String>, Vec<Column>),
-    Key(String, Vec<Column>),
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {

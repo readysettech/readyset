@@ -8,6 +8,24 @@ use keywords::sql_keyword;
 use table::Table;
 
 #[derive(Clone, Debug, Hash, PartialEq)]
+pub enum SqlType {
+    Char(u16),
+    Varchar(u16),
+    Int(u16),
+    Bigint(u16),
+    Tinyint(u16),
+    Tinyblob,
+    Blob,
+    Double,
+    Real,
+    Tinytext,
+    Mediumtext,
+    Text,
+    Date,
+    Timestamp,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Operator {
     Not,
     And,
@@ -20,6 +38,13 @@ pub enum Operator {
     GreaterOrEqual,
     Less,
     LessOrEqual,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub enum TableKey {
+    PrimaryKey(Vec<Column>),
+    UniqueKey(Option<String>, Vec<Column>),
+    Key(String, Vec<Column>),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

@@ -1,7 +1,7 @@
 use nom::IResult;
 use std::str;
 
-pub use common::{FieldExpression, Operator};
+use common::{FieldExpression, Operator};
 use create::*;
 use insert::*;
 use select::*;

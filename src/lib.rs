@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate nom;
 
+pub use self::common::{FieldExpression, Operator, TableKey};
 pub use self::column::{Column, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::CreateTableStatement;
