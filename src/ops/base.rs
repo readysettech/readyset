@@ -1,10 +1,14 @@
 // TODO(jmftrindade): Put the writing to disk behind a runtime command-line flag.
 use serde_json;
 use snowflake::ProcessUniqueId;
+use buf_redux::BufWriter;
+use buf_redux::strategy::WhenFull;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::BufWriter;
 use std::path::Path;
+
+// 4k buffered log.
+const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -15,7 +19,7 @@ use std::path::Path;
 pub struct Base {
     primary_key: Option<Vec<usize>>,
     durability: BaseDurabilityLevel,
-    persistent_log: Option<BufWriter<File>>,
+    persistent_log: Option<BufWriter<File, WhenFull>>,
     us: Option<NodeAddress>,
 
     // This id is unique within the same process.
@@ -75,7 +79,8 @@ impl Base {
                 let file = self.persistent_log.take().unwrap().into_inner().unwrap();
                 // need to drop as sync_data returns Result<()> and forces use
                 drop(file.sync_data());
-                self.persistent_log = Some(BufWriter::new(file));
+                self.persistent_log = Some(BufWriter::with_capacity_and_strategy(
+                    LOG_BUFFER_CAPACITY, file, WhenFull));
             }
         }
     }
@@ -104,7 +109,23 @@ impl Base {
                 }
                 Ok(file) => file,
             };
-            self.persistent_log = Some(BufWriter::new(file));
+
+            match self.durability {
+                BaseDurabilityLevel::None => self.persistent_log = None,
+
+                // TODO(jmftrindade): Use our own flush strategy instead?
+                BaseDurabilityLevel::Buffered => {
+                    self.persistent_log = Some(BufWriter::with_capacity_and_strategy(
+                        LOG_BUFFER_CAPACITY, file, WhenFull))
+                },
+
+                // XXX(jmftrindade): buf_redux does not provide a "sync immediately" flush strategy
+                // out of the box, so we handle that from persist_to_log by dropping sync_data.
+                BaseDurabilityLevel::SyncImmediately => {
+                    self.persistent_log = Some(BufWriter::with_capacity_and_strategy(
+                        LOG_BUFFER_CAPACITY, file, WhenFull))
+                }
+            }
         }
     }
 }
