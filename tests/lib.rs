@@ -84,6 +84,46 @@ fn finkelstein82_test_queries() {
 }
 
 #[test]
+fn hotcrp_schema() {
+    let mut f = File::open(Path::new("tests/hotcrp-schema.txt")).unwrap();
+    let mut s = String::new();
+
+    // Load queries
+    f.read_to_string(&mut s).unwrap();
+    let lines: Vec<&str> = s.lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty() && !l.starts_with("#") && !l.starts_with("--") && !l.starts_with("DROP")
+        })
+        .collect();
+    let mut q = String::new();
+    let mut queries = Vec::new();
+    for l in lines {
+        // remove inline comments, bah
+        let l = match l.find("#") {
+            None => l,
+            Some(pos) => &l[0..pos - 1],
+        };
+        if !l.ends_with(";") {
+            q.push_str(l);
+        } else {
+            // end of query
+            q.push_str(l);
+            queries.push(q.clone());
+            q = String::new();
+        }
+    }
+    println!("Loaded {} table definitions", queries.len());
+
+    // Try parsing them all
+    let (ok, fail) = parse_queryset(queries);
+
+    // There are 24 CREATE TABLE queries in the schema
+    assert_eq!(ok, 24);
+    assert_eq!(fail, 0);
+}
+
+#[test]
 fn mediawiki_schema() {
     let mut f = File::open(Path::new("tests/mediawiki-schema.txt")).unwrap();
     let mut s = String::new();
