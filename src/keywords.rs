@@ -1,8 +1,6 @@
-use nom::is_alphanumeric;
 use nom::{IResult, Err, ErrorKind, Needed};
 
 use std::str;
-use std::str::FromStr;
 
 /// Matches any SQL reserved keyword
 named!(pub sql_keyword<&[u8], &[u8]>,

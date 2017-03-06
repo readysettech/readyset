@@ -4,7 +4,7 @@ use std::str;
 use std::str::FromStr;
 
 use common::{column_identifier, field_list, sql_identifier, statement_terminator, table_reference,
-             value_list, SqlType, TableKey};
+             SqlType, TableKey};
 use column::Column;
 use table::Table;
 
@@ -50,27 +50,27 @@ named!(pub type_identifier<&[u8], SqlType>,
               caseless_tag!("varchar") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              binary: opt!(caseless_tag!("binary")),
+              _binary: opt!(caseless_tag!("binary")),
               || { SqlType::Varchar(len_as_u16(len)) }
           )
         | chain!(
               caseless_tag!("tinyint") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Tinyint(len_as_u16(len)) }
           )
         | chain!(
               caseless_tag!("bigint") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Bigint(len_as_u16(len)) }
           )
         | chain!(
               caseless_tag!("double") ~
               multispace? ~
-              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Double }
           )
         | chain!(
@@ -84,7 +84,7 @@ named!(pub type_identifier<&[u8], SqlType>,
         | chain!(
               caseless_tag!("real") ~
               multispace? ~
-              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Real }
           )
         | chain!(
@@ -95,14 +95,14 @@ named!(pub type_identifier<&[u8], SqlType>,
               caseless_tag!("char") ~
               len: delimited!(tag!("("), digit, tag!(")")) ~
               multispace? ~
-              binary: opt!(caseless_tag!("binary")),
+              _binary: opt!(caseless_tag!("binary")),
               || { SqlType::Char(len_as_u16(len)) }
           )
         | chain!(
               caseless_tag!("int") ~
               len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
               multispace? ~
-              signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Int(match len {
                   Some(len) => len_as_u16(len),
                   None => 32 as u16,
@@ -168,7 +168,7 @@ named!(pub field_specification_list<&[u8], Vec<Column> >,
        many1!(
            complete!(chain!(
                fieldname: column_identifier ~
-               fieldtype: opt!(complete!(chain!(multispace ~
+               _fieldtype: opt!(complete!(chain!(multispace ~
                                       type_identifier ~
                                       multispace?,
                                       || {}
