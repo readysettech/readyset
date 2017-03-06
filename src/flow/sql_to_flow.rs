@@ -1,7 +1,8 @@
 use nom_sql::parser as sql_parser;
 use flow::{NodeAddress, Migration};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
+              SqlQuery};
 use nom_sql::SelectStatement;
 use ops;
 use ops::base::Base;
@@ -158,7 +159,8 @@ impl SqlIncorporator {
         let (name, new_nodes) = match q {
             SqlQuery::CreateTable(ctq) => {
                 assert_eq!(query_name, ctq.table.name);
-                let na = self.make_base_node(&ctq.table.name, &ctq.fields, &mut mig);
+                let na =
+                    self.make_base_node(&ctq.table.name, &ctq.fields, ctq.keys.as_ref(), &mut mig);
                 match na {
                     None => (query_name, vec![]),
                     Some(na) => (query_name, vec![na]),
@@ -167,7 +169,7 @@ impl SqlIncorporator {
             SqlQuery::Insert(iq) => {
                 assert_eq!(query_name, iq.table.name);
                 let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let na = self.make_base_node(&iq.table.name, &cols, &mut mig);
+                let na = self.make_base_node(&iq.table.name, &cols, None, &mut mig);
                 match na {
                     None => (query_name, vec![]),
                     Some(na) => (query_name, vec![na]),
@@ -188,6 +190,7 @@ impl SqlIncorporator {
     fn make_base_node(&mut self,
                       name: &str,
                       cols: &Vec<Column>,
+                      keys: Option<&Vec<TableKey>>,
                       mig: &mut Migration)
                       -> Option<NodeAddress> {
         if self.write_schemas.contains_key(name) {
@@ -198,8 +201,40 @@ impl SqlIncorporator {
 
         let fields = Vec::from_iter(cols.iter().map(|c| c.name.clone()));
 
+        let primary_keys = match keys {
+            None => vec![],
+            Some(keys) => {
+                keys.iter()
+                    .filter_map(|k| match *k {
+                        ref k @ TableKey::PrimaryKey(..) => Some(k),
+                        _ => None,
+                    })
+                    .collect()
+            }
+        };
+        assert!(primary_keys.len() <= 1);
+
         // make the new base node and record its information
-        let na = mig.add_ingredient(name, fields.as_slice(), Base::default());
+        let na = if !primary_keys.is_empty() {
+            match **primary_keys.iter().next().unwrap() {
+                TableKey::PrimaryKey(ref key_cols) => {
+                    debug!(mig.log,
+                           "Assigning primary key {:?} for base {}",
+                           key_cols,
+                           name);
+                    let pkey_column_ids = key_cols.iter()
+                        .map(|pkc| {
+                            assert_eq!(pkc.table.as_ref().unwrap(), name);
+                            cols.iter().position(|c| c == pkc).unwrap()
+                        })
+                        .collect();
+                    mig.add_ingredient(name, fields.as_slice(), Base::new(pkey_column_ids))
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            mig.add_ingredient(name, fields.as_slice(), Base::default())
+        };
         self.node_addresses.insert(String::from(name), na);
         // TODO(malte): get rid of annoying duplication
         self.node_fields.insert(na, fields.clone());
