@@ -7,15 +7,15 @@ use std::collections::HashMap;
 /// type corresponding to the node's type.
 #[derive(Debug, Clone)]
 pub struct Base {
-    key_column: Option<usize>,
+    primary_key: Option<Vec<usize>>,
     us: Option<NodeAddress>,
 }
 
 impl Base {
     /// Create a base node operator.
-    pub fn new(key_column: usize) -> Self {
+    pub fn new(primary_key: Vec<usize>) -> Self {
         Base {
-            key_column: Some(key_column),
+            primary_key: Some(primary_key),
             us: None,
         }
     }
@@ -24,7 +24,7 @@ impl Base {
 impl Default for Base {
     fn default() -> Self {
         Base {
-            key_column: None,
+            primary_key: None,
             us: None,
         }
     }
@@ -46,13 +46,15 @@ impl Ingredient for Base {
     }
 
     fn will_query(&self, materialized: bool) -> bool {
-        !materialized && self.key_column.is_some()
+        !materialized && self.primary_key.is_some()
     }
 
     fn on_connected(&mut self, _: &Graph) {}
+
     fn on_commit(&mut self, us: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {
         self.us = Some(us);
     }
+
     fn on_input(&mut self,
                 _: NodeAddress,
                 rs: Records,
@@ -64,11 +66,12 @@ impl Ingredient for Base {
                 Record::Positive(u) => Record::Positive(u),
                 Record::Negative(u) => Record::Negative(u),
                 Record::DeleteRequest(key) => {
-                    let col = self.key_column
-                        .expect("base must have a key column to support deletions");
+                    let cols = self.primary_key
+                        .as_ref()
+                        .expect("base must have a primary key to support deletions");
                     let db = state.get(self.us.as_ref().unwrap().as_local())
                         .expect("base must have its own state materialized to support deletions");
-                    let rows = db.lookup(&[col], &KeyType::from(&key[..]));
+                    let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
                     assert_eq!(rows.len(), 1);
 
                     Record::Negative(rows[0].clone())
@@ -78,8 +81,8 @@ impl Ingredient for Base {
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        if self.key_column.is_some() {
-            Some((n, vec![self.key_column.unwrap()])).into_iter().collect()
+        if self.primary_key.is_some() {
+            Some((n, self.primary_key.as_ref().unwrap().clone())).into_iter().collect()
         } else {
             HashMap::new()
         }
