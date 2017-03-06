@@ -352,6 +352,7 @@ extern crate futures;
 #[cfg(feature="b_netsoup")]
 extern crate tokio_core;
 
+extern crate buf_redux;
 extern crate serde_json;
 extern crate snowflake;
 
