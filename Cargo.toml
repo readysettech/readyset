@@ -103,3 +103,7 @@ path = "benchmarks/multitail/multitail.rs"
 [[bin]]
 name = "tpc_w"
 path = "benchmarks/tpc_w/tpc_w.rs"
+
+[[bin]]
+name = "hotsoup"
+path = "benchmarks/hotsoup/hotsoup.rs"
