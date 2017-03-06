@@ -207,16 +207,30 @@ impl Recipe {
     }
 
     fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery)>, String> {
-        let lines: Vec<String> = recipe_text.lines()
+        let lines: Vec<&str> = recipe_text.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
-            .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
-                String::from(l) + "\n"
-            } else {
-                String::from(l)
+            .map(|l| {
+                // remove inline comments, too
+                match l.find("#") {
+                    None => l.trim(),
+                    Some(pos) => &l[0..pos - 1].trim(),
+                }
             })
             .collect();
+        let mut query_strings = Vec::new();
+        let mut q = String::new();
+        for l in lines {
+            if !l.ends_with(";") {
+                q.push_str(l);
+            } else {
+                // end of query
+                q.push_str(l);
+                query_strings.push(q);
+                q = String::new();
+            }
+        }
 
-        let parsed_queries = lines.iter()
+        let parsed_queries = query_strings.iter()
             .map(|ref q| {
                 let r: Vec<&str> = q.splitn(2, ":").collect();
                 if r.len() == 2 {
