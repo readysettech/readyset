@@ -14,15 +14,19 @@ pub enum SqlType {
     Int(u16),
     Bigint(u16),
     Tinyint(u16),
-    Tinyblob,
     Blob,
+    Longblob,
+    Mediumblob,
+    Tinyblob,
     Double,
+    Float,
     Real,
     Tinytext,
     Mediumtext,
     Text,
     Date,
     Timestamp,
+    Varbinary(u16),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]

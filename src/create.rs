@@ -39,6 +39,20 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Timestamp }
           )
         | chain!(
+              caseless_tag!("varbinary") ~
+              len: delimited!(tag!("("), digit, tag!(")")) ~
+              multispace?,
+              || { SqlType::Varbinary(len_as_u16(len)) }
+          )
+        | chain!(
+              caseless_tag!("mediumblob"),
+              || { SqlType::Mediumblob }
+          )
+        | chain!(
+              caseless_tag!("longblob"),
+              || { SqlType::Longblob }
+          )
+        | chain!(
               caseless_tag!("tinyblob"),
               || { SqlType::Tinyblob }
           )
@@ -72,6 +86,12 @@ named!(pub type_identifier<&[u8], SqlType>,
               multispace? ~
               _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
               || { SqlType::Double }
+          )
+        | chain!(
+              caseless_tag!("float") ~
+              multispace? ~
+              _signed: opt!(alt_complete!(caseless_tag!("unsigned") | caseless_tag!("signed"))),
+              || { SqlType::Float }
           )
         | chain!(
               caseless_tag!("blob"),
@@ -142,6 +162,17 @@ named!(pub key_specification<&[u8], TableKey>,
                   }
               }
           )
+        | chain!(
+              caseless_tag!("key") ~
+              multispace? ~
+              name: sql_identifier ~
+              multispace? ~
+              columns: delimited!(tag!("("), field_list, tag!(")")),
+              || {
+                  let n = String::from(str::from_utf8(name).unwrap());
+                  TableKey::Key(n, columns)
+              }
+          )
     )
 );
 
@@ -196,6 +227,8 @@ named!(pub field_specification_list<&[u8], Vec<Column> >,
                                  delimited!(tag!("'"), alphanumeric, tag!("'"))
                                | digit
                                | tag!("''")
+                               | caseless_tag!("null")
+                               | caseless_tag!("current_timestamp")
                            ) ~
                            multispace?,
                            || {}
@@ -254,6 +287,32 @@ named!(pub creation<&[u8], CreateTableStatement>,
                     tag!("=") ~
                     multispace? ~
                     alt_complete!(tag!("0") | tag!("1")),
+                    || {}
+                )
+            )
+        ) ~
+        multispace? ~
+        opt!(
+            complete!(
+                chain!(
+                    caseless_tag!("engine") ~
+                    multispace? ~
+                    tag!("=") ~
+                    multispace? ~
+                    alphanumeric,
+                    || {}
+                )
+            )
+        ) ~
+        multispace? ~
+        opt!(
+            complete!(
+                chain!(
+                    caseless_tag!("default charset") ~
+                    multispace? ~
+                    tag!("=") ~
+                    multispace? ~
+                    alt_complete!(tag!("utf8")),
                     || {}
                 )
             )
