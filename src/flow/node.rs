@@ -362,7 +362,7 @@ impl Node {
                        escape(&i.description()))?;
 
                 // Output node outputs. Second row.
-                write!(f, " | {}", self.fields().join(", "))?;
+                write!(f, " | {}", self.fields().join(", \\n"))?;
 
                 // Maybe output node's HAVING conditions. Optional third row.
                 // TODO
