@@ -183,6 +183,12 @@ impl ImpliedTableExpansion for SqlQuery {
                                               .map(|k| translate_column(k, Some(table.clone())))
                                               .collect())
                             }
+                            FulltextKey(name, key_cols) => {
+                                FulltextKey(name,
+                                            key_cols.into_iter()
+                                                .map(|k| translate_column(k, Some(table.clone())))
+                                                .collect())
+                            }
                             Key(name, key_cols) => {
                                 Key(name,
                                     key_cols.into_iter()
