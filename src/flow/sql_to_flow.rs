@@ -508,7 +508,7 @@ impl SqlIncorporator {
                format!("Making nodes for query named \"{}\"", name));
 
         // Do we already have this exact query or a subset of it?
-        for &(ref existing_qg, ref na) in self.query_graphs.iter() {
+        for &(ref existing_qg, _) in self.query_graphs.iter() {
             if existing_qg.signature() == qg.signature() {
                 // we already have this exact query, so we don't need to add anything
                 info!(mig.log,

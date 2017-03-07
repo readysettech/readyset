@@ -1138,7 +1138,7 @@ fn tpc_w() {
             let or = r.clone();
             r = match r.extend(q) {
                 Ok(mut nr) => {
-                    nr.activate(&mut mig);
+                    assert!(nr.activate(&mut mig).is_ok());
                     nr
                 }
                 Err(e) => {
