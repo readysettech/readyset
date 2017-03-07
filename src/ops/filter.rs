@@ -55,8 +55,8 @@ impl Ingredient for Filter {
                 _: &StateMap)
                 -> Records {
 
-        let mut f = self.filter.iter();
         rs.retain(|r| {
+            let mut f = self.filter.iter();
             r.iter().all(|d| {
                 // check if this filter matches
                 let fi = f.next()
@@ -206,5 +206,18 @@ mod tests {
         let g = setup(false, None);
         assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
         assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
+    }
+
+    #[test]
+    fn it_works_with_many() {
+        let mut g = setup(false, None);
+
+        let mut many = Vec::new();
+
+        for i in 0..10 {
+            many.push(vec![i.into(), "a".into()]);
+        }
+
+        assert_eq!(g.narrow_one(many.clone(), false), many.into());
     }
 }
