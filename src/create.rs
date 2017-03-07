@@ -35,7 +35,9 @@ named!(pub type_identifier<&[u8], SqlType>,
               || { SqlType::Mediumtext }
           )
         | chain!(
-              caseless_tag!("timestamp"),
+              caseless_tag!("timestamp") ~
+              _len: opt!(delimited!(tag!("("), digit, tag!(")"))) ~
+              multispace?,
               || { SqlType::Timestamp }
           )
         | chain!(
@@ -135,6 +137,22 @@ named!(pub type_identifier<&[u8], SqlType>,
 named!(pub key_specification<&[u8], TableKey>,
     alt_complete!(
           chain!(
+              caseless_tag!("fulltext key") ~
+              multispace? ~
+              name: opt!(sql_identifier) ~
+              multispace? ~
+              columns: delimited!(tag!("("), field_list, tag!(")")),
+              || {
+                  match name {
+                      Some(name) => {
+                          let n = String::from(str::from_utf8(name).unwrap());
+                          TableKey::FulltextKey(Some(n), columns)
+                      },
+                      None => TableKey::FulltextKey(None, columns),
+                  }
+              }
+          )
+        | chain!(
               caseless_tag!("primary key") ~
               multispace? ~
               columns: delimited!(tag!("("), field_list, tag!(")")) ~
@@ -224,7 +242,7 @@ named!(pub field_specification_list<&[u8], Vec<Column> >,
                            caseless_tag!("default") ~
                            multispace ~
                            alt_complete!(
-                                 delimited!(tag!("'"), alphanumeric, tag!("'"))
+                                 delimited!(tag!("'"), take_until!("'"), tag!("'"))
                                | digit
                                | tag!("''")
                                | caseless_tag!("null")

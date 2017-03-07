@@ -48,6 +48,7 @@ pub enum Operator {
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
     UniqueKey(Option<String>, Vec<Column>),
+    FulltextKey(Option<String>, Vec<Column>),
     Key(String, Vec<Column>),
 }
 
