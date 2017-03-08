@@ -64,7 +64,7 @@ getRelated1: SELECT i_related1 FROM item where i_id = ?;
 getMostRecentOrderLines: SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
 
 # createEmptyCart
-createEmptyCart: SELECT COUNT(*) FROM shopping_cart
+createEmptyCart: SELECT COUNT(*) FROM shopping_cart;
 # createEmptyCart.insert
 #INSERT into shopping_cart (sc_id, sc_time) VALUES ((SELECT COUNT(*) FROM shopping_cart), CURRENT_TIMESTAMP);
 # createEmptyCart.insert.v2
