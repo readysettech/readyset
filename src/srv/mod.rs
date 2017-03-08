@@ -139,9 +139,10 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
                 .name(format!("rpc{}", i))
                 .spawn(move || {
                     let mut core = reactor::Core::new().unwrap();
-                    let (_, handle) =
-                        s.listen(addr, &core.handle(), tarpc::server::Options::default())
-                            .unwrap();
+                    let (_, handle) = s.listen(addr,
+                                &core.handle(),
+                                tarpc::future::server::Options::default())
+                        .unwrap();
                     core.handle().spawn(handle);
 
                     match core.run(rx) {
