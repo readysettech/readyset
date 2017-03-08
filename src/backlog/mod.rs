@@ -78,6 +78,10 @@ impl ReadHandle {
     {
         self.handle.meta_get_and(key, then).ok_or(())
     }
+
+    pub fn key(&self) -> usize {
+        self.key
+    }
 }
 
 #[cfg(test)]

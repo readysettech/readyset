@@ -63,6 +63,13 @@ impl Reader {
             }) as Box<_>
         })
     }
+
+    pub fn key(&self) -> Result<usize, String> {
+        match self.state {
+            None => Err(String::from("no state on reader")),
+            Some(ref s) => Ok(s.key()),
+        }
+    }
 }
 
 impl Default for Reader {
@@ -350,7 +357,13 @@ impl Node {
             Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
             Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
-            Type::Reader(..) => write!(f, "{{ {} | (reader) }}", idx.index()),
+            Type::Reader(_, ref r) => {
+                let key = match r.key() {
+                    Err(_) => String::from("none"),
+                    Ok(k) => format!("{}", k),
+                };
+                write!(f, "{{ {} | (reader | key: {}) }}", idx.index(), key)
+            }
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
 
