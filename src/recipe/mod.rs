@@ -145,7 +145,12 @@ impl Recipe {
         let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            let name = self.versioned_query_name(&n, &q);
+
+            // add the query
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, name, mig)?;
+
+            // we currently use a domain per query
             let d = mig.add_domain();
             for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
@@ -154,8 +159,9 @@ impl Recipe {
         }
 
         // TODO(malte): deal with removal.
-        for _ in removed {
-            unimplemented!()
+        for qid in removed {
+            println!("Query removal of {:?}", qid);
+            //unimplemented!()
         }
 
         Ok(new_nodes)
@@ -286,6 +292,22 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    fn versioned_query_name(&self, name: &Option<String>, query: &SqlQuery) -> Option<String> {
+        // for CREATE/INSERT queries, we use the table name as the query name.
+        let base = match *name {
+            None => {
+                match *query {
+                    SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
+                    SqlQuery::Insert(ref iq) => iq.table.name.clone(),
+                    SqlQuery::Select(_) => return None,
+                }
+            }
+            Some(ref name) => name.clone(),
+        };
+
+        Some(format!("{}#{}", base, self.version))
     }
 }
 

@@ -190,9 +190,9 @@ impl SqlIncorporator {
 
         let (name, new_nodes, leaf) = match q {
             SqlQuery::CreateTable(ctq) => {
-                assert_eq!(query_name, ctq.table.name);
+                //assert_eq!(query_name, ctq.table.name);
                 let (na, new) =
-                    self.make_base_node(&ctq.table.name, &ctq.fields, ctq.keys.as_ref(), &mut mig);
+                    self.make_base_node(&query_name, &ctq.fields, ctq.keys.as_ref(), &mut mig);
                 if new {
                     (query_name, vec![na], na)
                 } else {
@@ -200,9 +200,9 @@ impl SqlIncorporator {
                 }
             }
             SqlQuery::Insert(iq) => {
-                assert_eq!(query_name, iq.table.name);
+                //assert_eq!(query_name, iq.table.name);
                 let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let (na, new) = self.make_base_node(&iq.table.name, &cols, None, &mut mig);
+                let (na, new) = self.make_base_node(&query_name, &cols, None, &mut mig);
                 if new {
                     (query_name, vec![na], na)
                 } else {
@@ -264,7 +264,7 @@ impl SqlIncorporator {
                            name);
                     let pkey_column_ids = key_cols.iter()
                         .map(|pkc| {
-                            assert_eq!(pkc.table.as_ref().unwrap(), name);
+                            //assert_eq!(pkc.table.as_ref().unwrap(), name);
                             cols.iter().position(|c| c == pkc).unwrap()
                         })
                         .collect();
