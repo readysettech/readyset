@@ -162,10 +162,9 @@ fn classify_conditionals(ce: &ConditionExpression,
                         ConditionBase::Literal(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 // TODO(malte): this fails hard if lf.table is None
-                                if !local.contains_key(lf.table.as_ref().unwrap()) {
-                                    local.insert(lf.table.clone().unwrap(), Vec::new());
-                                }
-                                local.get_mut(lf.table.as_ref().unwrap()).unwrap().push(ct.clone());
+                                let mut e = local.entry(lf.table.clone().unwrap())
+                                    .or_insert(Vec::new());
+                                e.push(ct.clone());
                             }
                         }
                         ConditionBase::Placeholder => {
