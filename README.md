@@ -1,6 +1,6 @@
 # distributary: a data-flow based database with automatic materialization
 
-[![Build Status](https://travis-ci.com/mit-pdos/distributary.svg?token=BSd4zXamztCMoDZRewoH&branch=master)](https://travis-ci.com/mit-pdos/distributary)
+[![Build Status](https://travis-ci.org/mit-pdos/distributary.svg?branch=master)](https://travis-ci.org/mit-pdos/distributary)
 
 This repository provides an implementation of the data storage system
 model proposed in [Soup](https://pdos.csail.mit.edu/projects/soup.html).
