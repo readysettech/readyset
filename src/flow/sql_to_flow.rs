@@ -712,12 +712,21 @@ impl SqlIncorporator {
                 ni = mig.add_ingredient(String::from(name),
                                         fields.as_slice(),
                                         Permute::new(*final_ni, projected_column_ids.as_slice()));
-                // We always materializes leaves of queries (at least currently)
-                // XXX(malte): this hard-codes the primary key to be the first column, since
-                // queries do not currently carry this information
-                mig.maintain(ni, 0);
                 self.node_addresses.insert(String::from(name), ni);
                 self.node_fields.insert(ni, fields);
+
+                // We always materialize leaves of queries (at least currently)
+                let query_params = qg.parameters();
+                // TODO(malte): this does not yet cover the case when there are multiple query
+                // parameters, which compound key support on Reader nodes.
+                if !query_params.is_empty() {
+                    //assert_eq!(query_params.len(), 1);
+                    let key_column = query_params.iter().next().unwrap();
+                    mig.maintain(ni, self.field_to_columnid(ni, &key_column.name).unwrap());
+                } else {
+                    // no query parameters, so we index on the first (and often only) column
+                    mig.maintain(ni, 0);
+                }
             }
             debug!(mig.log, format!("Added final node for query named \"{}\"", name); "node" => ni.as_global().index());
             new_filter_nodes.push(ni);
