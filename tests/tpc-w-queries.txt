@@ -68,14 +68,14 @@ createEmptyCart: SELECT COUNT(*) FROM shopping_cart;
 # createEmptyCart.insert
 #INSERT into shopping_cart (sc_id, sc_time) VALUES ((SELECT COUNT(*) FROM shopping_cart), CURRENT_TIMESTAMP);
 # createEmptyCart.insert.v2
-INSERT into shopping_cart (sc_id, sc_time) VALUES (?, CURRENT_TIMESTAMP);
+#INSERT into shopping_cart (sc_id, sc_time) VALUES (?, CURRENT_TIMESTAMP);
 
 # addItem
 addItem: SELECT scl_qty FROM shopping_cart_line WHERE scl_sc_id = ? AND scl_i_id = ?;
 # addItem.update
 #UPDATE shopping_cart_line SET scl_qty = ? WHERE scl_sc_id = ? AND scl_i_id = ?;
 # addItem.put
-INSERT into shopping_cart_line (scl_sc_id, scl_qty, scl_i_id) VALUES (?,?,?);
+#INSERT into shopping_cart_line (scl_sc_id, scl_qty, scl_i_id) VALUES (?,?,?);
 
 # refreshCArt.remove
 #DELETE FROM shopping_cart_line WHERE scl_sc_id = ? AND scl_i_id = ?;
@@ -95,7 +95,7 @@ getCart: SELECT * FROM shopping_cart_line, item WHERE scl_i_id = item.i_id AND s
 #UPDATE customer SET c_login = NOW(), c_expiration = (CURRENT_TIMESTAMP + INTERVAL 2 HOUR) WHERE c_id = ?;
 
 # createNewCustomer
-INSERT into customer (c_id, c_uname, c_passwd, c_fname, c_lname, c_addr_id, c_phone, c_email, c_since, c_last_login, c_login, c_expiration, c_discount, c_balance, c_ytd_pmt, c_birthdate, c_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+#INSERT into customer (c_id, c_uname, c_passwd, c_fname, c_lname, c_addr_id, c_phone, c_email, c_since, c_last_login, c_login, c_expiration, c_discount, c_balance, c_ytd_pmt, c_birthdate, c_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 # createNewCustomer.maxId
 createNewCustomerMaxId: SELECT max(c_id) FROM customer;
 
@@ -119,7 +119,7 @@ enterAddressId: SELECT co_id FROM country WHERE co_name = ?;
 # enterAddress.match
 #enterAddressMatch: SELECT addr_id FROM address WHERE addr_street1 = ? AND addr_street2 = ? AND addr_city = ? AND addr_state = ? AND addr_zip = ? AND addr_co_id = ?;
 # enterAddress.insert
-INSERT into address (addr_id, addr_street1, addr_street2, addr_city, addr_state, addr_zip, addr_co_id) VALUES (?, ?, ?, ?, ?, ?, ?);
+#INSERT into address (addr_id, addr_street1, addr_street2, addr_city, addr_state, addr_zip, addr_co_id) VALUES (?, ?, ?, ?, ?, ?, ?);
 # enterAddress.maxId
 enterAddressMaxId: SELECT max(addr_id) FROM address;
 
@@ -129,7 +129,7 @@ enterAddressMaxId: SELECT max(addr_id) FROM address;
 enterOrderMaxId: SELECT count(o_id) FROM orders;
 
 # addOrderLine
-INSERT into order_line (ol_id, ol_o_id, ol_i_id, ol_qty, ol_discount, ol_comments) VALUES (?, ?, ?, ?, ?, ?);
+#INSERT into order_line (ol_id, ol_o_id, ol_i_id, ol_qty, ol_discount, ol_comments) VALUES (?, ?, ?, ?, ?, ?);
 
 # getStock
 getStock: SELECT i_stock FROM item WHERE i_id = ?;
