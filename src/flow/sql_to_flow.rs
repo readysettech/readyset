@@ -651,17 +651,30 @@ impl SqlIncorporator {
 
                         let agg_node_name = &format!("q_{:x}_n{}", qg.signature().hash, i);
 
-                        // slightly messy hack: if there are no group columns, we make one up by adding an extra
-                        // projection node
-                        let proj_name = format!("{}_prj_hlpr", agg_node_name);
-                        let proj = self.make_projection_helper(&proj_name, computed_col, mig);
-                        let bogo_group_col = Column::from(format!("{}.grp", proj_name).as_str());
-                        func_nodes.push(proj);
+                        let over_cols = target_columns_from_computed_column(computed_col);
+                        let ref proj_cols_from_target_table = qg.relations
+                            .get(over_cols.iter().next().as_ref().unwrap().table.as_ref().unwrap())
+                            .as_ref()
+                            .unwrap()
+                            .columns;
+                        let (group_cols, parent_ni) = if proj_cols_from_target_table.is_empty() {
+                            // slightly messy hack: if there are no group columns and the table on
+                            // which we compute has no projected columns in the output, we make one
+                            // up a group column by adding an extra projection node
+                            let proj_name = format!("{}_prj_hlpr", agg_node_name);
+                            let proj = self.make_projection_helper(&proj_name, computed_col, mig);
+                            func_nodes.push(proj);
 
+                            let bogo_group_col = Column::from(format!("{}.grp", proj_name)
+                                .as_str());
+                            (vec![bogo_group_col], Some(proj))
+                        } else {
+                            (proj_cols_from_target_table.clone(), None)
+                        };
                         let ni = self.make_function_node(agg_node_name,
                                                          computed_col,
-                                                         &[bogo_group_col],
-                                                         Some(proj),
+                                                         group_cols.as_slice(),
+                                                         parent_ni,
                                                          mig);
                         func_nodes.push(ni);
                         i += 1;

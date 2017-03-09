@@ -13,6 +13,7 @@ pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionTree>,
     pub columns: Vec<Column>,
+    pub parameters: Vec<Column>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,6 +34,17 @@ impl QueryGraph {
             relations: HashMap::new(),
             edges: HashMap::new(),
         }
+    }
+
+    /// Returns the set of columns on which this query is parameterized. They can come from
+    /// multiple tables involved in the query.
+    pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
+        self.relations
+            .values()
+            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+                acc.extend(qgn.parameters.iter());
+                acc
+            })
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -117,7 +129,8 @@ impl QueryGraph {
 fn classify_conditionals(ce: &ConditionExpression,
                          mut local: &mut HashMap<String, Vec<ConditionTree>>,
                          mut join: &mut Vec<ConditionTree>,
-                         mut global: &mut Vec<ConditionTree>) {
+                         mut global: &mut Vec<ConditionTree>,
+                         mut params: &mut Vec<Column>) {
     use std::cmp::Ordering;
 
     match *ce {
@@ -127,11 +140,13 @@ fn classify_conditionals(ce: &ConditionExpression,
             classify_conditionals(ct.left.as_ref().unwrap(),
                                   &mut local,
                                   &mut join,
-                                  &mut global);
+                                  &mut global,
+                                  &mut params);
             classify_conditionals(ct.right.as_ref().unwrap(),
                                   &mut local,
                                   &mut join,
-                                  &mut global);
+                                  &mut global,
+                                  &mut params);
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
@@ -173,8 +188,9 @@ fn classify_conditionals(ce: &ConditionExpression,
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
                         ConditionBase::Placeholder => {
-                            // can't do anything about placeholders, so ignore them
-                            ()
+                            if let ConditionBase::Field(ref lf) = *l {
+                                params.push(lf.clone());
+                            }
                         }
                     }
                 };
@@ -221,25 +237,42 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             .collect()
                     }
                 },
+                parameters: Vec::new(),
             }
         };
+
+    // 1. Add any relations mentioned in the query to the query graph.
+    // This is needed so that we don't end up with an empty query graph when there are no
+    // conditionals, but rather with a one-node query graph that has no predicates.
+    for table in &st.tables {
+        qg.relations.insert(table.name.clone(),
+                            new_node(table.name.clone(), Vec::new(), st));
+    }
 
     if let Some(ref cond) = st.where_clause {
         let mut join_predicates = Vec::new();
         let mut local_predicates = HashMap::new();
         let mut global_predicates = Vec::<ConditionTree>::new();
+        let mut query_parameters = Vec::new();
         // Let's classify the predicates we have in the query
         classify_conditionals(cond,
                               &mut local_predicates,
                               &mut join_predicates,
-                              &mut global_predicates);
+                              &mut global_predicates,
+                              &mut query_parameters);
 
         // Now we're ready to build the query graph
-        // 1. Set up nodes for each relation that we have local predicates for
+        // 1. Add local predicates for each node that has them
         for (rel, preds) in local_predicates {
-            let n = new_node(rel.clone(), preds, st);
-            qg.relations.insert(rel, n);
+            if !qg.relations.contains_key(&rel) {
+                // can't have predicates on tables that do not appear in the FROM part of the
+                // statement
+                unreachable!()
+            } else {
+                qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
+            }
         }
+
         // 2. Add edges for each pair of joined relations
         // TODO(malte): This is pretty heavily into cloning things all over, which makes it both
         // inefficient and hideous. Maybe we can reengineer the data structures to require less of
@@ -284,15 +317,23 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 }
             }
         }
-    }
 
-    // 3. Add any relations mentioned in the query but not in any conditionals.
-    // This is also needed so that we don't end up with an empty query graph when there are no
-    // conditionals, but rather with a one-node query graph that has no predicates.
-    for table in &st.tables {
-        if !qg.relations.contains_key(table.name.as_str()) {
-            qg.relations.insert(table.name.clone(),
-                                new_node(table.name.clone(), Vec::new(), st));
+        // 3. Add any columns that are query parameters, and which therefore must appear in the leaf
+        //    node for this query. Such columns will be carried all the way through the operators
+        //    implementing the query (unlike in a traditional query plan, where the predicates on
+        //    parameters might be evaluated sooner).
+        for column in query_parameters.into_iter() {
+            match column.table {
+                None => panic!("each parameter's column must have an associated table!"),
+                Some(ref table) => {
+                    let rel = qg.relations.get_mut(table).unwrap();
+                    // the parameter column is included in the projected columns of the output, but
+                    // we also separately register it as a parameter so that we can set keys
+                    // correctly on the leaf view
+                    rel.columns.push(column.clone());
+                    rel.parameters.push(column.clone());
+                }
+            }
         }
     }
 
