@@ -743,7 +743,9 @@ impl<'a> Migration<'a> {
         let cols = self.mainline.ingredients[ri].fields().len();
 
         if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
-            if inner.state.is_none() {
+            if let Some(ref s) = inner.state {
+                assert_eq!(s.key(), key);
+            } else {
                 use backlog;
                 let (r, w) = backlog::new(cols, key);
                 inner.state = Some(r);
@@ -775,7 +777,9 @@ impl<'a> Migration<'a> {
         let cols = self.mainline.ingredients[ri].fields().len();
 
         if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
-            if inner.state.is_none() {
+            if let Some(ref s) = inner.state {
+                assert_eq!(s.key(), key);
+            } else {
                 use backlog;
                 let (r, w) = backlog::new(cols, key);
                 inner.state = Some(r);
