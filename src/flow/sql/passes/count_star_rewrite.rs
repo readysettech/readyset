@@ -80,7 +80,7 @@ mod tests {
 
         // SELECT COUNT(*) FROM users;
         // -->
-        // SELECT COUNT(users.id) FROM users;
+        // SELECT COUNT(users.age) FROM users;
         let q = parse_query("SELECT COUNT(*) FROM users;").unwrap();
         let mut schema = HashMap::new();
         schema.insert("users".into(),
@@ -94,7 +94,7 @@ mod tests {
                                name: String::from("anon_fn"),
                                table: None,
                                function: Some(FunctionExpression::Count(
-                                   FieldExpression::Seq(vec![Column::from("users.id")]))),
+                                   FieldExpression::Seq(vec![Column::from("users.age")]))),
                            }]));
             }
             // if we get anything other than a selection query back, something really weird is up

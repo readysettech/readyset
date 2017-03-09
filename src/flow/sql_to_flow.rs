@@ -1058,14 +1058,14 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
+        assert!(inc.add_query("INSERT INTO votes (userid, aid) VALUES (?, ?);",
                        None,
                        &mut mig)
             .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
-        assert_eq!(get_node(&inc, &mig, "votes").fields(), &["aid", "userid"]);
+        assert_eq!(get_node(&inc, &mig, "votes").fields(), &["userid", "aid"]);
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
         // Try a simple COUNT function without a GROUP BY clause
         let res = inc.add_query("SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
@@ -1086,7 +1086,7 @@ mod tests {
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
-        assert_eq!(agg_view.description(), format!("|*| γ[1]"));
+        assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
         let edge_view = get_node(&inc, &mig, &res.unwrap().0);
