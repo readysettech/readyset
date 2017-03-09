@@ -268,43 +268,44 @@ pub struct Mutator {
 }
 
 impl Mutator {
+    fn send(&self, r: prelude::Records) {
+        let m = payload::Packet::Message {
+            link: payload::Link::new(self.src, self.addr),
+            data: r,
+        };
+        self.tx.clone().send(m).unwrap();
+    }
+
+    fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> checktable::TransactionResult {
+        let (send, recv) = mpsc::channel();
+        let m = payload::Packet::Transaction {
+            link: payload::Link::new(self.src, self.addr),
+            data: r,
+            state: payload::TransactionState::Pending(t, send),
+        };
+        self.tx.clone().send(m).unwrap();
+        recv.recv().unwrap()
+    }
+
     /// Perform a non-transactional write to the base node this Mutator was generated for.
     pub fn put<V>(&self, u: V)
         where V: Into<Vec<prelude::DataType>>
     {
-        self.tx
-            .send(payload::Packet::Message {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![u.into()].into(),
-            })
-            .unwrap()
+        self.send(vec![u.into()].into())
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
     pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> checktable::TransactionResult
         where V: Into<Vec<prelude::DataType>>
     {
-        let (send, recv) = mpsc::channel();
-        self.tx
-            .send(payload::Packet::Transaction {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![u.into()].into(),
-                state: payload::TransactionState::Pending(t, send),
-            })
-            .unwrap();
-        recv.recv().unwrap()
+        self.tx_send(vec![u.into()].into(), t)
     }
 
     /// Perform a non-transactional delete frome the base node this Mutator was generated for.
     pub fn delete<I>(&self, key: I)
         where I: Into<Vec<prelude::DataType>>
     {
-        self.tx
-            .send(payload::Packet::Message {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(key.into())].into(),
-            })
-            .unwrap()
+        self.send(vec![prelude::Record::DeleteRequest(key.into())].into())
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
@@ -314,15 +315,7 @@ impl Mutator {
                                    -> checktable::TransactionResult
         where I: Into<Vec<prelude::DataType>>
     {
-        let (send, recv) = mpsc::channel();
-        self.tx
-            .send(payload::Packet::Transaction {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(key.into())].into(),
-                state: payload::TransactionState::Pending(t, send),
-            })
-            .unwrap();
-        recv.recv().unwrap()
+        self.tx_send(vec![prelude::Record::DeleteRequest(key.into())].into(), t)
     }
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
@@ -334,18 +327,13 @@ impl Mutator {
                 "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
-        self.tx
-            .send(payload::Packet::Message {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(self.primary_key
-                               .iter()
-                               .map(|&col| &u[col])
-                               .cloned()
-                               .collect()),
-                           u.into()]
-                    .into(),
-            })
-            .unwrap()
+        self.send(vec![prelude::Record::DeleteRequest(self.primary_key
+                           .iter()
+                           .map(|&col| &u[col])
+                           .cloned()
+                           .collect()),
+                       u.into()]
+            .into())
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
@@ -360,21 +348,14 @@ impl Mutator {
                 "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
-        let (send, recv) = mpsc::channel();
-        self.tx
-            .send(payload::Packet::Transaction {
-                link: payload::Link::new(self.src, self.addr),
-                data: vec![prelude::Record::DeleteRequest(self.primary_key
-                               .iter()
-                               .map(|&col| &u[col])
-                               .cloned()
-                               .collect()),
-                           u.into()]
-                    .into(),
-                state: payload::TransactionState::Pending(t, send),
-            })
-            .unwrap();
-        recv.recv().unwrap()
+        let m = vec![prelude::Record::DeleteRequest(self.primary_key
+                         .iter()
+                         .map(|&col| &u[col])
+                         .cloned()
+                         .collect()),
+                     u.into()]
+            .into();
+        self.tx_send(m, t)
     }
 }
 
