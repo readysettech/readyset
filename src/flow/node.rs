@@ -362,7 +362,7 @@ impl Node {
                     Err(_) => String::from("none"),
                     Ok(k) => format!("{}", k),
                 };
-                write!(f, "{{ {} | (reader | key: {}) }}", idx.index(), key)
+                write!(f, "{{ {} | (reader / key: {}) }}", idx.index(), key)
             }
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
