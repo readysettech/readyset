@@ -326,6 +326,13 @@ pub mod test {
             }
         }
 
+        pub fn unseed(&mut self, base: NodeAddress) {
+            assert!(self.nut.is_some(), "unseed must happen after set_op");
+
+            let local = self.to_local(base);
+            self.states.get_mut(local.as_local()).unwrap().clear();
+        }
+
         pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
