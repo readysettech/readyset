@@ -46,6 +46,25 @@ enum GroupedNodeType {
     Extremum(ops::grouped::extremum::Extremum),
 }
 
+fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
+    use nom_sql::FunctionExpression::*;
+    use nom_sql::FieldExpression::*;
+
+    match *computed_col.function.as_ref().unwrap() {
+        Avg(Seq(ref cols)) |
+        Count(Seq(ref cols)) |
+        GroupConcat(Seq(ref cols)) |
+        Max(Seq(ref cols)) |
+        Min(Seq(ref cols)) |
+        Sum(Seq(ref cols)) => cols,
+        Count(All) => {
+            // see comment re COUNT(*) rewriting in make_aggregation_node
+            panic!("COUNT(*) should have been rewritten earlier!")
+        }
+        _ => panic!("invalid aggregation function"),
+    }
+}
+
 impl SqlIncorporator {
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
     fn fields_for(&self, na: NodeAddress) -> &[String] {
@@ -340,26 +359,10 @@ impl SqlIncorporator {
                               computed_col: &Column,
                               mig: &mut Migration)
                               -> NodeAddress {
-        use nom_sql::FunctionExpression::*;
-        use nom_sql::FieldExpression::*;
-
-        let fn_col = match *computed_col.function.as_ref().unwrap() {
-            Avg(Seq(ref cols)) |
-            Count(Seq(ref cols)) |
-            GroupConcat(Seq(ref cols)) |
-            Max(Seq(ref cols)) |
-            Min(Seq(ref cols)) |
-            Sum(Seq(ref cols)) => {
-                // TODO(malte): we only support a single column argument at this point
-                assert_eq!(cols.len(), 1);
-                cols.last().unwrap()
-            }
-            Count(All) => {
-                // see comment re COUNT(*) rewriting in make_aggregation_node
-                panic!("COUNT(*) should have been rewritten earlier!")
-            }
-            _ => panic!("invalid aggregation function"),
-        };
+        let target_cols = target_columns_from_computed_column(computed_col);
+        // TODO(malte): we only support a single column argument at this point
+        assert_eq!(target_cols.len(), 1);
+        let fn_col = target_cols.last().unwrap();
 
         self.make_project_node(name,
                                fn_col.table.as_ref().unwrap(),
