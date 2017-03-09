@@ -138,8 +138,9 @@ fn classify_conditionals(ce: &ConditionExpression,
             if let ConditionExpression::Base(ref l) = *ct.left.as_ref().unwrap().as_ref() {
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref().unwrap().as_ref() {
                     match *r {
+                        // right-hand side is field, so this must be a comma join
                         ConditionBase::Field(ref fr) => {
-                            // column/column comparison
+                            // column/column comparison --> comma join
                             if let ConditionBase::Field(ref fl) = *l {
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
@@ -159,14 +160,18 @@ fn classify_conditionals(ce: &ConditionExpression,
                                 panic!("left hand side of comparison must be field");
                             }
                         }
+                        // right-hand side is a literal, so this is a predicate
                         ConditionBase::Literal(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
-                                // TODO(malte): this fails hard if lf.table is None
+                                // we assume that implied table names have previously been expanded
+                                // and thus all columns carry table names
+                                assert!(lf.table.is_some());
                                 let mut e = local.entry(lf.table.clone().unwrap())
                                     .or_insert(Vec::new());
                                 e.push(ct.clone());
                             }
                         }
+                        // right-hand side is a placeholder, so this must be a query parameter
                         ConditionBase::Placeholder => {
                             // can't do anything about placeholders, so ignore them
                             ()
