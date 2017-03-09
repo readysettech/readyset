@@ -18,7 +18,8 @@ use slog::Logger;
 use ops;
 use checktable;
 
-const BATCH_SIZE: usize = 128;
+const BATCH_SIZE: usize = 256;
+const REPLAY_RATIO: usize = 32;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -819,7 +820,7 @@ impl Domain {
             // log that we did another pass
             replaying_to.2 += 1;
 
-            let mut first = true;
+            let mut handled = 0;
             while let Some(m) = replaying_to.1.pop_front() {
                 // some updates were propagated to this node during the migration. we need to
                 // replay them before we take even newer updates. however, we don't want to
@@ -843,11 +844,11 @@ impl Domain {
                     unreachable!();
                 }
 
-                if !first {
-                    // handle two buffered for every one "real" update
+                handled += 1;
+                if handled == REPLAY_RATIO {
+                    // handle REPLAY_RATIO buffered for every one "real" update
                     break;
                 }
-                first = false;
             }
 
             replaying_to.1.is_empty()
