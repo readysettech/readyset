@@ -322,7 +322,7 @@ impl SqlIncorporator {
             Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
             Count(All) => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
-                // requires one to be specified, so we earlier rewrote it to use the first parent
+                // requires one to be specified, so we earlier rewrote it to use the last parent
                 // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
                 // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
                 // rows including those with NULL values, and we don't have a mechanism to do that
