@@ -118,6 +118,8 @@ pub struct CheckTable {
 
     // For each domain, stores the set of base nodes that it receives updates from.
     domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
+
+    last_migration: Option<i64>,
 }
 
 impl CheckTable {
@@ -127,6 +129,7 @@ impl CheckTable {
             toplevel: HashMap::new(),
             granular: HashMap::new(),
             domain_dependencies: HashMap::new(),
+            last_migration: None,
         }
     }
 
@@ -163,6 +166,22 @@ impl CheckTable {
         })
     }
 
+    fn compute_previous_timestamps(&self, base: Option<NodeIndex>) -> HashMap<domain::Index, i64> {
+        self.domain_dependencies
+            .iter()
+            .map(|(d, v)| {
+                let earliest: i64 = v.iter()
+                    .filter(|b| Some(**b) != base)
+                    .filter_map(|b| self.toplevel.get(b))
+                    .chain(self.last_migration.iter())
+                    .max()
+                    .cloned()
+                    .unwrap_or(0);
+                (*d, earliest)
+            })
+            .collect()
+    }
+
     pub fn claim_timestamp(&mut self,
                            token: &Token,
                            base: NodeIndex,
@@ -174,22 +193,10 @@ impl CheckTable {
             self.next_timestamp += 1;
 
             // Compute the previous timestamp that each domain will see before getting this one
-            let prev_times = self.domain_dependencies
-                .iter()
-                .map(|(d, v)| {
-                    let earliest: i64 = v.iter()
-                        .filter(|b| **b != base)
-                        .filter_map(|b| self.toplevel.get(b))
-                        .min()
-                        .cloned()
-                        .unwrap_or(ts - 1);
-                    (*d, earliest)
-                })
-                .collect();
-
-            self.toplevel.insert(base, ts);
+            let prev_times = self.compute_previous_timestamps(Some(base));
 
             // Update checktables
+            self.toplevel.insert(base, ts);
             let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
@@ -218,11 +225,15 @@ impl CheckTable {
     /// timestamps for the migration to happen between.
     pub fn perform_migration(&mut self,
                              new_domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>)
-                             -> (i64, i64) {
+                             -> (i64, i64, HashMap<domain::Index, i64>) {
         let ts = self.next_timestamp;
+        let prevs = self.compute_previous_timestamps(None);
+
         self.domain_dependencies = new_domain_dependencies;
         self.next_timestamp += 2;
-        (ts, ts + 1)
+        self.last_migration = Some(ts + 1);
+
+        (ts, ts + 1, prevs)
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {

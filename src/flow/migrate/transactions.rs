@@ -195,7 +195,12 @@ pub fn analyze_graph(graph: &Graph,
         .collect();
 
     let domain_dependencies = ingresses_from_base.iter()
-        .map(|(domain, ingress_from_base)| (*domain, ingress_from_base.keys().cloned().collect()))
+        .map(|(domain, ingress_from_base)| {
+            (*domain,
+             ingress_from_base.iter()
+                .filter_map(|(k, n)| { if *n > 0 { Some(*k) } else { None } })
+                .collect())
+        })
         .collect();
 
     (ingresses_from_base, domain_dependencies)

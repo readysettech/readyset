@@ -964,7 +964,8 @@ impl<'a> Migration<'a> {
             &mainline.ingredients,
             mainline.source,
             domain_nodes);
-        let (start_ts, end_ts) = mainline.checktable.lock().unwrap().perform_migration(domain_dependencies);
+        let (start_ts, end_ts, prevs) =
+            mainline.checktable.lock().unwrap().perform_migration(domain_dependencies);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -978,6 +979,7 @@ impl<'a> Migration<'a> {
 
             // Start up new domain
             migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                       domain.index().into(),
                                        &mut mainline.ingredients,
                                        uninformed_domain_nodes.remove(&domain).unwrap(),
                                        mainline.checktable.clone(),
@@ -993,10 +995,8 @@ impl<'a> Migration<'a> {
                                       mainline.source,
                                       &mut mainline.txs,
                                       uninformed_domain_nodes,
-                                      start_ts);
-
-        // TODO: we definitely need to update count_base_ingress somewhere
-        //       but to what? and how? jonathan?!
+                                      start_ts,
+                                      prevs);
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!

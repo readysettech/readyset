@@ -61,7 +61,7 @@ impl NodeDescriptor {
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     state.add(m.data().iter().cloned());
-                    if let Packet::Transaction { state: TransactionState::Committed(ts, _), .. } =
+                    if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } =
                         m {
                         state.update_ts(ts);
                     }
@@ -148,12 +148,12 @@ impl NodeDescriptor {
                 m
             }
             flow::node::Type::TimestampEgress(ref txs) => {
-                if let Packet::Transaction { state: TransactionState::Committed(ts, _), .. } = m {
-                    let txs = txs.lock().unwrap();
-                    for tx in txs.iter() {
-                        tx.send(Packet::Timestamp(ts)).unwrap();
-                    }
-                }
+                // if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } = m {
+                //     let txs = txs.lock().unwrap();
+                //     for tx in txs.iter() {
+                //         tx.send(Packet::Timestamp(ts)).unwrap();
+                //     }
+                // }
                 Packet::None
             }
             flow::node::Type::TimestampIngress(..) |
