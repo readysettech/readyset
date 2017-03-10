@@ -361,7 +361,7 @@ impl Node {
                 };
                 let size = match r.len() {
                     Err(_) => String::from("empty"),
-                    Ok(s) => format!("{} records", s),
+                    Ok(s) => format!("{} distinct keys", s),
                 };
                 write!(f,
                        "{{ {} | (reader / key: {}) | {} }}",
