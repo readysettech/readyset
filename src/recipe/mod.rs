@@ -55,9 +55,19 @@ impl Recipe {
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
     pub fn node_addr_for(&self, name: &str) -> Result<NodeAddress, String> {
-        // TODO(malte): better error handling
         match self.inc {
-            Some(ref inc) => Ok(inc.address_for(name)),
+            Some(ref inc) => {
+                // `name` might be an alias for another identical query, so resolve via QID here
+                // TODO(malte): better error handling
+                let na = match self.aliases.get(name) {
+                    None => inc.address_for(name),
+                    Some(ref qid) => {
+                        let (ref internal_qn, _) = self.expressions[qid];
+                        inc.address_for(internal_qn.as_ref().unwrap())
+                    }
+                };
+                Ok(na)
+            }
             None => Err(String::from("Recipe not applied")),
         }
     }
