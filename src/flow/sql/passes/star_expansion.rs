@@ -12,13 +12,21 @@ impl StarExpansion for SqlQuery {
             SqlQuery::Select(mut sq) => {
                 sq.fields = match sq.fields {
                     FieldExpression::All => {
-                        // XXX(malte): not currently compatible with selections from > 1 table.
-                        // This will be fixed once we support "* FROM table" syntax.
-                        let table = &sq.tables[0];
-                        let new_fs = write_schemas.get(&table.name).unwrap().clone();
-                        FieldExpression::Seq(new_fs.iter()
-                            .map(|f| Column::from(format!("{}.{}", table.name, f).as_ref()))
-                            .collect())
+                        // TODO(malte): not currently compatible with a "table.*" syntax, but only
+                        // with "* FROM table" or "* FROM table1, table2".
+                        let new_fs = sq.tables
+                            .iter()
+                            .fold(Vec::new(), |mut acc, ref t| {
+                                let fs = write_schemas.get(&t.name)
+                                    .unwrap()
+                                    .clone()
+                                    .iter()
+                                    .map(|f| Column::from(format!("{}.{}", t.name, f).as_ref()))
+                                    .collect::<Vec<_>>();
+                                acc.extend(fs);
+                                acc
+                            });
+                        FieldExpression::Seq(new_fs)
                     }
                     x => x,
                 };
@@ -66,4 +74,34 @@ mod tests {
             _ => panic!(),
         }
     }
+
+    #[test]
+    fn it_expands_stars_from_multiple_tables() {
+        // SELECT * FROM PaperTag, Users [...]
+        // -->
+        // SELECT paper_id, tag_id, uid, name FROM PaperTag, Users [...]
+        let q = SelectStatement {
+            tables: vec![Table::from("PaperTag"), Table::from("Users")],
+            fields: FieldExpression::All,
+            ..Default::default()
+        };
+        let mut schema = HashMap::new();
+        schema.insert("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]);
+        schema.insert("Users".into(), vec!["uid".into(), "name".into()]);
+
+        let res = SqlQuery::Select(q).expand_stars(&schema);
+        // * selector has been expanded to field list
+        match res {
+            SqlQuery::Select(tq) => {
+                assert_eq!(tq.fields,
+                           FieldExpression::Seq(vec![Column::from("PaperTag.paper_id"),
+                                                     Column::from("PaperTag.tag_id"),
+                                                     Column::from("Users.uid"),
+                                                     Column::from("Users.name")]));
+            }
+            // if we get anything other than a selection query back, something really weird is up
+            _ => panic!(),
+        }
+    }
+
 }
