@@ -6,6 +6,7 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operato
 use nom_sql::SelectStatement;
 use ops;
 use ops::base::Base;
+use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
 use flow::data::DataType;
@@ -532,17 +533,50 @@ impl SqlIncorporator {
                format!("Making nodes for query named \"{}\"", name));
 
         // Do we already have this exact query or a subset of it?
-        for &(ref existing_qg, ref leaf) in self.query_graphs.iter() {
-            if existing_qg.signature() == qg.signature() {
-                // we already have this exact query, so we don't need to add anything
+        // TODO(malte): make this an O(1) lookup by QG signature
+        for &(ref existing_qg, leaf) in self.query_graphs.iter() {
+            // note that this also checks the *order* in which parameters are specified; a
+            // different order means that we cannot simply reuse the existing reader.
+            if existing_qg.signature() == qg.signature() &&
+               existing_qg.parameters() == qg.parameters() {
+                // we already have this exact query, down to the exact same reader key columns
+                // in exactly the same order
                 info!(mig.log,
-                      "skipping query \"{}\" as an exact equivalent already exists",
+                      "An exact match for query \"{}\" already exists, reusing it",
                       name);
-                return (vec![], *leaf);
+                return (vec![], leaf);
+            } else if existing_qg.signature() == qg.signature() {
+                // QGs are identical, except for parameters (or their order)
+
+                // we must add a new reader for this query. This also requires adding an
+                // identity node (at least currently), since a node can only have a single
+                // associated reader.
+                // TODO(malte): consider the case when the projected columns need reordering
+                let id_fields = Vec::from(self.fields_for(leaf));
+                let id_na = mig.add_ingredient(String::from(name),
+                                               id_fields.as_slice(),
+                                               Identity::new(leaf));
+                self.node_addresses.insert(String::from(name), id_na);
+                self.node_fields.insert(id_na, id_fields);
+                // TODO(malte): this does not yet cover the case when there are multiple query
+                // parameters, which compound key support on Reader nodes.
+                let query_params = qg.parameters();
+                if !query_params.is_empty() {
+                    //assert_eq!(query_params.len(), 1);
+                    let key_column = query_params.iter().next().unwrap();
+                    mig.maintain(id_na,
+                                 self.field_to_columnid(id_na, &key_column.name).unwrap());
+                } else {
+                    // no query parameters, so we index on the first (and often only) column
+                    mig.maintain(id_na, 0);
+                }
+                return (vec![id_na], id_na);
             }
+            // queries are different, but one might be a generalization of the other
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
                 info!(mig.log,
-                      "candidate query graph for reuse: {:?}",
+                      "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
+                      qg,
                       existing_qg);
             }
         }
@@ -1056,6 +1090,46 @@ mod tests {
         assert_eq!(qfp.query_leaf, leaf);
     }
 
+    #[test]
+    fn it_reuses_with_different_parameter() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish a base write type
+        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+                       None,
+                       &mut mig)
+            .is_ok());
+        // Should have source and "users" base table node
+        assert_eq!(mig.graph().node_count(), 2);
+        assert_eq!(get_node(&inc, &mig, "users").name(), "users");
+        assert_eq!(get_node(&inc, &mig, "users").fields(), &["id", "name"]);
+        assert_eq!(get_node(&inc, &mig, "users").description(), "B");
+
+        // Add a new query
+        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+
+        // Add the same query again, but with a parameter on a different column
+        let ncount = mig.graph().node_count();
+        let res = inc.add_query("SELECT id, name FROM users WHERE users.name = ?;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        // should have added two more nodes: one identity node and one reader node
+        let qfp = res.unwrap();
+        assert_eq!(mig.graph().node_count(), ncount + 2);
+        // only the identity node is returned in the vector of new nodes
+        assert_eq!(qfp.new_nodes.len(), 1);
+        assert_eq!(get_node(&inc, &mig, &qfp.name).description(), "≡");
+        // we should be based off the identity as our leaf
+        let id_node = qfp.new_nodes.iter().next().unwrap();
+        assert_eq!(qfp.query_leaf, *id_node);
+    }
 
     #[test]
     fn it_incorporates_aggregation_no_group_by() {
