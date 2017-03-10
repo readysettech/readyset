@@ -327,10 +327,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 None => panic!("each parameter's column must have an associated table!"),
                 Some(ref table) => {
                     let rel = qg.relations.get_mut(table).unwrap();
+                    if !rel.columns.contains(&column) {
+                        rel.columns.push(column.clone());
+                    }
                     // the parameter column is included in the projected columns of the output, but
                     // we also separately register it as a parameter so that we can set keys
                     // correctly on the leaf view
-                    rel.columns.push(column.clone());
                     rel.parameters.push(column.clone());
                 }
             }
