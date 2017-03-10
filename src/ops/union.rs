@@ -12,10 +12,6 @@ pub struct Union {
     cols: HashMap<NodeAddress, usize>,
 }
 
-// gather isn't normally Sync, but we know that we're only
-// accessing it from one place at any given time, so it's fine..
-unsafe impl Sync for Union {}
-
 impl Union {
     /// Construct a new union operator.
     ///
