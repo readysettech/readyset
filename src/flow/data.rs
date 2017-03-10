@@ -11,7 +11,7 @@ use arccstr::ArcCStr;
 #[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone)]
 #[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
 pub enum DataType {
-    /// A placeholder value -- is considered equal to every other `DataType` value.
+    /// An empty value.
     None,
     /// A 32-bit numeric value.
     Int(i32),
@@ -23,20 +23,6 @@ pub enum DataType {
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
     TinyText([u8; 8]),
-}
-
-impl DataType {
-    /// Detect if this `DataType` is none.
-    ///
-    /// Since we re-implement `PartialEq` for `DataType` to always return `true` for `None`, it can
-    /// actually be somewhat hard to do this right for users.
-    pub fn is_none(&self) -> bool {
-        if let DataType::None = *self {
-            true
-        } else {
-            false
-        }
-    }
 }
 
 #[cfg(feature="web")]
@@ -56,13 +42,6 @@ impl ToJson for DataType {
 
 impl PartialEq for DataType {
     fn eq(&self, other: &DataType) -> bool {
-        if let DataType::None = *self {
-            return true;
-        }
-        if let DataType::None = *other {
-            return true;
-        }
-
         match (self, other) {
             (&DataType::Text(ref a), &DataType::Text(ref b)) => a == b,
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
@@ -73,6 +52,7 @@ impl PartialEq for DataType {
             (&DataType::Real((ref ai, ref af)), &DataType::Real((ref bi, ref bf))) => {
                 ai == bi && af == bf
             }
+            (&DataType::None, &DataType::None) => true,
             _ => false,
         }
     }
