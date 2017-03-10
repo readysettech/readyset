@@ -82,6 +82,10 @@ impl ReadHandle {
     pub fn key(&self) -> usize {
         self.key
     }
+
+    pub fn len(&self) -> usize {
+        self.handle.len()
+    }
 }
 
 #[cfg(test)]

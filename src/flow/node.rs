@@ -70,6 +70,13 @@ impl Reader {
             Some(ref s) => Ok(s.key()),
         }
     }
+
+    pub fn len(&self) -> Result<usize, String> {
+        match self.state {
+            None => Err(String::from("no state on reader")),
+            Some(ref s) => Ok(s.len()),
+        }
+    }
 }
 
 impl Default for Reader {
@@ -362,7 +369,15 @@ impl Node {
                     Err(_) => String::from("none"),
                     Ok(k) => format!("{}", k),
                 };
-                write!(f, "{{ {} | (reader / key: {}) }}", idx.index(), key)
+                let size = match r.len() {
+                    Err(_) => String::from("empty"),
+                    Ok(s) => format!("{} records", s),
+                };
+                write!(f,
+                       "{{ {} | (reader / key: {}) | {} }}",
+                       idx.index(),
+                       key,
+                       size)
             }
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
