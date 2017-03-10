@@ -24,12 +24,13 @@ fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> Domain
 }
 
 pub fn boot_new(log: Logger,
+                index: domain::Index,
                 graph: &mut Graph,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 rx: mpsc::Receiver<Packet>,
                 ts: i64) {
     let nodes = build_descriptors(graph, nodes);
-    let domain = domain::Domain::new(log, nodes, checktable, ts);
+    let domain = domain::Domain::new(log, index, nodes, checktable, ts);
     domain.boot(rx)
 }

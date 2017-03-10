@@ -276,7 +276,7 @@ impl Mutator {
         self.tx.clone().send(m).unwrap();
     }
 
-    fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> checktable::TransactionResult {
+    fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
         let (send, recv) = mpsc::channel();
         let m = payload::Packet::Transaction {
             link: payload::Link::new(self.src, self.addr),
@@ -295,7 +295,7 @@ impl Mutator {
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> checktable::TransactionResult
+    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> Result<i64, ()>
         where V: Into<Vec<prelude::DataType>>
     {
         self.tx_send(vec![u.into()].into(), t)
@@ -312,7 +312,7 @@ impl Mutator {
     pub fn transactional_delete<I>(&self,
                                    key: I,
                                    t: checktable::Token)
-                                   -> checktable::TransactionResult
+                                   -> Result<i64, ()>
         where I: Into<Vec<prelude::DataType>>
     {
         self.tx_send(vec![prelude::Record::DeleteRequest(key.into())].into(), t)
@@ -341,7 +341,7 @@ impl Mutator {
     pub fn transactional_update<V>(&self,
                                    u: V,
                                    t: checktable::Token)
-                                   -> checktable::TransactionResult
+                                   -> Result<i64, ()>
         where V: Into<Vec<prelude::DataType>>
     {
         assert!(!self.primary_key.is_empty(),
@@ -880,11 +880,6 @@ impl<'a> Migration<'a> {
             }
         }
 
-        // Add transactional time nodes
-        migrate::transactions::add_time_nodes(&mut domain_nodes,
-                                              &mut mainline.ingredients,
-                                              &mainline.txs);
-
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes
@@ -964,7 +959,11 @@ impl<'a> Migration<'a> {
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let (start_ts, end_ts) = mainline.checktable.lock().unwrap().claim_timestamp_pair();
+        let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
+                                                                       mainline.source,
+                                                                       domain_nodes);
+        let (start_ts, end_ts, prevs) =
+            mainline.checktable.lock().unwrap().perform_migration(&ingresses_from_base);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -978,6 +977,7 @@ impl<'a> Migration<'a> {
 
             // Start up new domain
             migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                       domain.index().into(),
                                        &mut mainline.ingredients,
                                        uninformed_domain_nodes.remove(&domain).unwrap(),
                                        mainline.checktable.clone(),
@@ -993,10 +993,8 @@ impl<'a> Migration<'a> {
                                       mainline.source,
                                       &mut mainline.txs,
                                       uninformed_domain_nodes,
-                                      start_ts);
-
-        // TODO: we definitely need to update count_base_ingress somewhere
-        //       but to what? and how? jonathan?!
+                                      start_ts,
+                                      prevs);
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
@@ -1013,12 +1011,7 @@ impl<'a> Migration<'a> {
                                              &mut mainline.txs);
 
         info!(log, "finalizing migration");
-        migrate::transactions::finalize(&log,
-                                        &mainline.ingredients,
-                                        mainline.source,
-                                        domain_nodes,
-                                        &mut mainline.txs,
-                                        end_ts);
+        migrate::transactions::finalize(ingresses_from_base, &log, &mut mainline.txs, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }

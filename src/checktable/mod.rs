@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
+use flow::domain;
 use flow::prelude::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -88,7 +89,7 @@ impl TokenGenerator {
 /// Represents the result of a transaction
 pub enum TransactionResult {
     /// The transaction committed at a given timestamp
-    Committed(i64),
+    Committed(i64, HashMap<domain::Index, i64>),
     /// The transaction aborted
     Aborted,
 }
@@ -96,7 +97,7 @@ pub enum TransactionResult {
 impl TransactionResult {
     /// Checks if a transaction committed.
     pub fn ok(&self) -> bool {
-        if let TransactionResult::Committed(_) = *self {
+        if let TransactionResult::Committed(..) = *self {
             true
         } else {
             false
@@ -114,6 +115,11 @@ pub struct CheckTable {
     // from value to the last time that a row of that value was written. Second element is the time
     // the column started being tracked.
     granular: HashMap<NodeIndex, HashMap<usize, (HashMap<DataType, i64>, i64)>>,
+
+    // For each domain, stores the set of base nodes that it receives updates from.
+    domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
+
+    last_migration: Option<i64>,
 }
 
 impl CheckTable {
@@ -122,6 +128,8 @@ impl CheckTable {
             next_timestamp: 0,
             toplevel: HashMap::new(),
             granular: HashMap::new(),
+            domain_dependencies: HashMap::new(),
+            last_migration: None,
         }
     }
 
@@ -158,16 +166,37 @@ impl CheckTable {
         })
     }
 
+    fn compute_previous_timestamps(&self, base: Option<NodeIndex>) -> HashMap<domain::Index, i64> {
+        self.domain_dependencies
+            .iter()
+            .map(|(d, v)| {
+                let earliest: i64 = v.iter()
+                    .filter(|b| Some(**b) != base)
+                    .filter_map(|b| self.toplevel.get(b))
+                    .chain(self.last_migration.iter())
+                    .max()
+                    .cloned()
+                    .unwrap_or(0);
+                (*d, earliest)
+            })
+            .collect()
+    }
+
     pub fn claim_timestamp(&mut self,
                            token: &Token,
                            base: NodeIndex,
                            rs: &Records)
                            -> TransactionResult {
         if self.validate_token(token) {
+            // Take timestamp
             let ts = self.next_timestamp;
             self.next_timestamp += 1;
-            self.toplevel.insert(base, ts);
 
+            // Compute the previous timestamp that each domain will see before getting this one
+            let prev_times = self.compute_previous_timestamps(Some(base));
+
+            // Update checktables
+            self.toplevel.insert(base, ts);
             let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
@@ -185,18 +214,35 @@ impl CheckTable {
                 }
             }
 
-            TransactionResult::Committed(ts)
+
+            TransactionResult::Committed(ts, prev_times)
         } else {
             TransactionResult::Aborted
         }
     }
 
-    /// Claim a pair of successive timestamps. Used by migration code to ensure
-    /// that no transactions happen while a migration is in progress.
-    pub fn claim_timestamp_pair(&mut self) -> (i64, i64) {
+    /// Transition to using `new_domain_dependencies`, and reserve a pair of
+    /// timestamps for the migration to happen between.
+    pub fn perform_migration(&mut self,
+                             ingresses_from_base: &HashMap<domain::Index,
+                                                           HashMap<NodeIndex, usize>>)
+                             -> (i64, i64, HashMap<domain::Index, i64>) {
         let ts = self.next_timestamp;
+        let prevs = self.compute_previous_timestamps(None);
+
         self.next_timestamp += 2;
-        (ts, ts + 1)
+        self.last_migration = Some(ts + 1);
+        self.domain_dependencies = ingresses_from_base.iter()
+            .map(|(domain, ingress_from_base)| {
+                (*domain,
+                 ingress_from_base.iter()
+                    .filter(|&(_, n)| *n > 0)
+                    .map(|(k, _)| *k)
+                    .collect())
+            })
+            .collect();
+
+        (ts, ts + 1, prevs)
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {

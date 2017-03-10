@@ -37,12 +37,11 @@ pub enum ReplayData {
 
 #[derive(Clone)]
 pub enum TransactionState {
-    Committed(i64, petgraph::graph::NodeIndex),
-    Pending(checktable::Token, mpsc::Sender<checktable::TransactionResult>),
+    Committed(i64, petgraph::graph::NodeIndex, HashMap<domain::Index, i64>),
+    Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
 }
 
 pub enum Packet {
-    //
     // Data messages
     //
     /// Regular data-flow update.
@@ -63,7 +62,6 @@ pub enum Packet {
         data: ReplayData,
     },
 
-    //
     // Control messages
     //
     /// Add a new node to this domain below the given parents.
@@ -106,14 +104,18 @@ pub enum Packet {
     /// Notification from Blender for domain to terminate
     Quit,
 
-    //
     // Transaction time messages
     //
-    /// Instruct domain to flush pending transactions and notify upon completion.
+    /// Instruct domain to flush pending transactions and notify upon completion. `prev_ts` is the
+    /// timestamp of the last transaction sent to the domain prior to at.
     ///
     /// This allows a migration to ensure all transactions happen strictly *before* or *after* a
     /// migration in timestamp order.
-    StartMigration { at: i64, ack: mpsc::SyncSender<()> },
+    StartMigration {
+        at: i64,
+        prev_ts: i64,
+        ack: mpsc::SyncSender<()>,
+    },
 
     /// Notify a domain about a completion timestamp for an ongoing migration.
     ///
@@ -251,7 +253,7 @@ impl fmt::Debug for Packet {
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
             Packet::Transaction { ref link, ref state, .. } => {
                 match *state {
-                    TransactionState::Committed(ts, _) => {
+                    TransactionState::Committed(ts, ..) => {
                         write!(f, "Packet::Transaction({:?}, {})", link, ts)
                     }
                     TransactionState::Pending(..) => {

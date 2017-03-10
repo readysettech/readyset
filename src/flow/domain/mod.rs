@@ -63,6 +63,8 @@ enum BufferedTransaction {
 type InjectCh = mpsc::SyncSender<Packet>;
 
 pub struct Domain {
+    index: Index,
+
     nodes: DomainNodes,
     state: StateMap,
 
@@ -92,23 +94,18 @@ pub struct Domain {
 
 impl Domain {
     pub fn new(log: Logger,
+               index: Index,
                nodes: DomainNodes,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
         // initially, all nodes are not ready (except for timestamp egress nodes)!
         let not_ready = nodes.iter()
-            .filter_map(|n| {
-                use flow::node::Type;
-                if let Type::TimestampEgress(..) = *n.borrow().inner {
-                    return None;
-                }
-
-                Some(*n.borrow().addr().as_local())
-            })
+            .map(|n| *n.borrow().addr().as_local())
             .collect();
 
         Domain {
+            index: index,
             nodes: nodes,
             state: StateMap::default(),
             log: log,
@@ -315,8 +312,26 @@ impl Domain {
         }
     }
 
+    // Skip the range of timestamps from start (inclusive) to end (non-inclusive).
+    fn skip_timestamp_range(&mut self, start: i64, end: i64) {
+        use std::cmp::max;
+        for t in max(start, self.ts+1)..end {
+            let o = BufferedTransaction::RemoteTransaction;
+            self.buffered_transactions.insert(t, o);
+        }
+    }
+
     fn buffer_transaction(&mut self, m: Packet) {
-        if let Packet::Transaction { state: TransactionState::Committed(ts, base), .. } = m {
+        // Skip timestamps if possible. Unfortunately, this can't be combined with the if statement
+        // below because that one inserts m into messages, while this one needs to borrow prevs from
+        // within it.
+        if let Packet::Transaction { state: TransactionState::Committed(ts, _, ref prevs), .. } = m {
+            if let Some(prev) = prevs.get(&self.index) {
+                self.skip_timestamp_range(*prev+1, ts);
+            }
+        }
+
+        if let Packet::Transaction { state: TransactionState::Committed(ts, base, _), .. } = m {
             // Insert message into buffer.
             match *self.buffered_transactions
                 .entry(ts)
@@ -325,9 +340,7 @@ impl Domain {
                 _ => unreachable!(),
             }
 
-            if ts == self.ts + 1 {
-                self.apply_transactions();
-            }
+            self.apply_transactions();
         } else {
             unreachable!();
         }
@@ -337,7 +350,8 @@ impl Domain {
         match *packet {
             Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
             Packet::Transaction { ref mut state, ref link, ref data } => {
-                let pending = ::std::mem::replace(state, TransactionState::Committed(0, 0.into()));
+                let empty = TransactionState::Committed(0, 0.into(), HashMap::new());
+                let pending = ::std::mem::replace(state, empty);
                 if let TransactionState::Pending(token, send) = pending {
                     let ingress = self.nodes[link.dst.as_local()].borrow();
                     // TODO: is this the correct node?
@@ -347,13 +361,14 @@ impl Domain {
                         .unwrap()
                         .claim_timestamp(&token, base_node, data);
                     match result {
-                        checktable::TransactionResult::Committed(i) => {
-                            ::std::mem::replace(state, TransactionState::Committed(i, base_node));
-                            let _ = send.send(result);
+                        checktable::TransactionResult::Committed(ts, prevs) => {
+                            ::std::mem::replace(state,
+                                                TransactionState::Committed(ts, base_node, prevs));
+                            let _ = send.send(Ok(ts));
                             true
                         }
                         checktable::TransactionResult::Aborted => {
-                            let _ = send.send(result);
+                            let _ = send.send(Err(()));
                             false
                         }
                     }
@@ -490,14 +505,13 @@ impl Domain {
 
                 drop(ack);
             }
-            Packet::StartMigration { at, ack } => {
+            Packet::StartMigration { at, prev_ts, ack } => {
+                self.skip_timestamp_range(prev_ts, at);
                 let o = self.buffered_transactions
                     .insert(at, BufferedTransaction::MigrationStart(ack));
                 assert!(o.is_none());
 
-                if at == self.ts + 1 {
-                    self.apply_transactions();
-                }
+                self.apply_transactions();
             }
             Packet::CompleteMigration { at, ingress_from_base } => {
                 let o = self.buffered_transactions

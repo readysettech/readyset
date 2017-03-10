@@ -22,7 +22,8 @@ pub fn inform(log: &Logger,
               source: NodeIndex,
               txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
-              ts: i64) {
+              ts: i64,
+              prevs: HashMap<domain::Index, i64>) {
 
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
@@ -33,6 +34,7 @@ pub fn inform(log: &Logger,
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(Packet::StartMigration {
             at: ts,
+            prev_ts: prevs[&domain],
             ack: ready_tx,
         });
         let _ = ready_rx.recv();
