@@ -97,6 +97,14 @@ name = "vote"
 path = "benchmarks/vote/vote.rs"
 
 [[bin]]
+name = "vote-server"
+path = "benchmarks/vote/vote-server.rs"
+
+[[bin]]
+name = "vote-client"
+path = "benchmarks/vote/vote-client.rs"
+
+[[bin]]
 name = "multitail"
 path = "benchmarks/multitail/multitail.rs"
 
