@@ -38,11 +38,10 @@ pub enum ReplayData {
 #[derive(Clone)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex),
-    Pending(checktable::Token, mpsc::Sender<checktable::TransactionResult>),
+    Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
 }
 
 pub enum Packet {
-    //
     // Data messages
     //
     /// Regular data-flow update.
@@ -63,7 +62,6 @@ pub enum Packet {
         data: ReplayData,
     },
 
-    //
     // Control messages
     //
     /// Add a new node to this domain below the given parents.
@@ -106,7 +104,6 @@ pub enum Packet {
     /// Notification from Blender for domain to terminate
     Quit,
 
-    //
     // Transaction time messages
     //
     /// Instruct domain to flush pending transactions and notify upon completion.

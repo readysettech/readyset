@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
+use flow::domain;
 use flow::prelude::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -88,7 +89,7 @@ impl TokenGenerator {
 /// Represents the result of a transaction
 pub enum TransactionResult {
     /// The transaction committed at a given timestamp
-    Committed(i64),
+    Committed(i64, HashMap<domain::Index, i64>),
     /// The transaction aborted
     Aborted,
 }
@@ -96,7 +97,7 @@ pub enum TransactionResult {
 impl TransactionResult {
     /// Checks if a transaction committed.
     pub fn ok(&self) -> bool {
-        if let TransactionResult::Committed(_) = *self {
+        if let TransactionResult::Committed(..) = *self {
             true
         } else {
             false
@@ -114,6 +115,9 @@ pub struct CheckTable {
     // from value to the last time that a row of that value was written. Second element is the time
     // the column started being tracked.
     granular: HashMap<NodeIndex, HashMap<usize, (HashMap<DataType, i64>, i64)>>,
+
+    // For each domain, stores the set of base nodes that it receives updates from.
+    domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
 }
 
 impl CheckTable {
@@ -122,6 +126,7 @@ impl CheckTable {
             next_timestamp: 0,
             toplevel: HashMap::new(),
             granular: HashMap::new(),
+            domain_dependencies: HashMap::new(),
         }
     }
 
@@ -164,10 +169,27 @@ impl CheckTable {
                            rs: &Records)
                            -> TransactionResult {
         if self.validate_token(token) {
+            // Take timestamp
             let ts = self.next_timestamp;
             self.next_timestamp += 1;
+
+            // Compute the previous timestamp that each domain will see before getting this one
+            let prev_times = self.domain_dependencies
+                .iter()
+                .map(|(d, v)| {
+                    let earliest: i64 = v.iter()
+                        .filter(|b| **b != base)
+                        .filter_map(|b| self.toplevel.get(b))
+                        .min()
+                        .cloned()
+                        .unwrap_or(ts - 1);
+                    (*d, earliest)
+                })
+                .collect();
+
             self.toplevel.insert(base, ts);
 
+            // Update checktables
             let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
                 for (i, value) in record.iter().enumerate() {
@@ -185,16 +207,20 @@ impl CheckTable {
                 }
             }
 
-            TransactionResult::Committed(ts)
+
+            TransactionResult::Committed(ts, prev_times)
         } else {
             TransactionResult::Aborted
         }
     }
 
-    /// Claim a pair of successive timestamps. Used by migration code to ensure
-    /// that no transactions happen while a migration is in progress.
-    pub fn claim_timestamp_pair(&mut self) -> (i64, i64) {
+    /// Transition to using `new_domain_dependencies`, and reserve a pair of
+    /// timestamps for the migration to happen between.
+    pub fn perform_migration(&mut self,
+                             new_domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>)
+                             -> (i64, i64) {
         let ts = self.next_timestamp;
+        self.domain_dependencies = new_domain_dependencies;
         self.next_timestamp += 2;
         (ts, ts + 1)
     }

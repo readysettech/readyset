@@ -175,31 +175,43 @@ fn count_base_ingress(graph: &Graph,
                 .expect("source ingress must have a base child")
         })
         .map(|base| {
-            let num_paths =
-                ingress_nodes.iter()
-                    .filter(|&&ingress| {
-                        petgraph::algo::has_path_connecting(graph, base, ingress, None)
-                    })
-                    .count();
+            let num_paths = ingress_nodes.iter()
+                .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
+                .count();
             (base, num_paths)
         })
         .collect()
 }
 
-pub fn finalize(log: &Logger,
-                graph: &Graph,
-                source: NodeIndex,
-                domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+pub fn analyze_graph(graph: &Graph,
+                     source: NodeIndex,
+                     domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>)
+                     -> (HashMap<domain::Index, HashMap<petgraph::graph::NodeIndex, usize>>,
+                         HashMap<domain::Index, Vec<petgraph::graph::NodeIndex>>) {
+    let ingresses_from_base: HashMap<_, _> = domain_nodes.into_iter()
+        .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
+            (domain, count_base_ingress(graph, source, &nodes[..]))
+        })
+        .collect();
+
+    let domain_dependencies = ingresses_from_base.iter()
+        .map(|(domain, ingress_from_base)| (*domain, ingress_from_base.keys().cloned().collect()))
+        .collect();
+
+    (ingresses_from_base, domain_dependencies)
+}
+
+pub fn finalize(ingresses_from_base: HashMap<domain::Index,
+                                             HashMap<petgraph::graph::NodeIndex, usize>>,
+                log: &Logger,
                 txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                 at: i64) {
-    for (domain, nodes) in domain_nodes {
+    for (domain, ingress_from_base) in ingresses_from_base {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
-        let ingress_from_base = count_base_ingress(graph, source, &nodes[..]);
         let ctx = txs.get_mut(&domain).unwrap();
         let _ = ctx.send(Packet::CompleteMigration {
             at: at,
             ingress_from_base: ingress_from_base,
         });
     }
-
 }

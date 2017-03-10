@@ -397,7 +397,7 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // make one article
-    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token).ok());
+    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token).is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -412,7 +412,7 @@ fn transactional_vote() {
     assert!(!validate(&endq_votes_token));
 
     // make another article
-    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token).ok());
+    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token).is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -437,7 +437,7 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
-    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token).ok());
+    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token).is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -571,7 +571,7 @@ fn transactional_migration() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty());
+    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty()).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -590,7 +590,7 @@ fn transactional_migration() {
     let mutb = g.get_mutator(b);
 
     // send a value on b
-    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty());
+    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty()).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));
@@ -615,8 +615,8 @@ fn transactional_migration() {
     assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
 
     // send a value on a and b
-    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty());
-    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty());
+    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty()).unwrap();
+    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty()).unwrap();
 
     // give them some time to propagate
     thread::sleep(time::Duration::new(0, 10_000_000));

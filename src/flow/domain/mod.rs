@@ -347,13 +347,13 @@ impl Domain {
                         .unwrap()
                         .claim_timestamp(&token, base_node, data);
                     match result {
-                        checktable::TransactionResult::Committed(i) => {
+                        checktable::TransactionResult::Committed(i, _) => {
                             ::std::mem::replace(state, TransactionState::Committed(i, base_node));
-                            let _ = send.send(result);
+                            let _ = send.send(Ok(i));
                             true
                         }
                         checktable::TransactionResult::Aborted => {
-                            let _ = send.send(result);
+                            let _ = send.send(Err(()));
                             false
                         }
                     }
