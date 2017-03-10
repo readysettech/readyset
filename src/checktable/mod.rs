@@ -224,14 +224,23 @@ impl CheckTable {
     /// Transition to using `new_domain_dependencies`, and reserve a pair of
     /// timestamps for the migration to happen between.
     pub fn perform_migration(&mut self,
-                             new_domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>)
+                             ingresses_from_base: &HashMap<domain::Index,
+                                                           HashMap<NodeIndex, usize>>)
                              -> (i64, i64, HashMap<domain::Index, i64>) {
         let ts = self.next_timestamp;
         let prevs = self.compute_previous_timestamps(None);
 
-        self.domain_dependencies = new_domain_dependencies;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
+        self.domain_dependencies = ingresses_from_base.iter()
+            .map(|(domain, ingress_from_base)| {
+                (*domain,
+                 ingress_from_base.iter()
+                    .filter(|&(_, n)| *n > 0)
+                    .map(|(k, _)| *k)
+                    .collect())
+            })
+            .collect();
 
         (ts, ts + 1, prevs)
     }

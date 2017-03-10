@@ -955,12 +955,11 @@ impl<'a> Migration<'a> {
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let (ingresses_from_base, domain_dependencies) = migrate::transactions::analyze_graph(
-            &mainline.ingredients,
-            mainline.source,
-            domain_nodes);
+        let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
+                                                                       mainline.source,
+                                                                       domain_nodes);
         let (start_ts, end_ts, prevs) =
-            mainline.checktable.lock().unwrap().perform_migration(domain_dependencies);
+            mainline.checktable.lock().unwrap().perform_migration(&ingresses_from_base);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 

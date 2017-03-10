@@ -38,28 +38,15 @@ fn count_base_ingress(graph: &Graph,
 pub fn analyze_graph(graph: &Graph,
                      source: NodeIndex,
                      domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>)
-                     -> (HashMap<domain::Index, HashMap<petgraph::graph::NodeIndex, usize>>,
-                         HashMap<domain::Index, Vec<petgraph::graph::NodeIndex>>) {
-    let ingresses_from_base: HashMap<_, _> = domain_nodes.into_iter()
+                     -> (HashMap<domain::Index, HashMap<NodeIndex, usize>>) {
+    domain_nodes.into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
             (domain, count_base_ingress(graph, source, &nodes[..]))
         })
-        .collect();
-
-    let domain_dependencies = ingresses_from_base.iter()
-        .map(|(domain, ingress_from_base)| {
-            (*domain,
-             ingress_from_base.iter()
-                .filter_map(|(k, n)| { if *n > 0 { Some(*k) } else { None } })
-                .collect())
-        })
-        .collect();
-
-    (ingresses_from_base, domain_dependencies)
+        .collect()
 }
 
-pub fn finalize(ingresses_from_base: HashMap<domain::Index,
-                                             HashMap<petgraph::graph::NodeIndex, usize>>,
+pub fn finalize(ingresses_from_base: HashMap<domain::Index, HashMap<NodeIndex, usize>>,
                 log: &Logger,
                 txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                 at: i64) {
