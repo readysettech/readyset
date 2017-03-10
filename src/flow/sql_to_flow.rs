@@ -313,7 +313,6 @@ impl SqlIncorporator {
             GroupedNodeType::Extremum(extr) => {
                 mig.add_ingredient(String::from(name),
                                    combined_columns.as_slice(),
-
                                    extr.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
             }
         };
