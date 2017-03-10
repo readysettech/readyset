@@ -363,8 +363,8 @@ mod tests {
             assert!(r.activate(&mut mig).is_ok());
             mig.commit();
         }
-        // source, base, ingress, ts-ingress, ts-egress
-        assert_eq!(g.graph().node_count(), 5);
+        // source, base, ingress
+        assert_eq!(g.graph().node_count(), 3);
         println!("{}", g);
     }
 

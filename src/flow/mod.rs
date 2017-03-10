@@ -876,11 +876,6 @@ impl<'a> Migration<'a> {
             }
         }
 
-        // Add transactional time nodes
-        migrate::transactions::add_time_nodes(&mut domain_nodes,
-                                              &mut mainline.ingredients,
-                                              &mainline.txs);
-
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes

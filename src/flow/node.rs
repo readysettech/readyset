@@ -127,8 +127,6 @@ pub enum Type {
         txs: sync::Arc<sync::Mutex<Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>>>,
         tags: sync::Arc<sync::Mutex<HashMap<Tag, NodeAddress>>>,
     },
-    TimestampIngress(sync::Arc<sync::Mutex<mpsc::SyncSender<Packet>>>),
-    TimestampEgress(sync::Arc<sync::Mutex<Vec<mpsc::SyncSender<Packet>>>>),
     Reader(Option<backlog::WriteHandle>, Reader),
     Source,
 }
@@ -194,8 +192,6 @@ impl Type {
                         .collect()
                 }
             }
-            Type::TimestampIngress(..) |
-            Type::TimestampEgress(..) |
             Type::Source => unreachable!(),
         }
     }
@@ -207,8 +203,6 @@ impl fmt::Debug for Type {
             Type::Source => write!(f, "source node"),
             Type::Ingress => write!(f, "ingress node"),
             Type::Egress { .. } => write!(f, "egress node"),
-            Type::TimestampIngress(..) => write!(f, "time ingress node"),
-            Type::TimestampEgress(..) => write!(f, "time egress node"),
             Type::Reader(..) => write!(f, "reader node"),
             Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
         }
@@ -313,8 +307,6 @@ impl Node {
                 // reader nodes can still be modified externally if txs are added
                 Type::Reader(w.take(), r.clone())
             }
-            Type::TimestampEgress(ref arc) => Type::TimestampEgress(arc.clone()),
-            Type::TimestampIngress(ref arc) => Type::TimestampIngress(arc.clone()),
             Type::Ingress => Type::Ingress,
             Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
             Type::Internal(_) |
@@ -355,8 +347,6 @@ impl Node {
             Type::Source => write!(f, "(source)"),
             Type::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
-            Type::TimestampIngress(..) => write!(f, "{{ {} | (timestamp-ingress) }}", idx.index()),
-            Type::TimestampEgress(..) => write!(f, "{{ {} | (timestamp-egress) }}", idx.index()),
             Type::Reader(_, ref r) => {
                 let key = match r.key() {
                     Err(_) => String::from("none"),

@@ -147,16 +147,6 @@ impl NodeDescriptor {
                 materialize(m.data(), state.get_mut(&addr));
                 m
             }
-            flow::node::Type::TimestampEgress(ref txs) => {
-                // if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } = m {
-                //     let txs = txs.lock().unwrap();
-                //     for tx in txs.iter() {
-                //         tx.send(Packet::Timestamp(ts)).unwrap();
-                //     }
-                // }
-                Packet::None
-            }
-            flow::node::Type::TimestampIngress(..) |
             flow::node::Type::Source => unreachable!(),
         }
     }

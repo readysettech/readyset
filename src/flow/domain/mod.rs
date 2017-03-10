@@ -101,14 +101,7 @@ impl Domain {
                -> Self {
         // initially, all nodes are not ready (except for timestamp egress nodes)!
         let not_ready = nodes.iter()
-            .filter_map(|n| {
-                use flow::node::Type;
-                if let Type::TimestampEgress(..) = *n.borrow().inner {
-                    return None;
-                }
-
-                Some(*n.borrow().addr().as_local())
-            })
+            .map(|n| *n.borrow().addr().as_local())
             .collect();
 
         Domain {
