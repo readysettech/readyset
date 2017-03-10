@@ -135,12 +135,12 @@ impl Recipe {
         let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
-            let (qn, nodes) = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
             let d = mig.add_domain();
-            for na in nodes.iter() {
+            for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
             }
-            new_nodes.insert(qn.clone(), self.node_addr_for(&qn).unwrap());
+            new_nodes.insert(qfp.name.clone(), self.node_addr_for(&qfp.name).unwrap());
         }
 
         // TODO(malte): deal with removal.

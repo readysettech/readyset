@@ -15,29 +15,16 @@ use std::iter::FromIterator;
 use std::str;
 use std::vec::Vec;
 
-/// Long-lived struct that holds information about the SQL queries that have been incorporated into
-/// the Soup graph `grap`.
-/// The incorporator shares the lifetime of the flow graph it is associated with.
+/// Represents the result of a query incorporation, specifying query name (auto-generated or
+/// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
+/// the query, and the leaf node that represents the query result (and off whom we've hung a
+/// `Reader` node),
 #[derive(Clone, Debug, PartialEq)]
-pub struct SqlIncorporator {
-    write_schemas: HashMap<String, Vec<String>>,
-    node_addresses: HashMap<String, NodeAddress>,
-    node_fields: HashMap<NodeAddress, Vec<String>>,
-    query_graphs: Vec<(QueryGraph, NodeAddress)>,
-    num_queries: usize,
-}
-
-impl Default for SqlIncorporator {
-    /// Creates a new `SqlIncorporator` for an empty flow graph.
-    fn default() -> Self {
-        SqlIncorporator {
-            write_schemas: HashMap::default(),
-            node_addresses: HashMap::default(),
-            node_fields: HashMap::default(),
-            query_graphs: Vec::new(),
-            num_queries: 0,
-        }
-    }
+pub struct QueryFlowParts {
+    pub name: String,
+    pub new_nodes: Vec<NodeAddress>,
+    pub reused_nodes: Vec<NodeAddress>,
+    pub query_leaf: NodeAddress,
 }
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
@@ -62,6 +49,31 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
             panic!("COUNT(*) should have been rewritten earlier!")
         }
         _ => panic!("invalid aggregation function"),
+    }
+}
+
+/// Long-lived struct that holds information about the SQL queries that have been incorporated into
+/// the Soup graph `grap`.
+/// The incorporator shares the lifetime of the flow graph it is associated with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SqlIncorporator {
+    write_schemas: HashMap<String, Vec<String>>,
+    node_addresses: HashMap<String, NodeAddress>,
+    node_fields: HashMap<NodeAddress, Vec<String>>,
+    query_graphs: Vec<(QueryGraph, NodeAddress)>,
+    num_queries: usize,
+}
+
+impl Default for SqlIncorporator {
+    /// Creates a new `SqlIncorporator` for an empty flow graph.
+    fn default() -> Self {
+        SqlIncorporator {
+            write_schemas: HashMap::default(),
+            node_addresses: HashMap::default(),
+            node_fields: HashMap::default(),
+            query_graphs: Vec::new(),
+            num_queries: 0,
+        }
     }
 }
 
@@ -124,7 +136,7 @@ impl SqlIncorporator {
                      query: &str,
                      name: Option<String>,
                      mut mig: &mut Migration)
-                     -> Result<(String, Vec<NodeAddress>), String> {
+                     -> Result<QueryFlowParts, String> {
         query.to_flow_parts(self, name, &mut mig)
     }
 
@@ -139,7 +151,7 @@ impl SqlIncorporator {
                             query: SqlQuery,
                             name: Option<String>,
                             mut mig: &mut Migration)
-                            -> Result<(String, Vec<NodeAddress>), String> {
+                            -> Result<QueryFlowParts, String> {
         let res = match name {
             None => self.nodes_for_query(query, mig),
             Some(n) => self.nodes_for_named_query(query, n, mig),
@@ -149,7 +161,7 @@ impl SqlIncorporator {
         Ok(res)
     }
 
-    fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> (String, Vec<NodeAddress>) {
+    fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::Insert(ref iq) => iq.table.name.clone(),
@@ -162,7 +174,7 @@ impl SqlIncorporator {
                              q: SqlQuery,
                              query_name: String,
                              mut mig: &mut Migration)
-                             -> (String, Vec<NodeAddress>) {
+                             -> QueryFlowParts {
         use flow::sql::passes::alias_removal::AliasRemoval;
         use flow::sql::passes::count_star_rewrite::CountStarRewrite;
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
@@ -175,47 +187,55 @@ impl SqlIncorporator {
             .expand_implied_tables(&self.write_schemas)
             .rewrite_count_star(&self.write_schemas);
 
-        let (name, new_nodes) = match q {
+        let (name, new_nodes, leaf) = match q {
             SqlQuery::CreateTable(ctq) => {
                 assert_eq!(query_name, ctq.table.name);
-                let na =
+                let (na, new) =
                     self.make_base_node(&ctq.table.name, &ctq.fields, ctq.keys.as_ref(), &mut mig);
-                match na {
-                    None => (query_name, vec![]),
-                    Some(na) => (query_name, vec![na]),
+                if new {
+                    (query_name, vec![na], na)
+                } else {
+                    (query_name, vec![], na)
                 }
             }
             SqlQuery::Insert(iq) => {
                 assert_eq!(query_name, iq.table.name);
                 let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let na = self.make_base_node(&iq.table.name, &cols, None, &mut mig);
-                match na {
-                    None => (query_name, vec![]),
-                    Some(na) => (query_name, vec![na]),
+                let (na, new) = self.make_base_node(&iq.table.name, &cols, None, &mut mig);
+                if new {
+                    (query_name, vec![na], na)
+                } else {
+                    (query_name, vec![], na)
                 }
             }
             SqlQuery::Select(sq) => {
-                let nodes = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
+                let (nodes, leaf) = self.make_nodes_for_selection(&sq, &query_name, &mut mig);
                 // Return new nodes
-                (query_name, nodes)
+                (query_name, nodes, leaf)
             }
         };
 
         self.num_queries += 1;
 
-        (name, new_nodes)
+        QueryFlowParts {
+            name: name,
+            new_nodes: new_nodes,
+            reused_nodes: vec![],
+            query_leaf: leaf,
+        }
     }
 
+    /// Return is (`node`, `is_new`)
     fn make_base_node(&mut self,
                       name: &str,
                       cols: &Vec<Column>,
                       keys: Option<&Vec<TableKey>>,
                       mig: &mut Migration)
-                      -> Option<NodeAddress> {
+                      -> (NodeAddress, bool) {
         if self.write_schemas.contains_key(name) {
             println!("WARNING: base table for write type {} already exists: ignoring query.",
                      name);
-            return None;
+            return (self.node_addresses[name], false);
         }
 
         let fields = Vec::from_iter(cols.iter().map(|c| c.name.clone()));
@@ -258,7 +278,8 @@ impl SqlIncorporator {
         // TODO(malte): get rid of annoying duplication
         self.node_fields.insert(na, fields.clone());
         self.write_schemas.insert(String::from(name), fields);
-        Some(na)
+
+        (na, true)
     }
 
     fn make_grouped_node(&mut self,
@@ -495,11 +516,12 @@ impl SqlIncorporator {
         n
     }
 
+    /// Return is (`new_nodes`, `leaf_node`).
     fn make_nodes_for_selection(&mut self,
                                 st: &SelectStatement,
                                 name: &str,
                                 mig: &mut Migration)
-                                -> Vec<NodeAddress> {
+                                -> (Vec<NodeAddress>, NodeAddress) {
         use std::collections::HashMap;
 
         let qg = match to_query_graph(st) {
@@ -511,13 +533,13 @@ impl SqlIncorporator {
                format!("Making nodes for query named \"{}\"", name));
 
         // Do we already have this exact query or a subset of it?
-        for &(ref existing_qg, _) in self.query_graphs.iter() {
+        for &(ref existing_qg, ref leaf) in self.query_graphs.iter() {
             if existing_qg.signature() == qg.signature() {
                 // we already have this exact query, so we don't need to add anything
                 info!(mig.log,
                       "skipping query \"{}\" as an exact equivalent already exists",
                       name);
-                return vec![];
+                return (vec![], *leaf);
             }
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
                 info!(mig.log,
@@ -527,6 +549,7 @@ impl SqlIncorporator {
         }
 
         let nodes_added;
+        let leaf_na;
 
         let mut i = 0;
         {
@@ -683,7 +706,6 @@ impl SqlIncorporator {
             }
 
             // 3. Generate leaf views that expose the query result
-            let ni;
             {
                 let final_ni = if !join_nodes.is_empty() {
                     join_nodes.last().unwrap()
@@ -709,11 +731,12 @@ impl SqlIncorporator {
                 let fields = projected_columns.iter()
                     .map(|c| c.name.clone())
                     .collect::<Vec<String>>();
-                ni = mig.add_ingredient(String::from(name),
-                                        fields.as_slice(),
-                                        Permute::new(*final_ni, projected_column_ids.as_slice()));
-                self.node_addresses.insert(String::from(name), ni);
-                self.node_fields.insert(ni, fields);
+                leaf_na = mig.add_ingredient(String::from(name),
+                                             fields.as_slice(),
+                                             Permute::new(*final_ni,
+                                                          projected_column_ids.as_slice()));
+                self.node_addresses.insert(String::from(name), leaf_na);
+                self.node_fields.insert(leaf_na, fields);
 
                 // We always materialize leaves of queries (at least currently)
                 let query_params = qg.parameters();
@@ -722,17 +745,19 @@ impl SqlIncorporator {
                 if !query_params.is_empty() {
                     //assert_eq!(query_params.len(), 1);
                     let key_column = query_params.iter().next().unwrap();
-                    mig.maintain(ni, self.field_to_columnid(ni, &key_column.name).unwrap());
+                    mig.maintain(leaf_na,
+                                 self.field_to_columnid(leaf_na, &key_column.name).unwrap());
                 } else {
                     // no query parameters, so we index on the first (and often only) column
-                    mig.maintain(ni, 0);
+                    mig.maintain(leaf_na, 0);
                 }
             }
-            debug!(mig.log, format!("Added final node for query named \"{}\"", name); "node" => ni.as_global().index());
-            new_filter_nodes.push(ni);
+            debug!(mig.log, format!("Added final node for query named \"{}\"", name);
+                   "node" => leaf_na.as_global().index());
+            new_filter_nodes.push(leaf_na);
 
             // Finally, store the query graph and the corresponding `NodeAddress`
-            self.query_graphs.push((qg.clone(), ni));
+            self.query_graphs.push((qg.clone(), leaf_na));
 
             // finally, we output all the nodes we generated
             nodes_added = new_filter_nodes.into_iter()
@@ -740,7 +765,8 @@ impl SqlIncorporator {
                 .chain(func_nodes.into_iter())
                 .collect();
         }
-        nodes_added
+
+        (nodes_added, leaf_na)
     }
 }
 
@@ -753,7 +779,7 @@ pub trait ToFlowParts {
                      &mut SqlIncorporator,
                      Option<String>,
                      &mut Migration)
-                     -> Result<(String, Vec<NodeAddress>), String>;
+                     -> Result<QueryFlowParts, String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
@@ -761,7 +787,7 @@ impl<'a> ToFlowParts for &'a String {
                      inc: &mut SqlIncorporator,
                      name: Option<String>,
                      mig: &mut Migration)
-                     -> Result<(String, Vec<NodeAddress>), String> {
+                     -> Result<QueryFlowParts, String> {
         self.as_str().to_flow_parts(inc, name, mig)
     }
 }
@@ -771,7 +797,7 @@ impl<'a> ToFlowParts for &'a str {
                      inc: &mut SqlIncorporator,
                      name: Option<String>,
                      mig: &mut Migration)
-                     -> Result<(String, Vec<NodeAddress>), String> {
+                     -> Result<QueryFlowParts, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
@@ -941,7 +967,7 @@ mod tests {
         assert_eq!(project.fields(), &["name"]);
         assert_eq!(project.description(), format!("π[1]"));
         // edge node
-        let edge = get_node(&inc, &mig, &res.unwrap().0);
+        let edge = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge.fields(), &["name"]);
         assert_eq!(edge.description(), format!("π[0]"));
     }
@@ -987,7 +1013,7 @@ mod tests {
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view
-        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
+        let edge_view = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge_view.fields(), &["votes"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
     }
@@ -1015,16 +1041,20 @@ mod tests {
                                 None,
                                 &mut mig);
         assert!(res.is_ok());
+        let leaf = res.unwrap().query_leaf;
 
         // Add the same query again
+        let ncount = mig.graph().node_count();
         let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
                                 None,
                                 &mut mig);
         assert!(res.is_ok());
-        let ncount = mig.graph().node_count();
         // should have added no more nodes
-        assert_eq!(res.unwrap().1, vec![]);
+        let qfp = res.unwrap();
+        assert_eq!(qfp.new_nodes, vec![]);
         assert_eq!(mig.graph().node_count(), ncount);
+        // should have ended up with the same leaf node
+        assert_eq!(qfp.query_leaf, leaf);
     }
 
 
@@ -1070,7 +1100,7 @@ mod tests {
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
-        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
+        let edge_view = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge_view.fields(), &["count"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
     }
@@ -1114,7 +1144,7 @@ mod tests {
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
-        let edge_view = get_node(&inc, &mig, &res.unwrap().0);
+        let edge_view = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge_view.fields(), &["count"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
     }
@@ -1146,8 +1176,8 @@ mod tests {
 
         // Add them one by one
         for (i, q) in lines.iter().enumerate() {
-            if let Ok((name, _)) = inc.add_query(q, None, &mut mig) {
-                println!("{}: {} -- {}\n", name, i, q);
+            if let Ok(qfp) = inc.add_query(q, None, &mut mig) {
+                println!("{}: {} -- {}\n", qfp.name, i, q);
             } else {
                 println!("Failed to parse: {}\n", q);
             };
