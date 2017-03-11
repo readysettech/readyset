@@ -6,12 +6,12 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 [features]
 web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcached-rs"]
-b_postgresql = ["postgres", "r2d2", "r2d2_postgres"]
-b_mysql = ["mysql", "r2d2", "r2d2_mysql"]
+b_postgresql = ["postgres"]
+b_mysql = ["mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
-b_hybrid = ["mysql", "r2d2", "r2d2_mysql", "memcached-rs"]
-default = ["web", "b_netsoup"]
+b_hybrid = ["mysql", "memcached-rs"]
+default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
 profiling = ["timekeeper/default"]
 
 [dependencies]
@@ -39,14 +39,11 @@ rand = "0.3"
 hdrsample = "2.1"
 # postgresql
 postgres = { version = "0.11", optional = true }
-r2d2 = { version = "0.7", optional = true }
-r2d2_postgres = { version = "0.10", optional = true }
 # mssql
 futures-state-stream = { version = "0.1", optional = true }
 tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
 # mysql
-mysql = { version = "8.0", optional = true }
-r2d2_mysql = { version = "8.0", optional = true }
+mysql = { version = "10.0", optional = true }
 # memcached
 memcached-rs = { version = "0.1.2", optional = true }
 # netsoup
