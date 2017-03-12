@@ -230,25 +230,39 @@ pub fn index(log: &Logger,
                     if let flow::node::Type::Ingress = ***node {
                         // we can't push further up!
                         unreachable!("node suggested index outside domain, and ingress isn't \
-                                      materalized");
+                                      materialized");
                     }
 
                     assert!(node.is_internal());
-                    // TODO: push indices up through views (do we even need this)?
-                    // for idx in idxs {
-                    //     let really = node.resolve(col);
-                    //     if let Some(really) = really {
-                    //         // the index should instead be placed on the corresponding
-                    //         // columns of this view's inputs
-                    //         for (v, col) in really {
-                    //             trace!(log, "pushing up index into column {} of {}", col, v);
-                    //             tmp.entry(v).or_insert_with(HashSet::new).insert(col);
-                    //         }
-                    //     } else {
-                    //         // this view is materialized, so we should index this column
-                    //         indices.entry(v).or_insert_with(HashSet::new).insert(col);
-                    //     }
-                    // }
+                    // push indices up through views. This is needed because a query-through
+                    // operators must inform its parents to set up appropriate indices; if it
+                    // doesn't, the previously established materialization on the parent(s) will be
+                    // considered unnnecessary and removed in the next step
+                    for idx in idxs {
+                        // idx could be compound, so we resolve each contained column separately
+                        let real_idxs =
+                            idx.iter().map(|col| node.resolve(*col)).collect::<Vec<_>>();
+                        for r_idx in real_idxs {
+                            if let Some(r_idx) = r_idx {
+                                // the index should instead be placed on the corresponding
+                                // columns of this view's inputs
+                                let (r_nodes, r_cols): (Vec<_>, Vec<_>) =
+                                    r_idx.iter().cloned().unzip();
+                                // compound index columns must be internally consistent, i.e. all
+                                // derived from the same node
+                                let n = r_nodes[0];
+                                assert!(r_nodes.iter().all(|nd| *nd == n));
+
+                                trace!(log,
+                                       "pushing up index {:?} on {} into columns {:?} of {}",
+                                       idx,
+                                       v,
+                                       r_cols,
+                                       n);
+                                tmp.entry(n).or_insert_with(HashSet::new).insert(r_cols);
+                            }
+                        }
+                    }
                 } else {
                     unreachable!("node suggested index outside domain");
                 }
