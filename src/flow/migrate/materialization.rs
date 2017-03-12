@@ -215,7 +215,7 @@ pub fn index(log: &Logger,
                     hm
                 });
 
-        // push down indices
+        // push up indices
         let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
@@ -230,25 +230,51 @@ pub fn index(log: &Logger,
                     if let flow::node::Type::Ingress = ***node {
                         // we can't push further up!
                         unreachable!("node suggested index outside domain, and ingress isn't \
-                                      materalized");
+                                      materialized");
                     }
 
                     assert!(node.is_internal());
-                    // TODO: push indices up through views (do we even need this)?
-                    // for idx in idxs {
-                    //     let really = node.resolve(col);
-                    //     if let Some(really) = really {
-                    //         // the index should instead be placed on the corresponding
-                    //         // columns of this view's inputs
-                    //         for (v, col) in really {
-                    //             trace!(log, "pushing up index into column {} of {}", col, v);
-                    //             tmp.entry(v).or_insert_with(HashSet::new).insert(col);
-                    //         }
-                    //     } else {
-                    //         // this view is materialized, so we should index this column
-                    //         indices.entry(v).or_insert_with(HashSet::new).insert(col);
-                    //     }
-                    // }
+                    // push indices up through views. This is needed because a query-through
+                    // operators must inform its parents to set up appropriate indices; if it
+                    // doesn't, the previously established materialization on the parent(s) will be
+                    // considered unnnecessary and removed in the next step
+                    for idx in idxs {
+                        // idx could be compound, so we resolve each contained column separately.
+                        // Note that a single column can resolve into *multiple* parent columns
+                        // that need to be indexed.
+                        let real_cols: Vec<_> = idx.iter().map(|col| node.resolve(*col)).collect();
+                        // here's the deal:
+                        // real_cols holds a vec of parent colums for each column in a compound
+                        // key. Each element of this vec is (parent_node, parent_col). We need to
+                        // collect these inner tuples and install corresponding indexing
+                        // requirements on the nodes/columns in them.
+                        let cols_to_index_per_node = real_cols.into_iter()
+                            .fold(HashMap::new(), |mut acc, nc| {
+                                if let Some(p_cols) = nc {
+                                    for (pn, pc) in p_cols {
+                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                                    }
+                                }
+                                acc
+                            });
+                        // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
+                        // index on each individual column in the Vec.
+                        // Note that this, and the semantics of node.resolve(), imply that each column
+                        // must resolve to one ore more *single* parent node columns. In other
+                        // words, we never install compound keys by pushing indices upwards; hence
+                        // the two nested loops are required here.
+                        for (n, cols) in cols_to_index_per_node {
+                            for col in cols {
+                                trace!(log,
+                                       "pushing up index {:?} on {} into columns {:?} of {}",
+                                       idx,
+                                       v,
+                                       col,
+                                       n);
+                                tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
+                            }
+                        }
+                    }
                 } else {
                     unreachable!("node suggested index outside domain");
                 }
