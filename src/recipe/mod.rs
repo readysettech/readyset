@@ -145,10 +145,10 @@ impl Recipe {
         let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
-            let name = self.versioned_query_name(&n, &q);
+            //let name = self.versioned_query_name(&n, &q);
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, name, mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
 
             // we currently use a domain per query
             let d = mig.add_domain();
