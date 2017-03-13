@@ -350,6 +350,17 @@ impl<T: Hash + Eq + Clone> State<T> {
             &[]
         }
     }
+
+    pub fn clear(&mut self) {
+        for s in &mut self.state {
+            match s.1 {
+                KeyedState::Single(ref mut map) => map.clear(),
+                KeyedState::Double(ref mut map) => map.clear(),
+                KeyedState::Tri(ref mut map) => map.clear(),
+                KeyedState::Quad(ref mut map) => map.clear(),
+            }
+        }
+    }
 }
 
 impl<T: Hash + Eq + Clone> IntoIterator for State<T> {

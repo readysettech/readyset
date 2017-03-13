@@ -8,6 +8,7 @@ pub mod union;
 pub mod identity;
 pub mod gatedid;
 pub mod filter;
+pub mod topk;
 
 use flow::data::DataType;
 use std::ops::{Deref, DerefMut};
@@ -323,6 +324,13 @@ pub mod test {
                         "unnecessary seed value for {} (never used by any node)",
                         base);
             }
+        }
+
+        pub fn unseed(&mut self, base: NodeAddress) {
+            assert!(self.nut.is_some(), "unseed must happen after set_op");
+
+            let local = self.to_local(base);
+            self.states.get_mut(local.as_local()).unwrap().clear();
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
