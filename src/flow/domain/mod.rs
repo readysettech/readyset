@@ -339,14 +339,18 @@ impl Domain {
         }
 
         if let Packet::Transaction { state: TransactionState::Committed(ts, base, _), .. } = m {
-            // Insert message into buffer.
-            match *self.buffered_transactions
-                .entry(ts)
-                .or_insert_with(|| BufferedTransaction::Transaction(base, vec![])) {
-                BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
-                _ => unreachable!(),
+            if self.ts + 1 == ts && self.ingress_from_base[&base] == 1 {
+                self.transactional_dispatch(vec![m]);
+                self.ts += 1;
+            } else {
+                // Insert message into buffer.
+                match *self.buffered_transactions
+                    .entry(ts)
+                    .or_insert_with(|| BufferedTransaction::Transaction(base, vec![])) {
+                        BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
+                        _ => unreachable!(),
+                    }
             }
-
             self.apply_transactions();
         } else {
             unreachable!();
