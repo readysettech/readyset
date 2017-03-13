@@ -50,21 +50,16 @@ impl TopK {
     /// state operation this will typically include some number of positives (at most k), and the
     /// same number of negatives.
     fn apply(&self,
-             new_count: usize,
              current_topk: &[Arc<Vec<DataType>>],
              new: Vec<Record>,
              state: &StateMap,
              group: &[DataType])
              -> Vec<Record> {
-        if new_count <= self.k {
-            return new;
-        }
-
         let cmp_rows =
-            |a: &Arc<Vec<DataType>>, b: &Arc<Vec<DataType>>| a[self.over].cmp(&b[self.over]);
+            |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[self.over].cmp(&b[self.over]);
 
-        let mut delta = Vec::new();
-        let mut current: Vec<_> = current_topk.iter().cloned().collect();
+        let mut delta: Vec<Record> = Vec::new();
+        let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
         current.sort_by(&cmp_rows);
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
@@ -76,10 +71,10 @@ impl TopK {
             }
         }
 
-        let mut output_rows: Vec<_> = new.into_iter()
+        let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
             .filter_map(|r| {
                 match r {
-                    Record::Positive(a) => Some((a, false)),
+                    &Record::Positive(ref a) => Some((a, false)),
                     _ => None,
                 }
             })
@@ -87,34 +82,37 @@ impl TopK {
             .collect();
         output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
 
-        if output_rows.len() < self.k && new_count >= self.k {
+        if output_rows.len() < self.k {
             let src_db = state.get(self.src.as_local())
                 .expect("topk must have its parent's state materialized");
             let rs = src_db.lookup(&self.group_by[..], &KeyType::from(group));
 
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
-                let is_min =
-                    |&(ref r, _): &(Arc<Vec<DataType>>, bool)| cmp_rows(r, &min) == Ordering::Equal;
-                let mut current_mins: Vec<_> = output_rows.iter().cloned().filter(is_min).collect();
-                println!("current_mins: {:?}", current_mins);
+                let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
+                    cmp_rows(&&r, &&min) == Ordering::Equal
+                };
+
+                let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
 
                 output_rows = rs.iter()
                     .filter_map(|r| {
-                        match cmp_rows(r, &min) {
-                            Ordering::Less => Some((r.clone(), false)),
+                        // Make sure that no duplicates are added to output_rows. This is simplified
+                        // by the fact that it currently contains all rows greater than `min`, and
+                        // none less than it. The only complication are rows which compare equal to
+                        // `min`: they get added except if there is already an identical row.
+                        match cmp_rows(&r, &&min) {
+                            Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
+                                use std::ops::Deref;
                                 let e = current_mins.iter()
-                                    .enumerate()
-                                    .find(|&(_, &(ref s, _))| s == r)
-                                    .map(|(i, _)| i);
+                                    .position(|&(ref s, _)| (*s).deref() == r.deref());
                                 match e {
                                     Some(i) => {
                                         current_mins.swap_remove(i);
-                                        println!("removed {}", i);
                                         None
                                     }
-                                    None => Some((r.clone(), false)),
+                                    None => Some((r, false)),
                                 }
                             }
                             Ordering::Greater => None,
@@ -124,8 +122,7 @@ impl TopK {
                     .collect();
             } else {
                 output_rows = rs.iter()
-                    .map(|rs| (rs.clone(), false))
-                    .chain(output_rows.into_iter())
+                    .map(|rs| (rs, false))
                     .collect();
             }
             output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
@@ -142,24 +139,15 @@ impl TopK {
 
             // Emit negatives for any elements in `bottom_rows` that were originally in
             // current_topk.
-            delta.extend(bottom_rows.into_iter().filter_map(|p| {
-                if p.1 {
-                    Some(Record::Negative(p.0))
-                } else {
-                    None
-                }
-            }));
+            delta.extend(bottom_rows.into_iter()
+                .filter(|p| p.1)
+                .map(|p| Record::Negative(p.0.clone())));
         }
 
         // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows.into_iter().filter_map(|p| {
-            if !p.1 {
-                Some(Record::Positive(p.0))
-            } else {
-                None
-            }
-        }));
-
+        delta.extend(output_rows.into_iter()
+            .filter(|p| !p.1)
+            .map(|p| Record::Positive(p.0.clone())));
         delta
     }
 }
@@ -228,15 +216,9 @@ impl Ingredient for TopK {
         }
 
         let mut out = Vec::new();
-        for (group, diffs) in consolidate {
-            // find the current value for this group
-            let db = state.get(self.us.as_ref().unwrap().as_local())
-                .expect("topk must have its own state materialized");
-
-            let old_rs = db.lookup(&self.group_by[..], &KeyType::from(&group[..]));
-
+        for (group, mut diffs) in consolidate {
             // Retrieve then update the number of times in this group
-            let count = *self.counts.get(&group).unwrap_or(&0);
+            let count: i64 = *self.counts.get(&group).unwrap_or(&0) as i64;
             let count_diff: i64 = diffs.iter()
                 .map(|r| match r {
                     &Record::Positive(..) => 1,
@@ -244,14 +226,19 @@ impl Ingredient for TopK {
                     &Record::DeleteRequest(..) => unreachable!(),
                 })
                 .sum();
-            assert!(count >= old_rs.len());
 
-            out.append(&mut self.apply((count as i64 + count_diff) as usize,
-                                       old_rs,
-                                       diffs,
-                                       state,
-                                       &group[..]));
-            self.counts.insert(group, ((count as i64) + count_diff) as usize);
+            if count + count_diff <= self.k as i64 {
+                out.append(&mut diffs);
+            } else {
+                // find the current value for this group
+                let db = state.get(self.us.as_ref().unwrap().as_local())
+                    .expect("topk must have its own state materialized");
+                let old_rs = db.lookup(&self.group_by[..], &KeyType::from(&group[..]));
+                assert!(count as usize >= old_rs.len());
+
+                out.append(&mut self.apply(old_rs, diffs, state, &group[..]));
+            }
+            self.counts.insert(group, (count + count_diff) as usize);
         }
 
         out.into()
