@@ -38,7 +38,7 @@ pub struct Base {
 
 /// Specifies the level of durability that this base node should offer. Stronger guarantees imply a
 /// reduced write performance.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BaseDurabilityLevel {
     /// No durability at all: records aren't written to a log.
     None,
@@ -279,5 +279,42 @@ impl Ingredient for Base {
     /// log.
     fn set_global_address(&mut self, n: NodeAddress) {
         self.global_address = Some(n);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let b = Base::default();
+        assert_eq!(b.durability, BaseDurabilityLevel::Buffered);
+        assert!(b.durable_log.is_none());
+        assert!(b.durable_log_path.is_none());
+    }
+
+    #[test]
+    fn it_works_durability_none() {
+        let b = Base::new(0, BaseDurabilityLevel::None);
+        assert_eq!(b.durability, BaseDurabilityLevel::None);
+        assert!(b.durable_log.is_none());
+        assert!(b.durable_log_path.is_none());
+    }
+
+    #[test]
+    fn it_works_durability_buffered() {
+        let b = Base::new(0, BaseDurabilityLevel::Buffered);
+        assert_eq!(b.durability, BaseDurabilityLevel::Buffered);
+        assert!(b.durable_log.is_none());
+        assert!(b.durable_log_path.is_none());
+    }
+
+    #[test]
+    fn it_works_durability_sync_immediately() {
+        let b = Base::new(0, BaseDurabilityLevel::SyncImmediately);
+        assert_eq!(b.durability, BaseDurabilityLevel::SyncImmediately);
+        assert!(b.durable_log.is_none());
+        assert!(b.durable_log_path.is_none());
     }
 }
