@@ -58,14 +58,11 @@ serde_derive = { version = "0.9" }
 rustful = { version = "0.9", optional = true }
 rustc-serialize = { version = "0.3", optional = true }
 
-# for unique ids used to name a base's persistent log
+# durable log
 snowflake = "1.2.0"
-
-# for serialization of records to JSON using serde
 serde_json = "0.9.8"
-
-# custom flush policies for buffered writes
 buf_redux = "0.6.1"
+time = "0.1"
 
 [profile.release]
 debug=true

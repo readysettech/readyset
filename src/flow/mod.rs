@@ -252,6 +252,11 @@ pub trait Ingredient
     // have an associated column. Similar to resolve, but does not depend on
     // materialization, and returns results even for computed columns.
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)>;
+
+    // For Base nodes to remember their own global address.
+    fn set_global_address(&mut self, _: NodeAddress) {
+        unreachable!();
+    }
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
@@ -611,7 +616,17 @@ impl<'a> Migration<'a> {
             }
         }
         // and tell the caller its id
-        NodeAddress::make_global(ni)
+        let global_address = NodeAddress::make_global(ni);
+
+        // FIXME(jmftrindade): Is this the right place to make a base remember its own global
+        // address?  Can't infer the correct type here though.
+        //
+        // let mut i = i.into();
+        // if i.is_base() {
+        //   i.set_global_address(global_address);
+        // }
+
+        global_address
     }
 
     #[cfg(test)]
