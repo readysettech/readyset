@@ -994,7 +994,7 @@ impl<'a> Migration<'a> {
                                       &mut mainline.txs,
                                       uninformed_domain_nodes,
                                       start_ts,
-                                      prevs);
+                                      prevs.unwrap());
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!

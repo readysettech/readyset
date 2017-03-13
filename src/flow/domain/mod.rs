@@ -331,8 +331,10 @@ impl Domain {
         // below because that one inserts m into messages, while this one needs to borrow prevs from
         // within it.
         if let Packet::Transaction { state: TransactionState::Committed(ts, _, ref prevs), .. } = m {
-            if let Some(prev) = prevs.get(&self.index) {
-                self.skip_timestamp_range(*prev+1, ts);
+            if let &Some(ref prevs) = prevs {
+                if let Some(prev) = prevs.get(&self.index) {
+                    self.skip_timestamp_range(*prev+1, ts);
+                }
             }
         }
 
@@ -355,7 +357,7 @@ impl Domain {
         match *packet {
             Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
             Packet::Transaction { ref mut state, ref link, ref data } => {
-                let empty = TransactionState::Committed(0, 0.into(), HashMap::new());
+                let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
                 if let TransactionState::Pending(token, send) = pending {
                     let ingress = self.nodes[link.dst.as_local()].borrow();

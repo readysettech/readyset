@@ -37,7 +37,7 @@ pub enum ReplayData {
 
 #[derive(Clone)]
 pub enum TransactionState {
-    Committed(i64, petgraph::graph::NodeIndex, HashMap<domain::Index, i64>),
+    Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
 }
 

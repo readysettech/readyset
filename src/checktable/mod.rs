@@ -89,7 +89,7 @@ impl TokenGenerator {
 /// Represents the result of a transaction
 pub enum TransactionResult {
     /// The transaction committed at a given timestamp
-    Committed(i64, HashMap<domain::Index, i64>),
+    Committed(i64, Option<HashMap<domain::Index, i64>>),
     /// The transaction aborted
     Aborted,
 }
@@ -120,6 +120,7 @@ pub struct CheckTable {
     domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
 
     last_migration: Option<i64>,
+    last_base: Option<NodeIndex>,
 }
 
 impl CheckTable {
@@ -130,6 +131,7 @@ impl CheckTable {
             granular: HashMap::new(),
             domain_dependencies: HashMap::new(),
             last_migration: None,
+            last_base: None,
         }
     }
 
@@ -166,8 +168,14 @@ impl CheckTable {
         })
     }
 
-    fn compute_previous_timestamps(&self, base: Option<NodeIndex>) -> HashMap<domain::Index, i64> {
-        self.domain_dependencies
+    fn compute_previous_timestamps(&self,
+                                   base: Option<NodeIndex>)
+                                   -> Option<HashMap<domain::Index, i64>> {
+        if self.last_base.is_some() && self.last_base == base {
+            return None;
+        }
+
+        Some(self.domain_dependencies
             .iter()
             .map(|(d, v)| {
                 let earliest: i64 = v.iter()
@@ -178,7 +186,7 @@ impl CheckTable {
                     .unwrap_or(0);
                 (*d, earliest)
             })
-            .collect()
+            .collect())
     }
 
     pub fn claim_timestamp(&mut self,
@@ -195,6 +203,7 @@ impl CheckTable {
             let prev_times = self.compute_previous_timestamps(Some(base));
 
             // Update checktables
+            self.last_base = Some(base);
             self.toplevel.insert(base, ts);
             let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
             for record in rs.iter() {
@@ -213,7 +222,6 @@ impl CheckTable {
                 }
             }
 
-
             TransactionResult::Committed(ts, prev_times)
         } else {
             TransactionResult::Aborted
@@ -225,10 +233,11 @@ impl CheckTable {
     pub fn perform_migration(&mut self,
                              ingresses_from_base: &HashMap<domain::Index,
                                                            HashMap<NodeIndex, usize>>)
-                             -> (i64, i64, HashMap<domain::Index, i64>) {
+                             -> (i64, i64, Option<HashMap<domain::Index, i64>>) {
         let ts = self.next_timestamp;
         let prevs = self.compute_previous_timestamps(None);
 
+        self.last_base = None;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
         self.domain_dependencies = ingresses_from_base.iter()
