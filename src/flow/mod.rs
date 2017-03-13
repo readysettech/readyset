@@ -151,7 +151,9 @@ pub trait Ingredient
     fn ancestors(&self) -> Vec<NodeAddress>;
     fn should_materialize(&self) -> bool;
 
-    fn replay_ancestor(&self, &HashSet<NodeAddress>) -> Option<NodeAddress> {
+    /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
+    /// replayed if this node's state is to be initialized.
+    fn must_replay_among(&self, &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
         None
     }
 
@@ -256,6 +258,11 @@ pub trait Ingredient
     // have an associated column. Similar to resolve, but does not depend on
     // materialization, and returns results even for computed columns.
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)>;
+
+    /// Performance hint: should return true if this operator reduces the size of its input
+    fn is_selective(&self) -> bool {
+        false
+    }
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
@@ -309,10 +316,7 @@ impl Mutator {
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete<I>(&self,
-                                   key: I,
-                                   t: checktable::Token)
-                                   -> Result<i64, ()>
+    pub fn transactional_delete<I>(&self, key: I, t: checktable::Token) -> Result<i64, ()>
         where I: Into<Vec<prelude::DataType>>
     {
         self.tx_send(vec![prelude::Record::DeleteRequest(key.into())].into(), t)
@@ -338,10 +342,7 @@ impl Mutator {
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
     /// generated for.
-    pub fn transactional_update<V>(&self,
-                                   u: V,
-                                   t: checktable::Token)
-                                   -> Result<i64, ()>
+    pub fn transactional_update<V>(&self, u: V, t: checktable::Token) -> Result<i64, ()>
         where V: Into<Vec<prelude::DataType>>
     {
         assert!(!self.primary_key.is_empty(),
@@ -523,19 +524,22 @@ impl Blender {
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> statistics::GraphStats {
         // TODO: request stats from domains in parallel.
-        let domains = self.txs.iter().map(|(di, s)|{
-            let (tx, rx) = mpsc::sync_channel(1);
-            s.send(payload::Packet::GetStatistics(tx)).unwrap();
+        let domains = self.txs
+            .iter()
+            .map(|(di, s)| {
+                let (tx, rx) = mpsc::sync_channel(1);
+                s.send(payload::Packet::GetStatistics(tx)).unwrap();
 
-            let (domain_stats, node_stats) = rx.recv().unwrap();
-            let node_map = node_stats.into_iter().map(|(ni, ns)| (NodeAddress::make_global(ni), ns)).collect();
+                let (domain_stats, node_stats) = rx.recv().unwrap();
+                let node_map = node_stats.into_iter()
+                    .map(|(ni, ns)| (NodeAddress::make_global(ni), ns))
+                    .collect();
 
-            (*di, (domain_stats, node_map))
-        }).collect();
+                (*di, (domain_stats, node_map))
+            })
+            .collect();
 
-        statistics::GraphStats {
-            domains: domains,
-        }
+        statistics::GraphStats { domains: domains }
     }
 }
 

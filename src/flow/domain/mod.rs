@@ -330,10 +330,11 @@ impl Domain {
         // Skip timestamps if possible. Unfortunately, this can't be combined with the if statement
         // below because that one inserts m into messages, while this one needs to borrow prevs from
         // within it.
-        if let Packet::Transaction { state: TransactionState::Committed(ts, _, ref prevs), .. } = m {
+        if let Packet::Transaction { state: TransactionState::Committed(ts, _, ref prevs), .. } =
+            m {
             if let &Some(ref prevs) = prevs {
                 if let Some(prev) = prevs.get(&self.index) {
-                    self.skip_timestamp_range(*prev+1, ts);
+                    self.skip_timestamp_range(*prev + 1, ts);
                 }
             }
         }
@@ -347,9 +348,9 @@ impl Domain {
                 match *self.buffered_transactions
                     .entry(ts)
                     .or_insert_with(|| BufferedTransaction::Transaction(base, vec![])) {
-                        BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
-                        _ => unreachable!(),
-                    }
+                    BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
+                    _ => unreachable!(),
+                }
             }
             self.apply_transactions();
         } else {
@@ -429,6 +430,13 @@ impl Domain {
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
+            }
+            Packet::StateSizeProbe { node, ack } => {
+                if let Some(state) = self.state.get(&node) {
+                    ack.send(state.len()).unwrap();
+                } else {
+                    drop(ack);
+                }
             }
             Packet::PrepareState { node, index } => {
                 let mut state = State::default();
@@ -538,22 +546,26 @@ impl Domain {
                     wait_time: self.wait_time.num_nanoseconds(),
                 };
 
-                let node_stats = self.nodes.iter().filter_map(|nd| {
-                    let ref n: NodeDescriptor = *nd.borrow();
-                    let local_index: LocalNodeIndex = *n.addr().as_local();
-                    let node_index: NodeIndex = n.index;
+                let node_stats = self.nodes
+                    .iter()
+                    .filter_map(|nd| {
+                        let ref n: NodeDescriptor = *nd.borrow();
+                        let local_index: LocalNodeIndex = *n.addr().as_local();
+                        let node_index: NodeIndex = n.index;
 
-                    let time = self.process_times.num_nanoseconds(local_index);
-                    let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                    if time.is_some() && ptime.is_some() {
-                        Some((node_index, statistics::NodeStats{
-                            process_time: time.unwrap(),
-                            process_ptime: ptime.unwrap(),
-                        }))
-                    } else {
-                        None
-                    }
-                }).collect();
+                        let time = self.process_times.num_nanoseconds(local_index);
+                        let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                        if time.is_some() && ptime.is_some() {
+                            Some((node_index,
+                                  statistics::NodeStats {
+                                      process_time: time.unwrap(),
+                                      process_ptime: ptime.unwrap(),
+                                  }))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 sender.send((domain_stats, node_stats)).unwrap();
             }

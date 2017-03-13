@@ -436,7 +436,7 @@ pub fn reconstruct(log: &Logger,
     //   4. tell the domain nearest to the root to start replaying
     //
     // so, first things first, let's find our closest materialized parents
-    let paths = trace(graph, source, node, empty, materialized, vec![node]);
+    let paths = trace(graph, source, node, empty, materialized, vec![node], txs);
 
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
@@ -574,7 +574,8 @@ fn trace<T>(graph: &Graph,
             node: NodeIndex,
             empty: &HashSet<NodeIndex>,
             materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
-            path: Vec<NodeIndex>)
+            path: Vec<NodeIndex>,
+            txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
             -> Vec<Vec<NodeIndex>> {
 
     if node == source {
@@ -608,10 +609,47 @@ fn trace<T>(graph: &Graph,
                 .filter(|ni| empty.contains(ni))
                 .map(|ni| graph[*ni].addr())
                 .collect();
-            if let Some(picked_ancestor) = n.replay_ancestor(&empty) {
-                // join, only replay picked ancestor
-                // NOTE: this is a *non-deterministic* choice
-                parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
+            if let Some(options) = n.must_replay_among(&empty) {
+                // we *must* replay the state of one of the nodes in options
+                parents.retain(|&parent| options.contains(&graph[parent].addr()));
+                assert!(!parents.is_empty());
+
+                // are any of the nodes filters?
+                let filter_parents: HashSet<_> = parents.iter()
+                    .map(|&p| (p, &graph[p]))
+                    .filter(|&(_, p)| p.is_internal() && p.is_selective())
+                    .filter(|&(_, p)| {
+                        // is not already materialized
+                        !materialized.get(&p.domain())
+                            .map(|dm| dm.contains_key(p.addr().as_local()))
+                            .unwrap_or(false)
+                    })
+                    .map(|(pi, _)| pi)
+                    .collect();
+                if !filter_parents.is_empty() {
+                    parents.clear();
+                    parents.extend(filter_parents.into_iter());
+                } else {
+                    // nope. so how do we pick? well, we look for the ancestor with the smallest
+                    // current state. unfortunately, that means we have to contact the domains
+                    // (since they own that state).
+                    let smallest = parents.iter()
+                        .min_by_key(|&pi| {
+                            let n = &graph[*pi];
+                            let (tx, rx) = mpsc::sync_channel(1);
+                            txs[&n.domain()]
+                                .send(Packet::StateSizeProbe {
+                                    node: *n.addr().as_local(),
+                                    ack: tx,
+                                })
+                                .unwrap();
+                            rx.recv().unwrap_or(0)
+                        })
+                        .map(|&pi| pi)
+                        .unwrap();
+                    parents.clear();
+                    parents.push(smallest);
+                }
             } else {
                 // union; just replay all
             }
@@ -624,7 +662,7 @@ fn trace<T>(graph: &Graph,
             .flat_map(|parent| {
                 let mut path = path.clone();
                 path.push(parent);
-                trace(graph, source, parent, empty, materialized, path)
+                trace(graph, source, parent, empty, materialized, path, txs)
             })
             .collect()
     }

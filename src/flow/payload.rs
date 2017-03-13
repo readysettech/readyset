@@ -78,6 +78,12 @@ pub enum Packet {
         index: Vec<Vec<usize>>,
     },
 
+    /// Probe for the number of records in the given node's state
+    StateSizeProbe {
+        node: flow::LocalNodeIndex,
+        ack: mpsc::SyncSender<usize>,
+    },
+
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,

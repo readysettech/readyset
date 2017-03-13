@@ -258,7 +258,7 @@ impl Ingredient for Joiner {
         false
     }
 
-    fn replay_ancestor(&self, empty: &HashSet<NodeAddress>) -> Option<NodeAddress> {
+    fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
         // we want to replay an ancestor that we are *not* doing an outer join against
         // it's not *entirely* clear how to extract that from self.join, but we'll use the
         // following heuristic: find an ancestor that is never performed an outer join against.
@@ -276,10 +276,16 @@ impl Ingredient for Joiner {
         // if any of them are empty, choose that one, since our output is also empty!
         for &option in &options {
             if empty.contains(option) {
-                return Some(*option);
+                // no need to look any further, just replay this
+                let mut options = HashSet::new();
+                options.insert(*option);
+                return Some(options);
             }
         }
-        options.into_iter().next().cloned()
+
+        // we don't know which of these we prefer, so we leave it up to the materialization code to
+        // pick among them for us.
+        Some(options.into_iter().map(|&ni| ni).collect())
     }
 
     fn will_query(&self, _: bool) -> bool {

@@ -124,6 +124,10 @@ impl Ingredient for Filter {
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
         vec![(self.src, Some(column))]
     }
+
+    fn is_selective(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

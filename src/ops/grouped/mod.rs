@@ -264,4 +264,8 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         }
         vec![(self.src, Some(self.colfix[column]))]
     }
+
+    fn is_selective(&self) -> bool {
+        true
+    }
 }

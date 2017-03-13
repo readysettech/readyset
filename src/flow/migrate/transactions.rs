@@ -27,9 +27,12 @@ fn count_base_ingress(graph: &Graph,
                 .expect("source ingress must have a base child")
         })
         .map(|base| {
-            let num_paths = ingress_nodes.iter()
-                .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
-                .count();
+            let num_paths =
+                ingress_nodes.iter()
+                    .filter(|&&ingress| {
+                        petgraph::algo::has_path_connecting(graph, base, ingress, None)
+                    })
+                    .count();
             (base, num_paths)
         })
         .collect()
