@@ -6,6 +6,7 @@ use buf_redux::strategy::WhenFull;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+use time;
 
 // 4k buffered log.
 const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
@@ -20,6 +21,7 @@ pub struct Base {
     primary_key: Option<Vec<usize>>,
     durability: BaseDurabilityLevel,
     persistent_log: Option<BufWriter<File, WhenFull>>,
+    global_address: Option<NodeAddress>,
     us: Option<NodeAddress>,
 
     // This id is unique within the same process.
@@ -54,6 +56,7 @@ impl Base {
             primary_key: Some(primary_key),
             durability: durability,
             persistent_log: None,
+            global_address: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
         }
@@ -91,7 +94,12 @@ impl Base {
 
         if self.persistent_log.is_none() {
             // Check whether NodeAddress is global or local?
-            let log_filename = format!("/tmp/soup-{}-{}.json", us, self.unique_id);
+            let now = time::now();
+            let today = time::strftime("%F", &now).unwrap();
+            //let log_filename = format!("/tmp/soup-log-{}-{:?}-{}.json",
+            //                           today, self.global_address.unwrap(), self.unique_id);
+            let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
+                                       today, us, self.unique_id);
             let path = Path::new(&log_filename);
 
             // TODO(jmftrindade): Current semantics is to overwrite an existing log. Once we
@@ -140,6 +148,7 @@ impl Clone for Base {
             durability: self.durability,
             persistent_log: None,
             unique_id: ProcessUniqueId::new(),
+            global_address: self.global_address,
             us: self.us,
         }
     }
@@ -149,6 +158,7 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             primary_key: None,
+            global_address: None,
             us: None,
             unique_id: ProcessUniqueId::new(),
             durability: BaseDurabilityLevel::Buffered,
@@ -237,5 +247,11 @@ impl Ingredient for Base {
 
     fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
         unreachable!();
+    }
+
+    /// A base node must remember its own global address so that it can use it as an id for durable
+    /// log.
+    fn set_global_address(&mut self, n: NodeAddress) {
+        self.global_address = Some(n);
     }
 }

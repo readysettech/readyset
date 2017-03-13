@@ -359,6 +359,7 @@ extern crate tokio_core;
 extern crate buf_redux;
 extern crate serde_json;
 extern crate snowflake;
+extern crate time;
 
 mod checktable;
 mod flow;
