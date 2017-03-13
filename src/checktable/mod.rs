@@ -171,7 +171,6 @@ impl CheckTable {
             .iter()
             .map(|(d, v)| {
                 let earliest: i64 = v.iter()
-                    .filter(|b| Some(**b) != base)
                     .filter_map(|b| self.toplevel.get(b))
                     .chain(self.last_migration.iter())
                     .max()

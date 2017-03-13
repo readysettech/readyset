@@ -315,7 +315,12 @@ impl Domain {
     // Skip the range of timestamps from start (inclusive) to end (non-inclusive).
     fn skip_timestamp_range(&mut self, start: i64, end: i64) {
         use std::cmp::max;
-        for t in max(start, self.ts+1)..end {
+        if self.ts + 1 >= start {
+            self.ts = end - 1;
+            // ok to return early here because self.ts + 1 == end, so below loop won't execute
+            return;
+        }
+        for t in max(start, self.ts + 1)..end {
             let o = BufferedTransaction::RemoteTransaction;
             self.buffered_transactions.insert(t, o);
         }
