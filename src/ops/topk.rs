@@ -104,9 +104,8 @@ impl TopK {
                         match cmp_rows(&r, &&min) {
                             Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
-                                use std::ops::Deref;
                                 let e = current_mins.iter()
-                                    .position(|&(ref s, _)| (*s).deref() == r.deref());
+                                    .position(|&(ref s, _)| *s == r);
                                 match e {
                                     Some(i) => {
                                         current_mins.swap_remove(i);
