@@ -107,3 +107,7 @@ path = "benchmarks/tpc_w/tpc_w.rs"
 [[bin]]
 name = "hotsoup"
 path = "benchmarks/hotsoup/hotsoup.rs"
+
+[[bin]]
+name = "extract_hotcrp_queries"
+path = "benchmarks/hotsoup/extract_queries.rs"
