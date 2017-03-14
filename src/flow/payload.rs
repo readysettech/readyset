@@ -139,12 +139,6 @@ pub enum Packet {
     GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
                                     HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
 
-    /// Notify a domain about a timestamp it would otherwise have missed.
-    ///
-    /// This message will be sent to domains from transactional base nodes with no connection to
-    /// a particular domain.
-    Timestamp(i64),
-
     None,
 }
 
@@ -186,7 +180,7 @@ impl Packet {
         where F: FnOnce(Records) -> Records
     {
         use std::mem;
-        let m = match mem::replace(self, Packet::Timestamp(0)) {
+        let m = match mem::replace(self, Packet::None) {
             Packet::Message { link, data } => {
                 Packet::Message {
                     link: link,
@@ -285,7 +279,6 @@ impl fmt::Debug for Packet {
                     }
                 }
             }
-            Packet::Timestamp(ts) => write!(f, "Packet::Timestamp({})", ts),
             Packet::None => write!(f, "Packet::Node"),
             _ => write!(f, "Packet::Control"),
         }
