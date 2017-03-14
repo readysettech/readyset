@@ -17,6 +17,8 @@ use std::sync::mpsc;
 
 use slog::Logger;
 
+const FILTER_SPECIFICITY: usize = 10;
+
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
     ($d:expr) => {{
@@ -582,88 +584,171 @@ fn trace<T>(graph: &Graph,
         unreachable!("base node was not materialized!");
     }
 
+    let in_materialized = |ni: NodeIndex| {
+        let n = &graph[ni];
+        materialized.get(&n.domain())
+            .map(|dm| dm.contains_key(n.addr().as_local()))
+            .unwrap_or(false)
+    };
+
     let n = &graph[node];
     let is_materialized = if path.len() == 1 {
         // the start node is the one we're trying to replay to, so while it'll be marked as
         // materialized in the map, it isn't really
         false
     } else {
-        materialized.get(&n.domain())
-            .map(|dm| dm.contains_key(n.addr().as_local()))
-            .unwrap_or(false)
+        in_materialized(node)
     };
 
     if is_materialized {
-        vec![path]
-    } else {
-        let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-            .collect();
-        if parents.len() != 1 {
-            // there are two cases where we have multiple parents: joins and unions
-            // for unions, we should replay *all* paths. for joins, we should only replay one path.
-            // in particular, for a join, we should only replay the ancestor that yields the full
-            // result-set (i.e., the left side of a left join).
-            assert!(n.is_internal());
-            // find empty parents
-            let empty: HashSet<_> = parents.iter()
-                .filter(|ni| empty.contains(ni))
-                .map(|ni| graph[*ni].addr())
-                .collect();
-            if let Some(options) = n.must_replay_among(&empty) {
-                // we *must* replay the state of one of the nodes in options
-                parents.retain(|&parent| options.contains(&graph[parent].addr()));
-                assert!(!parents.is_empty());
+        return vec![path];
+    }
 
-                // are any of the nodes filters?
-                let filter_parents: HashSet<_> = parents.iter()
-                    .map(|&p| (p, &graph[p]))
-                    .filter(|&(_, p)| p.is_internal() && p.is_selective())
-                    .filter(|&(_, p)| {
-                        // is not already materialized
-                        !materialized.get(&p.domain())
-                            .map(|dm| dm.contains_key(p.addr().as_local()))
-                            .unwrap_or(false)
-                    })
-                    .map(|(pi, _)| pi)
-                    .collect();
-                if !filter_parents.is_empty() {
-                    parents.clear();
-                    parents.extend(filter_parents.into_iter());
-                } else {
-                    // nope. so how do we pick? well, we look for the ancestor with the smallest
-                    // current state. unfortunately, that means we have to contact the domains
-                    // (since they own that state).
-                    let smallest = parents.iter()
-                        .min_by_key(|&pi| {
-                            let n = &graph[*pi];
-                            let (tx, rx) = mpsc::sync_channel(1);
-                            txs[&n.domain()]
-                                .send(Packet::StateSizeProbe {
-                                    node: *n.addr().as_local(),
-                                    ack: tx,
-                                })
-                                .unwrap();
-                            rx.recv().unwrap_or(0)
-                        })
-                        .map(|&pi| pi)
-                        .unwrap();
-                    parents.clear();
-                    parents.push(smallest);
-                }
-            } else {
-                // union; just replay all
-            }
+    let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        .collect();
+
+    loop {
+        // this loop is just here so we can break
+
+        if parents.len() == 1 {
+            break;
         }
 
-        // there's no point in replaying parents that are empty
-        parents.retain(|&parent| !empty.contains(&parent));
+        // there are two cases where we have multiple parents: joins and unions
+        // for unions, we should replay *all* paths. for joins, we should only replay one path.
+        // in particular, for a join, we should only replay the ancestor that yields the full
+        // result-set (i.e., the left side of a left join).
+        assert!(n.is_internal());
 
-        parents.into_iter()
-            .flat_map(|parent| {
-                let mut path = path.clone();
-                path.push(parent);
-                trace(graph, source, parent, empty, materialized, path, txs)
-            })
-            .collect()
+        // find empty parents
+        let empty: HashSet<_> = parents.iter()
+            .filter(|ni| empty.contains(ni))
+            .map(|ni| graph[*ni].addr())
+            .collect();
+
+        if let Some(options) = n.must_replay_among(&empty) {
+            // we *must* replay the state of one of the nodes in options
+            parents.retain(|&parent| options.contains(&graph[parent].addr()));
+            assert!(!parents.is_empty());
+
+            if parents.len() == 1 {
+                // no need to pick
+                break;
+            }
+
+            // we want to pick the ancestor that causes us to do the least amount of work.
+            // this is really a balancing act between
+            //
+            //   a) how many records we are going to push through the filter; and
+            //   b) how much state we need to replay
+            //
+            // consider the case where we are replaying a node downstream of a join, and the
+            // join has two ancestors: a base node (A) and a filter (F) over a base node (B).
+            // when should we choose to replay one or the other?
+            //
+            //  - the cost of replaying A is
+            //        |A| joins
+            //      + |A| lookups in B through F
+            //  - the cost of replaying B through F is
+            //        |B| filter operations
+            //      + |F(B)| join operations
+            //      + |F(B)| lookups in A
+            //
+            // which of these is more costly? even assuming we know |A| and |B|, it is not
+            // clear, because we don't know F's specificity. let's assume some things:
+            //
+            //  - filters are cheaper than joins (~10x)
+            //  - replaying is cheaper than filtering (~10x)
+            //  - a filter emits one record for every FILTER_SPECIFICITY input records
+            //
+            // given those rough estimates, what's the best choice? well, we should pick a node
+            // N with filters F1..Fn to replay which minimizes
+            //
+            //    1   * |N|                                 # replay cost
+            let replay_cost = 1;
+            //  + 10  * ( ∑i |N| / FILTER_SPECIFICITY ^ i ) # filter cost
+            let filter_cost = 10;
+            //  + 100 * |N| / FILTER_SPECIFICITY ^ n        # join cost
+            let join_cost = 100;
+            //
+            // it is worth pointing out that this heuristic does *not* capture the fact that
+            // replaying A above will encounter more expensive lookups on the join path (since
+            // the lookups are in F(B), as opposed to directly in A).
+            //
+            // to compute this, we need to find |N| and n for each candidate node.
+            // let's do that now
+            let best = parents.iter()
+                .map(|&p| {
+                    let mut intermediates = vec![];
+                    let mut stateful = p;
+                    while !in_materialized(stateful) {
+                        let n = &graph[stateful];
+                        // joins require their inputs to be materialized.
+                        // therefore, we know that this node must be query_through.
+                        assert!(n.is_internal());
+                        assert!(n.can_query_through());
+                        // if this node is selective (e.g., a filter), increase the filter factor
+                        // we need to keep track of non-selective project/permute nodes too though,
+                        // as they increase the cost
+                        intermediates.push(n.is_selective());
+                        // now walk to the parent.
+                        let mut ps =
+                            graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                        // of which there must be at least one
+                        stateful = ps.next().expect("recursed all the way to source");
+                        // there shouldn't ever be multiple, because neither join nor union
+                        // are query_through.
+                        assert_eq!(ps.count(), 0);
+                    }
+
+                    // find the size of the state we would end up replaying
+                    let (tx, rx) = mpsc::sync_channel(1);
+                    let stateful = &graph[stateful];
+                    txs[&stateful.domain()]
+                        .send(Packet::StateSizeProbe {
+                            node: *stateful.addr().as_local(),
+                            ack: tx,
+                        })
+                        .unwrap();
+                    let mut size = rx.recv().unwrap_or(0);
+
+                    // compute the total cost
+                    // replay cost
+                    let mut cost = replay_cost * size;
+                    // filter cost
+                    for does_filter in intermediates {
+                        cost += filter_cost * size;
+                        if does_filter {
+                            size /= FILTER_SPECIFICITY;
+                        }
+                    }
+                    // join cost
+                    cost += join_cost * size;
+
+                    println!("cost of replaying along {:?}: {}", p, cost);
+                    (p, cost)
+                })
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap();
+
+            println!("picked replay through {:?} for cost {}", best.0, best.1);
+
+            parents.clear();
+            parents.push(best.0);
+        } else {
+            // union; just replay all
+        }
+        break;
     }
+
+    // there's no point in replaying parents that are empty
+    parents.retain(|&parent| !empty.contains(&parent));
+
+    parents.into_iter()
+        .flat_map(|parent| {
+            let mut path = path.clone();
+            path.push(parent);
+            trace(graph, source, parent, empty, materialized, path, txs)
+        })
+        .collect()
 }

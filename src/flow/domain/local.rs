@@ -197,11 +197,15 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
 #[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
     state: Vec<(Vec<usize>, KeyedState<T>)>,
+    rows: usize,
 }
 
 impl<T: Hash + Eq + Clone> Default for State<T> {
     fn default() -> Self {
-        State { state: Vec::new() }
+        State {
+            state: Vec::new(),
+            rows: 0,
+        }
     }
 }
 
@@ -242,6 +246,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
 
+        self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
             match s.1 {
@@ -281,6 +286,11 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn remove(&mut self, r: &[T]) {
+        // TODO:
+        // this will currently remove *all* matching rows, whereas we probably only want to remove
+        // the *first* row. when that change is made, this next line will be correct (except if
+        // there's no match I guess).
+        self.rows.saturating_sub(1);
         for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => {
@@ -334,6 +344,10 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn len(&self) -> usize {
+        if self.state.is_empty() { 0 } else { self.rows }
+    }
+
+    pub fn nkeys(&self) -> usize {
         if self.state.is_empty() {
             0
         } else {
