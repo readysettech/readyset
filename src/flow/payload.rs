@@ -62,6 +62,11 @@ pub enum Packet {
         data: ReplayData,
     },
 
+    //
+    // Internal control
+    //
+    Finish(Tag, flow::LocalNodeIndex),
+
     // Control messages
     //
     /// Add a new node to this domain below the given parents.
