@@ -1,5 +1,6 @@
 use nom::{alphanumeric, digit, eof, is_alphanumeric, line_ending, multispace};
 use nom::{IResult, Err, ErrorKind, Needed};
+use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
 
@@ -42,6 +43,25 @@ pub enum Operator {
     GreaterOrEqual,
     Less,
     LessOrEqual,
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let op = match *self {
+            Operator::Not => "not",
+            Operator::And => "and",
+            Operator::Or => "or",
+            Operator::Like => "like",
+            Operator::NotLike => "not_like",
+            Operator::Equal => "=",
+            Operator::NotEqual => "!=",
+            Operator::Greater => ">",
+            Operator::GreaterOrEqual => ">=",
+            Operator::Less => "<",
+            Operator::LessOrEqual => "<=",
+        };
+        write!(f, "{}", op)
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
