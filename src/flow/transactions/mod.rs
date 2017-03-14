@@ -45,24 +45,18 @@ impl PartialEq for BufferEntry {
 }
 impl Eq for BufferEntry {}
 
-pub enum Bundle {
+enum Bundle {
     Empty,
-    Messages(Vec<Packet>),
+    Messages(usize, Vec<Packet>),
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
 }
 
-impl From<Packet> for Bundle {
-    fn from(p: Packet) -> Self {
-        match p {
-            Packet::Transaction { .. } => Bundle::Messages(vec![p]),
-            Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
-            Packet::CompleteMigration { ingress_from_base, .. } => {
-                Bundle::MigrationEnd(ingress_from_base)
-            }
-            _ => unreachable!(),
-        }
-    }
+pub enum Event {
+    Transaction(Vec<Packet>),
+    StartMigration,
+    CompleteMigration,
+    None,
 }
 
 pub struct DomainState {
@@ -76,12 +70,9 @@ pub struct DomainState {
 
     next_transaction: Bundle,
 
-    // Number of packets for the next transaction. None if not currently known.
-    next_packet_count: Option<usize>,
-
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
     /// that are only connected by timestamp ingress nodes are not included.
-    ingress_from_base: HashMap<NodeIndex, usize>,
+    ingress_from_base: Vec<usize>,
 
     /// Timestamp that the domain has seen all transactions up to.
     ts: i64,
@@ -121,8 +112,7 @@ impl DomainState {
             checktable: checktable,
             buffer: BinaryHeap::new(),
             next_transaction: Bundle::Empty,
-            next_packet_count: None,
-            ingress_from_base: HashMap::new(),
+            ingress_from_base: Vec::new(),
             ts: ts,
         }
     }
@@ -181,16 +171,21 @@ impl DomainState {
         if self.ts == prev_ts {
             self.ts = ts - 1;
 
-            if self.next_packet_count.is_none() {
-                self.next_packet_count = Some(base.map(|b| self.ingress_from_base[&b])
-                                                  .unwrap_or(1));
-            }
-
             match self.next_transaction {
                 Bundle::Empty => {
-                    mem::replace(&mut self.next_transaction, m.into());
+                    let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
+                    let bundle = match m {
+                        Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
+                        Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
+                        Packet::CompleteMigration { ingress_from_base, .. } => {
+                            Bundle::MigrationEnd(ingress_from_base)
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    mem::replace(&mut self.next_transaction, bundle);
                 }
-                Bundle::Messages(ref mut packets) => packets.push(m),
+                Bundle::Messages(_, ref mut packets) => packets.push(m),
                 _ => unreachable!(),
             }
         } else {
@@ -211,94 +206,83 @@ impl DomainState {
         }
     }
 
-    pub fn handle<'a>(&'a mut self, mut m: Packet) -> BufferIterator<'a> {
+    pub fn handle(&mut self, mut m: Packet) {
         if self.assign_ts(&mut m) {
             self.buffer_transaction(m);
         }
-
-        BufferIterator { ds: self }
     }
-}
 
-pub struct BufferIterator<'a> {
-    ds: &'a mut DomainState,
-}
+    fn update_next_transaction(&mut self) {
+        let has_next = self.buffer
+            .peek()
+            .map(|e| e.prev_ts == self.ts)
+            .unwrap_or(false);
 
-impl<'a> Iterator for BufferIterator<'a> {
-    type Item = Vec<Packet>;
+        if has_next {
+            let entry = self.buffer.pop().unwrap();
+            let ts = entry.ts;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let ready = match self.ds.next_transaction {
-            Bundle::Messages(ref v) => Some(v.len()) == self.ds.next_packet_count,
-            Bundle::MigrationStart(..) => true,
-            Bundle::MigrationEnd(..) => true,
-            Bundle::Empty => false,
-        };
-
-        if ready {
-            let mut bundle = mem::replace(&mut self.ds.next_transaction, Bundle::Empty);
-            if let Bundle::MigrationStart(channel) = bundle {
-                channel.send(()).unwrap();
-                bundle = Bundle::Empty;
-            }
-            if let Bundle::MigrationEnd(ingress_from_base) = bundle {
-                self.ds.ingress_from_base = ingress_from_base;
-                bundle = Bundle::Empty;
-            }
-
-            self.ds.ts += 1;
-            self.ds.next_packet_count = None;
-            if self.ds
-                   .buffer
-                   .peek()
-                   .map(|e| e.prev_ts == self.ds.ts)
-                   .unwrap_or(false) {
-                let entry = self.ds
-                    .buffer
-                    .pop()
-                    .unwrap();
-                let ts = entry.ts;
-
-                match entry.transaction {
-                    BufferedTransaction::Transaction(base, p) => {
-                        let mut messages = vec![p];
-                        while self.ds
-                                  .buffer
-                                  .peek()
-                                  .map(|e| e.ts == ts)
-                                  .unwrap_or(false) {
-                            let e = self.ds
-                                .buffer
-                                .pop()
-                                .unwrap();
-                            if let BufferedTransaction::Transaction(_, p) = e.transaction {
-                                messages.push(p);
-                            } else {
-                                unreachable!(); // Different transaction types at same timestamp
-                            }
+            match entry.transaction {
+                BufferedTransaction::Transaction(base, p) => {
+                    let mut messages = vec![p];
+                    while self.buffer
+                              .peek()
+                              .map(|e| e.ts == ts)
+                              .unwrap_or(false) {
+                        let e = self.buffer.pop().unwrap();
+                        if let BufferedTransaction::Transaction(_, p) = e.transaction {
+                            messages.push(p);
+                        } else {
+                            unreachable!(); // Different transaction types at same timestamp
                         }
+                    }
 
-                        self.ds.next_packet_count = Some(self.ds.ingress_from_base[&base]);
-                        self.ds.next_transaction = Bundle::Messages(messages);
-                    }
-                    BufferedTransaction::MigrationStart(sender) => {
-                        self.ds.next_packet_count = Some(1);
-                        self.ds.next_transaction = Bundle::MigrationStart(sender)
-                    }
-                    BufferedTransaction::MigrationEnd(ingress_from_base) => {
-                        self.ds.next_packet_count = Some(1);
-                        self.ds.next_transaction = Bundle::MigrationEnd(ingress_from_base);
-                    }
+                    self.next_transaction = Bundle::Messages(self.ingress_from_base[base.index()],
+                                                             messages);
+                }
+                BufferedTransaction::MigrationStart(sender) => {
+                    self.next_transaction = Bundle::MigrationStart(sender)
+                }
+                BufferedTransaction::MigrationEnd(ingress_from_base) => {
+                    self.next_transaction = Bundle::MigrationEnd(ingress_from_base);
                 }
             }
+        }
+    }
 
-            if let Bundle::Messages(v) = bundle {
-                Some(v)
-            } else {
-                self.next()
+    pub fn get_next_event(&mut self) -> Event {
+        match mem::replace(&mut self.next_transaction, Bundle::Empty) {
+            Bundle::MigrationStart(channel) => {
+                channel.send(()).unwrap();
+                self.ts += 1;
+                self.update_next_transaction();
+                Event::StartMigration
+
             }
-        } else {
-            None
+            Bundle::MigrationEnd(ingress_from_base) => {
+                let max_index = ingress_from_base.keys()
+                    .map(|ni| ni.index())
+                    .max()
+                    .unwrap_or(0);
+                self.ingress_from_base = vec![0; max_index + 1];
+                for (ni, count) in ingress_from_base.into_iter() {
+                    self.ingress_from_base[ni.index()] = count;
+                }
+
+                self.ts += 1;
+                self.update_next_transaction();
+                Event::CompleteMigration
+            }
+            Bundle::Messages(count, v) => {
+                if v.len() < count {
+                    return Event::None;
+                }
+
+                self.ts += 1;
+                self.update_next_transaction();
+                Event::Transaction(v)
+            }
+            Bundle::Empty => Event::None,
         }
     }
 }

@@ -274,9 +274,14 @@ impl Domain {
             m @ Packet::Transaction { .. } |
             m @ Packet::StartMigration { .. } |
             m @ Packet::CompleteMigration { .. } => {
-                let messages: Vec<_> = self.transaction_state.handle(m).collect();
-                for m in messages {
-                    self.transactional_dispatch(m);
+                self.transaction_state.handle(m);
+                loop {
+                    match self.transaction_state.get_next_event() {
+                        transactions::Event::Transaction(m) => self.transactional_dispatch(m),
+                        transactions::Event::StartMigration => {}
+                        transactions::Event::CompleteMigration => {}
+                        transactions::Event::None => break,
+                    }
                 }
             }
             m @ Packet::Replay { .. } => {
