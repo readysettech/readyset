@@ -344,7 +344,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn len(&self) -> usize {
-        if self.state.is_empty() { 0 } else { self.rows }
+        self.rows
     }
 
     pub fn nkeys(&self) -> usize {

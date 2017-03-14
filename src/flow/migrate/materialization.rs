@@ -710,7 +710,7 @@ fn trace<T>(graph: &Graph,
                             ack: tx,
                         })
                         .unwrap();
-                    let mut size = rx.recv().unwrap_or(0);
+                    let mut size = rx.recv().expect("stateful parent should have state");
 
                     // compute the total cost
                     // replay cost
