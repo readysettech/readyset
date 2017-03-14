@@ -102,28 +102,25 @@ impl SqlIncorporator {
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
     /// vector of conditions that `shortcut` understands.
-    fn to_conditions(&self, ct: &ConditionTree, na: &NodeAddress) -> Vec<Option<DataType>> {
+    fn to_conditions(&self,
+                     ct: &ConditionTree,
+                     na: &NodeAddress)
+                     -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): support other types of operators
-        if ct.operator != Operator::Equal {
-            println!("Conditionals with {:?} are not supported yet, so ignoring {:?}",
-                     ct.operator,
-                     ct);
-            vec![]
-        } else {
-            // TODO(malte): we only support one level of condition nesting at this point :(
-            let l = match *ct.left.as_ref().unwrap().as_ref() {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            let r = match *ct.right.as_ref().unwrap().as_ref() {
-                ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
-                _ => unimplemented!(),
-            };
-            let num_columns = self.fields_for(*na).len();
-            let mut filter = vec![None; num_columns];
-            filter[self.field_to_columnid(*na, &l.name).unwrap()] = Some(DataType::from(r));
-            filter
-        }
+        // TODO(malte): we only support one level of condition nesting at this point :(
+        let l = match *ct.left.as_ref().unwrap().as_ref() {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        let r = match *ct.right.as_ref().unwrap().as_ref() {
+            ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+            _ => unimplemented!(),
+        };
+        let num_columns = self.fields_for(*na).len();
+        let mut filter = vec![None; num_columns];
+        filter[self.field_to_columnid(*na, &l.name).unwrap()] = Some((ct.operator.clone(),
+                                                                      DataType::from(r)));
+        filter
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
