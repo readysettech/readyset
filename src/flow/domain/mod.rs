@@ -739,7 +739,10 @@ impl Domain {
                                 };
 
                                 trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                inject_tx.send(p).unwrap();
+                                if inject_tx.send(p).is_err() {
+                                    warn!(log, "replayer noticed domain shutdown");
+                                    break;
+                                }
                             }
 
                             debug!(log, "state chunker finished"; "node" => to.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
@@ -810,11 +813,69 @@ impl Domain {
             // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
             // this allows finish_replay to dispatch into the node by overriding replaying_to.
             self.not_ready.remove(&ni);
-            inject_tx.send(Packet::Finish(tag, ni)).unwrap();
+            // NOTE: if this call ever blocks, we're in big trouble: handle_replay is called
+            // directly from the main loop of a domain, so if we block here, we're also blocking
+            // the loop that is supposed to drain the channel we're blocking on. luckily, in this
+            // particular case, we know that sending will not block, because:
+            //
+            //  - inject_tx has a buffer size of 1, so we will block if either inject_tx is
+            //    already full, or if there are other concurrent senders.
+            //  - there are no concurrent senders because:
+            //    - there are only two other places that send on inject_tx: in finish_replay, and in
+            //      state replay.
+            //    - finish_replay is not running, because it is only run from the main domain loop,
+            //      and that's currently executing us.
+            //    - no state replay can be sending, because:
+            //      - there is only one replay: this one
+            //      - that replay sent an entry with last: true (so we got finished.is_some)
+            //      - last: true is the *last* thing the replay thread sends
+            //  - inject_tx must be empty, because
+            //    - if the previous send was from the replay thread, it had last: true (otherwise we
+            //      wouldn't have finished.is_some), and we just recv'd that.
+            //    - if the last send was from finish_replay, it must have been recv'd by the time
+            //      this code runs. the reason for this is a bit more involved:
+            //      - we just received a Packet::Replay with last: true.
+            //      - at some point prior to this, finish_replay sent a Packet::Finish
+            //      - it turns out that there *must* have been a recv on the inject channel between
+            //        these two. by contradiction:
+            //        - assume no packet was received on inject between the two times
+            //        - if we are using local replay, we know the replay thread has finished,
+            //          since handle_replay must have seen last: true from it in order to trigger
+            //          finish_replay
+            //        - if we were being replayed to from another domain, the *previous* Replay we
+            //          received from it must have had last: true (again, to trigger finish_replay)
+            //        - thus, the Replay we are receiving *now* must be a part of the *next* replay
+            //        - we know finish_replay has not acknowledged the previous replay to the
+            //          parent domain:
+            //          - it does so only after receiving a Finish (from the inject channel), and
+            //            *not* emitting another Finish
+            //          - since it *did* emit a Finish, we know it did *not* ack last time
+            //          - by assumption, the Finish it emitted has not been received, so we also
+            //            know it hasn't run again
+            //        - since no replay message is sent after a last: true until the migration sees
+            //          the ack from finish_replay, we know the most recent replay must be the
+            //          last: true that triggered finish_replay.
+            //        - but this is a contradiction, since we just received a Packet::Replay
+            //
+            // phew.
+            // hopefully that made sense.
+            // this (informal) argument relies on there only being one active replay in the system
+            // at any given point in time, so we may need to revisit it for partial materialization
+            // (TODO)
+            match inject_tx.try_send(Packet::Finish(tag, ni)) {
+                Ok(_) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    // can't happen, since we know the reader thread (us) is still running
+                    unreachable!();
+                }
+                Err(mpsc::TrySendError::Full(_)) => {
+                    unreachable!();
+                }
+            }
         }
     }
 
-    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject: &mut InjectCh) {
+    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject_tx: &mut InjectCh) {
         if self.replaying_to.is_none() {
             // we're told to continue replay, but nothing is being replayed
             unreachable!();
@@ -883,7 +944,30 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            inject.send(Packet::Finish(tag, node)).unwrap();
+            // NOTE: similarly to in handle_replay, if this call ever blocks, we're in big trouble:
+            // finish_replay is also called directly from the main loop of a domain, so if we block
+            // here, we're also blocking the loop that is supposed to drain the channel we're
+            // blocking on. the argument for why this won't block is very similar to for
+            // handle_replay. briefly:
+            //
+            //  - we know there's only one replay going on
+            //  - we know there are no more Replay packets for this replay, since one with last:
+            //    true must have been received for finish_replay to be triggered
+            //  - therefore we know that no replay thread is running
+            //  - since handle_replay will only send Packet::Finish once (when it receives last:
+            //    true), we also know that it will not send again until the replay is over
+            //  - the replay is over when we acknowedge the replay, which we haven't done yet
+            //    (otherwise we'd be hitting the if branch above).
+            match inject_tx.try_send(Packet::Finish(tag, node)) {
+                Ok(_) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    // can't happen, since we know the reader thread (us) is still running
+                    unreachable!();
+                }
+                Err(mpsc::TrySendError::Full(_)) => {
+                    unreachable!();
+                }
+            }
         }
     }
 
