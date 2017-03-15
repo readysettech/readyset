@@ -670,11 +670,37 @@ impl SqlIncorporator {
                                 // would need to generate an Agg-Join-Agg sequence for each pair of
                                 // tables involved.
                                 for fn_col in &computed_cols_cgn.columns {
+                                    // we must also push parameter columns through the group by
+                                    let over_cols = target_columns_from_computed_column(fn_col);
+                                    // TODO(malte): we only support a single `over` column here
+                                    assert_eq!(over_cols.len(), 1);
+                                    let over_table = over_cols.iter()
+                                        .next()
+                                        .unwrap()
+                                        .table
+                                        .as_ref()
+                                        .unwrap()
+                                        .as_str();
+                                    // get any parameter columns that aren't also in the group-by
+                                    // column set
+                                    let param_cols: Vec<_> = qg.relations
+                                        .get(over_table)
+                                        .as_ref()
+                                        .unwrap()
+                                        .parameters
+                                        .iter()
+                                        .filter(|ref c| !gb_cols.contains(c))
+                                        .collect();
+                                    // combine
+                                    let gb_and_param_cols: Vec<_> = gb_cols.iter()
+                                        .chain(param_cols.into_iter())
+                                        .cloned()
+                                        .collect();
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
                                                                               i),
                                                                      fn_col,
-                                                                     gb_cols,
+                                                                     gb_and_param_cols.as_slice(),
                                                                      None,
                                                                      mig);
                                     func_nodes.push(ni);
