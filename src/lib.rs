@@ -9,7 +9,7 @@ pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::CreateTableStatement;
 pub use self::insert::InsertStatement;
 pub use self::parser::*;
-pub use self::select::SelectStatement;
+pub use self::select::{SelectStatement, GroupByClause, LimitClause, OrderClause, OrderType};
 pub use self::table::Table;
 
 pub mod parser;
