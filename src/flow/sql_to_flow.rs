@@ -884,18 +884,19 @@ mod tests {
             .is_ok());
 
         // Should have two nodes: source and "users" base table
-        assert_eq!(mig.graph().node_count(), 2);
+        let ncount = mig.graph().node_count();
+        assert_eq!(ncount, 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
         assert!("SELECT users.id from users;".to_flow_parts(&mut inc, None, &mut mig).is_ok());
-        // Should now have source, "users", two nodes for the new selection: one filter node
-        // and one edge view node, and a reader node.
-        assert_eq!(mig.graph().node_count(), 5);
+        // Should now have source, "users", a leaf projection node for the new selection, and
+        // a reader node
+        assert_eq!(mig.graph().node_count(), ncount + 2);
 
         // Invalid query should fail parsing and add no nodes
         assert!("foo bar from whatever;".to_flow_parts(&mut inc, None, &mut mig).is_err());
         // Should still only have source, "users" and the two nodes for the above selection
-        assert_eq!(mig.graph().node_count(), 5);
+        assert_eq!(mig.graph().node_count(), ncount + 2);
     }
 
     #[test]
@@ -940,17 +941,15 @@ mod tests {
                                   &Column::from("articles.title"),
                                   &Column::from("users.id"),
                                   &Column::from("users.name")]);
-        // permute node 1 (for articles)
-        let new_view1 = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
-        assert_eq!(new_view1.fields(), &["title", "author"]);
-        assert_eq!(new_view1.description(), format!("π[2, 1]"));
-        // permute node 2 (for users)
-        let new_view2 = get_node(&inc, &mig, &format!("q_{:x}_n1", qid));
-        assert_eq!(new_view2.fields(), &["name", "id"]);
-        assert_eq!(new_view2.description(), format!("π[1, 0]"));
         // join node
-        let new_view3 = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(new_view3.fields(), &["title", "author", "name", "id"]);
+        let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        assert_eq!(new_join_view.fields(),
+                   &["id", "author", "title", "id", "name"]);
+        // leaf node
+        let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
+        // XXX(malte): leaf overprojection needs fixing
+        assert_eq!(new_leaf_view.fields(), &["title", "author", "name", "id"]);
+        assert_eq!(new_leaf_view.description(), format!("π[2, 1, 4, 0]"));
     }
 
     #[test]
@@ -983,15 +982,11 @@ mod tests {
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
-        assert_eq!(filter.description(), format!("σ[0=\"42\"]"));
-        // projection node
-        let project = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
-        assert_eq!(project.fields(), &["name"]);
-        assert_eq!(project.description(), format!("π[1]"));
-        // edge node
+        assert_eq!(filter.description(), format!("σ[f0 = \"42\"]"));
+        // leaf view node
         let edge = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge.fields(), &["name"]);
-        assert_eq!(edge.description(), format!("π[0]"));
+        assert_eq!(edge.description(), format!("π[1]"));
     }
 
     #[test]
