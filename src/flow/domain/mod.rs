@@ -29,6 +29,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
+#[allow(missing_docs)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
 
@@ -44,6 +45,7 @@ impl Into<usize> for Index {
     }
 }
 
+#[allow(missing_docs)]
 impl Index {
     pub fn index(&self) -> usize {
         self.0

@@ -367,6 +367,7 @@ pub use flow::{Blender, Migration, NodeAddress, Mutator};
 pub use flow::node::StreamUpdate;
 pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use flow::data::DataType;
+pub use flow::domain::Index;
 pub use ops::Datas;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
