@@ -267,12 +267,24 @@ pub trait Ingredient
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
-#[derive(Clone)]
 pub struct Mutator {
     src: NodeAddress,
     tx: mpsc::SyncSender<payload::Packet>,
     addr: NodeAddress,
     primary_key: Vec<usize>,
+    tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
+}
+
+impl Clone for Mutator {
+    fn clone(&self) -> Self {
+        Self {
+            src: self.src.clone(),
+            tx: self.tx.clone(),
+            addr: self.addr.clone(),
+            primary_key: self.primary_key.clone(),
+            tx_reply_channel: mpsc::channel(),
+        }
+    }
 }
 
 impl Mutator {
@@ -285,14 +297,19 @@ impl Mutator {
     }
 
     fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
-        let (send, recv) = mpsc::channel();
+        let send = self.tx_reply_channel.0.clone();
         let m = payload::Packet::Transaction {
             link: payload::Link::new(self.src, self.addr),
             data: r,
             state: payload::TransactionState::Pending(t, send),
         };
         self.tx.clone().send(m).unwrap();
-        recv.recv().unwrap()
+        loop {
+            match self.tx_reply_channel.1.try_recv() {
+                Ok(r) => return r,
+                Err(..) => {}
+            }
+        }
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
@@ -519,6 +536,7 @@ impl Blender {
                 .suggest_indexes(base)
                 .remove(&base)
                 .unwrap_or_else(Vec::new),
+            tx_reply_channel: mpsc::channel(),
         }
     }
 

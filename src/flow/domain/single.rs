@@ -132,7 +132,10 @@ impl NodeDescriptor {
                     m.link_mut().src = NodeAddress::make_global(self.index);
                     m.link_mut().dst = dst;
 
-                    tx.send(m).unwrap();
+                    if tx.send(m).is_err() {
+                        // we must be shutting down...
+                        break;
+                    }
 
                     if take {
                         break;

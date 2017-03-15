@@ -197,11 +197,15 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
 #[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
     state: Vec<(Vec<usize>, KeyedState<T>)>,
+    rows: usize,
 }
 
 impl<T: Hash + Eq + Clone> Default for State<T> {
     fn default() -> Self {
-        State { state: Vec::new() }
+        State {
+            state: Vec::new(),
+            rows: 0,
+        }
     }
 }
 
@@ -242,6 +246,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
 
+        self.rows = self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
             match s.1 {
@@ -281,11 +286,20 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn remove(&mut self, r: &[T]) {
+        let mut removed = 0;
         for s in &mut self.state {
+            removed = 0; // otherwise we'd count every removal multiple times
+            let keep = |rsr: &Arc<Vec<T>>| if &rsr[..] == r {
+                removed += 1;
+                false
+            } else {
+                true
+            };
+
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
-                        rs.retain(|rsr| &rsr[..] != r);
+                        rs.retain(keep);
                     }
                 }
                 _ => {
@@ -294,13 +308,13 @@ impl<T: Hash + Eq + Clone> State<T> {
                             // TODO: can we avoid the Clone here?
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
                             if let Some(ref mut rs) = map.get_mut(&key) {
-                                rs.retain(|rsr| &rsr[..] != r);
+                                rs.retain(keep);
                             }
                         }
                         KeyedState::Tri(ref mut map) => {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
                             if let Some(ref mut rs) = map.get_mut(&key) {
-                                rs.retain(|rsr| &rsr[..] != r);
+                                rs.retain(keep);
                             }
                         }
                         KeyedState::Quad(ref mut map) => {
@@ -309,7 +323,7 @@ impl<T: Hash + Eq + Clone> State<T> {
                                        r[s.0[2]].clone(),
                                        r[s.0[3]].clone());
                             if let Some(ref mut rs) = map.get_mut(&key) {
-                                rs.retain(|rsr| &rsr[..] != r);
+                                rs.retain(keep);
                             }
                         }
                         KeyedState::Single(..) => unreachable!(),
@@ -317,6 +331,7 @@ impl<T: Hash + Eq + Clone> State<T> {
                 }
             }
         }
+        self.rows = self.rows.saturating_sub(removed);
     }
 
     pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
@@ -334,6 +349,10 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn len(&self) -> usize {
+        self.rows
+    }
+
+    pub fn nkeys(&self) -> usize {
         if self.state.is_empty() {
             0
         } else {
@@ -352,6 +371,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn clear(&mut self) {
+        self.rows = 0;
         for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => map.clear(),

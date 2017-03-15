@@ -6,6 +6,8 @@ use std::sync::mpsc;
 
 use std::collections::HashMap;
 
+const SETTLE_TIME_MS: u64 = 100;
+
 #[test]
 fn it_works() {
     // set up graph
@@ -33,7 +35,7 @@ fn it_works() {
     muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
@@ -42,7 +44,7 @@ fn it_works() {
     mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that value was updated again
     let res = cq(&id).unwrap();
@@ -53,7 +55,7 @@ fn it_works() {
     muta.delete(vec![id.clone()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 4.into()]]));
@@ -62,7 +64,7 @@ fn it_works() {
     mutb.update(vec![id.clone(), 6.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 6.into()]]));
@@ -175,7 +177,7 @@ fn it_works_w_mat() {
     muta.put(vec![id.clone(), 3.into()]);
 
     // give them some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // send a query to c
     // we should see all the a values
@@ -191,7 +193,7 @@ fn it_works_w_mat() {
     mutb.put(vec![id.clone(), 6.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that value was updated again
     let res = cq(&id).unwrap();
@@ -295,7 +297,7 @@ fn votes() {
     mut1.put(vec![a1.clone(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // query articles to see that it was updated
     assert_eq!(articleq(&a1), Ok(vec![vec![a1.clone(), 2.into()]]));
@@ -304,7 +306,7 @@ fn votes() {
     mut2.put(vec![a2.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
@@ -315,7 +317,7 @@ fn votes() {
     mutv.put(vec![1.into(), a1.clone()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // query vote count to see that the count was updated
     let res = vcq(&a1).unwrap();
@@ -400,7 +402,7 @@ fn transactional_vote() {
     assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token).is_ok());
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // query articles to see that it was absorbed
     let (res, token) = articleq(&a1).unwrap();
@@ -415,7 +417,7 @@ fn transactional_vote() {
     assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token).is_ok());
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // query articles again to see that the new article was absorbed
     // and that the old one is still present
@@ -440,7 +442,7 @@ fn transactional_vote() {
     assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token).is_ok());
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check endq tokens
     assert!(!validate(&endq_token));
@@ -496,7 +498,7 @@ fn empty_migration() {
     muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
@@ -505,7 +507,7 @@ fn empty_migration() {
     mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that value was updated again
     let res = cq(&id).unwrap();
@@ -532,7 +534,7 @@ fn simple_migration() {
     muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that a got it
     assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
@@ -551,7 +553,7 @@ fn simple_migration() {
     mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that b got it
     assert_eq!(bq(&id), Ok(vec![vec![1.into(), 4.into()]]));
@@ -574,7 +576,7 @@ fn transactional_migration() {
     muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty()).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that a got it
     assert_eq!(aq(&1.into()).unwrap().0, vec![vec![1.into(), 2.into()]]);
@@ -593,7 +595,7 @@ fn transactional_migration() {
     mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty()).unwrap();
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that b got it
     assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
@@ -619,7 +621,7 @@ fn transactional_migration() {
     mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty()).unwrap();
 
     // give them some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that c got them
     assert_eq!(cq(&3.into()).unwrap().0,
@@ -682,7 +684,7 @@ fn independent_domain_migration() {
     muta.put(vec![id.clone(), 2.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that a got it
     assert_eq!(aq(&id), Ok(vec![vec![1.into(), 2.into()]]));
@@ -704,7 +706,7 @@ fn independent_domain_migration() {
     mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::new(0, 10_000_000));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that a got it
     assert_eq!(bq(&id), Ok(vec![vec![1.into(), 4.into()]]));
@@ -1019,7 +1021,7 @@ fn live_writes() {
     });
 
     // let a few writes through to make migration take a while
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
 
     // now do a migration that's going to have to copy state
     let mut mig = g.start_migration();
@@ -1035,7 +1037,7 @@ fn live_writes() {
     jh.join().unwrap();
 
     // allow the system to catch up with the last writes
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
 
     // check that all writes happened the right number of times
     for i in 0..ids {
