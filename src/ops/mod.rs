@@ -34,6 +34,17 @@ impl fmt::Display for Record {
     }
 }
 
+impl fmt::Display for Record {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            // TODO(jmftrindade): Retrieve timestamps.
+            Record::Positive(..) => write!(f, "positive: {:?}", self.rec()),
+            Record::Negative(..) => write!(f, "negative: {:?}", self.rec()),
+            Record::DeleteRequest(..) => write!(f, "delete request")
+        }
+    }
+}
+
 impl Record {
     pub fn rec(&self) -> &[DataType] {
         match *self {

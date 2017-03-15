@@ -217,18 +217,15 @@ impl Ingredient for Base {
     }
 
     fn on_connected(&mut self, _: &Graph) {}
-
     fn on_commit(&mut self, us: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {
         self.us = Some(us);
     }
-
     fn on_input(&mut self,
                 _: NodeAddress,
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> Records {
-
         // Write incoming records to log before processing them if we are a durable node.
         match self.durability {
             BaseDurabilityLevel::Buffered |
