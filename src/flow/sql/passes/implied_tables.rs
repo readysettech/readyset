@@ -66,6 +66,7 @@ fn rewrite_conditional<F>(expand_columns: &F,
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
         use nom_sql::FunctionExpression::*;
+        use nom_sql::GroupByClause;
         use nom_sql::TableKey::*;
 
         // Tries to find a table with a matching column in the `tables_in_query` (information
@@ -180,6 +181,23 @@ impl ImpliedTableExpansion for SqlQuery {
                     None => None,
                     Some(wc) => Some(rewrite_conditional(&expand_columns, wc, &tables)),
                 };
+                // Expand within GROUP BY clause
+                sq.group_by = match sq.group_by {
+                    None => None,
+                    Some(gbc) => {
+                        Some(GroupByClause {
+                            columns: gbc.columns
+                                .into_iter()
+                                .map(|f| expand_columns(f, &tables))
+                                .collect(),
+                            having: match gbc.having {
+                                None => None,
+                                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
+                            },
+                        })
+                    }
+                };
+
 
                 SqlQuery::Select(sq)
             }
