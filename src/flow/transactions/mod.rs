@@ -131,9 +131,9 @@ impl DomainState {
                         .claim_timestamp(&token, base_node, data);
                     match result {
                         checktable::TransactionResult::Committed(ts, prevs) => {
+                            let _ = send.send(Ok(ts));
                             ::std::mem::replace(state,
                                                 TransactionState::Committed(ts, base_node, prevs));
-                            let _ = send.send(Ok(ts));
                             true
                         }
                         checktable::TransactionResult::Aborted => {
