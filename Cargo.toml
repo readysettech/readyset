@@ -9,9 +9,9 @@ b_memcached = ["memcached-rs"]
 b_postgresql = ["postgres"]
 b_mysql = ["mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
-b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
+b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins"]
 b_hybrid = ["mysql", "memcached-rs"]
-default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
+default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid", "serde", "serde_derive"]
 profiling = ["timekeeper/default"]
 
 [dependencies]
@@ -51,8 +51,8 @@ futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
 tarpc = {git="https://github.com/google/tarpc.git", optional = true}
 tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
-serde = { version = "0.9" }
-serde_derive = { version = "0.9" }
+serde = { version = "0.9", optional = true }
+serde_derive = { version = "0.9", optional = true }
 
 # for web
 rustc-serialize = { version = "0.3", optional = true }
