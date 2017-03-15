@@ -54,7 +54,7 @@ pub enum BaseDurabilityLevel {
 
 impl Base {
     /// Create a base node operator.
-    pub fn new(primary_key: Vec<usize>) -> Self {
+    pub fn new(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
         Base {
             primary_key: Some(primary_key),
             durability: durability,
@@ -156,7 +156,7 @@ impl Clone for Base {
             durable_log: None,
             durable_log_path: None,
             global_address: self.global_address,
-            key_column: self.key_column,
+            primary_key: self.primary_key.clone(),
             unique_id: ProcessUniqueId::new(),
             us: self.us,
         }
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn it_works_durability_none() {
-        let b = Base::new(0, BaseDurabilityLevel::None);
+        let b = Base::new(vec![0], BaseDurabilityLevel::None);
         assert_eq!(b.durability, BaseDurabilityLevel::None);
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn it_works_durability_buffered() {
-        let b = Base::new(0, BaseDurabilityLevel::Buffered);
+        let b = Base::new(vec![0], BaseDurabilityLevel::Buffered);
         assert_eq!(b.durability, BaseDurabilityLevel::Buffered);
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn it_works_durability_sync_immediately() {
-        let b = Base::new(0, BaseDurabilityLevel::SyncImmediately);
+        let b = Base::new(vec![0], BaseDurabilityLevel::SyncImmediately);
         assert_eq!(b.durability, BaseDurabilityLevel::SyncImmediately);
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());

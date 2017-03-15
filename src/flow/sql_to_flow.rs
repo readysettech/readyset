@@ -5,7 +5,7 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operato
               SqlQuery};
 use nom_sql::SelectStatement;
 use ops;
-use ops::base::Base;
+use ops::base::{Base, BaseDurabilityLevel};
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
@@ -268,7 +268,7 @@ impl SqlIncorporator {
                             cols.iter().position(|c| c == pkc).unwrap()
                         })
                         .collect();
-                    mig.add_ingredient(name, fields.as_slice(), Base::new(pkey_column_ids))
+                    mig.add_ingredient(name, fields.as_slice(), Base::new(pkey_column_ids, BaseDurabilityLevel::None))
                 }
                 _ => unreachable!(),
             }
