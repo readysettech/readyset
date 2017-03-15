@@ -246,7 +246,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
 
-        self.rows.saturating_add(1);
+        self.rows = self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
             match s.1 {
@@ -290,7 +290,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         // this will currently remove *all* matching rows, whereas we probably only want to remove
         // the *first* row. when that change is made, this next line will be correct (except if
         // there's no match I guess).
-        self.rows.saturating_sub(1);
+        self.rows = self.rows.saturating_sub(1);
         for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => {
@@ -366,6 +366,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn clear(&mut self) {
+        self.rows = 0;
         for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => map.clear(),
