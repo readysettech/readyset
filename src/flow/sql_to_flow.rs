@@ -442,18 +442,6 @@ impl SqlIncorporator {
             parent_ni = n;
             new_nodes.push(n);
         }
-        // finally, project only the columns we need
-        let projected_columns = Vec::from_iter(qgn.columns.iter().map(|c| c.name.clone()));
-        let projected_column_ids: Vec<usize> = qgn.columns
-            .iter()
-            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
-            .collect();
-        let n = mig.add_ingredient(String::from(name),
-                                   projected_columns.as_slice(),
-                                   Permute::new(parent_ni, projected_column_ids.as_slice()));
-        self.node_addresses.insert(String::from(name), n);
-        self.node_fields.insert(n, projected_columns);
-        new_nodes.push(n);
         new_nodes
     }
 
@@ -597,7 +585,7 @@ impl SqlIncorporator {
                 if *rel != "computed_columns" {
                     // the following conditional is required to avoid "empty" nodes (without any
                     // projected columns) that are required as inputs to joins
-                    if !qgn.columns.is_empty() || !qgn.predicates.is_empty() {
+                    if !qgn.predicates.is_empty() {
                         // add a basic filter/permute node for each query graph node if it either
                         // has: 1) projected columns; or 2) a filter condition
                         let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
@@ -737,18 +725,22 @@ impl SqlIncorporator {
 
             // 3. Generate leaf views that expose the query result
             {
-                let final_ni = if !join_nodes.is_empty() {
-                    join_nodes.last().unwrap()
+                let final_na = if !join_nodes.is_empty() {
+                    *join_nodes.last().unwrap()
                 } else if !func_nodes.is_empty() {
                     // XXX(malte): This won't work if (a) there are multiple function nodes in the
                     // query, or (b) computed columns are used within JOIN clauses
                     assert!(func_nodes.len() <= 2);
-                    func_nodes.last().unwrap()
-                } else {
-                    assert!(filter_nodes.len() == 1);
+                    *func_nodes.last().unwrap()
+                } else if !filter_nodes.is_empty() {
+                    assert_eq!(filter_nodes.len(), 1);
                     let filter = filter_nodes.iter().next().as_ref().unwrap().1;
                     assert_ne!(filter.len(), 0);
-                    filter.last().unwrap()
+                    *filter.last().unwrap()
+                } else {
+                    // no join, filter, or function node --> base node is parent
+                    assert_eq!(sorted_rels.len(), 1);
+                    self.address_for(&sorted_rels.last().unwrap())
                 };
                 let projected_columns: Vec<Column> = sorted_rels.iter()
                     .fold(Vec::new(), |mut v, s| {
@@ -756,14 +748,14 @@ impl SqlIncorporator {
                         v
                     });
                 let projected_column_ids: Vec<usize> = projected_columns.iter()
-                    .map(|c| self.field_to_columnid(*final_ni, &c.name).unwrap())
+                    .map(|c| self.field_to_columnid(final_na, &c.name).unwrap())
                     .collect();
                 let fields = projected_columns.iter()
                     .map(|c| c.name.clone())
                     .collect::<Vec<String>>();
                 leaf_na = mig.add_ingredient(String::from(name),
                                              fields.as_slice(),
-                                             Permute::new(*final_ni,
+                                             Permute::new(final_na,
                                                           projected_column_ids.as_slice()));
                 self.node_addresses.insert(String::from(name), leaf_na);
                 self.node_fields.insert(leaf_na, fields);
