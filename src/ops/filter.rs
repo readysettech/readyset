@@ -91,12 +91,17 @@ impl Ingredient for Filter {
     }
 
     fn description(&self) -> String {
+        use regex::Regex;
+
+        let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
         format!("σ[{}]",
                 self.filter
                     .iter()
                     .enumerate()
                     .filter_map(|(i, ref e)| match e.as_ref() {
-                        Some(&(ref op, ref x)) => Some(format!("{}{}{}", i, op, x)),
+                        Some(&(ref op, ref x)) => {
+                            Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                        }
                         None => None,
                     })
                     .collect::<Vec<_>>()
