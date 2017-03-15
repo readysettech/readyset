@@ -155,7 +155,7 @@ impl Recipe {
             for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
             }
-            new_nodes.insert(qfp.name.clone(), self.node_addr_for(&qfp.name).unwrap());
+            new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 
         // TODO(malte): deal with removal.
