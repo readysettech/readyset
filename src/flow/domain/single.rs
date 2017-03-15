@@ -134,7 +134,6 @@ impl NodeDescriptor {
 
                     if tx.send(m).is_err() {
                         // we must be shutting down...
-                        println!("egress detected shutdown in progress");
                         break;
                     }
 
