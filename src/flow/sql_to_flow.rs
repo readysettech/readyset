@@ -477,7 +477,7 @@ impl SqlIncorporator {
                         .collect()
                 };
 
-            // non-join columns projected are the union of the ancestor's projected columns
+            // non-join columns projected are the union of the ancestors' projected columns
             // TODO(malte): this will need revisiting when we do smart reuse
             let mut join_proj_config = tuples_for_cols(left_ni, projected_cols_left);
             join_proj_config.extend(tuples_for_cols(right_ni, projected_cols_right));
