@@ -29,7 +29,6 @@ pub fn parse_query(input: &str) -> Result<SqlQuery, &str> {
     };
 
     match insertion(&q_bytes) {
-
         IResult::Done(_, o) => return Ok(SqlQuery::Insert(o)),
         _ => (),
     };
