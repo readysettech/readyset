@@ -16,6 +16,13 @@ pub struct GroupByClause {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
+pub enum JoinClause {
+    Tables(Vec<Table>),
+    NestedSelect(Box<SelectStatement>),
+    NestedJoin(Box<JoinClause>),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct LimitClause {
     pub limit: u64,
     pub offset: u64,
@@ -38,6 +45,7 @@ pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,
     pub fields: FieldExpression,
+    pub join: Option<JoinClause>,
     pub where_clause: Option<ConditionExpression>,
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
@@ -95,6 +103,59 @@ named!(limit_clause<&[u8], LimitClause>,
     }))
 );
 
+/// Parse JOIN clause
+named!(join_clause<&[u8], JoinClause>,
+    complete!(chain!(
+        multispace? ~
+        _natural: opt!(caseless_tag!("natural")) ~
+        multispace? ~
+        alt_complete!(
+              caseless_tag!("left outer join")
+            | caseless_tag!("inner join")
+            | caseless_tag!("cross join")
+            | caseless_tag!("left join")
+            | caseless_tag!("join")
+        ) ~
+        multispace ~
+        j: alt_complete!(
+              chain!(
+                  table: table_reference,
+                  || {
+                      JoinClause::Tables(vec![table])
+                  }
+              )
+            | chain!(
+                  select: delimited!(tag!("("), selection, tag!(")")),
+                  || {
+                      JoinClause::NestedSelect(Box::new(select))
+                  }
+              )
+            | chain!(
+                  nested_join: delimited!(tag!("("), join_clause, tag!(")")),
+                  || {
+                      JoinClause::NestedJoin(Box::new(nested_join))
+                  }
+              )
+        ) ~
+        multispace ~
+        alt_complete!(
+              chain!(
+                  caseless_tag!("using") ~
+                  multispace ~
+                  delimited!(tag!("("), field_list, tag!(")")),
+                  || {}
+              )
+            | chain!(
+                  caseless_tag!("on") ~
+                  multispace ~
+                  delimited!(tag!("("), condition_expr, tag!(")")),
+                  || {}
+              )
+        ),
+    || { j }))
+);
+
+/// Parse ORDER BY clause
 named!(order_clause<&[u8], OrderClause>,
     complete!(chain!(
         multispace? ~
@@ -144,6 +205,7 @@ named!(pub selection<&[u8], SelectStatement>,
         fields: field_definition_expr ~
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~
+        join: opt!(join_clause) ~
         cond: opt!(where_clause) ~
         group_by: opt!(group_by_clause) ~
         order: opt!(order_clause) ~
@@ -154,6 +216,7 @@ named!(pub selection<&[u8], SelectStatement>,
                 tables: tables,
                 distinct: distinct.is_some(),
                 fields: fields,
+                join: join,
                 where_clause: cond,
                 group_by: group_by,
                 order: order,
@@ -535,6 +598,37 @@ mod tests {
                            limit: 50,
                            offset: 0,
                        }),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn simple_joins() {
+        let qstring = "select paperId from PaperConflict join PCMember using (contactId);";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PaperConflict")],
+                       fields: FieldExpression::Seq(columns(&["paperId"])),
+                       join: Some(JoinClause::Tables(vec![Table::from("PCMember")])),
+                       ..Default::default()
+                   });
+
+        // slightly simplified from
+        // "select PCMember.contactId, group_concat(reviewType separator '')
+        // from PCMember left join PaperReview on (PCMember.contactId=PaperReview.contactId)
+        // group by PCMember.contactId"
+        let qstring = "select PCMember.contactId \
+                       from PCMember \
+                       join PaperReview on (PCMember.contactId=PaperReview.contactId);";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PCMember")],
+                       fields: FieldExpression::Seq(columns(&["PCMember.contactId"])),
+                       join: Some(JoinClause::Tables(vec![Table::from("PaperReview")])),
                        ..Default::default()
                    });
     }
