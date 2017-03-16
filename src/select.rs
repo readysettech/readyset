@@ -4,7 +4,8 @@ use std::str;
 
 use column::Column;
 use common::FieldExpression;
-use common::{field_expr, field_list, unsigned_number, statement_terminator, table_list};
+use common::{field_definition_expr, field_list, unsigned_number, statement_terminator, table_list,
+             table_reference};
 use condition::{condition_expr, ConditionExpression};
 use table::Table;
 
@@ -140,7 +141,7 @@ named!(pub selection<&[u8], SelectStatement>,
         multispace ~
         distinct: opt!(caseless_tag!("distinct")) ~
         multispace? ~
-        fields: field_expr ~
+        fields: field_definition_expr ~
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~
         cond: opt!(where_clause) ~

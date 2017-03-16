@@ -151,6 +151,42 @@ named!(pub column_function<&[u8], FunctionExpression>,
 );
 
 /// Parses a SQL column identifier in the table.column format
+named!(pub column_identifier_no_alias<&[u8], Column>,
+    alt_complete!(
+        chain!(
+            function: column_function,
+            || {
+                Column {
+                    name: String::from("anon_fn"),
+                    table: None,
+                    function: Some(function),
+                }
+            }
+        )
+        | chain!(
+            table: opt!(
+                chain!(
+                    tbl_name: map_res!(sql_identifier, str::from_utf8) ~
+                    tag!("."),
+                    || { tbl_name }
+                )
+            ) ~
+            column: map_res!(sql_identifier, str::from_utf8),
+            || {
+                Column {
+                    name: String::from(column),
+                    table: match table {
+                        None => None,
+                        Some(t) => Some(String::from(t)),
+                    },
+                    function: None,
+                }
+            }
+        )
+    )
+);
+
+/// Parses a SQL column identifier in the table.column format
 named!(pub column_identifier<&[u8], Column>,
     alt_complete!(
         chain!(
@@ -278,8 +314,8 @@ named!(pub as_alias<&[u8], &str>,
     )
 );
 
-/// Parse rule for a comma-separated list.
-named!(pub field_list<&[u8], Vec<Column> >,
+/// Parse rule for a comma-separated list of field definitions (can have aliases).
+named!(pub field_definition_list<&[u8], Vec<Column> >,
        many0!(
            chain!(
                fieldname: column_identifier ~
@@ -293,6 +329,33 @@ named!(pub field_list<&[u8], Vec<Column> >,
                ),
                || { fieldname }
            )
+       )
+);
+
+/// Parse rule for a comma-separated list of fields without aliases.
+named!(pub field_list<&[u8], Vec<Column> >,
+       many0!(
+           chain!(
+               fieldname: column_identifier_no_alias ~
+               opt!(
+                   complete!(chain!(
+                       multispace? ~
+                       tag!(",") ~
+                       multispace?,
+                       ||{}
+                   ))
+               ),
+               || { fieldname }
+           )
+       )
+);
+
+/// Parse list of column/field definitions.
+/// XXX(malte): add support for named table notation
+named!(pub field_definition_expr<&[u8], FieldExpression>,
+       alt_complete!(
+           tag!("*") => { |_| FieldExpression::All }
+         | map!(field_definition_list, |v| FieldExpression::Seq(v))
        )
 );
 

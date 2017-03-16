@@ -3,8 +3,8 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 use std::str::FromStr;
 
-use common::{column_identifier, field_list, sql_identifier, statement_terminator, table_reference,
-             SqlType, TableKey};
+use common::{column_identifier_no_alias, field_list, sql_identifier, statement_terminator,
+             table_reference, SqlType, TableKey};
 use column::Column;
 use table::Table;
 
@@ -216,7 +216,7 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
 named!(pub field_specification_list<&[u8], Vec<Column> >,
        many1!(
            complete!(chain!(
-               fieldname: column_identifier ~
+               fieldname: column_identifier_no_alias ~
                _fieldtype: opt!(complete!(chain!(multispace ~
                                       type_identifier ~
                                       multispace?,
