@@ -45,7 +45,7 @@ pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,
     pub fields: FieldExpression,
-    pub join: Option<JoinClause>,
+    pub join: Vec<JoinClause>,
     pub where_clause: Option<ConditionExpression>,
     pub group_by: Option<GroupByClause>,
     pub order: Option<OrderClause>,
@@ -205,7 +205,7 @@ named!(pub selection<&[u8], SelectStatement>,
         fields: field_definition_expr ~
         delimited!(opt!(multispace), caseless_tag!("from"), opt!(multispace)) ~
         tables: table_list ~
-        join: opt!(join_clause) ~
+        join: many0!(join_clause) ~
         cond: opt!(where_clause) ~
         group_by: opt!(group_by_clause) ~
         order: opt!(order_clause) ~
@@ -611,7 +611,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("PaperConflict")],
                        fields: FieldExpression::Seq(columns(&["paperId"])),
-                       join: Some(JoinClause::Tables(vec![Table::from("PCMember")])),
+                       join: vec![JoinClause::Tables(vec![Table::from("PCMember")])],
                        ..Default::default()
                    });
 
@@ -628,7 +628,45 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("PCMember")],
                        fields: FieldExpression::Seq(columns(&["PCMember.contactId"])),
-                       join: Some(JoinClause::Tables(vec![Table::from("PaperReview")])),
+                       join: vec![JoinClause::Tables(vec![Table::from("PaperReview")])],
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn multi_join() {
+        // simplified from
+        // "select max(conflictType), PaperReview.contactId as reviewer, PCMember.contactId as
+        //  pcMember, ChairAssistant.contactId as assistant, Chair.contactId as chair,
+        //  max(PaperReview.reviewNeedsSubmit) as reviewNeedsSubmit from ContactInfo
+        //  left join PaperReview using (contactId) left join PaperConflict using (contactId)
+        //  left join PCMember using (contactId) left join ChairAssistant using (contactId)
+        //  left join Chair using (contactId) where ContactInfo.contactId=?
+        //  group by ContactInfo.contactId;";
+        let qstring = "select PCMember.contactId, ChairAssistant.contactId, \
+                       Chair.contactId from ContactInfo left join PaperReview using (contactId) \
+                       left join PaperConflict using (contactId) left join PCMember using \
+                       (contactId) left join ChairAssistant using (contactId) left join Chair \
+                       using (contactId) where ContactInfo.contactId=?;";
+
+        let res = selection(qstring.as_bytes());
+        let expected_where_cond = Some(ComparisonOp(ConditionTree {
+            left: Some(Box::new(Base(Field(Column::from("ContactInfo.contactId"))))),
+            right: Some(Box::new(Base(Placeholder))),
+            operator: Operator::Equal,
+        }));
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("ContactInfo")],
+                       fields: FieldExpression::Seq(columns(&["PCMember.contactId",
+                                                              "ChairAssistant.contactId",
+                                                              "Chair.contactId"])),
+                       join: vec![JoinClause::Tables(vec![Table::from("PaperReview")]),
+                                  JoinClause::Tables(vec![Table::from("PaperConflict")]),
+                                  JoinClause::Tables(vec![Table::from("PCMember")]),
+                                  JoinClause::Tables(vec![Table::from("ChairAssistant")]),
+                                  JoinClause::Tables(vec![Table::from("Chair")])],
+                       where_clause: expected_where_cond,
                        ..Default::default()
                    });
     }
