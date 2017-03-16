@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::time;
+use std::thread;
 
 use slog;
 
@@ -306,7 +307,7 @@ impl Mutator {
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
-                Err(..) => {}
+                Err(..) => thread::yield_now(),
             }
         }
     }
