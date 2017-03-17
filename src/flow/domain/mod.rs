@@ -2,6 +2,7 @@ use petgraph::graph::NodeIndex;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time;
 
 use std::collections::hash_map::Entry;
@@ -971,9 +972,7 @@ impl Domain {
         }
     }
 
-    pub fn boot(mut self, rx: mpsc::Receiver<Packet>) {
-        use std::thread;
-
+    pub fn boot(mut self, rx: mpsc::Receiver<Packet>) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
         thread::Builder::new()
@@ -1015,6 +1014,6 @@ impl Domain {
                     self.handle(m, &mut inject_tx);
                 }
             })
-            .unwrap();
+            .unwrap()
     }
 }

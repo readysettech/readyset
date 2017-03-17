@@ -391,6 +391,7 @@ pub struct Blender {
     checktable: Arc<Mutex<checktable::CheckTable>>,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
+    domains: Vec<thread::JoinHandle<()>>,
 
     log: slog::Logger,
 }
@@ -407,6 +408,7 @@ impl Default for Blender {
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
 
             txs: HashMap::default(),
+            domains: Vec::new(),
 
             log: slog::Logger::root(slog::Discard, None),
         }
@@ -999,13 +1001,14 @@ impl<'a> Migration<'a> {
             }
 
             // Start up new domain
-            migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
-                                       domain.index().into(),
-                                       &mut mainline.ingredients,
-                                       uninformed_domain_nodes.remove(&domain).unwrap(),
-                                       mainline.checktable.clone(),
-                                       rxs.remove(&domain).unwrap(),
-                                       start_ts);
+            let jh = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                                domain.index().into(),
+                                                &mut mainline.ingredients,
+                                                uninformed_domain_nodes.remove(&domain).unwrap(),
+                                                mainline.checktable.clone(),
+                                                rxs.remove(&domain).unwrap(),
+                                                start_ts);
+            mainline.domains.push(jh);
         }
         drop(rxs);
 
@@ -1045,6 +1048,9 @@ impl Drop for Blender {
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
             drop(tx.send(payload::Packet::Quit));
+        }
+        for d in self.domains.drain(..) {
+            d.join().unwrap();
         }
     }
 }
