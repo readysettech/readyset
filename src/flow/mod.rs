@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::time;
+use std::thread;
 
 use slog;
 
@@ -23,6 +24,7 @@ pub mod node;
 pub mod payload;
 pub mod statistics;
 mod migrate;
+mod transactions;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -271,12 +273,24 @@ pub trait Ingredient
 }
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
-#[derive(Clone)]
 pub struct Mutator {
     src: NodeAddress,
     tx: mpsc::SyncSender<payload::Packet>,
     addr: NodeAddress,
     primary_key: Vec<usize>,
+    tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
+}
+
+impl Clone for Mutator {
+    fn clone(&self) -> Self {
+        Self {
+            src: self.src.clone(),
+            tx: self.tx.clone(),
+            addr: self.addr.clone(),
+            primary_key: self.primary_key.clone(),
+            tx_reply_channel: mpsc::channel(),
+        }
+    }
 }
 
 impl Mutator {
@@ -289,14 +303,19 @@ impl Mutator {
     }
 
     fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
-        let (send, recv) = mpsc::channel();
+        let send = self.tx_reply_channel.0.clone();
         let m = payload::Packet::Transaction {
             link: payload::Link::new(self.src, self.addr),
             data: r,
             state: payload::TransactionState::Pending(t, send),
         };
         self.tx.clone().send(m).unwrap();
-        recv.recv().unwrap()
+        loop {
+            match self.tx_reply_channel.1.try_recv() {
+                Ok(r) => return r,
+                Err(..) => thread::yield_now(),
+            }
+        }
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
@@ -378,6 +397,7 @@ pub struct Blender {
     checktable: Arc<Mutex<checktable::CheckTable>>,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
+    domains: Vec<thread::JoinHandle<()>>,
 
     log: slog::Logger,
 }
@@ -394,6 +414,7 @@ impl Default for Blender {
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
 
             txs: HashMap::default(),
+            domains: Vec::new(),
 
             log: slog::Logger::root(slog::Discard, None),
         }
@@ -523,6 +544,7 @@ impl Blender {
                 .suggest_indexes(base)
                 .remove(&base)
                 .unwrap_or_else(Vec::new),
+            tx_reply_channel: mpsc::channel(),
         }
     }
 
@@ -995,13 +1017,14 @@ impl<'a> Migration<'a> {
             }
 
             // Start up new domain
-            migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
-                                       domain.index().into(),
-                                       &mut mainline.ingredients,
-                                       uninformed_domain_nodes.remove(&domain).unwrap(),
-                                       mainline.checktable.clone(),
-                                       rxs.remove(&domain).unwrap(),
-                                       start_ts);
+            let jh = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
+                                                domain.index().into(),
+                                                &mut mainline.ingredients,
+                                                uninformed_domain_nodes.remove(&domain).unwrap(),
+                                                mainline.checktable.clone(),
+                                                rxs.remove(&domain).unwrap(),
+                                                start_ts);
+            mainline.domains.push(jh);
         }
         drop(rxs);
 
@@ -1038,9 +1061,49 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
+        println!("Blender started dropping.");
+
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
             drop(tx.send(payload::Packet::Quit));
         }
+        for d in self.domains.drain(..) {
+            println!("Waiting for domain thread to join.");
+            d.join().unwrap();
+        }
+
+        println!("Blender is done dropping.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Blender without any domains gets dropped once it leaves the scope.
+    #[test]
+    fn it_works_default() {
+        // Blender gets dropped. It doesn't have Domains, so we don't see any dropped.
+        let b = Blender::default();
+        assert_eq!(b.ndomains, 0);
+    }
+
+    // Blender with a few domains drops them once it leaves the scope.
+    #[test]
+    fn it_works_blender_with_migration() {
+        use Recipe;
+
+        let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
+                     INSERT INTO b (r, s) VALUES (?, ?);\n";
+        let mut r = Recipe::from_str(r_txt).unwrap();
+
+        let mut b = Blender::new();
+        {
+            let mut mig = b.start_migration();
+            assert!(r.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+
+        println!();
     }
 }
