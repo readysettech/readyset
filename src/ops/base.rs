@@ -30,6 +30,13 @@ impl Default for Base {
     }
 }
 
+#[cfg(test)]
+impl Drop for Base {
+    fn drop(&mut self) {
+        println!("Dropping Base!");
+    }
+}
+
 use flow::prelude::*;
 
 impl Ingredient for Base {
@@ -102,5 +109,18 @@ impl Ingredient for Base {
 
     fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
         unreachable!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        // Base gets dropped as expected here.
+        let b = Base::default();
+        assert!(b.primary_key.is_none());
+        assert!(b.us.is_none());
     }
 }

@@ -1046,12 +1046,49 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
+        println!("Blender started dropping.");
+
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
             drop(tx.send(payload::Packet::Quit));
         }
         for d in self.domains.drain(..) {
+            println!("Waiting for domain thread to join.");
             d.join().unwrap();
         }
+
+        println!("Blender is done dropping.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Blender without any domains gets dropped once it leaves the scope.
+    #[test]
+    fn it_works_default() {
+        // Blender gets dropped. It doesn't have Domains, so we don't see any dropped.
+        let b = Blender::default();
+        assert_eq!(b.ndomains, 0);
+    }
+
+    // Blender with a single domain gets dropped once it leaves the scope.
+    #[test]
+    fn it_works_blender_with_migration() {
+        use Recipe;
+
+        let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
+                     INSERT INTO b (r, s) VALUES (?, ?);\n";
+        let mut r = Recipe::from_str(r_txt).unwrap();
+
+        let mut b = Blender::new();
+        {
+            let mut mig = b.start_migration();
+            assert!(r.activate(&mut mig).is_ok());
+            mig.commit();
+        }
+
+        println!();
     }
 }
