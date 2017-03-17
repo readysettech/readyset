@@ -1,4 +1,5 @@
-use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, SqlQuery, Table};
+use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinClause, SqlQuery,
+              Table};
 
 use std::collections::HashMap;
 
@@ -166,7 +167,14 @@ impl ImpliedTableExpansion for SqlQuery {
         let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
         match self {
             SqlQuery::Select(mut sq) => {
-                let tables = sq.tables.clone();
+                let mut tables: Vec<Table> = sq.tables.clone();
+                // tables mentioned in JOINs are also available for expansion
+                for je in sq.join.iter() {
+                    match *je {
+                        JoinClause::Tables(ref join_tables) => tables.extend(join_tables.clone()),
+                        _ => unimplemented!(),
+                    }
+                }
                 // Expand within field list
                 sq.fields = match sq.fields {
                     FieldExpression::All => panic!(err),
