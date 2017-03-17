@@ -637,6 +637,7 @@ impl<'a> Migration<'a> {
                 self.mainline.ingredients.add_edge(*parent.as_global(), ni, false);
             }
         }
+
         // and tell the caller its id
         let global_address = NodeAddress::make_global(ni);
 
