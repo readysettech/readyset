@@ -875,11 +875,3 @@ impl Drop for Domain {
         println!("Dropping Domain!")
     }
 }
-
-
-#[cfg(test)]
-impl Drop for Domain {
-    fn drop(&mut self) {
-        println!("Dropping Domain!")
-    }
-}
