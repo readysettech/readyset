@@ -1,4 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression, Operator};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+              JoinClause, Operator};
 use nom_sql::SelectStatement;
 
 use std::collections::{HashMap, HashSet};
@@ -274,6 +275,25 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         }
 
         // 2. Add edges for each pair of joined relations
+        //
+        // 2a. Explicit joins
+        for je in &st.join {
+            match *je {
+                JoinClause::Tables(ref tables) => {
+                    // add joined table to relations if not present already
+                    let against = tables.get(0).as_ref().unwrap().name.clone();
+                    let join_rel = &mut qg.relations
+                        .entry(against.clone())
+                        .or_insert_with(|| new_node(against.clone(), vec![], st));
+                    // add edge for join
+                    let mut e = qg.edges
+                        .entry((st.tables.get(0).as_ref().unwrap().name.clone(), against))
+                        .or_insert_with(|| QueryGraphEdge::Join(vec![]));
+                }
+                _ => unimplemented!(),
+            }
+        }
+        // 2b. Implied (comma) joins
         // TODO(malte): This is pretty heavily into cloning things all over, which makes it both
         // inefficient and hideous. Maybe we can reengineer the data structures to require less of
         // that?
