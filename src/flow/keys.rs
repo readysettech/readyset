@@ -8,24 +8,22 @@ use std::collections::HashMap;
 pub fn provenance_of<F>(graph: &Graph,
                         node: NodeIndex,
                         column: usize,
-                        on_join: F)
+                        mut on_join: F)
                         -> Vec<Vec<(NodeIndex, Option<usize>)>>
-    where F: FnMut(&[NodeIndex]) -> Option<NodeIndex>
+    where F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>
 {
     let path = vec![(node, Some(column))];
-    trace(graph, on_join, path)
-    // TODO: push (n, None) to n's base nodes?
+    trace(graph, &mut on_join, path)
 }
 
 fn trace<F>(graph: &Graph,
-            mut on_join: F,
+            on_join: &mut F,
             mut path: Vec<(NodeIndex, Option<usize>)>)
             -> Vec<Vec<(NodeIndex, Option<usize>)>>
-    where F: FnMut(&[NodeIndex]) -> Option<NodeIndex>
+    where F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>
 {
     // figure out what node/column we're looking up
-    let node = path.last().unwrap().0;
-    let column = path.last().unwrap().1.unwrap();
+    let (node, column) = path.last().cloned().unwrap();
 
     let parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
         .collect();
@@ -50,6 +48,33 @@ fn trace<F>(graph: &Graph,
         })
         .collect();
 
+    // if the column isn't known, our job is trivial -- just map to all ancestors
+    if column.is_none() {
+        // except if we're a join and on_join says to only walk through one...
+        if parents.len() != 1 && graph[node].parent_columns(0).len() == 1 {
+            if let Some(parent) = on_join(node, &parents[..]) {
+                path.push((parent, None));
+                return trace(graph, on_join, path);
+            }
+        }
+
+        let mut paths = Vec::with_capacity(parents.len());
+        for p in parents {
+            let mut path = path.clone();
+            path.push((p, None));
+            paths.extend(trace(graph, on_join, path));
+        }
+        return paths;
+    }
+    let column = column.unwrap();
+
+    // we know all non-internal nodes use an identity mapping
+    if !graph[node].is_internal() {
+        let parent = parents.into_iter().next().unwrap();
+        path.push((parent, Some(column)));
+        return trace(graph, on_join, path);
+    }
+
     // try to resolve the currently selected column
     let resolved = graph[node].parent_columns(column);
     assert!(!resolved.is_empty());
@@ -64,7 +89,7 @@ fn trace<F>(graph: &Graph,
         for p in parents {
             let mut path = path.clone();
             path.push((p, None));
-            paths.push(path);
+            paths.extend(trace(graph, on_join, path));
         }
         return paths;
     }
@@ -99,7 +124,7 @@ fn trace<F>(graph: &Graph,
             let mut path = path.clone();
             // we know that the parent is in the same domain for unions, so [] is ok
             path.push((local_to_global[&parent], Some(column)));
-            paths.extend(trace(graph, &mut on_join, path));
+            paths.extend(trace(graph, on_join, path));
         }
         return paths;
     }
@@ -114,7 +139,7 @@ fn trace<F>(graph: &Graph,
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
     // TODO: provide an early-termination mechanism?
-    match on_join(&parents[..]) {
+    match on_join(node, &parents[..]) {
         None => {
             // our caller wants information about all our parents.
             // since the column we're chasing only follows a single path through a join (unless it
@@ -125,10 +150,10 @@ fn trace<F>(graph: &Graph,
                 let mut path = path.clone();
                 if parent == specific_parent {
                     path.push((parent, Some(column)));
-                    paths.extend(trace(graph, &mut on_join, path));
+                    paths.extend(trace(graph, on_join, path));
                 } else {
                     path.push((parent, None));
-                    paths.push(path);
+                    paths.extend(trace(graph, on_join, path));
                 }
             }
             paths
@@ -139,12 +164,12 @@ fn trace<F>(graph: &Graph,
             if parent == specific_parent {
                 // \o/
                 path.push((parent, Some(column)));
-                return trace(graph, on_join, path);
+                trace(graph, on_join, path)
+            } else {
+                // nope. we can't resolve any more for this column.
+                path.push((parent, None));
+                trace(graph, on_join, path)
             }
-
-            // nope. we can't resolve any more for this column.
-            path.push((parent, None));
-            return vec![path];
         }
     }
 }

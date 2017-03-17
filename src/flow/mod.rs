@@ -23,8 +23,8 @@ pub mod prelude;
 pub mod node;
 pub mod payload;
 pub mod statistics;
+pub mod keys;
 mod migrate;
-mod keys;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {

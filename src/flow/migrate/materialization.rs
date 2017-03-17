@@ -6,6 +6,7 @@
 //! module).
 
 use flow;
+use flow::keys;
 use flow::domain;
 use flow::prelude::*;
 
@@ -394,14 +395,7 @@ pub fn initialize(log: &Logger,
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
             info!(log, "beginning reconstruction of {:?}", *graph[node]);
-            reconstruct(&log,
-                        graph,
-                        source,
-                        &empty,
-                        &materialize,
-                        txs,
-                        node,
-                        index_on);
+            reconstruct(&log, graph, &empty, &materialize, txs, node, index_on);
             debug!(log, "reconstruction started");
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
@@ -413,7 +407,6 @@ pub fn initialize(log: &Logger,
 
 pub fn reconstruct(log: &Logger,
                    graph: &Graph,
-                   source: NodeIndex,
                    empty: &HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
@@ -437,16 +430,51 @@ pub fn reconstruct(log: &Logger,
     //   3. construct a daisy-chain of channels, and pass them to each domain along the path
     //   4. tell the domain nearest to the root to start replaying
     //
-    // so, first things first, let's find our closest materialized parents
-    let paths = trace(graph, source, node, empty, materialized, vec![node], txs);
+    // so, first things first, let's find all our paths up the tree
+    let mut paths = {
+        let mut on_join = cost_fn(graph, empty, materialized, txs);
+        keys::provenance_of(graph, node, 0, &mut *on_join)
+    };
 
+    // next eliminate any that terminate in empty base nodes
+    paths.retain(|path| !empty.contains(&path.last().unwrap().0));
+    assert!(!paths.is_empty());
+
+    // cut paths so they contain the shortest replay path
+    let paths = paths.into_iter()
+        .map(|path| -> Vec<_> {
+            let mut found = false;
+            path.into_iter()
+                .skip(1)
+                .map(|(node, _)| node)
+                .take_while(|&node| {
+                    // keep taking until we get our first materialized node
+                    // (`found` helps us emulate `take_while_inclusive`)
+                    let n = &graph[node];
+                    if found {
+                        // we've already found a materialized node
+                        return false;
+                    }
+
+                    let is_materialized = materialized.get(&n.domain())
+                        .map(|dm| dm.contains_key(n.addr().as_local()))
+                        .unwrap_or(false);
+                    if is_materialized {
+                        // we want to take this node, but not any later ones
+                        found = true;
+                    }
+                    true
+                })
+                .collect()
+        });
+
+    // tell the domain in question to create an empty state for the node in question
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
     } else {
         assert!(!index_on.is_empty(),
                 "all non-reader nodes must have a state key");
 
-        // tell the domain in question to create an empty state for the node in question
         txs[&graph[node].domain()]
             .send(Packet::PrepareState {
                 node: *graph[node].addr().as_local(),
@@ -463,6 +491,10 @@ pub fn reconstruct(log: &Logger,
 
     // set up channels for replay along each path
     for mut path in paths {
+        // there should always be a replay path
+        assert!(!path.is_empty(),
+                "needed to replay non-empty node, but no materializations found");
+
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
@@ -571,53 +603,26 @@ pub fn reconstruct(log: &Logger,
     }
 }
 
-fn trace<T>(graph: &Graph,
-            source: NodeIndex,
-            node: NodeIndex,
-            empty: &HashSet<NodeIndex>,
-            materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
-            path: Vec<NodeIndex>,
-            txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
-            -> Vec<Vec<NodeIndex>> {
+fn cost_fn<'a, T>(graph: &'a Graph,
+                  empty: &'a HashSet<NodeIndex>,
+                  materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
+                  txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
+                  -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
 
-    if node == source {
-        unreachable!("base node was not materialized!");
-    }
+    Box::new(move |node, parents| {
+        assert!(parents.len() > 1);
 
-    let in_materialized = |ni: NodeIndex| {
-        let n = &graph[ni];
-        materialized.get(&n.domain())
-            .map(|dm| dm.contains_key(n.addr().as_local()))
-            .unwrap_or(false)
-    };
+        let in_materialized = |ni: NodeIndex| {
+            let n = &graph[ni];
+            materialized.get(&n.domain())
+                .map(|dm| dm.contains_key(n.addr().as_local()))
+                .unwrap_or(false)
+        };
 
-    let n = &graph[node];
-    let is_materialized = if path.len() == 1 {
-        // the start node is the one we're trying to replay to, so while it'll be marked as
-        // materialized in the map, it isn't really
-        false
-    } else {
-        in_materialized(node)
-    };
+        // keep track of remaining parents
+        let mut parents: Vec<_> = parents.iter().map(|&ni| ni).collect();
 
-    if is_materialized {
-        return vec![path];
-    }
-
-    let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-        .collect();
-
-    loop {
-        // this loop is just here so we can break
-
-        if parents.len() == 1 {
-            break;
-        }
-
-        // there are two cases where we have multiple parents: joins and unions
-        // for unions, we should replay *all* paths. for joins, we should only replay one path.
-        // in particular, for a join, we should only replay the ancestor that yields the full
-        // result-set (i.e., the left side of a left join).
+        let n = &graph[node];
         assert!(n.is_internal());
 
         // find empty parents
@@ -626,129 +631,114 @@ fn trace<T>(graph: &Graph,
             .map(|ni| graph[*ni].addr())
             .collect();
 
-        if let Some(options) = n.must_replay_among(&empty) {
-            // we *must* replay the state of one of the nodes in options
-            parents.retain(|&parent| options.contains(&graph[parent].addr()));
-            assert!(!parents.is_empty());
+        let options = n.must_replay_among(&empty)
+            .expect("join did not have must replay preference");
 
-            if parents.len() == 1 {
-                // no need to pick
-                break;
-            }
+        // we *must* replay the state of one of the nodes in options
+        parents.retain(|&parent| options.contains(&graph[parent].addr()));
+        assert!(!parents.is_empty());
 
-            // we want to pick the ancestor that causes us to do the least amount of work.
-            // this is really a balancing act between
-            //
-            //   a) how many records we are going to push through the filter; and
-            //   b) how much state we need to replay
-            //
-            // consider the case where we are replaying a node downstream of a join, and the
-            // join has two ancestors: a base node (A) and a filter (F) over a base node (B).
-            // when should we choose to replay one or the other?
-            //
-            //  - the cost of replaying A is
-            //        |A| joins
-            //      + |A| lookups in B through F
-            //  - the cost of replaying B through F is
-            //        |B| filter operations
-            //      + |F(B)| join operations
-            //      + |F(B)| lookups in A
-            //
-            // which of these is more costly? even assuming we know |A| and |B|, it is not
-            // clear, because we don't know F's specificity. let's assume some things:
-            //
-            //  - filters are cheaper than joins (~10x)
-            //  - replaying is cheaper than filtering (~10x)
-            //  - a filter emits one record for every FILTER_SPECIFICITY input records
-            //
-            // given those rough estimates, what's the best choice? well, we should pick a node
-            // N with filters F1..Fn to replay which minimizes
-            //
-            //    1   * |N|                                 # replay cost
-            let replay_cost = 1;
-            //  + 10  * ( ∑i |N| / FILTER_SPECIFICITY ^ i ) # filter cost
-            let filter_cost = 10;
-            //  + 100 * |N| / FILTER_SPECIFICITY ^ n        # join cost
-            let join_cost = 100;
-            //
-            // it is worth pointing out that this heuristic does *not* capture the fact that
-            // replaying A above will encounter more expensive lookups on the join path (since
-            // the lookups are in F(B), as opposed to directly in A).
-            //
-            // to compute this, we need to find |N| and n for each candidate node.
-            // let's do that now
-            let best = parents.iter()
-                .map(|&p| {
-                    let mut intermediates = vec![];
-                    let mut stateful = p;
-                    while !in_materialized(stateful) {
-                        let n = &graph[stateful];
-                        // joins require their inputs to be materialized.
-                        // therefore, we know that this node must be query_through.
-                        assert!(n.is_internal());
-                        assert!(n.can_query_through());
-                        // if this node is selective (e.g., a filter), increase the filter factor
-                        // we need to keep track of non-selective project/permute nodes too though,
-                        // as they increase the cost
-                        intermediates.push(n.is_selective());
-                        // now walk to the parent.
-                        let mut ps =
-                            graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
-                        // of which there must be at least one
-                        stateful = ps.next().expect("recursed all the way to source");
-                        // there shouldn't ever be multiple, because neither join nor union
-                        // are query_through.
-                        assert_eq!(ps.count(), 0);
-                    }
-
-                    // find the size of the state we would end up replaying
-                    let (tx, rx) = mpsc::sync_channel(1);
-                    let stateful = &graph[stateful];
-                    txs[&stateful.domain()]
-                        .send(Packet::StateSizeProbe {
-                            node: *stateful.addr().as_local(),
-                            ack: tx,
-                        })
-                        .unwrap();
-                    let mut size = rx.recv().expect("stateful parent should have state");
-
-                    // compute the total cost
-                    // replay cost
-                    let mut cost = replay_cost * size;
-                    // filter cost
-                    for does_filter in intermediates {
-                        cost += filter_cost * size;
-                        if does_filter {
-                            size /= FILTER_SPECIFICITY;
-                        }
-                    }
-                    // join cost
-                    cost += join_cost * size;
-
-                    println!("cost of replaying along {:?}: {}", p, cost);
-                    (p, cost)
-                })
-                .min_by_key(|&(_, cost)| cost)
-                .unwrap();
-
-            println!("picked replay through {:?} for cost {}", best.0, best.1);
-
-            parents.clear();
-            parents.push(best.0);
-        } else {
-            // union; just replay all
+        if parents.len() == 1 {
+            // no need to pick
+            return parents.pop();
         }
-        break;
-    }
 
-    // there's no point in replaying parents that are empty
-    parents.retain(|&parent| !empty.contains(&parent));
+        // we want to pick the ancestor that causes us to do the least amount of work.
+        // this is really a balancing act between
+        //
+        //   a) how many records we are going to push through the filter; and
+        //   b) how much state we need to replay
+        //
+        // consider the case where we are replaying a node downstream of a join, and the
+        // join has two ancestors: a base node (A) and a filter (F) over a base node (B).
+        // when should we choose to replay one or the other?
+        //
+        //  - the cost of replaying A is
+        //        |A| joins
+        //      + |A| lookups in B through F
+        //  - the cost of replaying B through F is
+        //        |B| filter operations
+        //      + |F(B)| join operations
+        //      + |F(B)| lookups in A
+        //
+        // which of these is more costly? even assuming we know |A| and |B|, it is not
+        // clear, because we don't know F's specificity. let's assume some things:
+        //
+        //  - filters are cheaper than joins (~10x)
+        //  - replaying is cheaper than filtering (~10x)
+        //  - a filter emits one record for every FILTER_SPECIFICITY input records
+        //
+        // given those rough estimates, what's the best choice? well, we should pick a node
+        // N with filters F1..Fn to replay which minimizes
+        //
+        //    1   * |N|                                 # replay cost
+        let replay_cost = 1;
+        //  + 10  * ( ∑i |N| / FILTER_SPECIFICITY ^ i ) # filter cost
+        let filter_cost = 10;
+        //  + 100 * |N| / FILTER_SPECIFICITY ^ n        # join cost
+        let join_cost = 100;
+        //
+        // it is worth pointing out that this heuristic does *not* capture the fact that
+        // replaying A above will encounter more expensive lookups on the join path (since
+        // the lookups are in F(B), as opposed to directly in A).
+        //
+        // to compute this, we need to find |N| and n for each candidate node.
+        // let's do that now
+        parents.into_iter()
+            .map(|p| {
+                let mut intermediates = vec![];
+                let mut stateful = p;
+                while !in_materialized(stateful) {
+                    let n = &graph[stateful];
+                    // joins require their inputs to be materialized.
+                    // therefore, we know that this node must be query_through.
+                    assert!(n.is_internal());
+                    assert!(n.can_query_through());
+                    // if this node is selective (e.g., a filter), increase the filter factor
+                    // we need to keep track of non-selective project/permute nodes too though,
+                    // as they increase the cost
+                    intermediates.push(n.is_selective());
+                    // now walk to the parent.
+                    let mut ps =
+                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    // of which there must be at least one
+                    stateful = ps.next().expect("recursed all the way to source");
+                    // there shouldn't ever be multiple, because neither join nor union
+                    // are query_through.
+                    assert_eq!(ps.count(), 0);
+                }
 
-    parents.into_iter()
-        .flat_map(|parent| {
-            let mut path = path.clone();
-            path.push(parent);
-            trace(graph, source, parent, empty, materialized, path, txs)
-        })
-        .collect()
+                // find the size of the state we would end up replaying
+                let (tx, rx) = mpsc::sync_channel(1);
+                let stateful = &graph[stateful];
+                txs[&stateful.domain()]
+                    .send(Packet::StateSizeProbe {
+                        node: *stateful.addr().as_local(),
+                        ack: tx,
+                    })
+                    .unwrap();
+                let mut size = rx.recv().expect("stateful parent should have state");
+
+                // compute the total cost
+                // replay cost
+                let mut cost = replay_cost * size;
+                // filter cost
+                for does_filter in intermediates {
+                    cost += filter_cost * size;
+                    if does_filter {
+                        size /= FILTER_SPECIFICITY;
+                    }
+                }
+                // join cost
+                cost += join_cost * size;
+
+                println!("cost of replaying along {:?}: {}", p, cost);
+                (p, cost)
+            })
+            .min_by_key(|&(_, cost)| cost)
+            .map(|(node, cost)| {
+                println!("picked replay through {:?} for cost {}", node, cost);
+                node
+            })
+    })
 }
