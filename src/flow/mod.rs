@@ -1073,7 +1073,7 @@ mod tests {
         assert_eq!(b.ndomains, 0);
     }
 
-    // Blender with a single domain gets dropped once it leaves the scope.
+    // Blender with a few domains drops them once it leaves the scope.
     #[test]
     fn it_works_blender_with_migration() {
         use Recipe;
