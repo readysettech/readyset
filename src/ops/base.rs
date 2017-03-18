@@ -33,7 +33,7 @@ impl Default for Base {
 #[cfg(test)]
 impl Drop for Base {
     fn drop(&mut self) {
-        println!("Dropping Base!");
+        //println!("Dropping Base!");
     }
 }
 
