@@ -35,17 +35,19 @@ fn trace<F>(graph: &Graph,
     }
 
     let n = &graph[node];
-    let domain = n.domain();
-    let local_to_global: HashMap<_, _> = parents.iter()
-        .filter_map(|&ni| {
-            let n = &graph[ni];
-            if n.domain() == domain {
-                Some((n.addr(), ni))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut local_to_global = HashMap::new();
+    if n.is_localized() {
+        let domain = n.domain();
+        local_to_global.extend(parents.iter()
+            .filter_map(|&ni| {
+                let n = &graph[ni];
+                if n.domain() == domain {
+                    Some((n.addr(), ni))
+                } else {
+                    None
+                }
+            }));
+    }
 
     // have we reached a base node?
     if n.is_internal() && n.is_base() {
@@ -84,7 +86,11 @@ fn trace<F>(graph: &Graph,
     assert!(!resolved.is_empty());
 
     // is it a generated column?
-    let local = n.addr();
+    let local = if n.is_localized() {
+        n.addr()
+    } else {
+        node.into()
+    };
     if resolved.len() == 1 && resolved[0].0 == local {
         assert!(resolved[0].1.is_none()); // how could this be Some?
         // path terminates here, and has no connection to ancestors
@@ -103,11 +109,12 @@ fn trace<F>(graph: &Graph,
     if parents.len() == 1 {
         let parent = parents.into_iter().next().unwrap();
         let resolved = resolved.into_iter().next().unwrap();
-        assert_eq!(resolved.0, graph[parent].addr());
-        // since resolved.0 != local, we know the column isn't generated
-        assert!(resolved.1.is_some());
-        let col = resolved.1.unwrap();
-        path.push((parent, Some(col)));
+        if resolved.0.is_global() {
+            assert_eq!(resolved.0, parent.into());
+        } else {
+            assert_eq!(resolved.0, graph[parent].addr());
+        }
+        path.push((parent, resolved.1));
         return trace(graph, on_join, path);
     }
 
@@ -118,24 +125,29 @@ fn trace<F>(graph: &Graph,
     if !n.is_join() {
         // all columns come from all parents
         assert_eq!(parents.len(), resolved.len());
-        // no columns are generated
-        assert!(resolved.iter().all(|r| r.1.is_some()));
         // traverse up all the paths
         let mut paths = Vec::with_capacity(parents.len());
         for (parent, column) in resolved {
-            let column = column.unwrap();
             let mut path = path.clone();
             // we know that the parent is in the same domain for unions, so [] is ok
-            path.push((local_to_global[&parent], Some(column)));
+            let parent = if parent.is_global() {
+                *parent.as_global()
+            } else {
+                local_to_global[&parent]
+            };
+            path.push((parent, column));
             paths.extend(trace(graph, on_join, path));
         }
         return paths;
     }
 
-    // TODO: JOIN should emit multi-parent resolve for join key that is emitted
     let (specific_parent, column) = resolved.into_iter().next().unwrap();
     // we know join parents are all in the same domain as the join.
-    let specific_parent = local_to_global[&specific_parent];
+    let specific_parent = if specific_parent.is_global() {
+        *specific_parent.as_global()
+    } else {
+        local_to_global[&specific_parent]
+    };
     // we know joins don't generate values.
     let column = column.unwrap();
 
