@@ -7,6 +7,7 @@ use common::FieldExpression;
 use common::{field_definition_expr, field_list, unsigned_number, statement_terminator, table_list,
              table_reference};
 use condition::{condition_expr, ConditionExpression};
+use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -16,10 +17,10 @@ pub struct GroupByClause {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
-pub enum JoinClause {
-    Tables(Vec<Table>),
-    NestedSelect(Box<SelectStatement>),
-    NestedJoin(Box<JoinClause>),
+pub struct JoinClause {
+    operator: JoinOperator,
+    right: JoinRightSide,
+    constraint: JoinConstraint,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -109,50 +110,60 @@ named!(join_clause<&[u8], JoinClause>,
         multispace? ~
         _natural: opt!(caseless_tag!("natural")) ~
         multispace? ~
-        alt_complete!(
-              caseless_tag!("left outer join")
-            | caseless_tag!("inner join")
-            | caseless_tag!("cross join")
-            | caseless_tag!("left join")
-            | caseless_tag!("join")
-        ) ~
+        op: join_operator ~
         multispace ~
-        j: alt_complete!(
+        right: alt_complete!(
               chain!(
                   table: table_reference,
                   || {
-                      JoinClause::Tables(vec![table])
+                      JoinRightSide::Table(table)
+                  }
+              )
+            | chain!(
+                  tables: delimited!(tag!("("), table_list, tag!(")")),
+                  || {
+                      JoinRightSide::Tables(tables)
                   }
               )
             | chain!(
                   select: delimited!(tag!("("), selection, tag!(")")),
                   || {
-                      JoinClause::NestedSelect(Box::new(select))
+                      JoinRightSide::NestedSelect(Box::new(select))
                   }
               )
             | chain!(
                   nested_join: delimited!(tag!("("), join_clause, tag!(")")),
                   || {
-                      JoinClause::NestedJoin(Box::new(nested_join))
+                      JoinRightSide::NestedJoin(Box::new(nested_join))
                   }
               )
         ) ~
         multispace ~
-        alt_complete!(
+        constraint: alt_complete!(
               chain!(
                   caseless_tag!("using") ~
                   multispace ~
-                  delimited!(tag!("("), field_list, tag!(")")),
-                  || {}
+                  fields: delimited!(tag!("("), field_list, tag!(")")),
+                  || {
+                      JoinConstraint::Using(fields)
+                  }
               )
             | chain!(
                   caseless_tag!("on") ~
                   multispace ~
-                  delimited!(tag!("("), condition_expr, tag!(")")),
-                  || {}
+                  cond: delimited!(tag!("("), condition_expr, tag!(")")),
+                  || {
+                      JoinConstraint::On(cond)
+                  }
               )
         ),
-    || { j }))
+    || {
+        JoinClause {
+            operator: op,
+            right: right,
+            constraint: constraint,
+        }
+    }))
 );
 
 /// Parse ORDER BY clause
@@ -611,7 +622,11 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("PaperConflict")],
                        fields: FieldExpression::Seq(columns(&["paperId"])),
-                       join: vec![JoinClause::Tables(vec![Table::from("PCMember")])],
+                       join: vec![JoinClause {
+                                      operator: JoinOperator::Join,
+                                      right: JoinRightSide::Table(Table::from("PCMember")),
+                                      constraint: JoinConstraint::Using(vec![Column::from("contactId")]),
+                                  }],
                        ..Default::default()
                    });
 
@@ -624,11 +639,20 @@ mod tests {
                        join PaperReview on (PCMember.contactId=PaperReview.contactId);";
 
         let res = selection(qstring.as_bytes());
+        let join_cond = ConditionExpression::ComparisonOp(ConditionTree {
+            left: Some(Box::new(Base(Field(Column::from("PCMember.contactId"))))),
+            right: Some(Box::new(Base(Field(Column::from("PaperReview.contactId"))))),
+            operator: Operator::Equal,
+        });
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PCMember")],
                        fields: FieldExpression::Seq(columns(&["PCMember.contactId"])),
-                       join: vec![JoinClause::Tables(vec![Table::from("PaperReview")])],
+                       join: vec![JoinClause {
+                                      operator: JoinOperator::Join,
+                                      right: JoinRightSide::Table(Table::from("PaperReview")),
+                                      constraint: JoinConstraint::On(join_cond),
+                                  }],
                        ..Default::default()
                    });
     }
@@ -655,17 +679,24 @@ mod tests {
             right: Some(Box::new(Base(Placeholder))),
             operator: Operator::Equal,
         }));
+        let mkjoin = |tbl: &str, col: &str| -> JoinClause {
+            JoinClause {
+                operator: JoinOperator::LeftJoin,
+                right: JoinRightSide::Table(Table::from(tbl)),
+                constraint: JoinConstraint::Using(vec![Column::from(col)]),
+            }
+        };
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("ContactInfo")],
                        fields: FieldExpression::Seq(columns(&["PCMember.contactId",
                                                               "ChairAssistant.contactId",
                                                               "Chair.contactId"])),
-                       join: vec![JoinClause::Tables(vec![Table::from("PaperReview")]),
-                                  JoinClause::Tables(vec![Table::from("PaperConflict")]),
-                                  JoinClause::Tables(vec![Table::from("PCMember")]),
-                                  JoinClause::Tables(vec![Table::from("ChairAssistant")]),
-                                  JoinClause::Tables(vec![Table::from("Chair")])],
+                       join: vec![mkjoin("PaperReview", "contactId"),
+                                  mkjoin("PaperConflict", "contactId"),
+                                  mkjoin("PCMember", "contactId"),
+                                  mkjoin("ChairAssistant", "contactId"),
+                                  mkjoin("Chair", "contactId")],
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
