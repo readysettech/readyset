@@ -18,9 +18,9 @@ pub struct GroupByClause {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct JoinClause {
-    operator: JoinOperator,
-    right: JoinRightSide,
-    constraint: JoinConstraint,
+    pub operator: JoinOperator,
+    pub right: JoinRightSide,
+    pub constraint: JoinConstraint,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
