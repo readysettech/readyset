@@ -30,13 +30,12 @@ fn trace<F>(graph: &Graph,
 
     if parents.is_empty() {
         // this path reached the source node.
-        // trim off the source and the ingress
-        let len = path.len() - 2;
-        path.truncate(len);
-        return vec![path];
+        // but we should have stopped at base nodes above...
+        unreachable!();
     }
 
-    let domain = graph[node].domain();
+    let n = &graph[node];
+    let domain = n.domain();
     let local_to_global: HashMap<_, _> = parents.iter()
         .filter_map(|&ni| {
             let n = &graph[ni];
@@ -48,10 +47,15 @@ fn trace<F>(graph: &Graph,
         })
         .collect();
 
+    // have we reached a base node?
+    if n.is_internal() && n.is_base() {
+        return vec![path];
+    }
+
     // if the column isn't known, our job is trivial -- just map to all ancestors
     if column.is_none() {
         // except if we're a join and on_join says to only walk through one...
-        if parents.len() != 1 && graph[node].parent_columns(0).len() == 1 {
+        if n.is_internal() && n.is_join() {
             if let Some(parent) = on_join(node, &parents[..]) {
                 path.push((parent, None));
                 return trace(graph, on_join, path);
@@ -69,18 +73,18 @@ fn trace<F>(graph: &Graph,
     let column = column.unwrap();
 
     // we know all non-internal nodes use an identity mapping
-    if !graph[node].is_internal() {
+    if !n.is_internal() {
         let parent = parents.into_iter().next().unwrap();
         path.push((parent, Some(column)));
         return trace(graph, on_join, path);
     }
 
     // try to resolve the currently selected column
-    let resolved = graph[node].parent_columns(column);
+    let resolved = n.parent_columns(column);
     assert!(!resolved.is_empty());
 
     // is it a generated column?
-    let local = graph[node].addr();
+    let local = n.addr();
     if resolved.len() == 1 && resolved[0].0 == local {
         assert!(resolved[0].1.is_none()); // how could this be Some?
         // path terminates here, and has no connection to ancestors
@@ -111,8 +115,7 @@ fn trace<F>(graph: &Graph,
     // this means we are either a union or a join.
     // let's deal with the union case first.
     // in unions, all keys resolve to more than one parent.
-    // in a join, each column can only be sourced from a particular ancestor.
-    if resolved.len() != 1 {
+    if !n.is_join() {
         // all columns come from all parents
         assert_eq!(parents.len(), resolved.len());
         // no columns are generated

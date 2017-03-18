@@ -177,6 +177,10 @@ pub trait Ingredient
         false
     }
 
+    fn is_join(&self) -> bool {
+        false
+    }
+
     /// Produce a compact, human-readable description of this node.
     ///
     ///  Symbol   Description

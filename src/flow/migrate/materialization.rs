@@ -396,7 +396,6 @@ pub fn initialize(log: &Logger,
             let log = log.new(o!("node" => node.index()));
             info!(log, "beginning reconstruction of {:?}", *graph[node]);
             reconstruct(&log, graph, &empty, &materialize, txs, node, index_on);
-            debug!(log, "reconstruction started");
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
             ready(txs, vec![]);
@@ -432,22 +431,26 @@ pub fn reconstruct(log: &Logger,
     //
     // so, first things first, let's find all our paths up the tree
     let mut paths = {
-        let mut on_join = cost_fn(graph, empty, materialized, txs);
+        let mut on_join = cost_fn(log, graph, empty, materialized, txs);
         keys::provenance_of(graph, node, 0, &mut *on_join)
     };
 
     // next eliminate any that terminate in empty base nodes
     paths.retain(|path| !empty.contains(&path.last().unwrap().0));
-    assert!(!paths.is_empty());
 
     // cut paths so they contain the shortest replay path
     let paths = paths.into_iter()
         .map(|path| -> Vec<_> {
             let mut found = false;
             path.into_iter()
-                .skip(1)
                 .map(|(node, _)| node)
-                .take_while(|&node| {
+                .enumerate()
+                .take_while(|&(i, node)| {
+                    if i == 0 {
+                        // first node is target node
+                        return true;
+                    }
+
                     // keep taking until we get our first materialized node
                     // (`found` helps us emulate `take_while_inclusive`)
                     let n = &graph[node];
@@ -465,6 +468,7 @@ pub fn reconstruct(log: &Logger,
                     }
                     true
                 })
+                .map(|(_, node)| node)
                 .collect()
         });
 
@@ -482,6 +486,11 @@ pub fn reconstruct(log: &Logger,
             })
             .unwrap();
     }
+
+    // NOTE:
+    // there could be no paths left here. for example, if a symmetric join is joining an existing
+    // view with a newm, empty view, the empty view will be chosen for replay, and will be
+    // eliminated in the parents.retain() above.
 
     // TODO:
     // technically, we can be a bit smarter here. for example, a union with a 1-1 projection does
@@ -514,7 +523,7 @@ pub fn reconstruct(log: &Logger,
             segments.last_mut().unwrap().1.push(node);
         }
 
-        debug!(log, "domain replay path is {:?}", segments);
+        debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
 
         let locals = |i: usize| -> Vec<NodeAddress> {
             if i == 0 {
@@ -603,7 +612,8 @@ pub fn reconstruct(log: &Logger,
     }
 }
 
-fn cost_fn<'a, T>(graph: &'a Graph,
+fn cost_fn<'a, T>(log: &'a Logger,
+                  graph: &'a Graph,
                   empty: &'a HashSet<NodeIndex>,
                   materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
                   txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
@@ -732,12 +742,12 @@ fn cost_fn<'a, T>(graph: &'a Graph,
                 // join cost
                 cost += join_cost * size;
 
-                println!("cost of replaying along {:?}: {}", p, cost);
+                debug!(log, "cost of replaying from {:?}: {}", p, cost);
                 (p, cost)
             })
             .min_by_key(|&(_, cost)| cost)
             .map(|(node, cost)| {
-                println!("picked replay through {:?} for cost {}", node, cost);
+                debug!(log, "cost" => cost; "picked replay source {:?}", node);
                 node
             })
     })
