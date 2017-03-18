@@ -1,5 +1,5 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinClause, Operator};
+              JoinConstraint, JoinRightSide, Operator};
 use nom_sql::SelectStatement;
 
 use std::collections::{HashMap, HashSet};
@@ -277,18 +277,45 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         // 2. Add edges for each pair of joined relations
         //
         // 2a. Explicit joins
-        for je in &st.join {
-            match *je {
-                JoinClause::Tables(ref tables) => {
+        let wrapcol = |tbl: &str, col: &str| -> Option<Box<ConditionExpression>> {
+            let col = Column::from(format!("{}.{}", tbl, col).as_str());
+            Some(Box::new(ConditionExpression::Base(ConditionBase::Field(col))))
+        };
+        for jc in &st.join {
+            match jc.right {
+                JoinRightSide::Table(ref table) => {
+                    let join_pred = match jc.constraint {
+                        JoinConstraint::On(ref cond) => {
+                            match *cond {
+                                ConditionExpression::ComparisonOp(ref ct) => ct.clone(),
+                                _ => panic!("join condition is not a comparison!"),
+                            }
+                        }
+                        JoinConstraint::Using(ref cols) => {
+                            assert_eq!(cols.len(), 1);
+                            let col = cols.iter().next().unwrap();
+                            ConditionTree {
+                                operator: Operator::Equal,
+                                left: wrapcol(&st.tables
+                                                  .last()
+                                                  .as_ref()
+                                                  .unwrap()
+                                                  .name,
+                                              &col.name),
+                                right: wrapcol(&table.name, &col.name),
+                            }
+                        }
+                    };
+
                     // add joined table to relations if not present already
-                    let against = tables.get(0).as_ref().unwrap().name.clone();
-                    let join_rel = &mut qg.relations
+                    let against = table.name.clone();
+                    let _join_rel = &mut qg.relations
                         .entry(against.clone())
                         .or_insert_with(|| new_node(against.clone(), vec![], st));
                     // add edge for join
-                    let mut e = qg.edges
-                        .entry((st.tables.get(0).as_ref().unwrap().name.clone(), against))
-                        .or_insert_with(|| QueryGraphEdge::Join(vec![]));
+                    let mut _e = qg.edges
+                        .entry((st.tables.last().as_ref().unwrap().name.clone(), against))
+                        .or_insert_with(|| QueryGraphEdge::Join(vec![join_pred]));
                 }
                 _ => unimplemented!(),
             }
