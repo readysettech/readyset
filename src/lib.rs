@@ -8,6 +8,7 @@ pub use self::column::{Column, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
 pub use self::create::CreateTableStatement;
 pub use self::insert::InsertStatement;
+pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::parser::*;
 pub use self::select::{SelectStatement, GroupByClause, JoinClause, LimitClause, OrderClause,
                        OrderType};
