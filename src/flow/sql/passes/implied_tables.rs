@@ -93,9 +93,10 @@ impl ImpliedTableExpansion for SqlQuery {
                 })
                 .collect::<Vec<String>>();
             if matches.len() > 1 {
-                panic!("Ambiguous column {} specified. Matching tables: {:?}",
-                       f.name,
-                       matches);
+                println!("Ambiguous column {} exists in tables: {} -- picking a random one",
+                         f.name,
+                         matches.as_slice().join(", "));
+                Some(matches.pop().unwrap())
             } else if matches.is_empty() {
                 panic!("Failed to resolve table for column named {}", f.name);
             } else {
