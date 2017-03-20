@@ -318,7 +318,6 @@
 #![feature(pub_restricted)]
 #![feature(conservative_impl_trait)]
 #![feature(try_from)]
-#![feature(float_extras)]
 #![deny(missing_docs)]
 #![cfg_attr(feature="b_netsoup", feature(plugin))]
 #![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]

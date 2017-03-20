@@ -17,8 +17,9 @@ pub enum DataType {
     Int(i32),
     /// A 64-bit numeric value.
     BigInt(i64),
-    /// A fixed point real value.
-    Real((i32, i16)),
+    /// A fixed point real value. The first field is the integer part, while the second is the
+    /// fractional and must be between -999999999 and 999999999.
+    Real(i32, i32),
     /// A reference-counted string-like value.
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
@@ -28,12 +29,11 @@ pub enum DataType {
 #[cfg(feature="web")]
 impl ToJson for DataType {
     fn to_json(&self) -> Json {
-        use std::str::FromStr;
         match *self {
             DataType::None => Json::Null,
             DataType::Int(n) => Json::I64(n as i64),
             DataType::BigInt(n) => Json::I64(n),
-            DataType::Real((i, f)) => Json::F64(f64::from_str(&format!("{}.{}", i, f)).unwrap()),
+            DataType::Real(i, f) => Json::F64((i as f64) + (f as f64) * 1.0e-9),
             DataType::Text(..) |
             DataType::TinyText(..) => Json::String(self.into()),
         }
@@ -49,7 +49,7 @@ impl PartialEq for DataType {
             (&DataType::Int(ref a), &DataType::BigInt(ref b)) => *a as i64 == *b,
             (&DataType::BigInt(ref a), &DataType::Int(ref b)) => *a == *b as i64,
             (&DataType::BigInt(ref a), &DataType::BigInt(ref b)) => a == b,
-            (&DataType::Real((ref ai, ref af)), &DataType::Real((ref bi, ref bf))) => {
+            (&DataType::Real(ref ai, ref af), &DataType::Real(ref bi, ref bf)) => {
                 ai == bi && af == bf
             }
             (&DataType::None, &DataType::None) => true,
@@ -72,12 +72,21 @@ impl From<i32> for DataType {
 
 impl From<f64> for DataType {
     fn from(f: f64) -> Self {
-        if f.is_nan() {
+        if !f.is_finite() {
             panic!();
-        } else {
-            let (i, f, s) = f.integer_decode();
-            DataType::Real(((s as i64 * i as i64) as i32, f))
         }
+
+        let mut i = f.trunc() as i32;
+        let mut frac = (f.fract() * 1000_000_000.0).round() as i32;
+        if frac == 1000_000_000 {
+            i += 1;
+            frac = 0;
+        } else if frac == -1000_000_000 {
+            i -= 1;
+            frac = 0;
+        }
+
+        DataType::Real(i, frac)
     }
 }
 
@@ -159,7 +168,39 @@ impl fmt::Display for DataType {
             }
             DataType::Int(n) => write!(f, "{}", n),
             DataType::BigInt(n) => write!(f, "{}", n),
-            DataType::Real((i, frac)) => write!(f, "{}", format!("{}.{}", i, frac)),
+            DataType::Real(i, frac) => {
+                if i == 0 && frac < 0 {
+                    // We have to insert the negative sign ourselves.
+                    write!(f, "{}", format!("-0.{:09}", frac.abs()))
+                } else {
+                    write!(f, "{}", format!("{}.{:09}", i, frac.abs()))
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn real_to_string() {
+        let a: DataType = (2.5).into();
+        let b: DataType = (-2.01).into();
+        let c: DataType = (-0.012345678).into();
+        assert_eq!(a.to_string(), "2.500000000");
+        assert_eq!(b.to_string(), "-2.010000000");
+        assert_eq!(c.to_string(), "-0.012345678");
+    }
+
+    #[test]
+    fn real_to_json() {
+        let a: DataType = (2.5).into();
+        let b: DataType = (-2.01).into();
+        let c: DataType = (-0.012345678).into();
+        assert_eq!(a.to_json(), Json::F64(2.5));
+        assert_eq!(b.to_json(), Json::F64(-2.01));
+        assert_eq!(c.to_json(), Json::F64(-0.012345678));
     }
 }
