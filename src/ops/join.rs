@@ -258,6 +258,10 @@ impl Ingredient for Joiner {
         false
     }
 
+    fn is_join(&self) -> bool {
+        true
+    }
+
     fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
         // we want to replay an ancestor that we are *not* doing an outer join against
         // it's not *entirely* clear how to extract that from self.join, but we'll use the
@@ -402,20 +406,25 @@ impl Ingredient for Joiner {
     }
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        let (nl, c) = self.emit[col];
+        // we know where this column comes from through self.emit.
+        let (origin, ocol) = self.emit[col];
+        let mut source = vec![(origin, Some(ocol))];
 
-        let j = &self.join[&nl];
-        assert!(j.against.len() == 1);
+        // however, we *also* want to check if this column compares equal to a column in another
+        // ancestor, so that we can detect key provenance through both sides of the join.
+        let j = &self.join[&origin];
+        assert!(j.against.len() == 1); // only two-way joins for now
 
-        let (nr, target) = j.against.iter().next().unwrap();
-        let (lcol, rcol) = target.on;
+        // figure out how we join with the other view
+        let (&other, &JoinTarget { on: (lcol, rcol), .. }) = j.against.iter().next().unwrap();
 
-        if lcol == c {
-            vec![(nl, Some(lcol)), (*nr, Some(rcol))]
-        } else {
-            let other = *self.join.keys().find(|n: &&NodeAddress| **n != nl).unwrap();
-            vec![(nl, Some(c)), (other, None)]
+        // if we join on the same column that col resolves to,
+        // then we know that self[col] also comes from other[rcol].
+        if lcol == ocol {
+            source.push((other, Some(rcol)));
         }
+
+        source
     }
 }
 

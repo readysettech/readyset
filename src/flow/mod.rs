@@ -23,6 +23,7 @@ pub mod prelude;
 pub mod node;
 pub mod payload;
 pub mod statistics;
+pub mod keys;
 mod migrate;
 mod transactions;
 
@@ -174,6 +175,10 @@ pub trait Ingredient
 
     /// Returns true for base node types.
     fn is_base(&self) -> bool {
+        false
+    }
+
+    fn is_join(&self) -> bool {
         false
     }
 

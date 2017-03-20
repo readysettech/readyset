@@ -13,6 +13,7 @@ use checktable;
 use flow::data::DataType;
 use ops::{Record, Datas};
 use flow::domain;
+use flow::keys;
 use flow::{Ingredient, NodeAddress, Edge};
 use flow::payload::Packet;
 use flow::migrate::materialization::Tag;
@@ -148,59 +149,13 @@ impl Type {
                         index: NodeIndex)
                         -> Vec<(NodeIndex, Option<usize>)> {
 
-        fn base_parents(graph: &petgraph::Graph<Node, Edge>,
-                        index: NodeIndex)
-                        -> Vec<(NodeIndex, Option<usize>)> {
-            if let Type::Internal(ref i) = *graph[index] {
-                if i.is_base() {
-                    return vec![(index, None)];
-                }
-            }
-            graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming)
-                .flat_map(|n| base_parents(graph, n))
-                .collect()
-        }
-
-        let parents: Vec<_> = graph.neighbors_directed(index, petgraph::EdgeDirection::Incoming)
-            .collect();
-
-        match *self {
-            Type::Ingress |
-            Type::Reader(..) |
-            Type::Egress { .. } => {
-                assert_eq!(parents.len(), 1);
-                graph[parents[0]].base_columns(column, graph, parents[0])
-            }
-            Type::Internal(ref i) => {
-                if i.is_base() {
-                    vec![(index, Some(column))]
-                } else {
-                    i.parent_columns(column)
-                        .into_iter()
-                        .flat_map(|(n, c)| {
-                            let n = if n.is_global() {
-                                *n.as_global()
-                            } else {
-                                // Find the parent with node address matching the result from
-                                // parent_columns.
-                                *parents.iter()
-                                    .find(|p| match graph[**p].addr {
-                                        Some(a) if a == n => true,
-                                        _ => false,
-                                    })
-                                    .unwrap()
-                            };
-
-                            match c {
-                                Some(c) => graph[n].base_columns(c, graph, n),
-                                None => base_parents(graph, n),
-                            }
-                        })
-                        .collect()
-                }
-            }
-            Type::Source => unreachable!(),
-        }
+        keys::provenance_of(graph, index, column, |_, _| None)
+            .into_iter()
+            .map(|path| {
+                // we want the base node corresponding to each path
+                path.into_iter().last().unwrap()
+            })
+            .collect()
     }
 }
 
@@ -298,6 +253,10 @@ impl Node {
                 unreachable!("asked for unset addr for {:?}", &*self.inner);
             }
         }
+    }
+
+    pub fn is_localized(&self) -> bool {
+        self.addr.is_some() && self.domain.is_some()
     }
 
     pub fn take(&mut self) -> Node {
