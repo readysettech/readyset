@@ -287,7 +287,32 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     let join_pred = match jc.constraint {
                         JoinConstraint::On(ref cond) => {
                             match *cond {
-                                ConditionExpression::ComparisonOp(ref ct) => ct.clone(),
+                                ConditionExpression::ComparisonOp(ref ct) => {
+                                    println!("ct: {:?}", ct);
+                                    // the tables might be the other way around compared to how
+                                    // they're specified in the query; if so, flip them
+                                    // TODO(malte): this only deals with simple, flat join
+                                    // conditions for now.
+                                    let l = match **ct.left.as_ref().unwrap() {
+                                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                        _ => unimplemented!(),
+                                    };
+                                    let r = match **ct.right.as_ref().unwrap() {
+                                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                        _ => unimplemented!(),
+                                    };
+                                    if *l.table.as_ref().unwrap() == table.name &&
+                                       *r.table.as_ref().unwrap() ==
+                                       st.tables.last().as_ref().unwrap().name {
+                                        ConditionTree {
+                                            operator: ct.operator.clone(),
+                                            left: ct.right.clone(),
+                                            right: ct.left.clone(),
+                                        }
+                                    } else {
+                                        ct.clone()
+                                    }
+                                }
                                 _ => panic!("join condition is not a comparison!"),
                             }
                         }
