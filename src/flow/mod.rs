@@ -216,7 +216,7 @@ pub trait Ingredient
                 data: ops::Records,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
-                -> ops::Records;
+                -> Option<ops::Records>;
 
     fn can_query_through(&self) -> bool {
         false
@@ -1061,8 +1061,6 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
-        println!("Blender started dropping.");
-
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
             drop(tx.send(payload::Packet::Quit));
@@ -1071,8 +1069,6 @@ impl Drop for Blender {
             println!("Waiting for domain thread to join.");
             d.join().unwrap();
         }
-
-        println!("Blender is done dropping.")
     }
 }
 

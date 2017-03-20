@@ -75,8 +75,8 @@ impl Ingredient for Union {
                 rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Records {
-        rs.into_iter()
+                -> Option<Records> {
+        Some(rs.into_iter()
             .map(move |rec| {
                 let (r, pos) = rec.extract();
 
@@ -91,7 +91,7 @@ impl Ingredient for Union {
                     ops::Record::Negative(sync::Arc::new(res))
                 }
             })
-            .collect()
+            .collect())
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

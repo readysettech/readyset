@@ -332,7 +332,7 @@ impl Ingredient for Joiner {
                 rs: Records,
                 nodes: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> Option<Records> {
         // okay, so here's what's going on:
         // the record(s) we receive are all from one side of the join. we need to query the
         // other side(s) for records matching the incoming records on that side's join
@@ -340,7 +340,7 @@ impl Ingredient for Joiner {
 
         // TODO: we should be clever here, and only query once per *distinct join value*,
         // instead of once per received record.
-        rs.into_iter()
+        Some(rs.into_iter()
             .flat_map(|rec| {
                 let (r, pos) = rec.extract();
 
@@ -353,7 +353,7 @@ impl Ingredient for Joiner {
                     }
                 })
             })
-            .collect()
+            .collect())
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

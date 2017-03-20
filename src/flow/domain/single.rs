@@ -146,7 +146,7 @@ impl NodeDescriptor {
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
-                m.map_data(|data| i.on_input(from, data, nodes, state));
+                m.map_data(|data| i.on_input(from, data, nodes, state).unwrap());
                 materialize(m.data(), state.get_mut(&addr));
                 m
             }

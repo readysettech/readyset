@@ -352,7 +352,8 @@ pub mod test {
             let u = self.nodes[self.nut.unwrap().1.as_local()]
                 .borrow_mut()
                 .inner
-                .on_input(src, u.into(), &self.nodes, &self.states);
+                .on_input(src, u.into(), &self.nodes, &self.states)
+                .unwrap();
 
             if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;

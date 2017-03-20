@@ -72,7 +72,7 @@ impl Ingredient for Permute {
                 mut rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Records {
+                -> Option<Records> {
         debug_assert_eq!(from, self.src);
 
         if self.emit.is_some() {
@@ -89,7 +89,7 @@ impl Ingredient for Permute {
                 **r = sync::Arc::new(new_r);
             }
         }
-        rs
+        Some(rs)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

@@ -124,7 +124,6 @@ impl Base {
             match self.durability {
                 BaseDurabilityLevel::None => {
                     self.durable_log = None;
-                    println!("SET DURABLE LOG TO NONE, BECAUSE DURABILITY IS NONE!");
                 },
 
                 // TODO(jmftrindade): Use our own flush strategy instead?
@@ -140,8 +139,6 @@ impl Base {
                         LOG_BUFFER_CAPACITY, file, WhenFull))
                 }
             }
-
-            println!("SET BASE DURABLE_LOG TO SOME!");
         }
     }
 }
@@ -177,22 +174,12 @@ impl Default for Base {
     }
 }
 
-#[cfg(test)]
 impl Drop for Base {
     fn drop(&mut self) {
-        println!("Dropping Base!");
-
-        if self.durable_log.is_some() {
-            println!("Durable log is SOME!");
-        } else {
-            println!("Durable log is NONE!");
-        }
-
+        // Cleanup any durable log files.
+        // TODO(jmftrindade): We want to do this only for tests instead of always.
         if self.durable_log_path.is_some() {
             fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
-
-            // Somehow this is never reached.
-            panic!("Removed file!");
         }
     }
 }
@@ -227,7 +214,7 @@ impl Ingredient for Base {
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
         match self.durability {
             BaseDurabilityLevel::Buffered |
@@ -235,7 +222,9 @@ impl Ingredient for Base {
             BaseDurabilityLevel::None => (),
         }
 
-        rs.into_iter()
+        // FIXME: here is where I only return records if we wrote them to disk
+
+        Some(rs.into_iter()
             .map(|r| match r {
                 Record::Positive(u) => Record::Positive(u),
                 Record::Negative(u) => Record::Negative(u),
@@ -251,7 +240,7 @@ impl Ingredient for Base {
                     Record::Negative(rows[0].clone())
                 }
             })
-            .collect()
+            .collect())
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

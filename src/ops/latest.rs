@@ -69,7 +69,7 @@ impl Ingredient for Latest {
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> Option<Records> {
         debug_assert_eq!(from, self.src);
         // We don't allow standalone negatives as input to a latest. This is because it
         // would be very computationally expensive (and currently impossible) to find what
@@ -109,7 +109,7 @@ impl Ingredient for Latest {
 
         // TODO: check that there aren't any standalone negatives
 
-        out.into()
+        Some(out.into())
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
