@@ -78,7 +78,7 @@ impl Drop for ServerHandle {
         let wait: Vec<_> = self.threads
             .drain(..)
             .map(|(tx, jh)| {
-                tx.complete(());
+                tx.send(()).unwrap();
                 jh
             })
             .collect();

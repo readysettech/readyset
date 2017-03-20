@@ -8,6 +8,11 @@ use std::sync::Arc;
 use flow::prelude::*;
 use std::cmp::Ordering;
 
+/// TopK provides an operator that will produce the top k elements for each group.
+///
+/// Positives are generally fast to process, while negative records can trigger expensive backwards
+/// queries. It is also worth noting that due the nature of Soup, the results of this operator are
+/// unordered.
 #[derive(Debug, Clone)]
 pub struct TopK {
     src: NodeAddress,
@@ -27,6 +32,11 @@ pub struct TopK {
 }
 
 impl TopK {
+    /// Construct a new TopK operator.
+    ///
+    /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
+    /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
+    /// of results per group.
     pub fn new(src: NodeAddress, over: usize, group_by: Vec<usize>, k: usize) -> Self {
         let mut group_by = group_by;
         group_by.sort();
@@ -72,12 +82,10 @@ impl TopK {
         }
 
         let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
-            .filter_map(|r| {
-                match r {
-                    &Record::Positive(ref a) => Some((a, false)),
-                    _ => None,
-                }
-            })
+            .filter_map(|r| match r {
+                            &Record::Positive(ref a) => Some((a, false)),
+                            _ => None,
+                        })
             .chain(current.into_iter().map(|a| (a, true)))
             .collect();
         output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
@@ -93,7 +101,10 @@ impl TopK {
                     cmp_rows(&&r, &&min) == Ordering::Equal
                 };
 
-                let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
+                let mut current_mins: Vec<_> = output_rows.iter()
+                    .filter(is_min)
+                    .cloned()
+                    .collect();
 
                 output_rows = rs.iter()
                     .filter_map(|r| {
@@ -104,8 +115,7 @@ impl TopK {
                         match cmp_rows(&r, &&min) {
                             Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
-                                let e = current_mins.iter()
-                                    .position(|&(ref s, _)| *s == r);
+                                let e = current_mins.iter().position(|&(ref s, _)| *s == r);
                                 match e {
                                     Some(i) => {
                                         current_mins.swap_remove(i);
@@ -120,9 +130,7 @@ impl TopK {
                     .chain(output_rows.into_iter())
                     .collect();
             } else {
-                output_rows = rs.iter()
-                    .map(|rs| (rs, false))
-                    .collect();
+                output_rows = rs.iter().map(|rs| (rs, false)).collect();
             }
             output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
         }
@@ -144,9 +152,9 @@ impl TopK {
         }
 
         // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows.into_iter()
-            .filter(|p| !p.1)
-            .map(|p| Record::Positive(p.0.clone())));
+        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
+                                                                      Record::Positive(p.0.clone())
+                                                                  }));
         delta
     }
 }
@@ -204,10 +212,10 @@ impl Ingredient for TopK {
             let group = rec.iter()
                 .enumerate()
                 .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                    Some(v)
-                } else {
-                    None
-                })
+                                Some(v)
+                            } else {
+                                None
+                            })
                 .cloned()
                 .collect::<Vec<_>>();
 
@@ -220,17 +228,20 @@ impl Ingredient for TopK {
             let count: i64 = *self.counts.get(&group).unwrap_or(&0) as i64;
             let count_diff: i64 = diffs.iter()
                 .map(|r| match r {
-                    &Record::Positive(..) => 1,
-                    &Record::Negative(..) => -1,
-                    &Record::DeleteRequest(..) => unreachable!(),
-                })
+                         &Record::Positive(..) => 1,
+                         &Record::Negative(..) => -1,
+                         &Record::DeleteRequest(..) => unreachable!(),
+                     })
                 .sum();
 
             if count + count_diff <= self.k as i64 {
                 out.append(&mut diffs);
             } else {
                 // find the current value for this group
-                let db = state.get(self.us.as_ref().unwrap().as_local())
+                let db = state.get(self.us
+                                       .as_ref()
+                                       .unwrap()
+                                       .as_local())
                     .expect("topk must have its own state materialized");
                 let old_rs = db.lookup(&self.group_by[..], &KeyType::from(&group[..]));
                 assert!(count as usize >= old_rs.len());
@@ -331,8 +342,17 @@ mod tests {
         let me = NodeAddress::mock_global(1.into());
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
-        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
-        assert_eq!(*idx.iter().skip(1).next().unwrap().1, vec![1]);
+        assert_eq!(*idx.iter()
+                        .next()
+                        .unwrap()
+                        .1,
+                   vec![1]);
+        assert_eq!(*idx.iter()
+                        .skip(1)
+                        .next()
+                        .unwrap()
+                        .1,
+                   vec![1]);
     }
 
     #[test]

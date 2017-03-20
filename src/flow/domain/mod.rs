@@ -264,7 +264,7 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, mut m: Packet, inject_tx: &mut InjectCh) {
+    fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
