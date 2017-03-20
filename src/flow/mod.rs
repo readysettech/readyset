@@ -25,6 +25,7 @@ pub mod payload;
 pub mod statistics;
 mod migrate;
 mod transactions;
+mod hook;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {

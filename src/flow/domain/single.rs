@@ -79,14 +79,30 @@ impl NodeDescriptor {
                 txs.retain(|tx| {
                     left -= 1;
                     if left == 0 {
-                            tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.take()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         } else {
-                            tx.send(data.clone().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.clone()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         }
                         .is_ok()
                 });
 
                 // readers never have children
+                Packet::None
+            }
+            flow::node::Type::Hook(ref mut h) => {
+                if let &mut Some(ref mut h) = h {
+                    h.on_input(m.take_data());
+                } else {
+                    unreachable!();
+                }
                 Packet::None
             }
             flow::node::Type::Egress { ref txs, ref tags } => {
