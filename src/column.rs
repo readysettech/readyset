@@ -16,6 +16,7 @@ pub enum FunctionExpression {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Column {
     pub name: String,
+    pub alias: Option<String>,
     pub table: Option<String>,
     pub function: Option<FunctionExpression>,
 }
@@ -26,6 +27,7 @@ impl<'a> From<&'a str> for Column {
             None => {
                 Column {
                     name: String::from(c),
+                    alias: None,
                     table: None,
                     function: None,
                 }
@@ -33,6 +35,7 @@ impl<'a> From<&'a str> for Column {
             Some(i) => {
                 Column {
                     name: String::from(&c[i + 1..]),
+                    alias: None,
                     table: Some(String::from(&c[0..i])),
                     function: None,
                 }
@@ -81,6 +84,7 @@ mod tests {
         assert_eq!(c,
                    Column {
                        name: String::from("col"),
+                       alias: None,
                        table: Some(String::from("table")),
                        function: None,
                    });

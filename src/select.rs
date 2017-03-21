@@ -274,16 +274,8 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("id"),
-                                                             table: Some(String::from("users")),
-                                                             function: None,
-                                                         },
-                                                         Column {
-                                                             name: String::from("name"),
-                                                             table: Some(String::from("users")),
-                                                             function: None,
-                                                         }]),
+                       fields: FieldExpression::Seq(vec![Column::from("users.id"),
+                                                         Column::from("users.name")]),
                        ..Default::default()
                    });
     }
@@ -431,14 +423,24 @@ mod tests {
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperTag")],
-                       fields: FieldExpression::Seq(vec![Column::from("TagName")]),
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("name"),
+                                                             alias: Some(String::from("TagName")),
+                                                             table: None,
+                                                             function: None,
+                                                         }]),
                        ..Default::default()
                    });
         let res2 = selection(qstring2.as_bytes());
         assert_eq!(res2.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperTag")],
-                       fields: FieldExpression::Seq(vec![Column::from("PaperTag.TagName")]),
+                       fields: FieldExpression::Seq(vec![Column {
+                                                             name: String::from("name"),
+                                                             alias: Some(String::from("TagName")),
+                                                             table: Some(String::from("PaperTag")),
+                                                             function: None,
+                                                         }]),
                        ..Default::default()
                    });
     }
@@ -530,6 +532,7 @@ mod tests {
                        tables: vec![Table::from("address")],
                        fields: FieldExpression::Seq(vec![Column {
                                                              name: String::from("anon_fn"),
+                                                             alias: None,
                                                              table: None,
                                                              function: Some(agg_expr),
                                                          }]),
@@ -547,7 +550,8 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("address")],
                        fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("max_addr"),
+                                                             name: String::from("anon_fn"),
+                                                             alias: Some(String::from("max_addr")),
                                                              table: None,
                                                              function: Some(agg_expr),
                                                          }]),
@@ -566,6 +570,7 @@ mod tests {
                        tables: vec![Table::from("votes")],
                        fields: FieldExpression::Seq(vec![Column {
                                                              name: String::from("anon_fn"),
+                                                             alias: None,
                                                              table: None,
                                                              function: Some(agg_expr),
                                                          }]),

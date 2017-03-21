@@ -158,6 +158,7 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
             || {
                 Column {
                     name: String::from("anon_fn"),
+                    alias: None,
                     table: None,
                     function: Some(function),
                 }
@@ -175,6 +176,7 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
             || {
                 Column {
                     name: String::from(column),
+                    alias: None,
                     table: match table {
                         None => None,
                         Some(t) => Some(String::from(t)),
@@ -194,9 +196,10 @@ named!(pub column_identifier<&[u8], Column>,
             alias: opt!(as_alias),
             || {
                 Column {
-                    name: match alias {
-                        Some(a) => String::from(a),
-                        None => String::from("anon_fn"),
+                    name: String::from("anon_fn"),
+                    alias: match alias {
+                        None => None,
+                        Some(a) => Some(String::from(a)),
                     },
                     table: None,
                     function: Some(function),
@@ -215,9 +218,10 @@ named!(pub column_identifier<&[u8], Column>,
             alias: opt!(as_alias),
             || {
                 Column {
-                    name: match alias {
-                        Some(a) => String::from(a),
-                        None => String::from(column),
+                    name: String::from(column),
+                    alias: match alias {
+                        None => None,
+                        Some(a) => Some(String::from(a)),
                     },
                     table: match table {
                         None => None,
@@ -463,6 +467,7 @@ mod tests {
         let expected_fn = Some(FunctionExpression::Max(expected_fields));
         let expected = Column {
             name: String::from("anon_fn"),
+            alias: None,
             table: None,
             function: expected_fn,
         };
