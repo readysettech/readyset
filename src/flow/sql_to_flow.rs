@@ -298,10 +298,7 @@ impl SqlIncorporator {
 
         // The function node's set of output columns is the group columns plus the function
         // column
-        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
-            Some(ref a) => a.clone(),
-            None => c.name.clone(),
-        }));
+        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| c.name.clone()));
         combined_columns.push(String::from(computed_col_name));
 
         // make the new operator and record its metadata
@@ -348,10 +345,7 @@ impl SqlIncorporator {
             };
             let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
 
-            let computed_col_name = match func_col.alias {
-                None => &func_col.name,
-                Some(ref a) => a,
-            };
+            let computed_col_name = &func_col.name;
             self.make_grouped_node(name,
                                    computed_col_name,
                                    (parent_ni, over_col_indx),
@@ -412,10 +406,7 @@ impl SqlIncorporator {
             .collect();
 
         let mut col_names: Vec<String> = proj_cols.iter()
-            .map(|c| match c.alias {
-                Some(ref a) => a.clone(),
-                None => c.name.clone(),
-            })
+            .map(|c| c.name.clone())
             .collect::<Vec<_>>();
         let (literal_names, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
         col_names.extend(literal_names.into_iter().map(String::from));
@@ -785,13 +776,7 @@ impl SqlIncorporator {
                         v
                     });
                 let projected_column_ids: Vec<usize> = projected_columns.iter()
-                    .map(|c| {
-                        let name = match c.alias {
-                            Some(ref a) => a,
-                            None => &c.name,
-                        };
-                        self.field_to_columnid(final_na, &name).unwrap()
-                    })
+                    .map(|c| self.field_to_columnid(final_na, &c.name).unwrap())
                     .collect();
                 let fields = projected_columns.iter()
                     .map(|c| match c.alias {
@@ -1074,7 +1059,7 @@ mod tests {
                                                 vec![Column::from("votes.userid")]))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["aid", "votes"]);
+        assert_eq!(agg_view.fields(), &["aid", "anon_fn"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view
         let edge_view = get_node(&inc, &mig, &res.unwrap().name);
@@ -1201,7 +1186,7 @@ mod tests {
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
         // check aggregation view
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["grp", "count"]);
+        assert_eq!(agg_view.fields(), &["grp", "anon_fn"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
@@ -1246,7 +1231,7 @@ mod tests {
                                                 vec![Column::from("votes.aid")]))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["userid", "count"]);
+        assert_eq!(agg_view.fields(), &["userid", "anon_fn"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
