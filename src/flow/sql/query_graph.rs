@@ -39,12 +39,10 @@ impl QueryGraph {
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations
-            .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
-                acc.extend(qgn.parameters.iter());
-                acc
-            })
+        self.relations.values().fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+            acc.extend(qgn.parameters.iter());
+            acc
+        })
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -54,10 +52,7 @@ impl QueryGraph {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
-        let rels = self.relations
-            .keys()
-            .map(|r| String::as_str(r))
-            .collect();
+        let rels = self.relations.keys().map(|r| String::as_str(r)).collect();
 
         // Compute relations part of hash
         let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
@@ -161,8 +156,8 @@ fn classify_conditionals(ce: &ConditionExpression,
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
                                     if let Ordering::Less = fr.table
-                                        .as_ref()
-                                        .cmp(&fl.table.as_ref()) {
+                                           .as_ref()
+                                           .cmp(&fl.table.as_ref()) {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
                                     }
@@ -294,22 +289,28 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // strictly required, and eagerly pushes more columns than needed, but makes a
                     // naive version of the graph construction work.
                     {
-                        let left = &mut qg.relations
-                            .entry(l.table.as_ref().unwrap().clone())
-                            .or_insert_with(|| {
-                                new_node(l.table.as_ref().unwrap().clone(), vec![], st)
-                            });
+                        let left =
+                            &mut qg.relations
+                                     .entry(l.table.as_ref().unwrap().clone())
+                                     .or_insert_with(|| {
+                                                         new_node(l.table.as_ref().unwrap().clone(),
+                                                                  vec![],
+                                                                  st)
+                                                     });
                         if !left.columns.iter().any(|c| c.name == l.name) {
                             left.columns.push(l.clone());
                         }
                     }
 
                     {
-                        let right = &mut qg.relations
-                            .entry(r.table.as_ref().unwrap().clone())
-                            .or_insert_with(|| {
-                                new_node(r.table.as_ref().unwrap().clone(), vec![], st)
-                            });
+                        let right =
+                            &mut qg.relations
+                                     .entry(r.table.as_ref().unwrap().clone())
+                                     .or_insert_with(|| {
+                                                         new_node(r.table.as_ref().unwrap().clone(),
+                                                                  vec![],
+                                                                  st)
+                                                     });
                         if !right.columns.iter().any(|c| c.name == r.name) {
                             right.columns.push(r.clone());
                         }

@@ -205,10 +205,7 @@ impl GroupedOperation for GroupConcat {
         // Sort group by columns for consistent output.
         let mut group_cols = self.group.clone();
         group_cols.sort();
-        let group_cols = group_cols.iter()
-            .map(|g| g.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let group_cols = group_cols.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
 
         format!("||([{}], \"{}\") γ[{}]",
                 fields,

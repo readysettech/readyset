@@ -98,10 +98,7 @@ impl TopK {
                     cmp_rows(&&r, &&min) == Ordering::Equal
                 };
 
-                let mut current_mins: Vec<_> = output_rows.iter()
-                    .filter(is_min)
-                    .cloned()
-                    .collect();
+                let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
 
                 output_rows = rs.iter()
                     .filter_map(|r| {
@@ -339,17 +336,8 @@ mod tests {
         let me = NodeAddress::mock_global(1.into());
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
-        assert_eq!(*idx.iter()
-                        .next()
-                        .unwrap()
-                        .1,
-                   vec![1]);
-        assert_eq!(*idx.iter()
-                        .skip(1)
-                        .next()
-                        .unwrap()
-                        .1,
-                   vec![1]);
+        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
+        assert_eq!(*idx.iter().skip(1).next().unwrap().1, vec![1]);
     }
 
     #[test]

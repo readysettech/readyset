@@ -147,11 +147,7 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::MIN => format!("min({})", self.over),
             Extremum::MAX => format!("max({})", self.over),
         };
-        let group_cols = self.group
-            .iter()
-            .map(|g| g.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let group_cols = self.group.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }

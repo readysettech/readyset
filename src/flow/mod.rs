@@ -120,12 +120,12 @@ impl Mutator {
 
         let u = u.into();
         self.send(vec![prelude::Record::DeleteRequest(self.primary_key
-                           .iter()
-                           .map(|&col| &u[col])
-                           .cloned()
-                           .collect()),
+                                                          .iter()
+                                                          .map(|&col| &u[col])
+                                                          .cloned()
+                                                          .collect()),
                        u.into()]
-            .into())
+                          .into())
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
@@ -138,12 +138,12 @@ impl Mutator {
 
         let u = u.into();
         let m = vec![prelude::Record::DeleteRequest(self.primary_key
-                         .iter()
-                         .map(|&col| &u[col])
-                         .cloned()
-                         .collect()),
+                                                        .iter()
+                                                        .map(|&col| &u[col])
+                                                        .cloned()
+                                                        .collect()),
                      u.into()]
-            .into();
+                .into();
         self.tx_send(m, t)
     }
 }
@@ -235,8 +235,9 @@ impl Blender {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .flat_map(|ingress| {
-                self.ingredients.neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-            })
+                          self.ingredients.neighbors_directed(ingress,
+                                                              petgraph::EdgeDirection::Outgoing)
+                      })
             .map(|n| (n, &self.ingredients[n]))
             .filter(|&(_, base)| base.is_internal() && base.is_base())
             .map(|(n, base)| (n.into(), &*base))
@@ -281,10 +282,10 @@ impl Blender {
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
             .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
-                Some(inner)
-            } else {
-                None
-            })
+                            Some(inner)
+                        } else {
+                            None
+                        })
             .next(); // there should be at most one
 
         reader.and_then(|r| r.get_reader())
@@ -322,9 +323,7 @@ impl Blender {
                 s.send(payload::Packet::GetStatistics(tx)).unwrap();
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
-                let node_map = node_stats.into_iter()
-                    .map(|(ni, ns)| (ni.into(), ns))
-                    .collect();
+                let node_map = node_stats.into_iter().map(|(ni, ns)| (ni.into(), ns)).collect();
 
                 (*di, (domain_stats, node_map))
             })
@@ -491,8 +490,10 @@ impl<'a> Migration<'a> {
             unreachable!("tried to add token generator to non-reader node");
         }
 
-        let base_columns: Vec<(_, Option<_>)> = self.mainline.ingredients[*n.as_global()]
-            .base_columns(key, &self.mainline.ingredients, *n.as_global());
+        let base_columns: Vec<(_, Option<_>)> =
+            self.mainline.ingredients[*n.as_global()].base_columns(key,
+                                                                   &self.mainline.ingredients,
+                                                                   *n.as_global());
 
         let coarse_parents = base_columns.iter()
             .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
@@ -500,10 +501,10 @@ impl<'a> Migration<'a> {
 
         let granular_parents = base_columns.into_iter()
             .filter_map(|(ni, o)| if o.is_some() {
-                Some((ni, o.unwrap()))
-            } else {
-                None
-            })
+                            Some((ni, o.unwrap()))
+                        } else {
+                            None
+                        })
             .collect();
 
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
@@ -656,9 +657,9 @@ impl<'a> Migration<'a> {
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .map(|ni| {
-                let domain = mainline.ingredients[ni].domain();
-                (domain, ni, new.contains(&ni))
-            })
+                     let domain = mainline.ingredients[ni].domain();
+                     (domain, ni, new.contains(&ni))
+                 })
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -743,13 +744,13 @@ impl<'a> Migration<'a> {
         debug!(log, "calculating materializations");
         let index = domain_nodes.iter()
             .map(|(domain, nodes)| {
-                use self::migrate::materialization::{pick, index};
-                debug!(log, "picking materializations"; "domain" => domain.index());
-                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
-                debug!(log, "deriving indices"; "domain" => domain.index());
-                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
-                (*domain, idx)
-            })
+                     use self::migrate::materialization::{pick, index};
+                     debug!(log, "picking materializations"; "domain" => domain.index());
+                     let mat = pick(&log, &mainline.ingredients, &nodes[..]);
+                     debug!(log, "deriving indices"; "domain" => domain.index());
+                     let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
+                     (*domain, idx)
+                 })
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();

@@ -41,9 +41,7 @@ impl Tag {
 }
 
 pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
-    let nodes: Vec<_> = nodes.iter()
-        .map(|&(ni, new)| (ni, &graph[ni], new))
-        .collect();
+    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (ni, &graph[ni], new)).collect();
 
     let mut materialize: HashSet<_> = nodes.iter()
         .filter_map(|&(ni, n, _)| {
@@ -154,8 +152,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 continue;
             }
 
-            if graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                .any(|e| *e.weight()) {
+            if graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing).any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
                 materialize.remove(n.addr().as_local());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
@@ -180,9 +177,7 @@ pub fn index(log: &Logger,
 
     let map: HashMap<_, _> =
         nodes.iter().map(|&(ni, _)| (*graph[ni].addr().as_local(), ni)).collect();
-    let nodes: Vec<_> = nodes.iter()
-        .map(|&(ni, new)| (&graph[ni], new))
-        .collect();
+    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
 
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
@@ -251,8 +246,8 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node = real_cols.into_iter()
-                            .fold(HashMap::new(), |mut acc, nc| {
+                        let cols_to_index_per_node =
+                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
                                 if let Some(p_cols) = nc {
                                     for (pn, pc) in p_cols {
                                         acc.entry(pn).or_insert_with(Vec::new).push(pc);
@@ -339,10 +334,10 @@ pub fn initialize(log: &Logger,
             .and_then(|ss| ss.get(n.addr().as_local()))
             .cloned()
             .map(|idxs| {
-                // we've been told to materialize a node using 0 indices
-                assert!(!idxs.is_empty());
-                idxs
-            })
+                     // we've been told to materialize a node using 0 indices
+                     assert!(!idxs.is_empty());
+                     idxs
+                 })
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
@@ -362,10 +357,10 @@ pub fn initialize(log: &Logger,
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
                 .send(Packet::Ready {
-                    node: *n.addr().as_local(),
-                    index: index_on,
-                    ack: ack_tx,
-                })
+                          node: *n.addr().as_local(),
+                          index: index_on,
+                          ack: ack_tx,
+                      })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -375,8 +370,8 @@ pub fn initialize(log: &Logger,
         };
 
         if graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-            .filter(|&ni| ni != source)
-            .all(|n| empty.contains(&n)) {
+               .filter(|&ni| ni != source)
+               .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             trace!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
@@ -439,38 +434,37 @@ pub fn reconstruct(log: &Logger,
     paths.retain(|path| !empty.contains(&path.last().unwrap().0));
 
     // cut paths so they contain the shortest replay path
-    let paths = paths.into_iter()
-        .map(|path| -> Vec<_> {
-            let mut found = false;
-            path.into_iter()
-                .map(|(node, _)| node)
-                .enumerate()
-                .take_while(|&(i, node)| {
-                    if i == 0 {
-                        // first node is target node
-                        return true;
-                    }
+    let paths = paths.into_iter().map(|path| -> Vec<_> {
+        let mut found = false;
+        path.into_iter()
+            .map(|(node, _)| node)
+            .enumerate()
+            .take_while(|&(i, node)| {
+                if i == 0 {
+                    // first node is target node
+                    return true;
+                }
 
-                    // keep taking until we get our first materialized node
-                    // (`found` helps us emulate `take_while_inclusive`)
-                    let n = &graph[node];
-                    if found {
-                        // we've already found a materialized node
-                        return false;
-                    }
+                // keep taking until we get our first materialized node
+                // (`found` helps us emulate `take_while_inclusive`)
+                let n = &graph[node];
+                if found {
+                    // we've already found a materialized node
+                    return false;
+                }
 
-                    let is_materialized = materialized.get(&n.domain())
-                        .map(|dm| dm.contains_key(n.addr().as_local()))
-                        .unwrap_or(false);
-                    if is_materialized {
-                        // we want to take this node, but not any later ones
-                        found = true;
-                    }
-                    true
-                })
-                .map(|(_, node)| node)
-                .collect()
-        });
+                let is_materialized = materialized.get(&n.domain())
+                    .map(|dm| dm.contains_key(n.addr().as_local()))
+                    .unwrap_or(false);
+                if is_materialized {
+                    // we want to take this node, but not any later ones
+                    found = true;
+                }
+                true
+            })
+            .map(|(_, node)| node)
+            .collect()
+    });
 
     // tell the domain in question to create an empty state for the node in question
     if let flow::node::Type::Reader(..) = *graph[node] {
@@ -481,9 +475,9 @@ pub fn reconstruct(log: &Logger,
 
         txs[&graph[node].domain()]
             .send(Packet::PrepareState {
-                node: *graph[node].addr().as_local(),
-                index: index_on,
-            })
+                      node: *graph[node].addr().as_local(),
+                      index: index_on,
+                  })
             .unwrap();
     }
 
@@ -528,18 +522,9 @@ pub fn reconstruct(log: &Logger,
         let locals = |i: usize| -> Vec<NodeAddress> {
             if i == 0 {
                 // we're not replaying through the starter node
-                segments[i]
-                    .1
-                    .iter()
-                    .skip(1)
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
+                segments[i].1.iter().skip(1).map(|&ni| graph[ni].addr()).collect::<Vec<_>>()
             } else {
-                segments[i]
-                    .1
-                    .iter()
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
+                segments[i].1.iter().map(|&ni| graph[ni].addr()).collect::<Vec<_>>()
             }
         };
 
@@ -600,10 +585,10 @@ pub fn reconstruct(log: &Logger,
         trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
         txs[&segments[0].0]
             .send(Packet::StartReplay {
-                tag: tag,
-                from: graph[segments[0].1[0]].addr(),
-                ack: wait_tx.clone(),
-            })
+                      tag: tag,
+                      from: graph[segments[0].1[0]].addr(),
+                      ack: wait_tx.clone(),
+                  })
             .unwrap();
 
         // and finally, wait for the last domain to finish the replay
@@ -636,13 +621,11 @@ fn cost_fn<'a, T>(log: &'a Logger,
         assert!(n.is_internal());
 
         // find empty parents
-        let empty: HashSet<_> = parents.iter()
-            .filter(|ni| empty.contains(ni))
-            .map(|ni| graph[*ni].addr())
-            .collect();
+        let empty: HashSet<_> =
+            parents.iter().filter(|ni| empty.contains(ni)).map(|ni| graph[*ni].addr()).collect();
 
-        let options = n.must_replay_among(&empty)
-            .expect("join did not have must replay preference");
+        let options =
+            n.must_replay_among(&empty).expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
         parents.retain(|&parent| options.contains(&graph[parent].addr()));
@@ -723,9 +706,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 let stateful = &graph[stateful];
                 txs[&stateful.domain()]
                     .send(Packet::StateSizeProbe {
-                        node: *stateful.addr().as_local(),
-                        ack: tx,
-                    })
+                              node: *stateful.addr().as_local(),
+                              ack: tx,
+                          })
                     .unwrap();
                 let mut size = rx.recv().expect("stateful parent should have state");
 
@@ -747,8 +730,8 @@ fn cost_fn<'a, T>(log: &'a Logger,
             })
             .min_by_key(|&(_, cost)| cost)
             .map(|(node, cost)| {
-                debug!(log, "cost" => cost; "picked replay source {:?}", node);
-                node
-            })
+                     debug!(log, "cost" => cost; "picked replay source {:?}", node);
+                     node
+                 })
     })
 }

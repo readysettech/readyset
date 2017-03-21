@@ -89,9 +89,7 @@ impl Domain {
                ts: i64)
                -> Self {
         // initially, all nodes are not ready
-        let not_ready = nodes.iter()
-            .map(|n| *n.borrow().addr().as_local())
-            .collect();
+        let not_ready = nodes.iter().map(|n| *n.borrow().addr().as_local()).collect();
 
         Domain {
             _index: index,
@@ -216,13 +214,13 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let ts =
-            if let Some(&Packet::Transaction { state: ref ts@TransactionState::Committed(..), .. }) =
-                messages.iter().next() {
-                ts.clone()
-            } else {
-                unreachable!();
-            };
+        let ts = if let Some(&Packet::Transaction {
+                                  state: ref ts @ TransactionState::Committed(..), ..
+                              }) = messages.iter().next() {
+            ts.clone()
+        } else {
+            unreachable!();
+        };
 
         for m in messages {
             let new_messages = self.dispatch_(m, false);
@@ -251,9 +249,7 @@ impl Domain {
 
             self.process_times.start(*addr.as_local());
             self.process_ptimes.start(*addr.as_local());
-            self.nodes[addr.as_local()]
-                .borrow_mut()
-                .process(m, &mut self.state, &self.nodes, true);
+            self.nodes[addr.as_local()].borrow_mut().process(m, &mut self.state, &self.nodes, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().children.len(), 0);
@@ -306,7 +302,12 @@ impl Domain {
                 }
                 self.state.insert(node, state);
             }
-            Packet::SetupReplayPath { tag, path, done_tx, ack } => {
+            Packet::SetupReplayPath {
+                tag,
+                path,
+                done_tx,
+                ack,
+            } => {
                 // let coordinator know that we've registered the tagged path
                 ack.send(()).unwrap();
 
@@ -429,7 +430,12 @@ impl Domain {
     fn handle_replay(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         let mut finished = None;
         let mut playback = None;
-        if let Packet::Replay { mut link, tag, last, data } = m {
+        if let Packet::Replay {
+                   mut link,
+                   tag,
+                   last,
+                   data,
+               } = m {
             let &mut (ref path, ref mut done_tx) = self.replay_paths.get_mut(&tag).unwrap();
 
             if done_tx.is_some() && self.replaying_to.is_none() {
@@ -821,7 +827,13 @@ impl Domain {
 
     pub fn boot(mut self, rx: mpsc::Receiver<Packet>) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
+        let name: usize = self.nodes
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .domain()
+            .into();
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {

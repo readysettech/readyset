@@ -59,11 +59,7 @@ impl Ingredient for GatedIdentity {
     }
 
     fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
-        self.rx
-            .lock()
-            .unwrap()
-            .recv()
-            .unwrap();
+        self.rx.lock().unwrap().recv().unwrap();
         rs
     }
 

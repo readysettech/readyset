@@ -118,10 +118,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
         // group by all columns
         self.cols = srcn.fields().len();
-        self.group_by.extend(self.inner
-                                 .group_by()
-                                 .iter()
-                                 .cloned());
+        self.group_by.extend(self.inner.group_by().iter().cloned());
         self.group_by.sort();
         // cache the range of our output keys
         self.out_key = (0..self.group_by.len()).collect();
@@ -209,10 +206,8 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             match current {
                 None => {
                     // emit positive, which is group + new.
-                    let rec: Vec<_> = group.into_iter()
-                        .cloned()
-                        .chain(Some(new.into()).into_iter())
-                        .collect();
+                    let rec: Vec<_> =
+                        group.into_iter().cloned().chain(Some(new.into()).into_iter()).collect();
                     out.push(Record::Positive(sync::Arc::new(rec)));
                 }
                 Some(ref current) if new == **current => {

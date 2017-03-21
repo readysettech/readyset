@@ -94,9 +94,9 @@ pub fn add(log: &Logger,
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
                     let proxy = graph[node].mirror(node::Type::Egress {
-                        tags: Default::default(),
-                        txs: Default::default(),
-                    });
+                                                       tags: Default::default(),
+                                                       txs: Default::default(),
+                                                   });
                     let egress = graph.add_node(proxy);
                     graph.add_edge(node, egress, false);
 
@@ -249,9 +249,9 @@ pub fn connect(log: &Logger,
             match *graph[egress] {
                 node::Type::Egress { ref txs, .. } => {
                     trace!(log, "connecting"; "egress" => egress.index(), "ingress" => node.index());
-                    txs.lock()
-                        .unwrap()
-                        .push((node.into(), n.addr(), main_txs[&n.domain()].clone()));
+                    txs.lock().unwrap().push((node.into(),
+                                              n.addr(),
+                                              main_txs[&n.domain()].clone()));
                     continue;
                 }
                 node::Type::Source => continue,

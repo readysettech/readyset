@@ -55,15 +55,9 @@ pub mod test {
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .set_addr(local);
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
             remap.insert(global, local);
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .on_commit(&remap);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
             self.states.insert(*local.as_local(), State::default());
             self.remap.insert(global, local);
             global
@@ -91,14 +85,8 @@ pub mod test {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .set_addr(local);
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .on_commit(&self.remap);
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(&self.remap);
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[ni].suggest_indexes(local);
@@ -133,12 +121,12 @@ pub mod test {
 
             let nodes: Vec<_> = nodes.into_iter()
                 .map(|(ni, n)| {
-                    single::NodeDescriptor {
-                        index: ni,
-                        inner: n,
-                        children: Vec::default(),
-                    }
-                })
+                         single::NodeDescriptor {
+                             index: ni,
+                             inner: n,
+                             children: Vec::default(),
+                         }
+                     })
                 .collect();
 
             self.nodes = nodes.into_iter()
@@ -180,41 +168,23 @@ pub mod test {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
 
             let local = self.to_local(base);
-            self.states
-                .get_mut(local.as_local())
-                .unwrap()
-                .clear();
+            self.states.get_mut(local.as_local()).unwrap().clear();
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
-            assert!(!remember ||
-                    self.states.contains_key(self.nut
-                                                 .unwrap()
-                                                 .1
-                                                 .as_local()));
+            assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
-            let u = self.nodes[self.nut
-                .unwrap()
-                .1
-                .as_local()]
-                    .borrow_mut()
-                    .inner
-                    .on_input(src, u.into(), &self.nodes, &self.states);
+            let u = self.nodes[self.nut.unwrap().1.as_local()]
+                .borrow_mut()
+                .inner
+                .on_input(src, u.into(), &self.nodes, &self.states);
 
-            if !remember ||
-               !self.states.contains_key(self.nut
-                                             .unwrap()
-                                             .1
-                                             .as_local()) {
+            if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;
             }
 
-            single::materialize(&u,
-                                self.states.get_mut(self.nut
-                                                        .unwrap()
-                                                        .1
-                                                        .as_local()));
+            single::materialize(&u, self.states.get_mut(self.nut.unwrap().1.as_local()));
             u
         }
 
@@ -236,20 +206,12 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes[self.nut
-                .unwrap()
-                .1
-                .as_local()]
-                    .borrow()
+            self.nodes[self.nut.unwrap().1.as_local()].borrow()
         }
 
         pub fn narrow_base_id(&self) -> NodeAddress {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
-            *self.remap
-                 .values()
-                 .skip_while(|&&n| n == self.nut.unwrap().1)
-                 .next()
-                 .unwrap()
+            *self.remap.values().skip_while(|&&n| n == self.nut.unwrap().1).next().unwrap()
         }
 
         pub fn to_local(&self, global: NodeAddress) -> NodeAddress {

@@ -107,11 +107,7 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT => "|*|".into(),
             Aggregation::SUM => format!("𝛴({})", self.over),
         };
-        let group_cols = self.group
-            .iter()
-            .map(|g| g.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let group_cols = self.group.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }

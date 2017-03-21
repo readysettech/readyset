@@ -38,10 +38,7 @@ impl Ingredient for Union {
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
-        self.emit
-            .keys()
-            .cloned()
-            .collect()
+        self.emit.keys().cloned().collect()
     }
 
     fn should_materialize(&self) -> bool {
@@ -101,10 +98,7 @@ impl Ingredient for Union {
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(self.emit
-                 .iter()
-                 .map(|(src, emit)| (*src, emit[col]))
-                 .collect())
+        Some(self.emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
     }
 
     fn description(&self) -> String {
@@ -113,20 +107,14 @@ impl Ingredient for Union {
         emit.sort();
         emit.iter()
             .map(|&(src, emit)| {
-                let cols = emit.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}:[{}]", src, cols)
-            })
+                     let cols = emit.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+                     format!("{}:[{}]", src, cols)
+                 })
             .collect::<Vec<_>>()
             .join(" ⋃ ")
     }
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        self.emit
-            .iter()
-            .map(|(src, emit)| (*src, Some(emit[col])))
-            .collect()
+        self.emit.iter().map(|(src, emit)| (*src, Some(emit[col]))).collect()
     }
 }
 
@@ -183,22 +171,10 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup();
         let r0 = u.node().resolve(0);
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l && c == 0));
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 0));
         let r1 = u.node().resolve(1);
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l && c == 1));
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r && c == 2));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 1));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 2));
     }
 }
