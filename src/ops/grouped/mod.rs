@@ -153,11 +153,11 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> ProcessingResult {
         debug_assert_eq!(from, self.src);
 
         if rs.is_empty() {
-            return rs;
+            return ProcessingResult::Done(rs);
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -238,7 +238,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             }
         }
 
-        out.into()
+        ProcessingResult::Done(out.into())
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

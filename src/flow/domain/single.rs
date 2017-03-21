@@ -146,7 +146,21 @@ impl NodeDescriptor {
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
-                m.map_data(|data| i.on_input(from, data, nodes, state));
+                let mut need_replay = None;
+                m.map_data(|data| {
+                    let _ = (); // force rustfmt to not eliminate closure {}
+                    match i.on_input(from, data, nodes, state) {
+                        ProcessingResult::Done(rs) => rs,
+                        ProcessingResult::NeedReplay { tag, was } => {
+                            need_replay = Some(tag);
+                            was
+                        }
+                    }
+                });
+
+                if let Some(tag) = need_replay {
+                    unimplemented!();
+                }
                 materialize(m.data(), state.get_mut(&addr));
                 m
             }

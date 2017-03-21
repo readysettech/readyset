@@ -175,10 +175,14 @@ pub mod test {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
-            let u = self.nodes[self.nut.unwrap().1.as_local()]
-                .borrow_mut()
-                .inner
-                .on_input(src, u.into(), &self.nodes, &self.states);
+            let u = {
+                let id = self.nut.unwrap().1;
+                let mut n = self.nodes[id.as_local()].borrow_mut();
+                match n.inner.on_input(src, u.into(), &self.nodes, &self.states) {
+                    ProcessingResult::Done(rs) => rs,
+                    ProcessingResult::NeedReplay { .. } => unreachable!(),
+                }
+            };
 
             if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;

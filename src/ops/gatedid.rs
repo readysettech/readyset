@@ -58,9 +58,14 @@ impl Ingredient for GatedIdentity {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
+    fn on_input(&mut self,
+                _: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                _: &StateMap)
+                -> ProcessingResult {
         self.rx.lock().unwrap().recv().unwrap();
-        rs
+        ProcessingResult::Done(rs)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

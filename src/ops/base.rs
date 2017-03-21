@@ -67,8 +67,8 @@ impl Ingredient for Base {
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
-        rs.into_iter()
+                -> ProcessingResult {
+        let rs = rs.into_iter()
             .map(|r| match r {
                      Record::Positive(u) => Record::Positive(u),
                      Record::Negative(u) => Record::Negative(u),
@@ -88,7 +88,8 @@ impl Ingredient for Base {
                 Record::Negative(rows[0].clone())
             }
                  })
-            .collect()
+            .collect();
+        ProcessingResult::Done(rs)
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

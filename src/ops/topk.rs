@@ -191,11 +191,11 @@ impl Ingredient for TopK {
                 rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> ProcessingResult {
         debug_assert_eq!(from, self.src);
 
         if rs.is_empty() {
-            return rs;
+            return ProcessingResult::Done(rs);
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -245,7 +245,7 @@ impl Ingredient for TopK {
             self.counts.insert(group, (count + count_diff) as usize);
         }
 
-        out.into()
+        ProcessingResult::Done(out.into())
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

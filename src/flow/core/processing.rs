@@ -3,6 +3,14 @@ use std::sync::Arc;
 
 use flow::prelude;
 
+pub enum ProcessingResult {
+    Done(prelude::Records),
+    NeedReplay {
+        tag: prelude::Tag,
+        was: prelude::Records,
+    },
+}
+
 pub trait Ingredient
     where Self: Send
 {
@@ -84,7 +92,7 @@ pub trait Ingredient
                 data: prelude::Records,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
-                -> prelude::Records;
+                -> ProcessingResult;
 
     fn can_query_through(&self) -> bool {
         false

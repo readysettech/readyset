@@ -39,8 +39,13 @@ impl Ingredient for Identity {
         self.src = remap[&self.src];
     }
 
-    fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
-        rs
+    fn on_input(&mut self,
+                _: NodeAddress,
+                rs: Records,
+                _: &DomainNodes,
+                _: &StateMap)
+                -> ProcessingResult {
+        ProcessingResult::Done(rs)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

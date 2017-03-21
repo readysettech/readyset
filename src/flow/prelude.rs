@@ -5,7 +5,7 @@ use std::cell;
 use flow::core;
 pub use flow::core::{NodeAddress, LocalNodeIndex};
 pub use flow::core::{DataType, Record, Records, Datas};
-pub use flow::core::Ingredient;
+pub use flow::core::{Ingredient, ProcessingResult};
 
 // graph types
 pub use flow::node::Node;
