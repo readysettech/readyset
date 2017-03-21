@@ -622,6 +622,8 @@ impl SqlIncorporator {
             let mut prev_ni = None;
             for &(&(ref src, ref dst), edge) in &sorted_edges {
                 match *edge {
+                    // Edge represents a LEFT JOIN
+                    QueryGraphEdge::LeftJoin(ref jps) => unimplemented!(),
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
                         let left_ni = match prev_ni {
@@ -666,7 +668,8 @@ impl SqlIncorporator {
                     let mut grouped_fn_columns = HashSet::new();
                     for e in qg.edges.values() {
                         match *e {
-                            QueryGraphEdge::Join(_) => (),
+                            QueryGraphEdge::Join(_) |
+                            QueryGraphEdge::LeftJoin(_) => (),
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
                                 // Generate the right function nodes for all relevant columns in
                                 // the "computed_columns" node

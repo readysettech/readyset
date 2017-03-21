@@ -1,5 +1,5 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinConstraint, JoinRightSide, Operator};
+              JoinConstraint, JoinOperator, JoinRightSide, Operator};
 use nom_sql::SelectStatement;
 
 use std::collections::{HashMap, HashSet};
@@ -20,6 +20,7 @@ pub struct QueryGraphNode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueryGraphEdge {
     Join(Vec<ConditionTree>),
+    LeftJoin(Vec<ConditionTree>),
     GroupBy(Vec<Column>),
 }
 
@@ -84,7 +85,8 @@ impl QueryGraph {
         }
         for e in self.edges.values() {
             match *e {
-                QueryGraphEdge::Join(ref join_predicates) => {
+                QueryGraphEdge::Join(ref join_predicates) |
+                QueryGraphEdge::LeftJoin(ref join_predicates) => {
                     for p in join_predicates {
                         for c in &p.contained_columns() {
                             attrs_vec.push(c);
@@ -281,6 +283,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             let col = Column::from(format!("{}.{}", tbl, col).as_str());
             Some(Box::new(ConditionExpression::Base(ConditionBase::Field(col))))
         };
+        let mut prev_table = None;
         for jc in &st.join {
             match jc.right {
                 JoinRightSide::Table(ref table) => {
@@ -332,6 +335,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         }
                     };
 
+                    // if this is the first explicit join, we're joining against the last table in
+                    // the list of tables
+                    if prev_table.is_none() {
+                        prev_table = Some(&st.tables.last().as_ref().unwrap().name);
+                    }
                     // add joined table to relations if not present already
                     let against = table.name.clone();
                     let _join_rel = &mut qg.relations
@@ -339,8 +347,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         .or_insert_with(|| new_node(against.clone(), vec![], st));
                     // add edge for join
                     let mut _e = qg.edges
-                        .entry((st.tables.last().as_ref().unwrap().name.clone(), against))
-                        .or_insert_with(|| QueryGraphEdge::Join(vec![join_pred]));
+                        .entry((prev_table.unwrap().clone(), against))
+                        .or_insert_with(|| match jc.operator {
+                            JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
+                            JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
+                            _ => unimplemented!(),
+                        });
                 }
                 _ => unimplemented!(),
             }
