@@ -15,6 +15,7 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
             Some(t) => {
                 Column {
                     name: f.name,
+                    alias: f.alias,
                     table: if table_aliases.contains_key(&t) {
                         Some(table_aliases[&t].clone())
                     } else {
@@ -96,6 +97,7 @@ impl AliasRemoval for SqlQuery {
                                 Some(t) => {
                                     Column {
                                         name: f.name,
+                                        alias: f.alias,
                                         table: if table_aliases.contains_key(&t) {
                                             Some(table_aliases[&t].clone())
                                         } else {

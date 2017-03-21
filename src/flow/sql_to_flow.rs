@@ -298,7 +298,10 @@ impl SqlIncorporator {
 
         // The function node's set of output columns is the group columns plus the function
         // column
-        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| c.name.clone()));
+        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
+            Some(ref a) => a.clone(),
+            None => c.name.clone(),
+        }));
         combined_columns.push(String::from(computed_col_name));
 
         // make the new operator and record its metadata
@@ -345,8 +348,12 @@ impl SqlIncorporator {
             };
             let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
 
+            let computed_col_name = match func_col.alias {
+                None => &func_col.name,
+                Some(ref a) => a,
+            };
             self.make_grouped_node(name,
-                                   &func_col.name,
+                                   computed_col_name,
                                    (parent_ni, over_col_indx),
                                    group_cols,
                                    t,
@@ -404,8 +411,12 @@ impl SqlIncorporator {
             .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
             .collect();
 
-        let mut col_names: Vec<String> =
-            proj_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        let mut col_names: Vec<String> = proj_cols.iter()
+            .map(|c| match c.alias {
+                Some(ref a) => a.clone(),
+                None => c.name.clone(),
+            })
+            .collect::<Vec<_>>();
         let (literal_names, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
         col_names.extend(literal_names.into_iter().map(String::from));
 
@@ -774,10 +785,19 @@ impl SqlIncorporator {
                         v
                     });
                 let projected_column_ids: Vec<usize> = projected_columns.iter()
-                    .map(|c| self.field_to_columnid(final_na, &c.name).unwrap())
+                    .map(|c| {
+                        let name = match c.alias {
+                            Some(ref a) => a,
+                            None => &c.name,
+                        };
+                        self.field_to_columnid(final_na, &name).unwrap()
+                    })
                     .collect();
                 let fields = projected_columns.iter()
-                    .map(|c| c.name.clone())
+                    .map(|c| match c.alias {
+                        Some(ref a) => a.clone(),
+                        None => c.name.clone(),
+                    })
                     .collect::<Vec<String>>();
                 leaf_na = mig.add_ingredient(String::from(name),
                                              fields.as_slice(),
@@ -1046,7 +1066,8 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
-                                    name: String::from("votes"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("votes")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(
@@ -1168,7 +1189,8 @@ mod tests {
         // check project helper node
         let qid = query_id_hash(&["computed_columns", "votes"], &[],
                                 &[&Column {
-                                    name: String::from("count"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(
@@ -1216,7 +1238,8 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
-                                    name: String::from("count"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(

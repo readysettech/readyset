@@ -20,6 +20,7 @@ impl CountStarRewrite for SqlQuery {
                     FieldExpression::All => {
                         FieldExpression::Seq(vec![Column {
                                                       name: bogo_column.clone(),
+                                                      alias: None,
                                                       table: Some(bogo_table.name
                                                           .clone()),
                                                       function: None,
@@ -92,6 +93,7 @@ mod tests {
                 assert_eq!(tq.fields,
                            FieldExpression::Seq(vec![Column {
                                name: String::from("anon_fn"),
+                               alias: None,
                                table: None,
                                function: Some(FunctionExpression::Count(
                                    FieldExpression::Seq(vec![Column::from("users.age")]))),
