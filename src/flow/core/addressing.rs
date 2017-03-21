@@ -36,6 +36,8 @@ impl fmt::Debug for NodeAddress {
 }
 
 impl NodeAddress {
+    // https://github.com/rust-lang-nursery/rustfmt/issues/1394
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     pub(crate) unsafe fn make_local(id: usize) -> NodeAddress {
         NodeAddress { addr: NodeAddress_::Local(LocalNodeIndex { id: id }) }
     }
