@@ -244,9 +244,9 @@ impl CheckTable {
             .map(|(domain, ingress_from_base)| {
                 (*domain,
                  ingress_from_base.iter()
-                    .filter(|&(_, n)| *n > 0)
-                    .map(|(k, _)| *k)
-                    .collect())
+                     .filter(|&(_, n)| *n > 0)
+                     .map(|(k, _)| *k)
+                     .collect())
             })
             .collect();
 

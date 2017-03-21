@@ -1,6 +1,3 @@
-
-use flow::data::DataType;
-
 use std::mem;
 use std::collections::HashMap;
 use std::sync::Arc;

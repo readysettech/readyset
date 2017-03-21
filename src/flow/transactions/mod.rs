@@ -98,9 +98,9 @@ impl DomainState {
                 }
 
                 let ni = *n.borrow()
-                              .inner
-                              .addr()
-                              .as_local();
+                    .inner
+                    .addr()
+                    .as_local();
 
                 Some((ni, child.index))
             })
@@ -226,9 +226,9 @@ impl DomainState {
                 BufferedTransaction::Transaction(base, p) => {
                     let mut messages = vec![p];
                     while self.buffer
-                              .peek()
-                              .map(|e| e.ts == ts)
-                              .unwrap_or(false) {
+                        .peek()
+                        .map(|e| e.ts == ts)
+                        .unwrap_or(false) {
                         let e = self.buffer.pop().unwrap();
                         if let BufferedTransaction::Transaction(_, p) = e.transaction {
                             messages.push(p);

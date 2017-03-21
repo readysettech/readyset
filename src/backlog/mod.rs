@@ -1,5 +1,4 @@
-use ops::Record;
-use flow::data::DataType;
+use flow::core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use evmap;
 

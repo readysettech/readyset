@@ -70,26 +70,36 @@ impl Ingredient for Base {
                 -> Records {
         rs.into_iter()
             .map(|r| match r {
-                Record::Positive(u) => Record::Positive(u),
-                Record::Negative(u) => Record::Negative(u),
-                Record::DeleteRequest(key) => {
-                    let cols = self.primary_key
+                     Record::Positive(u) => Record::Positive(u),
+                     Record::Negative(u) => Record::Negative(u),
+                     Record::DeleteRequest(key) => {
+                let cols = self.primary_key
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
-                    let db = state.get(self.us.as_ref().unwrap().as_local())
+                let db =
+                    state.get(self.us
+                                  .as_ref()
+                                  .unwrap()
+                                  .as_local())
                         .expect("base must have its own state materialized to support deletions");
-                    let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
-                    assert_eq!(rows.len(), 1);
+                let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
+                assert_eq!(rows.len(), 1);
 
-                    Record::Negative(rows[0].clone())
-                }
-            })
+                Record::Negative(rows[0].clone())
+            }
+                 })
             .collect()
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n, self.primary_key.as_ref().unwrap().clone())).into_iter().collect()
+            Some((n,
+                  self.primary_key
+                      .as_ref()
+                      .unwrap()
+                      .clone()))
+                    .into_iter()
+                    .collect()
         } else {
             HashMap::new()
         }

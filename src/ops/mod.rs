@@ -10,170 +10,8 @@ pub mod gatedid;
 pub mod filter;
 pub mod topk;
 
-use flow::data::DataType;
-use std::ops::{Deref, DerefMut};
-use std::sync;
-
-/// A record is a single positive or negative data record with an associated time stamp.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Record {
-    Positive(sync::Arc<Vec<DataType>>),
-    Negative(sync::Arc<Vec<DataType>>),
-    DeleteRequest(Vec<DataType>),
-}
-
-impl Record {
-    pub fn rec(&self) -> &[DataType] {
-        match *self {
-            Record::Positive(ref v) |
-            Record::Negative(ref v) => &v[..],
-            Record::DeleteRequest(..) => unreachable!(),
-        }
-    }
-
-    pub fn is_positive(&self) -> bool {
-        if let Record::Positive(..) = *self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn extract(self) -> (sync::Arc<Vec<DataType>>, bool) {
-        match self {
-            Record::Positive(v) => (v, true),
-            Record::Negative(v) => (v, false),
-            Record::DeleteRequest(..) => unreachable!(),
-        }
-    }
-}
-
-impl Deref for Record {
-    type Target = sync::Arc<Vec<DataType>>;
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            Record::Positive(ref r) |
-            Record::Negative(ref r) => r,
-            Record::DeleteRequest(..) => unreachable!(),
-        }
-    }
-}
-
-impl DerefMut for Record {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match *self {
-            Record::Positive(ref mut r) |
-            Record::Negative(ref mut r) => r,
-            Record::DeleteRequest(..) => unreachable!(),
-        }
-    }
-}
-
-impl From<sync::Arc<Vec<DataType>>> for Record {
-    fn from(other: sync::Arc<Vec<DataType>>) -> Self {
-        Record::Positive(other)
-    }
-}
-
-impl From<Vec<DataType>> for Record {
-    fn from(other: Vec<DataType>) -> Self {
-        Record::Positive(sync::Arc::new(other))
-    }
-}
-
-impl From<(Vec<DataType>, bool)> for Record {
-    fn from(other: (Vec<DataType>, bool)) -> Self {
-        if other.1 {
-            Record::Positive(sync::Arc::new(other.0))
-        } else {
-            Record::Negative(sync::Arc::new(other.0))
-        }
-    }
-}
-
-impl Into<Vec<Record>> for Records {
-    fn into(self) -> Vec<Record> {
-        self.0
-    }
-}
-
-use std::iter::FromIterator;
-impl FromIterator<Record> for Records {
-    fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = Record>
-    {
-        Records(iter.into_iter().collect())
-    }
-}
-impl FromIterator<sync::Arc<Vec<DataType>>> for Records {
-    fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = sync::Arc<Vec<DataType>>>
-    {
-        Records(iter.into_iter().map(Record::Positive).collect())
-    }
-}
-
-impl IntoIterator for Records {
-    type Item = Record;
-    type IntoIter = ::std::vec::IntoIter<Record>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-/// Represents a set of records returned from a query.
-pub type Datas = Vec<Vec<DataType>>;
-
-#[derive(Clone, Default, PartialEq, Debug)]
-pub struct Records(Vec<Record>);
-
-impl Deref for Records {
-    type Target = Vec<Record>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Records {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Into<Records> for Record {
-    fn into(self) -> Records {
-        Records(vec![self])
-    }
-}
-
-impl Into<Records> for Vec<Record> {
-    fn into(self) -> Records {
-        Records(self)
-    }
-}
-
-impl Into<Records> for Vec<sync::Arc<Vec<DataType>>> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
-    }
-}
-
-impl Into<Records> for Vec<Vec<DataType>> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
-    }
-}
-
-impl Into<Records> for Vec<(Vec<DataType>, bool)> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
-    }
-}
-
 #[cfg(test)]
 pub mod test {
-    use super::*;
-
     use std::collections::HashMap;
     use std::cell;
 
@@ -217,9 +55,15 @@ pub mod test {
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
-            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_addr(local);
             remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .on_commit(&remap);
             self.states.insert(*local.as_local(), State::default());
             self.remap.insert(global, local);
             global
@@ -247,8 +91,14 @@ pub mod test {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(&self.remap);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_addr(local);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .on_commit(&self.remap);
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[ni].suggest_indexes(local);
@@ -293,9 +143,9 @@ pub mod test {
 
             self.nodes = nodes.into_iter()
                 .map(|n| {
-                    use std::cell;
-                    (*n.addr().as_local(), cell::RefCell::new(n))
-                })
+                         use std::cell;
+                         (*n.addr().as_local(), cell::RefCell::new(n))
+                     })
                 .collect();
         }
 
@@ -330,23 +180,41 @@ pub mod test {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
 
             let local = self.to_local(base);
-            self.states.get_mut(local.as_local()).unwrap().clear();
+            self.states
+                .get_mut(local.as_local())
+                .unwrap()
+                .clear();
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
-            assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
+            assert!(!remember ||
+                    self.states.contains_key(self.nut
+                                                 .unwrap()
+                                                 .1
+                                                 .as_local()));
 
-            let u = self.nodes[self.nut.unwrap().1.as_local()]
-                .borrow_mut()
-                .inner
-                .on_input(src, u.into(), &self.nodes, &self.states);
+            let u = self.nodes[self.nut
+                .unwrap()
+                .1
+                .as_local()]
+                    .borrow_mut()
+                    .inner
+                    .on_input(src, u.into(), &self.nodes, &self.states);
 
-            if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
+            if !remember ||
+               !self.states.contains_key(self.nut
+                                             .unwrap()
+                                             .1
+                                             .as_local()) {
                 return u;
             }
 
-            single::materialize(&u, self.states.get_mut(self.nut.unwrap().1.as_local()));
+            single::materialize(&u,
+                                self.states.get_mut(self.nut
+                                                        .unwrap()
+                                                        .1
+                                                        .as_local()));
             u
         }
 
@@ -368,12 +236,20 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes[self.nut.unwrap().1.as_local()].borrow()
+            self.nodes[self.nut
+                .unwrap()
+                .1
+                .as_local()]
+                    .borrow()
         }
 
         pub fn narrow_base_id(&self) -> NodeAddress {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
-            *self.remap.values().skip_while(|&&n| n == self.nut.unwrap().1).next().unwrap()
+            *self.remap
+                 .values()
+                 .skip_while(|&&n| n == self.nut.unwrap().1)
+                 .next()
+                 .unwrap()
         }
 
         pub fn to_local(&self, global: NodeAddress) -> NodeAddress {

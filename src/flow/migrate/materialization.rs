@@ -80,7 +80,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     {
         let mark_parent_inquisitive_or_materialize =
             |ni: NodeIndex,
-             materialize: &mut HashSet<flow::LocalNodeIndex>,
+             materialize: &mut HashSet<LocalNodeIndex>,
              inquisitive_children: &mut HashSet<NodeIndex>|
              -> Option<NodeIndex> {
                 let n = &graph[ni];

@@ -1,10 +1,8 @@
 pub mod sql_to_flow;
-pub mod data;
 mod sql;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
-use ops;
 use checktable;
 
 use std::sync::mpsc;
@@ -24,6 +22,7 @@ pub mod node;
 pub mod payload;
 pub mod statistics;
 pub mod keys;
+pub mod core;
 mod migrate;
 mod transactions;
 
@@ -37,246 +36,11 @@ macro_rules! dur_to_ns {
 
 pub type Edge = bool; // should the edge be materialized?
 
-/// A domain-local node identifier.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
-pub struct LocalNodeIndex {
-    id: usize, // not a tuple struct so this field can be made private
-}
-
-impl LocalNodeIndex {
-    pub fn id(&self) -> usize {
-        self.id
-    }
-}
-
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
-enum NodeAddress_ {
-    Global(NodeIndex),
-    Local(LocalNodeIndex), // XXX: maybe include domain here?
-}
-
-/// `NodeAddress` is a unique identifier that can be used to refer to nodes in the graph across
-/// migrations.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
-pub struct NodeAddress {
-    addr: NodeAddress_, // wrap the enum so people can't create these accidentally
-}
-
-impl fmt::Debug for NodeAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => write!(f, "NodeAddress::Global({})", ni.index()),
-            NodeAddress_::Local(ref li) => write!(f, "NodeAddress::Local({})", li.id()),
-        }
-    }
-}
-
-impl NodeAddress {
-    fn make_local(id: usize) -> NodeAddress {
-        NodeAddress { addr: NodeAddress_::Local(LocalNodeIndex { id: id }) }
-    }
-
-    fn make_global(id: NodeIndex) -> NodeAddress {
-        NodeAddress { addr: NodeAddress_::Global(id) }
-    }
-
-    fn is_global(&self) -> bool {
-        match self.addr {
-            NodeAddress_::Global(_) => true,
-            _ => false,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn mock_local(id: usize) -> NodeAddress {
-        Self::make_local(id)
-    }
-
-    #[cfg(test)]
-    pub fn mock_global(id: NodeIndex) -> NodeAddress {
-        Self::make_global(id)
-    }
-}
-
-impl Into<usize> for NodeAddress {
-    fn into(self) -> usize {
-        match self.addr {
-            NodeAddress_::Global(ni) => ni.index(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl From<NodeIndex> for NodeAddress {
-    fn from(o: NodeIndex) -> Self {
-        NodeAddress { addr: NodeAddress_::Global(o) }
-    }
-}
-
-impl From<usize> for NodeAddress {
-    fn from(o: usize) -> Self {
-        NodeAddress::from(NodeIndex::new(o))
-    }
-}
-
-impl fmt::Display for NodeAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => write!(f, "g{}", ni.index()),
-            NodeAddress_::Local(ref ni) => write!(f, "l{}", ni.id),
-        }
-    }
-}
-
-impl NodeAddress {
-    pub(crate) fn as_global(&self) -> &NodeIndex {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => ni,
-            NodeAddress_::Local(_) => unreachable!("tried to use local address as global"),
-        }
-    }
-
-    pub(crate) fn as_local(&self) -> &LocalNodeIndex {
-        match self.addr {
-            NodeAddress_::Local(ref i) => i,
-            NodeAddress_::Global(_) => unreachable!("tried to use global address as local"),
-        }
-    }
-}
-
-pub trait Ingredient
-    where Self: Send
-{
-    /// Construct a new node from this node that will be given to the domain running this node.
-    /// Whatever is left behind in self is what remains observable in the graph.
-    fn take(&mut self) -> Box<Ingredient>;
-
-    fn ancestors(&self) -> Vec<NodeAddress>;
-    fn should_materialize(&self) -> bool;
-
-    /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
-    /// replayed if this node's state is to be initialized.
-    fn must_replay_among(&self, &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
-        None
-    }
-
-    /// Should return true if this ingredient will ever query the state of an ancestor.
-    fn will_query(&self, materialized: bool) -> bool;
-
-    /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
-    ///
-    /// Note that a vector of length > 1 for any one node means that that node should be given a
-    /// *compound* key, *not* that multiple columns should be independently indexed.
-    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>>;
-
-    /// Resolve where the given field originates from. If the view is materialized, or the value is
-    /// otherwise created by this view, None should be returned.
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeAddress, usize)>>;
-
-    /// Returns true for base node types.
-    fn is_base(&self) -> bool {
-        false
-    }
-
-    fn is_join(&self) -> bool {
-        false
-    }
-
-    /// Produce a compact, human-readable description of this node.
-    ///
-    ///  Symbol   Description
-    /// --------|-------------
-    ///    B    |  Base
-    ///    ||   |  Concat
-    ///    ⧖    |  Latest
-    ///    γ    |  Group by
-    ///   |*|   |  Count
-    ///    𝛴    |  Sum
-    ///    ⋈    |  Join
-    ///    ⋉    |  Left join
-    ///    ⋃    |  Union
-    fn description(&self) -> String;
-
-    /// Called when a node is first connected to the graph.
-    ///
-    /// All its ancestors are present, but this node and its children may not have been connected
-    /// yet. Only addresses of the type `NodeAddress::Global` may be used.
-    fn on_connected(&mut self, graph: &prelude::Graph);
-
-    /// Called when a domain is finalized and is about to be booted.
-    ///
-    /// The provided arguments give mappings from global to local addresses. After this method has
-    /// been invoked (and crucially, in `Ingredient::on_input`) only addresses of the type
-    /// `NodeAddress::Local` may be used.
-    fn on_commit(&mut self,
-                 you: prelude::NodeAddress,
-                 remap: &HashMap<prelude::NodeAddress, prelude::NodeAddress>);
-
-    /// Process a single incoming message, optionally producing an update to be propagated to
-    /// children.
-    ///
-    /// Only addresses of the type `NodeAddress::Local` may be used in this function.
-    fn on_input(&mut self,
-                from: NodeAddress,
-                data: ops::Records,
-                domain: &prelude::DomainNodes,
-                states: &prelude::StateMap)
-                -> ops::Records;
-
-    fn can_query_through(&self) -> bool {
-        false
-    }
-
-    fn query_through<'a>(&self,
-                         _columns: &[usize],
-                         _key: &prelude::KeyType<prelude::DataType>,
-                         _states: &'a prelude::StateMap)
-                         -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
-        None
-    }
-
-    /// Process a single incoming message, optionally producing an update to be propagated to
-    /// children.
-    ///
-    /// Only addresses of the type `NodeAddress::Local` may be used in this function.
-    fn lookup<'a>(&self,
-                  parent: prelude::NodeAddress,
-                  columns: &[usize],
-                  key: &prelude::KeyType<prelude::DataType>,
-                  domain: &prelude::DomainNodes,
-                  states: &'a prelude::StateMap)
-                  -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
-        states.get(parent.as_local())
-            .map(move |state| Box::new(state.lookup(columns, key).iter()) as Box<_>)
-            .or_else(|| {
-                // this is a long-shot.
-                // if our ancestor can be queried *through*, then we just use that state instead
-                let parent = domain.get(parent.as_local()).unwrap().borrow();
-                if parent.is_internal() {
-                    parent.query_through(columns, key, states)
-                } else {
-                    None
-                }
-            })
-    }
-
-    // Translate a column in this ingredient into the corresponding column(s) in
-    // parent ingredients. None for the column means that the parent doesn't
-    // have an associated column. Similar to resolve, but does not depend on
-    // materialization, and returns results even for computed columns.
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)>;
-
-    /// Performance hint: should return true if this operator reduces the size of its input
-    fn is_selective(&self) -> bool {
-        false
-    }
-}
-
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    src: NodeAddress,
+    src: core::NodeAddress,
     tx: mpsc::SyncSender<payload::Packet>,
-    addr: NodeAddress,
+    addr: core::NodeAddress,
     primary_key: Vec<usize>,
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
 }
@@ -467,7 +231,7 @@ impl Blender {
     ///
     /// This function will only tell you which nodes are input nodes in the graph. To obtain a
     /// function for inserting writes, use `Blender::get_putter`.
-    pub fn inputs(&self) -> Vec<(NodeAddress, &node::Node)> {
+    pub fn inputs(&self) -> Vec<(core::NodeAddress, &node::Node)> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .flat_map(|ingress| {
@@ -475,7 +239,7 @@ impl Blender {
             })
             .map(|n| (n, &self.ingredients[n]))
             .filter(|&(_, base)| base.is_internal() && base.is_base())
-            .map(|(n, base)| (NodeAddress::make_global(n), &*base))
+            .map(|(n, base)| (n.into(), &*base))
             .collect()
     }
 
@@ -486,7 +250,7 @@ impl Blender {
     ///
     /// This function will only tell you which nodes are output nodes in the graph. To obtain a
     /// function for performing reads, call `.get_reader()` on the returned reader.
-    pub fn outputs(&self) -> Vec<(NodeAddress, &node::Node, &node::Reader)> {
+    pub fn outputs(&self) -> Vec<(core::NodeAddress, &node::Node, &node::Reader)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -498,7 +262,7 @@ impl Blender {
                         .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
                         .next()
                         .unwrap();
-                    Some((NodeAddress::make_global(src), &self.ingredients[src], inner))
+                    Some((src.into(), &self.ingredients[src], inner))
                 } else {
                     None
                 }
@@ -509,8 +273,8 @@ impl Blender {
     /// Obtain a new function for querying a given (already maintained) reader node.
     pub fn get_getter
         (&self,
-         node: NodeAddress)
-         -> Option<Box<Fn(&prelude::DataType) -> Result<ops::Datas, ()> + Send + Sync>> {
+         node: core::NodeAddress)
+         -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync>> {
 
         // reader should be a child of the given node
         trace!(self.log, "creating reader"; "for" => node.as_global().index());
@@ -527,7 +291,7 @@ impl Blender {
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
-    pub fn get_mutator(&self, base: NodeAddress) -> Mutator {
+    pub fn get_mutator(&self, base: core::NodeAddress) -> Mutator {
         let n = self.ingredients
             .neighbors_directed(*base.as_global(), petgraph::EdgeDirection::Incoming)
             .next()
@@ -537,7 +301,7 @@ impl Blender {
 
         trace!(self.log, "creating mutator"; "for" => n.index());
         Mutator {
-            src: NodeAddress::make_global(self.source),
+            src: self.source.into(),
             tx: tx,
             addr: node.addr(),
             primary_key: self.ingredients[*base.as_global()]
@@ -559,7 +323,7 @@ impl Blender {
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
                 let node_map = node_stats.into_iter()
-                    .map(|(ni, ns)| (NodeAddress::make_global(ni), ns))
+                    .map(|(ni, ns)| (ni.into(), ns))
                     .collect();
 
                 (*di, (domain_stats, node_map))
@@ -634,7 +398,7 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeAddress
+    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> core::NodeAddress
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>,
@@ -660,7 +424,7 @@ impl<'a> Migration<'a> {
             }
         }
         // and tell the caller its id
-        NodeAddress::make_global(ni)
+        ni.into()
     }
 
     #[cfg(test)]
@@ -676,7 +440,7 @@ impl<'a> Migration<'a> {
     /// every receiving domain, this can save us some space if a child that doesn't require
     /// materialization is in its own domain. If multiple nodes in the same domain require
     /// materialization of the same parent, that materialized state will be shared.
-    pub fn materialize(&mut self, src: NodeAddress, dst: NodeAddress) {
+    pub fn materialize(&mut self, src: core::NodeAddress, dst: core::NodeAddress) {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
         // converted to an egress/ingress pair?
@@ -700,13 +464,13 @@ impl<'a> Migration<'a> {
     /// Assign the ingredient with identifier `n` to the thread domain `d`.
     ///
     /// `n` must be have been added in this migration.
-    pub fn assign_domain(&mut self, n: NodeAddress, d: domain::Index) {
+    pub fn assign_domain(&mut self, n: core::NodeAddress, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
         debug!(self.log, "node manually assigned to domain"; "node" => n.as_global().index(), "domain" => d.index());
         assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
-    fn ensure_reader_for(&mut self, n: NodeAddress) {
+    fn ensure_reader_for(&mut self, n: core::NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
             let r = node::Type::Reader(None, Default::default());
@@ -717,7 +481,7 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn ensure_token_generator(&mut self, n: NodeAddress, key: usize) {
+    fn ensure_token_generator(&mut self, n: core::NodeAddress, key: usize) {
         let ri = self.readers[n.as_global()];
         if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
             if inner.token_generator.is_some() {
@@ -750,7 +514,7 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn reader_for(&self, n: NodeAddress) -> &node::Reader {
+    fn reader_for(&self, n: core::NodeAddress) -> &node::Reader {
         let ri = self.readers[n.as_global()];
         if let node::Type::Reader(_, ref inner) = *self.mainline.ingredients[ri] {
             &*inner
@@ -764,9 +528,9 @@ impl<'a> Migration<'a> {
     /// The returned function can be called with a `Query`, and any matching results will be
     /// returned.
     pub fn maintain(&mut self,
-                    n: NodeAddress,
+                    n: core::NodeAddress,
                     key: usize)
-                    -> Box<Fn(&prelude::DataType) -> Result<ops::Datas, ()> + Send + Sync> {
+                    -> Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync> {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -797,9 +561,9 @@ impl<'a> Migration<'a> {
     /// returned, along with a token.
     pub fn transactional_maintain
         (&mut self,
-         n: NodeAddress,
+         n: core::NodeAddress,
          key: usize)
-         -> Box<Fn(&prelude::DataType) -> Result<(ops::Datas, checktable::Token), ()> + Send + Sync> {
+-> Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send + Sync>{
         self.ensure_reader_for(n);
         self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];
@@ -820,7 +584,7 @@ impl<'a> Migration<'a> {
             // cook up a function to query this materialized state
             let arc = inner.state.as_ref().unwrap().clone();
             let generator = inner.token_generator.clone().unwrap();
-            Box::new(move |q: &prelude::DataType| -> Result<(ops::Datas, checktable::Token), ()> {
+            Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
                 arc.find_and(q,
                               |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
                     .map(|(res, ts)| {
@@ -838,7 +602,7 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
-    pub fn stream(&mut self, n: NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
+    pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
         self.reader_for(n).streamers.lock().unwrap().push(tx);
@@ -927,7 +691,8 @@ impl<'a> Migration<'a> {
             for &(ni, new) in nodes.iter() {
                 if new {
                     debug!(log, "assigning local index"; "type" => format!("{:?}", *mainline.ingredients[ni]), "node" => ni.index(), "local" => nnodes);
-                    mainline.ingredients[ni].set_addr(NodeAddress::make_local(nnodes));
+                    mainline.ingredients[ni]
+                        .set_addr(unsafe { prelude::NodeAddress::make_local(nnodes) });
                     nnodes += 1;
                 }
             }
@@ -936,14 +701,12 @@ impl<'a> Migration<'a> {
             let mut remap = HashMap::new();
             // The global address of each node in this domain is now a local one
             for &(ni, _) in nodes.iter() {
-                remap.insert(NodeAddress::make_global(ni),
-                             mainline.ingredients[ni].addr());
+                remap.insert(ni.into(), mainline.ingredients[ni].addr());
             }
             // Parents in other domains have been swapped for ingress nodes.
             // Those ingress nodes' indices are now local.
             for (from, to) in swapped.remove(domain).unwrap_or_else(HashMap::new) {
-                remap.insert(NodeAddress::make_global(from),
-                             mainline.ingredients[to].addr());
+                remap.insert(from.into(), mainline.ingredients[to].addr());
             }
 
             // Initialize each new node

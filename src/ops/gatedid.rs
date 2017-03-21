@@ -59,7 +59,11 @@ impl Ingredient for GatedIdentity {
     }
 
     fn on_input(&mut self, _: NodeAddress, rs: Records, _: &DomainNodes, _: &StateMap) -> Records {
-        self.rx.lock().unwrap().recv().unwrap();
+        self.rx
+            .lock()
+            .unwrap()
+            .recv()
+            .unwrap();
         rs
     }
 
@@ -108,9 +112,10 @@ mod tests {
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            assert_eq!(i.narrow_one_row(left.clone(), false), vec![left].into());
-            &done.store(true, Ordering::SeqCst);
-        });
+                                      assert_eq!(i.narrow_one_row(left.clone(), false),
+                                                 vec![left].into());
+                                      &done.store(true, Ordering::SeqCst);
+                                  });
 
         assert_eq!((&child_done).load(Ordering::SeqCst), false);
         tx.send(()).unwrap();

@@ -1,5 +1,6 @@
 use nom_sql::parser as sql_parser;
-use flow::{NodeAddress, Migration};
+use flow::Migration;
+use flow::core::{NodeAddress, DataType};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
@@ -9,7 +10,6 @@ use ops::base::Base;
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
-use flow::data::DataType;
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;

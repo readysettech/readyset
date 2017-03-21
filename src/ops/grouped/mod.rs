@@ -1,5 +1,3 @@
-use ops;
-
 use std::fmt;
 use std::collections::HashMap;
 use std::sync;
@@ -120,7 +118,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
         // group by all columns
         self.cols = srcn.fields().len();
-        self.group_by.extend(self.inner.group_by().iter().cloned());
+        self.group_by.extend(self.inner
+                                 .group_by()
+                                 .iter()
+                                 .cloned());
         self.group_by.sort();
         // cache the range of our output keys
         self.out_key = (0..self.group_by.len()).collect();
@@ -171,10 +172,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             let group = rec.iter()
                 .enumerate()
                 .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                    Some(v)
-                } else {
-                    None
-                })
+                                Some(v)
+                            } else {
+                                None
+                            })
                 .collect::<Vec<_>>();
 
             consolidate.entry(group).or_insert_with(Vec::new).push(val);
@@ -183,7 +184,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         let mut out = Vec::with_capacity(2 * consolidate.len());
         for (group, diffs) in consolidate {
             // find the current value for this group
-            let db = state.get(self.us.as_ref().unwrap().as_local())
+            let db = state.get(self.us
+                                   .as_ref()
+                                   .unwrap()
+                                   .as_local())
                 .expect("grouped operators must have their own state materialized");
             let rs = db.lookup(&self.out_key[..], &KeyType::from(&group[..]));
             debug_assert!(rs.len() <= 1, "a group had more than 1 result");
@@ -209,7 +213,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                         .cloned()
                         .chain(Some(new.into()).into_iter())
                         .collect();
-                    out.push(ops::Record::Positive(sync::Arc::new(rec)));
+                    out.push(Record::Positive(sync::Arc::new(rec)));
                 }
                 Some(ref current) if new == **current => {
                     // no change
@@ -224,17 +228,17 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                         // we're generating a zero row
                         // revoke old value
                         rec.push(current.into_owned());
-                        out.push(ops::Record::Negative(sync::Arc::new(rec.clone())));
+                        out.push(Record::Negative(sync::Arc::new(rec.clone())));
 
                         // remove the old value from the end of the record
                         rec.pop();
                     } else {
-                        out.push(ops::Record::Negative(old.unwrap().clone()));
+                        out.push(Record::Negative(old.unwrap().clone()));
                     }
 
                     // emit new value
                     rec.push(new.into());
-                    out.push(ops::Record::Positive(sync::Arc::new(rec)));
+                    out.push(Record::Positive(sync::Arc::new(rec)));
                 }
             }
         }

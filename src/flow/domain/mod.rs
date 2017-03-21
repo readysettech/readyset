@@ -18,7 +18,6 @@ use slog::Logger;
 
 use flow::transactions;
 
-use ops;
 use checktable;
 
 const BATCH_SIZE: usize = 256;
@@ -119,7 +118,7 @@ impl Domain {
                     process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
                     process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
                     enable_output: bool)
-                    -> HashMap<NodeAddress, Vec<ops::Record>> {
+                    -> HashMap<NodeAddress, Vec<Record>> {
 
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
@@ -202,10 +201,7 @@ impl Domain {
         output_messages
     }
 
-    fn dispatch_(&mut self,
-                 m: Packet,
-                 enable_output: bool)
-                 -> HashMap<NodeAddress, Vec<ops::Record>> {
+    fn dispatch_(&mut self, m: Packet, enable_output: bool) -> HashMap<NodeAddress, Vec<Record>> {
         Self::dispatch(m,
                        &self.not_ready,
                        &mut self.replaying_to,
