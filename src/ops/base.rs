@@ -12,6 +12,9 @@ use time;
 // 4k buffered log.
 const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
 
+// We store at most this many write records before flushing to disk.
+const BUFFERED_WRITES_CAPACITY: usize = 512;
+
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
 /// These nodes perform no computation, and their job is merely to persist all received updates and
@@ -19,11 +22,12 @@ const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
 /// type corresponding to the node's type.
 #[derive(Debug)]
 pub struct Base {
-    primary_key: Option<Vec<usize>>,
+    buffered_writes: Option<Records>,
     durability: BaseDurabilityLevel,
     durable_log: Option<BufWriter<File, WhenFull>>,
     durable_log_path: Option<PathBuf>,
     global_address: Option<NodeAddress>,
+    primary_key: Option<Vec<usize>>,
 
     // This id is unique within the same process.
     //
@@ -56,13 +60,14 @@ impl Base {
     /// Create a base node operator.
     pub fn new(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
         Base {
-            primary_key: Some(primary_key),
+            buffered_writes: Some(Records::default()),
             durability: durability,
             durable_log: None,
             durable_log_path: None,
             global_address: None,
-            us: None,
+            primary_key: Some(primary_key),
             unique_id: ProcessUniqueId::new(),
+            us: None,
         }
     }
 
@@ -70,11 +75,7 @@ impl Base {
     fn persist_to_log(&mut self, records: &Records) {
         match self.durability {
             BaseDurabilityLevel::None => panic!("tried to persist non-durable base node!"),
-            BaseDurabilityLevel::Buffered => {
-                self.ensure_log_writer();
-                serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
-                    .unwrap();
-            }
+            BaseDurabilityLevel::Buffered |
             BaseDurabilityLevel::SyncImmediately => {
                 self.ensure_log_writer();
                 serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
@@ -126,11 +127,7 @@ impl Base {
                     self.durable_log = None;
                 },
 
-                // TODO(jmftrindade): Use our own flush strategy instead?
-                BaseDurabilityLevel::Buffered => {
-                    self.durable_log = Some(BufWriter::with_capacity_and_strategy(
-                        LOG_BUFFER_CAPACITY, file, WhenFull))
-                },
+                BaseDurabilityLevel::Buffered |
 
                 // XXX(jmftrindade): buf_redux does not provide a "sync immediately" flush strategy
                 // out of the box, so we handle that from persist_to_log by dropping sync_data.
@@ -149,6 +146,7 @@ impl Base {
 impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
+            buffered_writes: self.buffered_writes.clone(),
             durability: self.durability,
             durable_log: None,
             durable_log_path: None,
@@ -163,6 +161,7 @@ impl Clone for Base {
 impl Default for Base {
     fn default() -> Self {
         Base {
+            buffered_writes: Some(Records::default()),
             durability: BaseDurabilityLevel::Buffered,
             durable_log: None,
             durable_log_path: None,
@@ -216,15 +215,40 @@ impl Ingredient for Base {
                 state: &StateMap)
                 -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
+        let records_to_return;
         match self.durability {
-            BaseDurabilityLevel::Buffered |
-            BaseDurabilityLevel::SyncImmediately => self.persist_to_log(&rs),
-            BaseDurabilityLevel::None => (),
+            BaseDurabilityLevel::Buffered => {
+                // Perform a synchronous flush if one of the following conditions are met:
+                //
+                // 1. Enough time has passed since the last time we flushed.
+                // 2. Our buffer of write records reaches capacity.
+                let num_buffered_writes = self.buffered_writes.as_ref().unwrap().len();
+                if num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY {
+                    let clone_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
+                    self.persist_to_log(&clone_buffered_writes);
+                    records_to_return = Some(clone_buffered_writes);
+                } else {
+                    let mut copy_rs = rs.clone();
+                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
+
+                    // FIXME(jmftrindade): This makes a bunch of tests fail or get stuck.
+                    // return Some(Records::default())
+
+                    // FIXME(jmftrindade): And this makes a bunch of domains panic.
+                    return None
+                }
+            },
+            BaseDurabilityLevel::SyncImmediately => {
+                self.persist_to_log(&rs);
+                records_to_return = Some(rs.clone());
+            },
+            BaseDurabilityLevel::None => {
+                records_to_return = Some(rs.clone());
+            },
         }
 
-        // FIXME: here is where I only return records if we wrote them to disk
-
-        Some(rs.into_iter()
+        let flushed_records = Some(records_to_return.unwrap()
+            .into_iter()
             .map(|r| match r {
                 Record::Positive(u) => Record::Positive(u),
                 Record::Negative(u) => Record::Negative(u),
@@ -240,7 +264,15 @@ impl Ingredient for Base {
                     Record::Negative(rows[0].clone())
                 }
             })
-            .collect())
+            .collect());
+
+        if self.durability == BaseDurabilityLevel::Buffered {
+            self.buffered_writes.as_mut().unwrap().clear();
+            let mut copy_rs = rs.clone();
+            self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
+        }
+
+        flushed_records
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
