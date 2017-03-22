@@ -6,6 +6,8 @@ use memcached::proto::MemCachedResult;
 
 use rustc_serialize::json::{ToJson, Json};
 
+use std::io;
+
 use flow::prelude::*;
 
 pub struct Memcache(memcached::Client);
@@ -15,6 +17,7 @@ unsafe impl Send for Memcache {}
 pub struct Hook {
     client: Memcache,
     key_columns: Vec<usize>,
+    name: Json,
 
     state: State,
 }
@@ -26,20 +29,21 @@ impl Hook {
     /// of tuples in this form
     ///
     /// `(address, weight)`.
-    pub fn new(servers: &[(&str, usize)], key_columns: Vec<usize>) -> Option<Self> {
-        let client = memcached::Client::connect(&servers, ProtoType::Binary);
-        if client.is_err() {
-            return None;
-        }
+    pub fn new(name: String,
+               servers: &[(&str, usize)],
+               key_columns: Vec<usize>)
+               -> io::Result<Self> {
+        let client = try!(memcached::Client::connect(&servers, ProtoType::Binary));
 
         let mut s = State::default();
         s.add_key(&key_columns[..]);
 
-        Some(Self {
-                 client: Memcache(client.unwrap()),
-                 key_columns: key_columns,
-                 state: s,
-             })
+        Ok(Self {
+               client: Memcache(client),
+               key_columns: key_columns,
+               name: Json::String(name),
+               state: s,
+           })
     }
 
     /// Push the relevant record updates to Memcached.
@@ -81,7 +85,7 @@ impl Hook {
         // Push to Memcached
         for key in modified_keys {
             let rows = self.state.lookup(&self.key_columns[..], &KeyType::from(&key[..]));
-            let k = key.to_json().to_string();
+            let k = Json::Array(vec![self.name.clone(), key.to_json()]).to_string();
             let v = Json::Array(rows.into_iter()
                                     .map(|row| {
                                              Json::Array(row.iter().map(|c| c.to_json()).collect())
@@ -95,7 +99,8 @@ impl Hook {
 
     #[cfg(test)]
     pub fn get_row(&mut self, key: Vec<DataType>) -> MemCachedResult<(Vec<u8>, u32)> {
-        self.client.0.get(key.to_json().to_string().as_bytes())
+        let k = Json::Array(vec![self.name.clone(), key.to_json()]).to_string();
+        self.client.0.get(k.as_bytes())
     }
 }
 
@@ -106,7 +111,10 @@ mod tests {
     #[test]
     // #[ignore]
     fn it_works() {
-        let mut h = Hook::new(&[("tcp://127.0.0.1:11211", 1)], vec![0]).unwrap();
+        let mut h = Hook::new(String::from("table_1"),
+                              &[("tcp://127.0.0.1:11211", 1)],
+                              vec![0])
+                .unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 2.into()]].into());
@@ -132,7 +140,10 @@ mod tests {
     #[test]
     // #[ignore]
     fn it_works_multikey() {
-        let mut h = Hook::new(&[("tcp://127.0.0.1:11211", 1)], vec![0, 2]).unwrap();
+        let mut h = Hook::new(String::from("table_2"),
+                              &[("tcp://127.0.0.1:11211", 1)],
+                              vec![0, 2])
+                .unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 5.into(), 3.into()]].into());

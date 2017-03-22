@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::time;
 use std::thread;
+use std::io;
 
 use slog;
 
@@ -609,6 +610,20 @@ impl<'a> Migration<'a> {
         let (tx, rx) = mpsc::channel();
         self.reader_for(n).streamers.lock().unwrap().push(tx);
         rx
+    }
+
+    /// Set up the given node such that its output is stored in Memcached.
+    pub fn memcached_hook(&mut self,
+                          n: core::NodeAddress,
+                          name: String,
+                          servers: &[(&str, usize)],
+                          key: usize) -> io::Result<()> {
+        let h = try!(hook::Hook::new(name, servers, vec![key]));
+        let h = node::Type::Hook(Some(h));
+        let h = self.mainline.ingredients[*n.as_global()].mirror(h);
+        let h = self.mainline.ingredients.add_node(h);
+        self.mainline.ingredients.add_edge(*n.as_global(), h, false);
+        Ok(())
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
