@@ -41,7 +41,7 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
     match *computed_col.function.as_ref().unwrap() {
         Avg(Seq(ref cols)) |
         Count(Seq(ref cols)) |
-        GroupConcat(Seq(ref cols)) |
+        GroupConcat(Seq(ref cols), _) |
         Max(Seq(ref cols)) |
         Min(Seq(ref cols)) |
         Sum(Seq(ref cols)) => cols,

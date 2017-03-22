@@ -31,13 +31,13 @@ impl CountStarRewrite for SqlQuery {
             c.function = match c.function {
                 Some(f) => {
                     Some(match f {
-                             Avg(fe) => Avg(rewrite(fe)),
-                             Count(fe) => Count(rewrite(fe)),
-                             Sum(fe) => Sum(rewrite(fe)),
-                             Min(fe) => Min(rewrite(fe)),
-                             Max(fe) => Max(rewrite(fe)),
-                             GroupConcat(fe) => GroupConcat(rewrite(fe)),
-                         })
+                        Avg(fe) => Avg(rewrite(fe)),
+                        Count(fe) => Count(rewrite(fe)),
+                        Sum(fe) => Sum(rewrite(fe)),
+                        Min(fe) => Min(rewrite(fe)),
+                        Max(fe) => Max(rewrite(fe)),
+                        GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
+                    })
                 }
                 None => None,
             };
@@ -53,8 +53,8 @@ impl CountStarRewrite for SqlQuery {
                     FieldExpression::All => panic!(err),
                     FieldExpression::Seq(fs) => {
                         FieldExpression::Seq(fs.into_iter()
-                                                 .map(|c| rewrite_count_star(c, &tables))
-                                                 .collect())
+                            .map(|c| rewrite_count_star(c, &tables))
+                            .collect())
                     }
                 };
                 // TODO: also expand function columns within WHERE clause
