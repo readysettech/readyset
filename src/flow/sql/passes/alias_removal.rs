@@ -16,6 +16,7 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
             Some(t) => {
                 Column {
                     name: f.name,
+                    alias: f.alias,
                     table: if table_aliases.contains_key(&t) {
                         Some(table_aliases[&t].clone())
                     } else {
@@ -99,19 +100,20 @@ impl AliasRemoval for SqlQuery {
                     FieldExpression::Seq(fs) => {
                         let new_fs = fs.into_iter()
                             .map(|f| match f.table {
-                                None => f,
-                                Some(t) => {
-                                    Column {
-                                        name: f.name,
-                                        table: if table_aliases.contains_key(&t) {
-                                            Some(table_aliases[&t].clone())
-                                        } else {
-                                            Some(t)
-                                        },
-                                        function: None,
-                                    }
-                                }
-                            })
+                                     None => f,
+                                     Some(t) => {
+                                         Column {
+                                             name: f.name,
+                                             alias: f.alias,
+                                             table: if table_aliases.contains_key(&t) {
+                                                 Some(table_aliases[&t].clone())
+                                             } else {
+                                                 Some(t)
+                                             },
+                                             function: None,
+                                         }
+                                     }
+                                 })
                             .collect();
                         FieldExpression::Seq(new_fs)
                     }

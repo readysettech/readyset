@@ -7,8 +7,6 @@ use memcached::proto::MemCachedResult;
 use rustc_serialize::json::{ToJson, Json};
 
 use flow::prelude::*;
-use flow::domain::local;
-use ops;
 
 pub struct Memcache(memcached::Client);
 unsafe impl Send for Memcache {}
@@ -45,21 +43,21 @@ impl Hook {
     }
 
     /// Push the relevant record updates to Memcached.
-    pub fn on_input(&mut self, records: ops::Records) {
+    pub fn on_input(&mut self, records: Records) {
         // Update materialized state
         for rec in records.iter() {
             match rec {
-                &ops::Record::Positive(ref r) => self.state.insert(r.clone()),
-                &ops::Record::Negative(ref r) => self.state.remove(r),
-                &ops::Record::DeleteRequest(..) => unreachable!(),
+                &Record::Positive(ref r) => self.state.insert(r.clone()),
+                &Record::Negative(ref r) => self.state.remove(r),
+                &Record::DeleteRequest(..) => unreachable!(),
             }
         }
 
         // Extract modified keys
         let mut modified_keys: Vec<_> = records.into_iter()
             .map(|rec| match rec {
-                     ops::Record::Positive(a) |
-                     ops::Record::Negative(a) => {
+                     Record::Positive(a) |
+                     Record::Negative(a) => {
                          a.iter()
                              .enumerate()
                              .filter_map(|(i, v)| if self.key_columns.iter().any(|col| {
@@ -72,7 +70,7 @@ impl Hook {
                              .cloned()
                              .collect::<Vec<_>>()
                      }
-                     ops::Record::DeleteRequest(..) => unreachable!(),
+                     Record::DeleteRequest(..) => unreachable!(),
                  })
             .collect();
 
@@ -104,7 +102,6 @@ impl Hook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ops::Records;
 
     #[test]
     // #[ignore]

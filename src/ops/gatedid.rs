@@ -108,9 +108,10 @@ mod tests {
         let done = Arc::new(AtomicBool::new(false));
         let child_done = done.clone();
         let child = thread::spawn(move || {
-            assert_eq!(i.narrow_one_row(left.clone(), false), vec![left].into());
-            &done.store(true, Ordering::SeqCst);
-        });
+                                      assert_eq!(i.narrow_one_row(left.clone(), false),
+                                                 vec![left].into());
+                                      &done.store(true, Ordering::SeqCst);
+                                  });
 
         assert_eq!((&child_done).load(Ordering::SeqCst), false);
         tx.send(()).unwrap();

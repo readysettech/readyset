@@ -107,11 +107,7 @@ impl GroupedOperation for Aggregator {
             Aggregation::COUNT => "|*|".into(),
             Aggregation::SUM => format!("𝛴({})", self.over),
         };
-        let group_cols = self.group
-            .iter()
-            .map(|g| g.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let group_cols = self.group.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }
@@ -157,7 +153,7 @@ mod tests {
     fn it_forwards() {
         let mut c = setup(true);
 
-        let u: ops::Record = vec![1.into(), 1.into()].into();
+        let u: Record = vec![1.into(), 1.into()].into();
 
         // first row for a group should emit -0 and +1 for that group
         let rs = c.narrow_one(u, true);
@@ -165,21 +161,21 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 0.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 1.into());
             }
             _ => unreachable!(),
         }
 
-        let u: ops::Record = vec![2.into(), 2.into()].into();
+        let u: Record = vec![2.into(), 2.into()].into();
 
         // first row for a second group should emit -0 and +1 for that new group
         let rs = c.narrow_one(u, true);
@@ -187,21 +183,21 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 2.into());
                 assert_eq!(r[1], 0.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
                 assert_eq!(r[1], 1.into());
             }
             _ => unreachable!(),
         }
 
-        let u: ops::Record = vec![1.into(), 2.into()].into();
+        let u: Record = vec![1.into(), 2.into()].into();
 
         // second row for a group should emit -1 and +2
         let rs = c.narrow_one(u, true);
@@ -209,14 +205,14 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 1.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
             }
@@ -231,14 +227,14 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 1.into());
             }
@@ -259,45 +255,45 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 6); // one - and one + for each group
         // group 1 lost 1 and gained 2
-        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == 1.into()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == 2.into()
-        } else {
-            false
-        }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  r[0] == 1.into() && r[1] == 1.into()
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  r[0] == 1.into() && r[1] == 2.into()
+                              } else {
+                                  false
+                              }));
         // group 2 lost 1 and gained 3
-        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == 1.into()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == 3.into()
-        } else {
-            false
-        }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  r[0] == 2.into() && r[1] == 1.into()
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  r[0] == 2.into() && r[1] == 3.into()
+                              } else {
+                                  false
+                              }));
         // group 3 lost 1 (well, 0) and gained 1
-        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-            r[0] == 3.into() && r[1] == 0.into()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == 1.into()
-        } else {
-            false
-        }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  r[0] == 3.into() && r[1] == 0.into()
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  r[0] == 3.into() && r[1] == 1.into()
+                              } else {
+                                  false
+                              }));
     }
 
     #[test]
     fn it_groups_by_multiple_columns() {
         let mut c = setup_multicolumn(true);
 
-        let u: ops::Record = vec![1.into(), 1.into(), 2.into()].into();
+        let u: Record = vec![1.into(), 1.into(), 2.into()].into();
 
         // first row for a group should emit -0 and +1 for the group (1, 1)
         let rs = c.narrow_one(u, true);
@@ -305,7 +301,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 0.into());
@@ -313,7 +309,7 @@ mod tests {
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 1.into());
@@ -321,7 +317,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let u: ops::Record = vec![2.into(), 1.into(), 2.into()].into();
+        let u: Record = vec![2.into(), 1.into(), 2.into()].into();
 
         // first row for a second group should emit -0 and +1 for that new group
         let rs = c.narrow_one(u, true);
@@ -329,7 +325,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 2.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 0.into());
@@ -337,7 +333,7 @@ mod tests {
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 1.into());
@@ -345,7 +341,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let u: ops::Record = vec![1.into(), 1.into(), 2.into()].into();
+        let u: Record = vec![1.into(), 1.into(), 2.into()].into();
 
         // second row for a group should emit -1 and +2
         let rs = c.narrow_one(u, true);
@@ -353,7 +349,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 1.into());
@@ -361,7 +357,7 @@ mod tests {
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 2.into());
@@ -377,7 +373,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 2.into());
@@ -385,7 +381,7 @@ mod tests {
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
                 assert_eq!(r[2], 1.into());

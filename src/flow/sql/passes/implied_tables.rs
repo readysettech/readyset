@@ -65,9 +65,7 @@ impl ImpliedTableExpansion for SqlQuery {
         let find_table = |f: &Column| -> Option<String> {
             let mut matches = write_schemas.iter()
                 .filter_map(|(t, ws)| {
-                    let num_matching = ws.iter()
-                        .filter(|c| **c == f.name)
-                        .count();
+                    let num_matching = ws.iter().filter(|c| **c == f.name).count();
                     assert!(num_matching <= 1);
                     if num_matching == 1 {
                         Some((*t).clone())
@@ -102,7 +100,7 @@ impl ImpliedTableExpansion for SqlQuery {
                                 Sum(ref mut fe) |
                                 Min(ref mut fe) |
                                 Max(ref mut fe) |
-                                GroupConcat(ref mut fe) => {
+                                GroupConcat(ref mut fe, _) => {
                                     match *fe {
                                         FieldExpression::Seq(ref mut fields) => {
                                             for f in fields.iter_mut() {
@@ -110,9 +108,9 @@ impl ImpliedTableExpansion for SqlQuery {
                                                     f.table = find_table(f);
                                                 } else {
                                                     f.table = Some(known_table.as_ref()
-                                                        .unwrap()
-                                                        .name
-                                                        .clone())
+                                                                       .unwrap()
+                                                                       .name
+                                                                       .clone())
                                                 }
                                             }
                                         }
@@ -126,10 +124,7 @@ impl ImpliedTableExpansion for SqlQuery {
                             if known_table.is_none() {
                                 find_table(&f)
                             } else {
-                                Some(known_table.as_ref()
-                                    .unwrap()
-                                    .name
-                                    .clone())
+                                Some(known_table.as_ref().unwrap().name.clone())
                             }
                         }
                     }
@@ -147,8 +142,8 @@ impl ImpliedTableExpansion for SqlQuery {
                     FieldExpression::All => panic!(err),
                     FieldExpression::Seq(fs) => {
                         FieldExpression::Seq(fs.into_iter()
-                            .map(|f| translate_column(f, None))
-                            .collect())
+                                                 .map(|f| translate_column(f, None))
+                                                 .collect())
                     }
                 };
                 // Expand within WHERE clause
@@ -169,34 +164,34 @@ impl ImpliedTableExpansion for SqlQuery {
                 // Expand tables for key specification
                 if ctq.keys.is_some() {
                     ctq.keys = Some(ctq.keys
-                        .unwrap()
-                        .into_iter()
-                        .map(|k| match k {
-                            PrimaryKey(key_cols) => {
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|k| match k {
+                                                 PrimaryKey(key_cols) => {
                                 PrimaryKey(key_cols.into_iter()
                                     .map(|k| translate_column(k, Some(table.clone())))
                                     .collect())
                             }
-                            UniqueKey(name, key_cols) => {
+                                                 UniqueKey(name, key_cols) => {
                                 UniqueKey(name,
                                           key_cols.into_iter()
                                               .map(|k| translate_column(k, Some(table.clone())))
                                               .collect())
                             }
-                            FulltextKey(name, key_cols) => {
+                                                 FulltextKey(name, key_cols) => {
                                 FulltextKey(name,
                                             key_cols.into_iter()
                                                 .map(|k| translate_column(k, Some(table.clone())))
                                                 .collect())
                             }
-                            Key(name, key_cols) => {
+                                                 Key(name, key_cols) => {
                                 Key(name,
                                     key_cols.into_iter()
                                         .map(|k| translate_column(k, Some(table.clone())))
                                         .collect())
                             }
-                        })
-                        .collect());
+                                             })
+                                        .collect());
                 }
                 SqlQuery::CreateTable(ctq)
             }

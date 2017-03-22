@@ -1,5 +1,3 @@
-use ops;
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -94,12 +92,15 @@ impl Ingredient for Latest {
                 let r = r.rec();
 
                 // find the current value for this group
-                let db = state.get(self.us.as_ref().unwrap().as_local())
+                let db = state.get(self.us
+                                       .as_ref()
+                                       .unwrap()
+                                       .as_local())
                     .expect("latest must have its own state materialized");
                 let rs = db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]]));
                 debug_assert!(rs.len() <= 1, "a group had more than 1 result");
                 if let Some(current) = rs.get(0) {
-                    out.push(ops::Record::Negative(current.clone()));
+                    out.push(Record::Negative(current.clone()));
                 }
             }
 
@@ -122,11 +123,7 @@ impl Ingredient for Latest {
     }
 
     fn description(&self) -> String {
-        let key_cols = self.key
-            .iter()
-            .map(|k| k.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let key_cols = self.key.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
         format!("⧖ γ[{}]", key_cols)
     }
 
@@ -168,7 +165,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 1.into());
             }
@@ -183,7 +180,7 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
                 assert_eq!(r[1], 2.into());
             }
@@ -198,14 +195,14 @@ mod tests {
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
-            ops::Record::Negative(r) => {
+            Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 1.into());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
-            ops::Record::Positive(r) => {
+            Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
                 assert_eq!(r[1], 2.into());
             }
@@ -222,27 +219,27 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 4); // one - and one + for each group
         // group 1 lost 2 and gained 3
-        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == 2.into()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == 3.into()
-        } else {
-            false
-        }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  r[0] == 1.into() && r[1] == 2.into()
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  r[0] == 1.into() && r[1] == 3.into()
+                              } else {
+                                  false
+                              }));
         // group 2 lost 2 and gained 4
-        assert!(rs.iter().any(|r| if let ops::Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == 2.into()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let ops::Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == 4.into()
-        } else {
-            false
-        }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  r[0] == 2.into() && r[1] == 2.into()
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  r[0] == 2.into() && r[1] == 4.into()
+                              } else {
+                                  false
+                              }));
     }
 
     #[test]

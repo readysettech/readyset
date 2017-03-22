@@ -74,8 +74,7 @@ impl TokenGenerator {
         TokenGenerator {
             conflicts: base_table_conflicts.into_iter()
                 .map(Conflict::BaseTable)
-                .chain(base_column_conflicts.into_iter()
-                    .map(|(n, c)| Conflict::BaseColumn(n, c)))
+                .chain(base_column_conflicts.into_iter().map(|(n, c)| Conflict::BaseColumn(n, c)))
                 .collect(),
         }
     }
@@ -164,8 +163,8 @@ impl CheckTable {
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
         !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-            conflicts.iter().any(|c| self.check_conflict(ts, key, c))
-        })
+                                        conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+                                    })
     }
 
     fn compute_previous_timestamps(&self,
@@ -176,17 +175,17 @@ impl CheckTable {
         }
 
         Some(self.domain_dependencies
-            .iter()
-            .map(|(d, v)| {
-                let earliest: i64 = v.iter()
-                    .filter_map(|b| self.toplevel.get(b))
-                    .chain(self.last_migration.iter())
-                    .max()
-                    .cloned()
-                    .unwrap_or(0);
-                (*d, earliest)
-            })
-            .collect())
+                 .iter()
+                 .map(|(d, v)| {
+            let earliest: i64 = v.iter()
+                .filter_map(|b| self.toplevel.get(b))
+                .chain(self.last_migration.iter())
+                .max()
+                .cloned()
+                .unwrap_or(0);
+            (*d, earliest)
+        })
+                 .collect())
     }
 
     pub fn claim_timestamp(&mut self,
@@ -242,12 +241,9 @@ impl CheckTable {
         self.last_migration = Some(ts + 1);
         self.domain_dependencies = ingresses_from_base.iter()
             .map(|(domain, ingress_from_base)| {
-                (*domain,
-                 ingress_from_base.iter()
-                    .filter(|&(_, n)| *n > 0)
-                    .map(|(k, _)| *k)
-                    .collect())
-            })
+                     (*domain,
+                      ingress_from_base.iter().filter(|&(_, n)| *n > 0).map(|(k, _)| *k).collect())
+                 })
             .collect();
 
         (ts, ts + 1, prevs)

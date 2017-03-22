@@ -1,5 +1,3 @@
-use ops;
-
 use std::sync;
 use std::iter;
 use std::collections::HashMap;
@@ -129,12 +127,12 @@ impl From<Builder> for Joiner {
                         let pg: Vec<_> = pg.iter()
                             .enumerate()
                             .filter_map(|(pi, g)| {
-                                // look for ones that share a group with us
-                                g2c.get(g).map(|srci| {
-                                    // and emit that mapping
-                                    (*srci, pi)
-                                })
-                            })
+                                            // look for ones that share a group with us
+                                            g2c.get(g).map(|srci| {
+                                                               // and emit that mapping
+                                                               (*srci, pi)
+                                                           })
+                                        })
                             .collect();
 
                         // if there are no shared columns, don't join against this view
@@ -200,27 +198,27 @@ impl Joiner {
 
         // send the parameters to start the query.
         let rx: Vec<_> = self.lookup(other,
-                    &[target.on.1],
-                    &KeyType::Single(&left.1[target.on.0]),
-                    domain,
-                    states)
+                                     &[target.on.1],
+                                     &KeyType::Single(&left.1[target.on.0]),
+                                     domain,
+                                     states)
             .expect("joins must have inputs materialized")
             .cloned()
             .collect();
 
         if rx.is_empty() && target.outer {
             return Box::new(Some(self.emit
-                    .iter()
-                    .map(|&(source, column)| {
-                        if source == other {
-                            DataType::None
-                        } else {
-                            // this clone is unnecessary
-                            left.1[column].clone()
-                        }
-                    })
-                    .collect::<Vec<_>>())
-                .into_iter());
+                                     .iter()
+                                     .map(|&(source, column)| {
+                                              if source == other {
+                                                  DataType::None
+                                              } else {
+                                                  // this clone is unnecessary
+                                                  left.1[column].clone()
+                                              }
+                                          })
+                                     .collect::<Vec<_>>())
+                                    .into_iter());
         }
 
         Box::new(rx.into_iter().map(move |right| {
@@ -256,6 +254,10 @@ impl Ingredient for Joiner {
 
     fn should_materialize(&self) -> bool {
         false
+    }
+
+    fn is_join(&self) -> bool {
+        true
     }
 
     fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
@@ -295,9 +297,8 @@ impl Ingredient for Joiner {
     fn on_connected(&mut self, g: &Graph) {
         for j in self.join.values_mut() {
             for (t, jt) in &mut j.against {
-                jt.select = iter::repeat(true)
-                    .take(g[*t.as_global()].fields().len())
-                    .collect::<Vec<_>>();
+                jt.select =
+                    iter::repeat(true).take(g[*t.as_global()].fields().len()).collect::<Vec<_>>();
             }
         }
     }
@@ -345,13 +346,13 @@ impl Ingredient for Joiner {
                 let (r, pos) = rec.extract();
 
                 self.join((from, r), nodes, state).map(move |res| {
-                    // return new row with appropriate sign
-                    if pos {
-                        ops::Record::Positive(sync::Arc::new(res))
-                    } else {
-                        ops::Record::Negative(sync::Arc::new(res))
-                    }
-                })
+                                                           // return new row with appropriate sign
+                                                           if pos {
+                                                               Record::Positive(sync::Arc::new(res))
+                                                           } else {
+                                                               Record::Negative(sync::Arc::new(res))
+                                                           }
+                                                       })
             })
             .collect()
     }
@@ -388,13 +389,10 @@ impl Ingredient for Joiner {
         let joins = self.join
             .iter()
             .flat_map(|(left, rs)| {
-                rs.against
-                    .iter()
-                    .filter(move |&(right, _)| left < right)
-                    .map(move |(right, rs)| {
-                        let op = if rs.outer { "⋉" } else { "⋈" };
-                        format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
-                    })
+                rs.against.iter().filter(move |&(right, _)| left < right).map(move |(right, rs)| {
+                    let op = if rs.outer { "⋉" } else { "⋈" };
+                    format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
+                })
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -402,20 +400,25 @@ impl Ingredient for Joiner {
     }
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        let (nl, c) = self.emit[col];
+        // we know where this column comes from through self.emit.
+        let (origin, ocol) = self.emit[col];
+        let mut source = vec![(origin, Some(ocol))];
 
-        let j = &self.join[&nl];
-        assert!(j.against.len() == 1);
+        // however, we *also* want to check if this column compares equal to a column in another
+        // ancestor, so that we can detect key provenance through both sides of the join.
+        let j = &self.join[&origin];
+        assert!(j.against.len() == 1); // only two-way joins for now
 
-        let (nr, target) = j.against.iter().next().unwrap();
-        let (lcol, rcol) = target.on;
+        // figure out how we join with the other view
+        let (&other, &JoinTarget { on: (lcol, rcol), .. }) = j.against.iter().next().unwrap();
 
-        if lcol == c {
-            vec![(nl, Some(lcol)), (*nr, Some(rcol))]
-        } else {
-            let other = *self.join.keys().find(|n: &&NodeAddress| **n != nl).unwrap();
-            vec![(nl, Some(c)), (other, None)]
+        // if we join on the same column that col resolves to,
+        // then we know that self[col] also comes from other[rcol].
+        if lcol == ocol {
+            source.push((other, Some(rcol)));
         }
+
+        source
     }
 }
 
@@ -558,8 +561,8 @@ mod tests {
         let (j, l, r) = setup(false);
         let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
                                      (r, vec![0]) /* join column for right */]
-            .into_iter()
-            .collect();
+                .into_iter()
+                .collect();
         assert_eq!(j.node().suggest_indexes(me), hm);
     }
 

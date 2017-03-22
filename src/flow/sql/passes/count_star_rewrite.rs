@@ -20,8 +20,8 @@ impl CountStarRewrite for SqlQuery {
                     FieldExpression::All => {
                         FieldExpression::Seq(vec![Column {
                                                       name: bogo_column.clone(),
-                                                      table: Some(bogo_table.name
-                                                          .clone()),
+                                                      alias: None,
+                                                      table: Some(bogo_table.name.clone()),
                                                       function: None,
                                                   }])
                     }
@@ -36,7 +36,7 @@ impl CountStarRewrite for SqlQuery {
                         Sum(fe) => Sum(rewrite(fe)),
                         Min(fe) => Min(rewrite(fe)),
                         Max(fe) => Max(rewrite(fe)),
-                        GroupConcat(fe) => GroupConcat(rewrite(fe)),
+                        GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
                     })
                 }
                 None => None,
@@ -92,6 +92,7 @@ mod tests {
                 assert_eq!(tq.fields,
                            FieldExpression::Seq(vec![Column {
                                name: String::from("anon_fn"),
+                               alias: None,
                                table: None,
                                function: Some(FunctionExpression::Count(
                                    FieldExpression::Seq(vec![Column::from("users.age")]))),

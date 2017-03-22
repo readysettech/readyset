@@ -220,12 +220,12 @@ impl Recipe {
         let lines: Vec<&str> = recipe_text.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| {
-                // remove inline comments, too
-                match l.find("#") {
-                    None => l.trim(),
-                    Some(pos) => &l[0..pos - 1].trim(),
-                }
-            })
+                     // remove inline comments, too
+                     match l.find("#") {
+                         None => l.trim(),
+                         Some(pos) => &l[0..pos - 1].trim(),
+                     }
+                 })
             .collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();

@@ -1,5 +1,6 @@
 use nom_sql::parser as sql_parser;
-use flow::{NodeAddress, Migration};
+use flow::Migration;
+use flow::core::{NodeAddress, DataType};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
@@ -9,7 +10,6 @@ use ops::base::Base;
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
-use flow::data::DataType;
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -41,7 +41,7 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
     match *computed_col.function.as_ref().unwrap() {
         Avg(Seq(ref cols)) |
         Count(Seq(ref cols)) |
-        GroupConcat(Seq(ref cols)) |
+        GroupConcat(Seq(ref cols), _) |
         Max(Seq(ref cols)) |
         Min(Seq(ref cols)) |
         Sum(Seq(ref cols)) => cols,
@@ -246,9 +246,9 @@ impl SqlIncorporator {
             Some(keys) => {
                 keys.iter()
                     .filter_map(|k| match *k {
-                        ref k @ TableKey::PrimaryKey(..) => Some(k),
-                        _ => None,
-                    })
+                                    ref k @ TableKey::PrimaryKey(..) => Some(k),
+                                    _ => None,
+                                })
                     .collect()
             }
         };
@@ -264,9 +264,9 @@ impl SqlIncorporator {
                            name);
                     let pkey_column_ids = key_cols.iter()
                         .map(|pkc| {
-                            assert_eq!(pkc.table.as_ref().unwrap(), name);
-                            cols.iter().position(|c| c == pkc).unwrap()
-                        })
+                                 assert_eq!(pkc.table.as_ref().unwrap(), name);
+                                 cols.iter().position(|c| c == pkc).unwrap()
+                             })
                         .collect();
                     mig.add_ingredient(name, fields.as_slice(), Base::new(pkey_column_ids))
                 }
@@ -301,7 +301,10 @@ impl SqlIncorporator {
 
         // The function node's set of output columns is the group columns plus the function
         // column
-        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| c.name.clone()));
+        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
+                                                                          Some(ref a) => a.clone(),
+                                                                          None => c.name.clone(),
+                                                                      }));
         combined_columns.push(String::from(computed_col_name));
 
         // make the new operator and record its metadata
@@ -348,8 +351,12 @@ impl SqlIncorporator {
             };
             let over_col_indx = self.field_to_columnid(parent_ni, &over.name).unwrap();
 
+            let computed_col_name = match func_col.alias {
+                None => &func_col.name,
+                Some(ref a) => a,
+            };
             self.make_grouped_node(name,
-                                   &func_col.name,
+                                   computed_col_name,
                                    (parent_ni, over_col_indx),
                                    group_cols,
                                    t,
@@ -403,12 +410,15 @@ impl SqlIncorporator {
 
         let parent_ni = self.address_for(&parent_name);
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
-        let proj_col_ids: Vec<usize> = proj_cols.iter()
-            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
-            .collect();
+        let proj_col_ids: Vec<usize> =
+            proj_cols.iter().map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap()).collect();
 
-        let mut col_names: Vec<String> =
-            proj_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+        let mut col_names: Vec<String> = proj_cols.iter()
+            .map(|c| match c.alias {
+                     Some(ref a) => a.clone(),
+                     None => c.name.clone(),
+                 })
+            .collect::<Vec<_>>();
         let (literal_names, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
         col_names.extend(literal_names.into_iter().map(String::from));
 
@@ -451,9 +461,10 @@ impl SqlIncorporator {
             .iter()
             .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
             .collect();
-        let n = mig.add_ingredient(String::from(name),
-                                   projected_columns.as_slice(),
-                                   Permute::new(parent_ni, projected_column_ids.as_slice()));
+        let n =
+            mig.add_ingredient(String::from(name),
+                               projected_columns.as_slice(),
+                               Permute::new(parent_ni, projected_column_ids.as_slice()));
         self.node_addresses.insert(String::from(name), n);
         self.node_fields.insert(n, projected_columns);
         new_nodes.push(n);
@@ -475,9 +486,7 @@ impl SqlIncorporator {
 
             let tuples_for_cols =
                 |ni: NodeAddress, cols: &[String]| -> Vec<(NodeAddress, usize)> {
-                    cols.iter()
-                        .map(|c| (ni, self.field_to_columnid(ni, c).unwrap()))
-                        .collect()
+                    cols.iter().map(|c| (ni, self.field_to_columnid(ni, c).unwrap())).collect()
                 };
 
             // non-join columns projected are the union of the ancestor's projected columns
@@ -655,11 +664,12 @@ impl SqlIncorporator {
                             // associated with the same query graph edge.
                             unreachable!();
                         };
-                        let ni = self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
-                                            jps,
-                                            left_ni,
-                                            right_ni,
-                                            mig);
+                        let ni =
+                            self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
+                                                jps,
+                                                left_ni,
+                                                right_ni,
+                                                mig);
                         join_nodes.push(ni);
                         i += 1;
                         prev_ni = Some(ni);
@@ -701,15 +711,21 @@ impl SqlIncorporator {
                     }
                     // Function columns without GROUP BY
                     for computed_col in computed_cols_cgn.columns
-                        .iter()
-                        .filter(|c| !grouped_fn_columns.contains(c))
-                        .collect::<Vec<_>>() {
+                            .iter()
+                            .filter(|c| !grouped_fn_columns.contains(c))
+                            .collect::<Vec<_>>() {
 
                         let agg_node_name = &format!("q_{:x}_n{}", qg.signature().hash, i);
 
                         let over_cols = target_columns_from_computed_column(computed_col);
                         let ref proj_cols_from_target_table = qg.relations
-                            .get(over_cols.iter().next().as_ref().unwrap().table.as_ref().unwrap())
+                            .get(over_cols.iter()
+                                     .next()
+                                     .as_ref()
+                                     .unwrap()
+                                     .table
+                                     .as_ref()
+                                     .unwrap())
                             .as_ref()
                             .unwrap()
                             .columns;
@@ -722,7 +738,7 @@ impl SqlIncorporator {
                             func_nodes.push(proj);
 
                             let bogo_group_col = Column::from(format!("{}.grp", proj_name)
-                                .as_str());
+                                                                  .as_str());
                             (vec![bogo_group_col], Some(proj))
                         } else {
                             (proj_cols_from_target_table.clone(), None)
@@ -753,21 +769,30 @@ impl SqlIncorporator {
                     assert_ne!(filter.len(), 0);
                     filter.last().unwrap()
                 };
-                let projected_columns: Vec<Column> = sorted_rels.iter()
-                    .fold(Vec::new(), |mut v, s| {
+                let projected_columns: Vec<Column> =
+                    sorted_rels.iter().fold(Vec::new(), |mut v, s| {
                         v.extend(qg.relations[*s].columns.clone().into_iter());
                         v
                     });
                 let projected_column_ids: Vec<usize> = projected_columns.iter()
-                    .map(|c| self.field_to_columnid(*final_ni, &c.name).unwrap())
+                    .map(|c| {
+                             let name = match c.alias {
+                                 Some(ref a) => a,
+                                 None => &c.name,
+                             };
+                             self.field_to_columnid(*final_ni, &name).unwrap()
+                         })
                     .collect();
                 let fields = projected_columns.iter()
-                    .map(|c| c.name.clone())
+                    .map(|c| match c.alias {
+                             Some(ref a) => a.clone(),
+                             None => c.name.clone(),
+                         })
                     .collect::<Vec<String>>();
-                leaf_na = mig.add_ingredient(String::from(name),
-                                             fields.as_slice(),
-                                             Permute::new(*final_ni,
-                                                          projected_column_ids.as_slice()));
+                leaf_na =
+                    mig.add_ingredient(String::from(name),
+                                       fields.as_slice(),
+                                       Permute::new(*final_ni, projected_column_ids.as_slice()));
                 self.node_addresses.insert(String::from(name), leaf_na);
                 self.node_fields.insert(leaf_na, fields);
 
@@ -891,8 +916,8 @@ mod tests {
 
         // Must have a base node for type inference to work, so make one manually
         assert!("INSERT INTO users (id, name) VALUES (?, ?);"
-            .to_flow_parts(&mut inc, None, &mut mig)
-            .is_ok());
+                    .to_flow_parts(&mut inc, None, &mut mig)
+                    .is_ok());
 
         // Should have two nodes: source and "users" base table
         assert_eq!(mig.graph().node_count(), 2);
@@ -918,9 +943,9 @@ mod tests {
 
         // Establish a base write type for "users"
         assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -929,9 +954,9 @@ mod tests {
 
         // Establish a base write type for "articles"
         assert!(inc.add_query("INSERT INTO articles (id, author, title) VALUES (?, ?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 3);
         assert_eq!(get_node(&inc, &mig, "articles").name(), "articles");
@@ -973,9 +998,9 @@ mod tests {
 
         // Establish a base write type
         assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -1014,9 +1039,9 @@ mod tests {
 
         // Establish a base write types
         assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
@@ -1024,10 +1049,9 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
 
         // Try a simple COUNT function
-        let res =
-            inc.add_query("SELECT COUNT(votes.userid) AS votes FROM votes GROUP BY votes.aid;",
-                          None,
-                          &mut mig);
+        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes FROM votes GROUP BY votes.aid;",
+                                None,
+                                &mut mig);
         assert!(res.is_ok());
         println!("{:?}", res);
         // added the aggregation and the edge view, and a reader
@@ -1036,7 +1060,8 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
-                                    name: String::from("votes"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("votes")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(
@@ -1060,9 +1085,9 @@ mod tests {
 
         // Establish a base write type
         assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -1099,9 +1124,9 @@ mod tests {
 
         // Establish a base write type
         assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -1140,9 +1165,9 @@ mod tests {
 
         // Establish a base write type
         assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
@@ -1158,7 +1183,8 @@ mod tests {
         // check project helper node
         let qid = query_id_hash(&["computed_columns", "votes"], &[],
                                 &[&Column {
-                                    name: String::from("count"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(
@@ -1187,9 +1213,9 @@ mod tests {
 
         // Establish a base write type
         assert!(inc.add_query("INSERT INTO votes (userid, aid) VALUES (?, ?);",
-                       None,
-                       &mut mig)
-            .is_ok());
+                              None,
+                              &mut mig)
+                    .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
@@ -1206,7 +1232,8 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
-                                    name: String::from("count"),
+                                    name: String::from("anon_fn"),
+                                    alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
                                             FieldExpression::Seq(
@@ -1241,10 +1268,10 @@ mod tests {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
-                String::from(l) + "\n"
-            } else {
-                String::from(l)
-            })
+                     String::from(l) + "\n"
+                 } else {
+                     String::from(l)
+                 })
             .collect();
 
         // Add them one by one

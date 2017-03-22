@@ -18,7 +18,8 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let article = mig.add_ingredient("article", &["id", "user", "title", "url"], Base::default());
+        let article =
+            mig.add_ingredient("article", &["id", "user", "title", "url"], Base::default());
 
         // add vote base table
         let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());

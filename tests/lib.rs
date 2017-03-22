@@ -1012,13 +1012,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-        let user: DataType = 0.into();
-        for _ in 0..votes {
-            for i in 0..ids {
-                add.put(vec![user.clone(), i.into()]);
-            }
-        }
-    });
+                               let user: DataType = 0.into();
+                               for _ in 0..votes {
+                                   for i in 0..ids {
+                                       add.put(vec![user.clone(), i.into()]);
+                                   }
+                               }
+                           });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
@@ -1128,10 +1128,10 @@ fn tpc_w() {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-                String::from(l) + "\n"
-            } else {
-                String::from(l)
-            })
+                     String::from(l) + "\n"
+                 } else {
+                     String::from(l)
+                 })
             .collect();
 
         // Add them one by one

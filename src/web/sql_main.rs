@@ -16,11 +16,10 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let _article =
-            inc.add_query("INSERT INTO article (id, user, title, url) VALUES (?, ?, ?, ?);",
-                           None,
-                           &mut mig)
-                .unwrap();
+        let _article = inc.add_query("INSERT INTO article (id, user, title, url) VALUES (?, ?, ?, ?);",
+                                     None,
+                                     &mut mig)
+            .unwrap();
 
         // add vote base table
         let _vote = inc.add_query("INSERT INTO vote (user, id) VALUES (?, ?);", None, &mut mig)
@@ -28,8 +27,8 @@ fn main() {
 
         // add a user account base table
         let _user = inc.add_query("INSERT INTO user (id, username, hash) VALUES (?, ?, ?);",
-                       None,
-                       &mut mig)
+                                  None,
+                                  &mut mig)
             .unwrap();
 
         // add vote count
@@ -52,8 +51,8 @@ fn main() {
         // add user karma
         let _karma = inc.add_query("SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
                             awvc.user;",
-                       Some("karma".into()),
-                       &mut mig)
+                                   Some("karma".into()),
+                                   &mut mig)
             .unwrap();
     }
 
