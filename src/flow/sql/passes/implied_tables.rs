@@ -122,7 +122,7 @@ impl ImpliedTableExpansion for SqlQuery {
                                 Sum(ref mut fe) |
                                 Min(ref mut fe) |
                                 Max(ref mut fe) |
-                                GroupConcat(ref mut fe) => {
+                                GroupConcat(ref mut fe, _) => {
                                     match *fe {
                                         FieldExpression::Seq(ref mut fields) => {
                                             for f in fields.iter_mut() {

@@ -37,7 +37,7 @@ impl CountStarRewrite for SqlQuery {
                         Sum(fe) => Sum(rewrite(fe)),
                         Min(fe) => Min(rewrite(fe)),
                         Max(fe) => Max(rewrite(fe)),
-                        GroupConcat(fe) => GroupConcat(rewrite(fe)),
+                        GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
                     })
                 }
                 None => None,
