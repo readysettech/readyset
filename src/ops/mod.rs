@@ -173,20 +173,21 @@ pub mod test {
 
         pub fn one<U: Into<Records>>(&mut self,
                                      src: NodeAddress,
-                                     u: U, remember: bool) -> Option<Records> {
+                                     u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
             let u = self.nodes[self.nut.unwrap().1.as_local()]
                 .borrow_mut()
                 .inner
-                .on_input(src, u.into(), &self.nodes, &self.states);
+                .on_input(src, u.into(), &self.nodes, &self.states)
+                .unwrap();
 
             if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;
             }
 
-            single::materialize(&u.unwrap(), self.states.get_mut(self.nut.unwrap().1.as_local()));
+            single::materialize(&u, self.states.get_mut(self.nut.unwrap().1.as_local()));
             u
         }
 
@@ -195,12 +196,12 @@ pub mod test {
                                         d: R,
                                         remember: bool)
                                         -> Records {
-            self.one::<Record>(src, d.into(), remember).unwrap()
+            self.one::<Record>(src, d.into(), remember)
         }
 
         pub fn narrow_one<U: Into<Records>>(&mut self, u: U, remember: bool) -> Records {
             let src = self.narrow_base_id();
-            self.one::<Records>(src, u.into(), remember).unwrap()
+            self.one::<Records>(src, u.into(), remember)
         }
 
         pub fn narrow_one_row<R: Into<Record>>(&mut self, d: R, remember: bool) -> Records {
