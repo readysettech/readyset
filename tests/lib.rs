@@ -73,6 +73,122 @@ fn it_works() {
 }
 
 #[test]
+fn it_sees_writes_w_durability_sync_immediately() {
+    use distributary::{Base, BaseDurabilityLevel};
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately));
+        let b = mig.add_ingredient("b", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately));
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
+
+    let muta = g.get_mutator(a);
+    let mutb = g.get_mutator(b);
+    let id: distributary::DataType = 1.into();
+
+    // send a value on a
+    muta.put(vec![id.clone(), 2.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // send a query to c
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 2.into()]]));
+
+    // update value again
+    mutb.put(vec![id.clone(), 4.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // check that value was updated again
+    let res = cq(&id).unwrap();
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
+
+    // Delete first record
+    muta.delete(vec![id.clone()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // send a query to c
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 4.into()]]));
+
+    // Update second record
+    mutb.update(vec![id.clone(), 6.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // send a query to c
+    assert_eq!(cq(&id), Ok(vec![vec![1.into(), 6.into()]]));
+}
+
+#[test]
+fn it_sees_writes_w_durability_buffered() {
+    use distributary::{Base, BaseDurabilityLevel};
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, b, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered));
+        let b = mig.add_ingredient("b", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered));
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
+
+    let muta = g.get_mutator(a);
+    let id: distributary::DataType = 1.into();
+
+    // Send less values than what Base's buffer will hold before flushing.
+    for i in 0..511 {
+        muta.put(vec![id.clone(), i.into()]);
+    }
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Send a query to check that we do not see our updates yet.
+    assert_eq!(cq(&id), Ok(vec![]));
+
+    // Send one more value so that we go over what Base's buffer will hold before flushing.
+    muta.put(vec![id.clone(), 512.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Check that we see our writes.
+    let res = cq(&id).unwrap();
+    assert_eq!(res.iter().len(), 512);
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 512.into()]));
+}
+
+#[test]
 fn it_works_streaming() {
     use distributary::{Base, BaseDurabilityLevel};
 

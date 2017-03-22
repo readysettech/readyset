@@ -138,6 +138,14 @@ impl Base {
             }
         }
     }
+
+    #[cfg(test)]
+    fn cleanup_durable_log(&mut self) {
+        // Cleanup any durable log files.
+        if self.durable_log_path.is_some() {
+            fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
+        }
+    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
@@ -169,16 +177,6 @@ impl Default for Base {
             primary_key: None,
             unique_id: ProcessUniqueId::new(),
             us: None,
-        }
-    }
-}
-
-impl Drop for Base {
-    fn drop(&mut self) {
-        // Cleanup any durable log files.
-        // TODO(jmftrindade): We want to do this only for tests instead of always.
-        if self.durable_log_path.is_some() {
-            fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
         }
     }
 }
@@ -215,30 +213,30 @@ impl Ingredient for Base {
                 state: &StateMap)
                 -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
-        let records_to_return;
+        let mut records_to_return;
         let mut copy_rs = rs.clone();
         match self.durability {
             BaseDurabilityLevel::Buffered => {
                 // Perform a synchronous flush if one of the following conditions are met:
                 //
-                // 1. Enough time has passed since the last time we flushed.
+                // 1. TODO: Enough time has passed since the last time we flushed.
                 // 2. Our buffer of write records reaches capacity.
                 let num_buffered_writes = self.buffered_writes.as_ref().unwrap().len();
                 if num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY {
+                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
+
                     let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
                     self.persist_to_log(&copy_buffered_writes);
+
+                    // This returns everything that was buffered, plus the newly inserted records.
                     records_to_return = Some(copy_buffered_writes);
 
+                    // Clear buffer after we've persisted records to log.
                     self.buffered_writes.as_mut().unwrap().clear();
-                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
                 } else {
+                    // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
-
-                    // FIXME(jmftrindade): Write tests to exercise SyncImmediately and Buffered
-                    // durability levels.
-                    //
-                    // return Some(Records::default())
-                    return None
+                    return Some(Records::default())
                 }
             },
             BaseDurabilityLevel::SyncImmediately => {
