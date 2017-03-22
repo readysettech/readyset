@@ -216,6 +216,7 @@ impl Ingredient for Base {
                 -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
         let records_to_return;
+        let mut copy_rs = rs.clone();
         match self.durability {
             BaseDurabilityLevel::Buffered => {
                 // Perform a synchronous flush if one of the following conditions are met:
@@ -224,11 +225,13 @@ impl Ingredient for Base {
                 // 2. Our buffer of write records reaches capacity.
                 let num_buffered_writes = self.buffered_writes.as_ref().unwrap().len();
                 if num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY {
-                    let clone_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
-                    self.persist_to_log(&clone_buffered_writes);
-                    records_to_return = Some(clone_buffered_writes);
+                    let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
+                    self.persist_to_log(&copy_buffered_writes);
+                    records_to_return = Some(copy_buffered_writes);
+
+                    self.buffered_writes.as_mut().unwrap().clear();
+                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
                 } else {
-                    let mut copy_rs = rs.clone();
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
 
                     // FIXME(jmftrindade): This makes a bunch of tests fail or get stuck.
@@ -247,7 +250,7 @@ impl Ingredient for Base {
             },
         }
 
-        let flushed_records = Some(records_to_return.unwrap()
+        Some(records_to_return.unwrap()
             .into_iter()
             .map(|r| match r {
                 Record::Positive(u) => Record::Positive(u),
@@ -264,15 +267,7 @@ impl Ingredient for Base {
                     Record::Negative(rows[0].clone())
                 }
             })
-            .collect());
-
-        if self.durability == BaseDurabilityLevel::Buffered {
-            self.buffered_writes.as_mut().unwrap().clear();
-            let mut copy_rs = rs.clone();
-            self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
-        }
-
-        flushed_records
+            .collect())
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

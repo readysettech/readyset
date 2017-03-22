@@ -1066,7 +1066,6 @@ impl Drop for Blender {
             drop(tx.send(payload::Packet::Quit));
         }
         for d in self.domains.drain(..) {
-            println!("Waiting for domain thread to join.");
             d.join().unwrap();
         }
     }
