@@ -534,6 +534,9 @@ impl SqlIncorporator {
                 return (vec![], leaf);
             } else if existing_qg.signature() == qg.signature() {
                 // QGs are identical, except for parameters (or their order)
+                info!(mig.log,
+                      "Query \"{}\" has an exact match modulo parameters, so making a new reader",
+                      name);
 
                 // we must add a new reader for this query. This also requires adding an
                 // identity node (at least currently), since a node can only have a single
