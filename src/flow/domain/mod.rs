@@ -647,7 +647,7 @@ impl Domain {
                         // a thread to walk empty state).
                         let p = Packet::Replay {
                             tag: tag,
-                            link: Link::new(path[0], path[0]), // to will be overwritten by receiver
+                            link: Link::new(link.dst, path[0]), // to will be overwritten by receiver
                             last: true,
                             data: ReplayData::Records(Vec::<Record>::new().into()),
                         };
@@ -666,7 +666,7 @@ impl Domain {
                         // part of state.
                         let p = Packet::Replay {
                             tag: tag,
-                            link: Link::new(path[0], path[0]), // to will be overwritten by receiver
+                            link: Link::new(link.dst, path[0]), // to will be overwritten by receiver
                             last: false,
                             data: ReplayData::Records(Vec::<Record>::new().into()),
                         };
