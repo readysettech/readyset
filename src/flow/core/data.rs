@@ -362,4 +362,17 @@ mod tests {
         assert_eq!(b.to_json(), Json::F64(-2.01));
         assert_eq!(c.to_json(), Json::F64(-0.012345678));
     }
+
+    #[test]
+    fn real_ordering() {
+        use std::cmp::Ordering;
+
+        let a: DataType = (2.5).into();
+        let b: DataType = (-2.01).into();
+        let c: DataType = (-0.012345678).into();
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+        assert_eq!(a.cmp(&c), Ordering::Greater);
+        assert_eq!(b.cmp(&c), Ordering::Less);
+        assert_eq!(c.cmp(&c), Ordering::Equal);
+    }
 }
