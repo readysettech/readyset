@@ -251,9 +251,99 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         qg.relations.insert(table.name.clone(),
                             new_node(table.name.clone(), Vec::new(), st));
     }
+    for jc in &st.join {
+        match jc.right {
+            JoinRightSide::Table(ref table) => {
+                if !qg.relations.contains_key(&table.name) {
+                    qg.relations.insert(table.name.clone(),
+                                        new_node(table.name.clone(), Vec::new(), st));
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
+    //    predicates here already, but more may be added when processing the WHERE clause lateron.
+    let mut join_predicates = Vec::new();
+    let wrapcol = |tbl: &str, col: &str| -> Option<Box<ConditionExpression>> {
+        let col = Column::from(format!("{}.{}", tbl, col).as_str());
+        Some(Box::new(ConditionExpression::Base(ConditionBase::Field(col))))
+    };
+    // 2a. Explicit joins
+    let mut prev_table = None;
+    for jc in &st.join {
+        match jc.right {
+            JoinRightSide::Table(ref table) => {
+                let join_pred = match jc.constraint {
+                    JoinConstraint::On(ref cond) => {
+                        match *cond {
+                            ConditionExpression::ComparisonOp(ref ct) => {
+                                // the tables might be the other way around compared to how
+                                // they're specified in the query; if so, flip them
+                                // TODO(malte): this only deals with simple, flat join
+                                // conditions for now.
+                                let l = match **ct.left.as_ref().unwrap() {
+                                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                    _ => unimplemented!(),
+                                };
+                                let r = match **ct.right.as_ref().unwrap() {
+                                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
+                                    _ => unimplemented!(),
+                                };
+                                if *l.table.as_ref().unwrap() == table.name &&
+                                   *r.table.as_ref().unwrap() ==
+                                   st.tables.last().as_ref().unwrap().name {
+                                    ConditionTree {
+                                        operator: ct.operator.clone(),
+                                        left: ct.right.clone(),
+                                        right: ct.left.clone(),
+                                    }
+                                } else {
+                                    ct.clone()
+                                }
+                            }
+                            _ => panic!("join condition is not a comparison!"),
+                        }
+                    }
+                    JoinConstraint::Using(ref cols) => {
+                        assert_eq!(cols.len(), 1);
+                        let col = cols.iter().next().unwrap();
+                        ConditionTree {
+                            operator: Operator::Equal,
+                            left: wrapcol(&st.tables
+                                              .last()
+                                              .as_ref()
+                                              .unwrap()
+                                              .name,
+                                          &col.name),
+                            right: wrapcol(&table.name, &col.name),
+                        }
+                    }
+                };
+
+                // if this is the first explicit join, we're joining against the last table in
+                // the list of tables
+                if prev_table.is_none() {
+                    prev_table = Some(&st.tables.last().as_ref().unwrap().name);
+                }
+                // add joined table to relations if not present already
+                let against = table.name.clone();
+                // add edge for join
+                let mut e = qg.edges
+                    .entry((prev_table.unwrap().clone(), against))
+                    .or_insert_with(|| match jc.operator {
+                        JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
+                        JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
+                        _ => unimplemented!(),
+                    });
+                println!("edge added: {:?}", e);
+            }
+            _ => unimplemented!(),
+        }
+    }
 
     if let Some(ref cond) = st.where_clause {
-        let mut join_predicates = Vec::new();
         let mut local_predicates = HashMap::new();
         let mut global_predicates = Vec::<ConditionTree>::new();
         let mut query_parameters = Vec::new();
@@ -264,103 +354,20 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                               &mut global_predicates,
                               &mut query_parameters);
 
-        // Now we're ready to build the query graph
         // 1. Add local predicates for each node that has them
         for (rel, preds) in local_predicates {
             if !qg.relations.contains_key(&rel) {
                 // can't have predicates on tables that do not appear in the FROM part of the
                 // statement
-                unreachable!()
+                panic!("predicate(s) {:?} on relation {} that is not in query graph",
+                       preds,
+                       rel);
             } else {
                 qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
             }
         }
 
-        // 2. Add edges for each pair of joined relations
-        //
-        // 2a. Explicit joins
-        let wrapcol = |tbl: &str, col: &str| -> Option<Box<ConditionExpression>> {
-            let col = Column::from(format!("{}.{}", tbl, col).as_str());
-            Some(Box::new(ConditionExpression::Base(ConditionBase::Field(col))))
-        };
-        let mut prev_table = None;
-        for jc in &st.join {
-            match jc.right {
-                JoinRightSide::Table(ref table) => {
-                    let join_pred = match jc.constraint {
-                        JoinConstraint::On(ref cond) => {
-                            match *cond {
-                                ConditionExpression::ComparisonOp(ref ct) => {
-                                    println!("ct: {:?}", ct);
-                                    // the tables might be the other way around compared to how
-                                    // they're specified in the query; if so, flip them
-                                    // TODO(malte): this only deals with simple, flat join
-                                    // conditions for now.
-                                    let l = match **ct.left.as_ref().unwrap() {
-                                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                        _ => unimplemented!(),
-                                    };
-                                    let r = match **ct.right.as_ref().unwrap() {
-                                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
-                                        _ => unimplemented!(),
-                                    };
-                                    if *l.table.as_ref().unwrap() == table.name &&
-                                       *r.table.as_ref().unwrap() ==
-                                       st.tables.last().as_ref().unwrap().name {
-                                        ConditionTree {
-                                            operator: ct.operator.clone(),
-                                            left: ct.right.clone(),
-                                            right: ct.left.clone(),
-                                        }
-                                    } else {
-                                        ct.clone()
-                                    }
-                                }
-                                _ => panic!("join condition is not a comparison!"),
-                            }
-                        }
-                        JoinConstraint::Using(ref cols) => {
-                            assert_eq!(cols.len(), 1);
-                            let col = cols.iter().next().unwrap();
-                            ConditionTree {
-                                operator: Operator::Equal,
-                                left: wrapcol(&st.tables
-                                                  .last()
-                                                  .as_ref()
-                                                  .unwrap()
-                                                  .name,
-                                              &col.name),
-                                right: wrapcol(&table.name, &col.name),
-                            }
-                        }
-                    };
-
-                    // if this is the first explicit join, we're joining against the last table in
-                    // the list of tables
-                    if prev_table.is_none() {
-                        prev_table = Some(&st.tables.last().as_ref().unwrap().name);
-                    }
-                    // add joined table to relations if not present already
-                    let against = table.name.clone();
-                    let _join_rel = &mut qg.relations
-                        .entry(against.clone())
-                        .or_insert_with(|| new_node(against.clone(), vec![], st));
-                    // add edge for join
-                    let mut _e = qg.edges
-                        .entry((prev_table.unwrap().clone(), against))
-                        .or_insert_with(|| match jc.operator {
-                            JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
-                            JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
-                            _ => unimplemented!(),
-                        });
-                }
-                _ => unimplemented!(),
-            }
-        }
-        // 2b. Implied (comma) joins
-        // TODO(malte): This is pretty heavily into cloning things all over, which makes it both
-        // inefficient and hideous. Maybe we can reengineer the data structures to require less of
-        // that?
+        // 2. Add predicates for implied (comma) joins
         for jp in join_predicates {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) =
