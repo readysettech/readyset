@@ -41,7 +41,7 @@ pub enum Modify {
 #[derive(Debug, Clone)]
 pub struct GroupConcat {
     components: Vec<TextComponent>,
-    separator: &'static str,
+    separator: String,
     group: Vec<usize>,
     slen: usize,
 }
@@ -61,7 +61,7 @@ impl GroupConcat {
     /// record data.
     pub fn new(src: NodeAddress,
                components: Vec<TextComponent>,
-               separator: &'static str)
+               separator: String)
                -> GroupedOperator<GroupConcat> {
         assert!(!separator.is_empty(),
                 "group concat separator cannot be empty");
@@ -168,7 +168,7 @@ impl GroupedOperation for GroupConcat {
         let clen = current.len();
 
         // TODO this is not particularly robust, and requires a non-empty separator
-        let mut current = BTreeSet::from_iter(current.split_terminator(self.separator));
+        let mut current = BTreeSet::from_iter(current.split_terminator(&self.separator));
         for diff in &diffs {
             match *diff {
                 Modify::Add(ref s) => {
@@ -184,7 +184,7 @@ impl GroupedOperation for GroupConcat {
         let mut new = current.into_iter()
             .fold(String::with_capacity(2 * clen), |mut acc, s| {
                 acc.push_str(s);
-                acc.push_str(self.separator);
+                acc.push_str(&self.separator);
                 acc
             });
         // we pushed one separator too many above
@@ -232,7 +232,7 @@ mod tests {
                                  vec![TextComponent::Literal("."),
                                       TextComponent::Column(1),
                                       TextComponent::Literal(";")],
-                                 "#");
+                                 String::from("#"));
         g.set_op("concat", &["x", "ys"], c, mat);
         g
     }
