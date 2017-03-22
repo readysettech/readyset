@@ -28,7 +28,7 @@ evmap = "0.2.0"
 arccstr = "0.3.2"
 
 spmc = "0.2.1"
-nom_sql = { git = "https://github.com/ms705/nom-sql.git" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "43a67cb82faa429047a542ed12cf0e61eaced4c4" }
 
 # for benchmarks
 # cli
