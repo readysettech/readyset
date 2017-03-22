@@ -1,5 +1,3 @@
-#![recursion_limit = "150"]
-
 #[macro_use]
 extern crate nom;
 

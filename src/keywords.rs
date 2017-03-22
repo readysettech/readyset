@@ -2,10 +2,8 @@ use nom::{IResult, Err, ErrorKind, Needed};
 
 use std::str;
 
-/// Matches any SQL reserved keyword
-named!(pub sql_keyword<&[u8], &[u8]>,
-    complete!(chain!(
-        kw: alt_complete!(
+named!(keyword_a_to_c<&[u8], &[u8]>,
+    alt_complete!(
           caseless_tag!("ABORT")
         | caseless_tag!("ACTION")
         | caseless_tag!("ADD")
@@ -36,7 +34,12 @@ named!(pub sql_keyword<&[u8], &[u8]>,
         | caseless_tag!("CURRENT_DATE")
         | caseless_tag!("CURRENT_TIME")
         | caseless_tag!("CURRENT_TIMESTAMP")
-        | caseless_tag!("DATABASE")
+    )
+);
+
+named!(keyword_d_to_i<&[u8], &[u8]>,
+    alt_complete!(
+          caseless_tag!("DATABASE")
         | caseless_tag!("DEFAULT")
         | caseless_tag!("DEFERRABLE")
         | caseless_tag!("DEFERRED")
@@ -75,7 +78,12 @@ named!(pub sql_keyword<&[u8], &[u8]>,
         | caseless_tag!("INTO")
         | caseless_tag!("IS")
         | caseless_tag!("ISNULL")
-        | caseless_tag!("JOIN")
+    )
+);
+
+named!(keyword_j_to_s<&[u8], &[u8]>,
+    alt_complete!(
+          caseless_tag!("JOIN")
         | caseless_tag!("KEY")
         | caseless_tag!("LEFT")
         | caseless_tag!("LIKE")
@@ -111,7 +119,12 @@ named!(pub sql_keyword<&[u8], &[u8]>,
         | caseless_tag!("SAVEPOINT")
         | caseless_tag!("SELECT")
         | caseless_tag!("SET")
-        | caseless_tag!("TABLE")
+    )
+);
+
+named!(keyword_t_to_z<&[u8], &[u8]>,
+    alt_complete!(
+          caseless_tag!("TABLE")
         | caseless_tag!("TEMP")
         | caseless_tag!("TEMPORARY")
         | caseless_tag!("THEN")
@@ -130,8 +143,18 @@ named!(pub sql_keyword<&[u8], &[u8]>,
         | caseless_tag!("WHERE")
         | caseless_tag!("WITH")
         | caseless_tag!("WITHOUT")
-    ) ~
-    peek!(one_of!(" \n;(\t,=")),
-    || { kw }
+    )
+);
+
+/// Matches any SQL reserved keyword
+named!(pub sql_keyword<&[u8], &[u8]>,
+    complete!(chain!(
+        kw: alt_complete!(
+              keyword_a_to_c
+            | keyword_d_to_i
+            | keyword_j_to_s
+            | keyword_t_to_z) ~
+        peek!(one_of!(" \n;(\t,=")),
+        || { kw }
     ))
 );
