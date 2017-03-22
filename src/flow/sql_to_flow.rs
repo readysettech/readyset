@@ -32,6 +32,7 @@ pub struct QueryFlowParts {
 enum GroupedNodeType {
     Aggregation(ops::grouped::aggregate::Aggregation),
     Extremum(ops::grouped::extremum::Extremum),
+    GroupConcat(String),
 }
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
@@ -313,6 +314,13 @@ impl SqlIncorporator {
                                    combined_columns.as_slice(),
                                    extr.over(parent_ni, over_col_indx, group_col_indx.as_slice()))
             }
+            GroupedNodeType::GroupConcat(sep) => {
+                use ops::grouped::concat::{GroupConcat, TextComponent};
+
+                let gc =
+                    GroupConcat::new(parent_ni, vec![TextComponent::Column(over_col_indx)], sep);
+                mig.add_ingredient(String::from(name), combined_columns.as_slice(), gc)
+            }
         };
         self.node_addresses.insert(String::from(name), na);
         self.node_fields.insert(na, combined_columns);
@@ -369,6 +377,9 @@ impl SqlIncorporator {
             }
             Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
             Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
+            GroupConcat(Seq(ref cols), ref separator) => {
+                mknode(cols, GroupedNodeType::GroupConcat(separator.clone()))
+            }
             _ => unimplemented!(),
         }
     }
