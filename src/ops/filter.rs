@@ -59,8 +59,8 @@ impl Ingredient for Filter {
             let mut f = self.filter.iter();
             r.iter().all(|d| {
                 // check if this filter matches
-                let fi = f.next()
-                    .expect("should have as many filters as there are columns in ancestor");
+                let fi =
+                    f.next().expect("should have as many filters as there are columns in ancestor");
                 if let Some(ref f) = *fi {
                     f == d
                 } else {
@@ -87,13 +87,13 @@ impl Ingredient for Filter {
                     .iter()
                     .enumerate()
                     .filter_map(|(i, ref e)| match e.as_ref() {
-                        Some(ref x) => Some(format!("{}={}", i, x)),
-                        None => None,
-                    })
+                                    Some(ref x) => Some(format!("{}={}", i, x)),
+                                    None => None,
+                                })
                     .collect::<Vec<_>>()
                     .as_slice()
                     .join(", "))
-            .into()
+                .into()
     }
 
     fn can_query_through(&self) -> bool {

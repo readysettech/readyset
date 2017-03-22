@@ -104,12 +104,7 @@ impl Ingredient for Permute {
     fn description(&self) -> String {
         let emit_cols = match self.emit.as_ref() {
             None => "*".into(),
-            Some(emit) => {
-                emit.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }
+            Some(emit) => emit.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "),
         };
         format!("π[{}]", emit_cols)
     }

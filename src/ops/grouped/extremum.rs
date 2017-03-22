@@ -147,11 +147,7 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::MIN => format!("min({})", self.over),
             Extremum::MAX => format!("max({})", self.over),
         };
-        let group_cols = self.group
-            .iter()
-            .map(|g| g.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let group_cols = self.group.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
         format!("{} γ[{}]", op_string, group_cols)
     }
 }
@@ -174,11 +170,11 @@ mod tests {
     fn it_forwards() {
         let mut c = setup(true);
 
-        let check_first_max = |group, val, rs: ops::Records| {
+        let check_first_max = |group, val, rs: Records| {
             assert_eq!(rs.len(), 1);
 
             match rs.into_iter().next().unwrap() {
-                ops::Record::Positive(r) => {
+                Record::Positive(r) => {
                     assert_eq!(r[0], group);
                     assert_eq!(r[1], val);
                 }
@@ -186,19 +182,19 @@ mod tests {
             }
         };
 
-        let check_new_max = |group, old, new, rs: ops::Records| {
+        let check_new_max = |group, old, new, rs: Records| {
             assert_eq!(rs.len(), 2);
             let mut rs = rs.into_iter();
 
             match rs.next().unwrap() {
-                ops::Record::Negative(r) => {
+                Record::Negative(r) => {
                     assert_eq!(r[0], group);
                     assert_eq!(r[1], old);
                 }
                 _ => unreachable!(),
             }
             match rs.next().unwrap() {
-                ops::Record::Positive(r) => {
+                Record::Positive(r) => {
                     assert_eq!(r[0], group);
                     assert_eq!(r[1], new);
                 }

@@ -1,6 +1,5 @@
 use petgraph;
 
-use flow;
 use checktable;
 use flow::domain;
 use flow::statistics;
@@ -18,10 +17,7 @@ pub struct Link {
 
 impl Link {
     pub fn new(src: NodeAddress, dst: NodeAddress) -> Self {
-        Link {
-            src: src,
-            dst: dst,
-        }
+        Link { src: src, dst: dst }
     }
 }
 
@@ -65,27 +61,27 @@ pub enum Packet {
     //
     // Internal control
     //
-    Finish(Tag, flow::LocalNodeIndex),
+    Finish(Tag, LocalNodeIndex),
 
     // Control messages
     //
     /// Add a new node to this domain below the given parents.
     AddNode {
         node: domain::NodeDescriptor,
-        parents: Vec<flow::LocalNodeIndex>,
+        parents: Vec<LocalNodeIndex>,
     },
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
-        node: flow::LocalNodeIndex,
+        node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
     },
 
     /// Probe for the number of records in the given node's state
     StateSizeProbe {
-        node: flow::LocalNodeIndex,
+        node: LocalNodeIndex,
         ack: mpsc::SyncSender<usize>,
     },
 
@@ -107,7 +103,7 @@ pub enum Packet {
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.
     Ready {
-        node: flow::LocalNodeIndex,
+        node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
         ack: mpsc::SyncSender<()>,
     },
@@ -199,7 +195,12 @@ impl Packet {
                     state: state,
                 }
             }
-            Packet::Replay { link, tag, last, data: ReplayData::Records(data) } => {
+            Packet::Replay {
+                link,
+                tag,
+                last,
+                data: ReplayData::Records(data),
+            } => {
                 Packet::Replay {
                     link: link,
                     tag: tag,
@@ -240,7 +241,11 @@ impl Packet {
                     data: data.clone(),
                 }
             }
-            Packet::Transaction { ref link, ref data, ref state } => {
+            Packet::Transaction {
+                ref link,
+                ref data,
+                ref state,
+            } => {
                 Packet::Transaction {
                     link: link.clone(),
                     data: data.clone(),
@@ -256,7 +261,11 @@ impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::Transaction { ref link, ref state, .. } => {
+            Packet::Transaction {
+                ref link,
+                ref state,
+                ..
+            } => {
                 match *state {
                     TransactionState::Committed(ts, ..) => {
                         write!(f, "Packet::Transaction({:?}, {})", link, ts)
@@ -266,7 +275,12 @@ impl fmt::Debug for Packet {
                     }
                 }
             }
-            Packet::Replay { ref link, ref tag, ref data, .. } => {
+            Packet::Replay {
+                ref link,
+                ref tag,
+                ref data,
+                ..
+            } => {
                 match *data {
                     ReplayData::Records(ref data) => {
                         write!(f,

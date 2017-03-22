@@ -14,18 +14,16 @@ impl StarExpansion for SqlQuery {
                     FieldExpression::All => {
                         // TODO(malte): not currently compatible with a "table.*" syntax, but only
                         // with "* FROM table" or "* FROM table1, table2".
-                        let new_fs = sq.tables
-                            .iter()
-                            .fold(Vec::new(), |mut acc, ref t| {
-                                let fs = write_schemas.get(&t.name)
-                                    .unwrap()
-                                    .clone()
-                                    .iter()
-                                    .map(|f| Column::from(format!("{}.{}", t.name, f).as_ref()))
-                                    .collect::<Vec<_>>();
-                                acc.extend(fs);
-                                acc
-                            });
+                        let new_fs = sq.tables.iter().fold(Vec::new(), |mut acc, ref t| {
+                            let fs = write_schemas.get(&t.name)
+                                .unwrap()
+                                .clone()
+                                .iter()
+                                .map(|f| Column::from(format!("{}.{}", t.name, f).as_ref()))
+                                .collect::<Vec<_>>();
+                            acc.extend(fs);
+                            acc
+                        });
                         FieldExpression::Seq(new_fs)
                     }
                     x => x,

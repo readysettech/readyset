@@ -1,5 +1,3 @@
-use ops;
-
 use std::collections::HashMap;
 use std::sync;
 
@@ -86,9 +84,9 @@ impl Ingredient for Union {
 
                 // return new row with appropriate sign
                 if pos {
-                    ops::Record::Positive(sync::Arc::new(res))
+                    Record::Positive(sync::Arc::new(res))
                 } else {
-                    ops::Record::Negative(sync::Arc::new(res))
+                    Record::Negative(sync::Arc::new(res))
                 }
             })
             .collect())
@@ -109,12 +107,9 @@ impl Ingredient for Union {
         emit.sort();
         emit.iter()
             .map(|&(src, emit)| {
-                let cols = emit.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}:[{}]", src, cols)
-            })
+                     let cols = emit.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+                     format!("{}:[{}]", src, cols)
+                 })
             .collect::<Vec<_>>()
             .join(" ⋃ ")
     }

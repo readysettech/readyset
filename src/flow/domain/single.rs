@@ -1,4 +1,3 @@
-use ops;
 use flow;
 use petgraph::graph::NodeIndex;
 use flow::prelude::*;
@@ -61,8 +60,9 @@ impl NodeDescriptor {
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     state.add(m.data().iter().cloned());
-                    if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } =
-                        m {
+                    if let Packet::Transaction {
+                               state: TransactionState::Committed(ts, ..), ..
+                           } = m {
                         state.update_ts(ts);
                     }
 
@@ -129,7 +129,7 @@ impl NodeDescriptor {
                         m.as_ref().map(|m| m.clone_data()).unwrap()
                     };
 
-                    m.link_mut().src = NodeAddress::make_global(self.index);
+                    m.link_mut().src = self.index.into();
                     m.link_mut().dst = dst;
 
                     if tx.send(m).is_err() {
@@ -166,9 +166,9 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) {
     let mut state = state.unwrap();
     for r in rs.iter() {
         match *r {
-            ops::Record::Positive(ref r) => state.insert(r.clone()),
-            ops::Record::Negative(ref r) => state.remove(r),
-            ops::Record::DeleteRequest(..) => unreachable!(),
+            Record::Positive(ref r) => state.insert(r.clone()),
+            Record::Negative(ref r) => state.remove(r),
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }

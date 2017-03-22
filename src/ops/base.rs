@@ -1,4 +1,3 @@
-// TODO(jmftrindade): Put the writing to disk behind a runtime command-line flag.
 use serde_json;
 use snowflake::ProcessUniqueId;
 use buf_redux::BufWriter;
@@ -139,6 +138,12 @@ impl Base {
         }
     }
 
+    /// A base node must remember its own global address so that it can use it as an id for durable
+    /// log.
+    fn set_global_address(&mut self, n: NodeAddress) {
+        self.global_address = Some(n);
+    }
+
     #[cfg(test)]
     fn cleanup_durable_log(&mut self) {
         // Cleanup any durable log files.
@@ -251,20 +256,24 @@ impl Ingredient for Base {
         Some(records_to_return.unwrap()
             .into_iter()
             .map(|r| match r {
-                Record::Positive(u) => Record::Positive(u),
-                Record::Negative(u) => Record::Negative(u),
-                Record::DeleteRequest(key) => {
-                    let cols = self.primary_key
+                     Record::Positive(u) => Record::Positive(u),
+                     Record::Negative(u) => Record::Negative(u),
+                     Record::DeleteRequest(key) => {
+                let cols = self.primary_key
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
-                    let db = state.get(self.us.as_ref().unwrap().as_local())
+                let db =
+                    state.get(self.us
+                                  .as_ref()
+                                  .unwrap()
+                                  .as_local())
                         .expect("base must have its own state materialized to support deletions");
-                    let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
-                    assert_eq!(rows.len(), 1);
+                let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
+                assert_eq!(rows.len(), 1);
 
-                    Record::Negative(rows[0].clone())
-                }
-            })
+                Record::Negative(rows[0].clone())
+            }
+                 })
             .collect())
     }
 
@@ -290,12 +299,6 @@ impl Ingredient for Base {
 
     fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
         unreachable!();
-    }
-
-    /// A base node must remember its own global address so that it can use it as an id for durable
-    /// log.
-    fn set_global_address(&mut self, n: NodeAddress) {
-        self.global_address = Some(n);
     }
 }
 

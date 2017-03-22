@@ -117,12 +117,7 @@ impl Ingredient for Project {
             None => "*".into(),
             Some(emit) => {
                 match self.additional {
-                    None => {
-                        emit.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
+                    None => emit.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "),
                     Some(ref add) => {
                         emit.iter()
                             .map(|e| e.to_string())

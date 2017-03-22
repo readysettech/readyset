@@ -1,5 +1,4 @@
-use ops::Record;
-use flow::data::DataType;
+use flow::core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use evmap;
 
@@ -7,10 +6,8 @@ use std::sync::Arc;
 
 /// Allocate a new buffered `Store`.
 pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
-    let (r, w) = evmap::Options::default()
-        .with_meta(-1)
-        .with_hasher(FnvBuildHasher::default())
-        .construct();
+    let (r, w) =
+        evmap::Options::default().with_meta(-1).with_hasher(FnvBuildHasher::default()).construct();
     let r = ReadHandle {
         handle: r,
         key: key,
@@ -125,9 +122,9 @@ mod tests {
         let n = 10000;
         let (r, mut w) = new(1, 0);
         thread::spawn(move || for i in 0..n {
-            w.add(vec![Record::Positive(Arc::new(vec![i.into()]))]);
-            w.swap();
-        });
+                          w.add(vec![Record::Positive(Arc::new(vec![i.into()]))]);
+                          w.swap();
+                      });
 
         for i in 0..n {
             let i = i.into();
