@@ -165,27 +165,28 @@ fn it_sees_writes_w_durability_buffered() {
     let id: distributary::DataType = 1.into();
 
     // Send less values than what Base's buffer will hold before flushing.
-    for i in 0..511 {
+    let base_buffer_capacity = 512;
+    for i in 0..(base_buffer_capacity - 1) {
         muta.put(vec![id.clone(), i.into()]);
     }
 
-    // give it some time to propagate
+    // Give it some time to propagate.
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // Send a query to check that we do not see our updates yet.
     assert_eq!(cq(&id), Ok(vec![]));
 
     // Send one more value so that we go over what Base's buffer will hold before flushing.
-    muta.put(vec![id.clone(), 512.into()]);
+    muta.put(vec![id.clone(), base_buffer_capacity.into()]);
 
-    // give it some time to propagate
+    // Give it some time to propagate.
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // Check that we see our writes.
     let res = cq(&id).unwrap();
     assert_eq!(res.iter().len(), 512);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 512.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), base_buffer_capacity.into()]));
 }
 
 #[test]

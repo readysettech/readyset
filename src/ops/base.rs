@@ -213,7 +213,7 @@ impl Ingredient for Base {
                 state: &StateMap)
                 -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
-        let mut records_to_return;
+        let records_to_return;
         let mut copy_rs = rs.clone();
         match self.durability {
             BaseDurabilityLevel::Buffered => {
