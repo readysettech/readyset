@@ -144,7 +144,7 @@ fn it_sees_writes_w_durability_buffered() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let (a, b, cq) = {
+    let (a, _, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
                                    Base::new(vec![0], BaseDurabilityLevel::Buffered));
