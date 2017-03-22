@@ -142,9 +142,30 @@ named!(pub column_function<&[u8], FunctionExpression>,
         )
     |   chain!(
             caseless_tag!("group_concat") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            spec: delimited!(tag!("("),
+                       complete!(chain!(
+                               columns: field_expr ~
+                               seperator: opt!(
+                                   chain!(
+                                       multispace? ~
+                                       caseless_tag!("separator") ~
+                                       sep: delimited!(tag!("'"), alphanumeric, tag!("'")) ~
+                                       multispace?,
+                                       || { sep }
+                                   )
+                               ),
+                               || { (columns, seperator) }
+                       )),
+                       tag!(")")),
             || {
-                FunctionExpression::GroupConcat(columns)
+                let (ref cols, ref sep) = spec;
+                let sep = match *sep {
+                    // default separator is a comma, see MySQL manual §5.7
+                    None => String::from(","),
+                    Some(s) => String::from_utf8(s.to_vec()).unwrap(),
+                };
+
+                FunctionExpression::GroupConcat(cols.clone(), sep)
             }
         )
     )

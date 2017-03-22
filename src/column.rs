@@ -10,7 +10,7 @@ pub enum FunctionExpression {
     Sum(FieldExpression),
     Max(FieldExpression),
     Min(FieldExpression),
-    GroupConcat(FieldExpression),
+    GroupConcat(FieldExpression, String),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
