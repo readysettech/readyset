@@ -10,12 +10,14 @@ const SETTLE_TIME_MS: u64 = 100;
 
 #[test]
 fn it_works() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::new(vec![0], distributary::BaseDurabilityLevel::None));
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::new(vec![0], distributary::BaseDurabilityLevel::None));
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -72,12 +74,14 @@ fn it_works() {
 
 #[test]
 fn it_works_streaming() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -104,11 +108,13 @@ fn it_works_streaming() {
 
 #[test]
 fn shared_interdomain_ancestor() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, bq, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -136,26 +142,28 @@ fn shared_interdomain_ancestor() {
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]);
     assert_eq!(bq.recv_timeout(time::Duration::from_millis(100)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    Ok(vec![vec![id.clone(), 2.into()].into()]));
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(100)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
     muta.put(vec![id.clone(), 4.into()]);
     assert_eq!(bq.recv_timeout(time::Duration::from_millis(100)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    Ok(vec![vec![id.clone(), 4.into()].into()]));
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(100)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
 
 #[test]
 fn it_works_w_mat() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -208,12 +216,15 @@ fn it_works_w_mat() {
 
 #[test]
 fn it_works_deletion() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::new(vec![1], distributary::BaseDurabilityLevel::None));
-        let b = mig.add_ingredient("b", &["_", "x", "y"], distributary::Base::new(vec![2], distributary::BaseDurabilityLevel::None));
+        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![1], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["_", "x", "y"],
+                                   Base::new(vec![2], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -241,12 +252,12 @@ fn it_works_deletion() {
     use distributary::StreamUpdate::*;
     muta.delete(vec![2.into()]);
     assert_eq!(cq.recv(),
-               Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
+    Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Aggregation, JoinBuilder};
+    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, JoinBuilder};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -254,8 +265,10 @@ fn votes() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article1", &["id", "title"], Base::default());
+        let article1 = mig.add_ingredient("article1", &["id", "title"],
+                                          Base::new(vec![0], BaseDurabilityLevel::None));
+        let article2 = mig.add_ingredient("article1", &["id", "title"],
+                                          Base::new(vec![0], BaseDurabilityLevel::None));
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -266,7 +279,8 @@ fn votes() {
         let articleq = mig.maintain(article, 0);
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_ingredient("vote", &["user", "id"],
+                                      Base::new(vec![0], BaseDurabilityLevel::None));
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -327,8 +341,8 @@ fn votes() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap();
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-            "no entry for [1,2,1|2] in {:?}",
-            res);
+    "no entry for [1,2,1|2] in {:?}",
+    res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
@@ -338,7 +352,7 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Base, Union, Aggregation, JoinBuilder, Identity};
+    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, JoinBuilder, Identity};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -348,8 +362,10 @@ fn transactional_vote() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article1", &["id", "title"], Base::default());
+        let article1 = mig.add_ingredient("article1", &["id", "title"],
+                                          Base::new(vec![0], BaseDurabilityLevel::None));
+        let article2 = mig.add_ingredient("article1", &["id", "title"],
+                                          Base::new(vec![0], BaseDurabilityLevel::None));
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -360,7 +376,8 @@ fn transactional_vote() {
         let articleq = mig.transactional_maintain(article, 0);
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_ingredient("vote", &["user", "id"],
+                                      Base::new(vec![0], BaseDurabilityLevel::None));
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -457,8 +474,8 @@ fn transactional_vote() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap().0;
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-            "no entry for [1,2,1|2] in {:?}",
-            res);
+    "no entry for [1,2,1|2] in {:?}",
+    res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
@@ -468,6 +485,8 @@ fn transactional_vote() {
 
 #[test]
 fn empty_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     {
@@ -477,8 +496,8 @@ fn empty_migration() {
 
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -517,13 +536,15 @@ fn empty_migration() {
 
 #[test]
 fn simple_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     let id: distributary::DataType = 1.into();
 
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, aq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         let aq = mig.maintain(a, 0);
         mig.commit();
         (a, aq)
@@ -542,7 +563,7 @@ fn simple_migration() {
     // add unrelated node b in a migration
     let (b, bq) = {
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         let bq = mig.maintain(b, 0);
         mig.commit();
         (b, bq)
@@ -561,11 +582,13 @@ fn simple_migration() {
 
 #[test]
 fn transactional_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, aq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         let aq = mig.transactional_maintain(a, 0);
         mig.commit();
         (a, aq)
@@ -584,7 +607,7 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let (b, bq) = {
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         let bq = mig.transactional_maintain(b, 0);
         mig.commit();
         (b, bq)
@@ -625,17 +648,19 @@ fn transactional_migration() {
 
     // check that c got them
     assert_eq!(cq(&3.into()).unwrap().0,
-               vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
+    vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
 }
 
 #[test]
 fn crossing_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         mig.commit();
         (a, b)
     };
@@ -665,6 +690,8 @@ fn crossing_migration() {
 
 #[test]
 fn independent_domain_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     let id: distributary::DataType = 1.into();
 
     // set up graph
@@ -672,7 +699,7 @@ fn independent_domain_migration() {
     let (a, aq, domain) = {
         let mut mig = g.start_migration();
         let domain = mig.add_domain();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         mig.assign_domain(a, domain);
         let aq = mig.maintain(a, 0);
         mig.commit();
@@ -692,7 +719,7 @@ fn independent_domain_migration() {
     // add unrelated node b in a migration
     let (b, bq) = {
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         mig.assign_domain(b, domain);
         let bq = mig.maintain(b, 0);
         mig.commit();
@@ -714,13 +741,15 @@ fn independent_domain_migration() {
 
 #[test]
 fn domain_amend_migration() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, domain) = {
         let mut mig = g.start_migration();
         let domain = mig.add_domain();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
         mig.assign_domain(a, domain);
         mig.assign_domain(b, domain);
         mig.commit();
@@ -755,6 +784,8 @@ fn domain_amend_migration() {
 
 #[test]
 fn state_replay_migration_stream() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.
     // then, we'll do a migration that adds a join in a different domain (requiring state replay),
@@ -764,7 +795,7 @@ fn state_replay_migration_stream() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![0], BaseDurabilityLevel::None));
         mig.commit();
         a
     };
@@ -778,7 +809,7 @@ fn state_replay_migration_stream() {
     let (out, b) = {
         // add a new base and a join
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
+        let b = mig.add_ingredient("b", &["x", "z"], Base::new(vec![0], BaseDurabilityLevel::None));
         let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
             .from(a, vec![1, 0])
             .join(b, vec![1, 0]);
@@ -813,7 +844,7 @@ fn state_replay_migration_stream() {
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]);
     assert_eq!(out.recv(),
-               Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
+    Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
 
     // there should now be no more records
     drop(g);
@@ -870,7 +901,7 @@ fn full_vote_migration() {
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
     // that, so we run the test a couple of times.
     for _ in 0..5 {
-        use distributary::{Blender, Base, JoinBuilder, Aggregation, DataType};
+        use distributary::{Blender, Base, BaseDurabilityLevel, JoinBuilder, Aggregation, DataType};
         let mut g = Blender::new();
         let article;
         let vote;
@@ -881,10 +912,12 @@ fn full_vote_migration() {
             let mut mig = g.start_migration();
 
             // add article base node
-            article = mig.add_ingredient("article", &["id", "title"], Base::default());
+            article = mig.add_ingredient("article", &["id", "title"],
+                                         Base::new(vec![0], BaseDurabilityLevel::None));
 
             // add vote base table
-            vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+            vote = mig.add_ingredient("vote", &["user", "id"],
+                                      Base::new(vec![0], BaseDurabilityLevel::None));
 
             // add vote count
             vc = mig.add_ingredient("votecount",
@@ -926,7 +959,8 @@ fn full_vote_migration() {
             let domain = mig.add_domain();
 
             // add new "ratings" base table
-            let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
+            let rating = mig.add_ingredient("rating", &["user", "id", "stars"],
+                                            Base::new(vec![0], BaseDurabilityLevel::None));
 
             // add sum of ratings
             let rs = mig.add_ingredient("rsum",
@@ -969,8 +1003,8 @@ fn full_vote_migration() {
             assert_eq!(rows.len(), 1, "every article should have only one entry");
             let row = rows.into_iter().next().unwrap();
             assert_eq!(row[0],
-                       i.into(),
-                       "each article result should have the right id");
+            i.into(),
+            "each article result should have the right id");
             assert_eq!(row[1], title, "all articles should have title 'foo'");
             assert_eq!(row[2], raten, "all articles should have one 5-star rating");
             assert_eq!(row[3], voten, "all articles should have one vote");
@@ -983,7 +1017,7 @@ fn full_vote_migration() {
 #[test]
 fn live_writes() {
     use std::time::Duration;
-    use distributary::{Blender, Aggregation, DataType};
+    use distributary::{Base, BaseDurabilityLevel, Blender, Aggregation, DataType};
     let mut g = Blender::new();
     let vc_state;
     let vote;
@@ -993,7 +1027,8 @@ fn live_writes() {
         let mut mig = g.start_migration();
 
         // add vote base table
-        vote = mig.add_ingredient("vote", &["user", "id"], distributary::Base::default());
+        vote = mig.add_ingredient("vote", &["user", "id"],
+                                  Base::new(vec![0], BaseDurabilityLevel::None));
 
         // add vote count
         vc = mig.add_ingredient("votecount",
@@ -1048,6 +1083,8 @@ fn live_writes() {
 
 #[test]
 fn state_replay_migration_query() {
+    use distributary::{Base, BaseDurabilityLevel};
+
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
@@ -1055,8 +1092,8 @@ fn state_replay_migration_query() {
     let mut g = distributary::Blender::new();
     let (a, b) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::default());
-        let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
+        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let b = mig.add_ingredient("b", &["x", "z"], Base::new(vec![0], BaseDurabilityLevel::None));
 
         let domain = mig.add_domain();
         mig.assign_domain(a, domain);
@@ -1103,7 +1140,7 @@ fn state_replay_migration_query() {
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(out(&2.into()),
-               Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
+    Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
 
     // there are (/should be) no records with x == 3
     assert!(out(&3.into()).unwrap().is_empty());

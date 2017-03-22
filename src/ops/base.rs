@@ -234,10 +234,10 @@ impl Ingredient for Base {
                 } else {
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
 
-                    // FIXME(jmftrindade): This makes a bunch of tests fail or get stuck.
+                    // FIXME(jmftrindade): Write tests to exercise SyncImmediately and Buffered
+                    // durability levels.
+                    //
                     // return Some(Records::default())
-
-                    // FIXME(jmftrindade): And this makes a bunch of domains panic.
                     return None
                 }
             },

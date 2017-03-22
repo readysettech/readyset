@@ -172,11 +172,12 @@
 //! the new record to the put function on a mutator obtained for article.
 //!
 //! ```rust
-//! # use distributary::{Blender, Base};
+//! # use distributary::{Blender, Base, BaseDurabilityLevel};
 //! # let mut g = Blender::new();
 //! # let article = {
 //! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"], Base::default());
+//! # let article = mig.add_ingredient("article", &["id", "title"],
+//! #                                  Base::new(vec![0], BaseDurabilityLevel::None));
 //! # mig.commit();
 //! # article
 //! # };
@@ -235,11 +236,12 @@
 //! Let's next trace what happens when a `Vote` is introduced into the system using
 //!
 //! ```rust
-//! # use distributary::{Blender, Base};
+//! # use distributary::{Blender, Base, BaseDurabilityLevel};
 //! # let mut g = Blender::new();
 //! # let vote = {
 //! # let mut mig = g.start_migration();
-//! # let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+//! # let vote = mig.add_ingredient("vote", &["user", "id"],
+//! #                               Base::new(vec![0], BaseDurabilityLevel::None));
 //! # mig.commit();
 //! # vote
 //! # };
