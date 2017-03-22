@@ -10,7 +10,6 @@ use std::cmp::Ordering;
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
 /// queries. It is also worth noting that due the nature of Soup, the results of this operator are
 /// unordered.
-#[derive(Debug, Clone)]
 pub struct TopK {
     src: NodeAddress,
 
@@ -21,8 +20,7 @@ pub struct TopK {
     // precomputed datastructures
     group_by: Vec<usize>,
 
-    // column to use for ordering
-    over: usize,
+    cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static>,
     k: usize,
 
     counts: HashMap<Vec<DataType>, usize>,
@@ -34,7 +32,7 @@ impl TopK {
     /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
     /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
     /// of results per group.
-    pub fn new(src: NodeAddress, over: usize, group_by: Vec<usize>, k: usize) -> Self {
+    pub fn new(src: NodeAddress, cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static>, group_by: Vec<usize>, k: usize) -> Self {
         let mut group_by = group_by;
         group_by.sort();
 
@@ -46,7 +44,7 @@ impl TopK {
 
             group_by: group_by,
 
-            over: over,
+            cmp_rows: cmp_rows,
             k: k,
 
             counts: HashMap::new(),
@@ -62,15 +60,12 @@ impl TopK {
              state: &StateMap,
              group: &[DataType])
              -> Vec<Record> {
-        let cmp_rows =
-            |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[self.over].cmp(&b[self.over]);
-
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
-        current.sort_by(&cmp_rows);
+        current.sort_by(self.cmp_rows.as_ref());
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
-                let idx = current.binary_search_by_key(&&a[self.over], |arc| &arc[self.over]);
+                let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
                 if let Ok(idx) = idx {
                     current.remove(idx);
                     delta.push(r.clone())
@@ -85,7 +80,7 @@ impl TopK {
                         })
             .chain(current.into_iter().map(|a| (a, true)))
             .collect();
-        output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
+        output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
 
         if output_rows.len() < self.k {
             let src_db = state.get(self.src.as_local())
@@ -95,7 +90,7 @@ impl TopK {
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
                 let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
-                    cmp_rows(&&r, &&min) == Ordering::Equal
+                    (self.cmp_rows)(&&r, &&min) == Ordering::Equal
                 };
 
                 let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
@@ -106,7 +101,7 @@ impl TopK {
                         // by the fact that it currently contains all rows greater than `min`, and
                         // none less than it. The only complication are rows which compare equal to
                         // `min`: they get added except if there is already an identical row.
-                        match cmp_rows(&r, &&min) {
+                        match (self.cmp_rows)(&r, &&min) {
                             Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
                                 let e = current_mins.iter().position(|&(ref s, _)| *s == r);
@@ -126,7 +121,7 @@ impl TopK {
             } else {
                 output_rows = rs.iter().map(|rs| (rs, false)).collect();
             }
-            output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
+            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
         }
 
         if output_rows.len() > self.k {
@@ -155,7 +150,20 @@ impl TopK {
 
 impl Ingredient for TopK {
     fn take(&mut self) -> Box<Ingredient> {
-        Box::new(Clone::clone(self))
+        // Necessary because cmp_rows can't be cloned.
+        Box::new(Self{
+            src: self.src,
+
+            us: self.us,
+            cols: self.cols,
+
+            group_by: self.group_by.clone(),
+
+            cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_,_| Ordering::Equal)),
+            k: self.k,
+
+            counts: self.counts.clone(),
+        })
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
@@ -172,9 +180,6 @@ impl Ingredient for TopK {
 
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[*self.src.as_global()];
-        assert!(self.over < srcn.fields().len(),
-                "cannot compute top K over non-existing column");
-
         self.cols = srcn.fields().len();
     }
 
@@ -257,7 +262,7 @@ impl Ingredient for TopK {
     }
 
     fn description(&self) -> String {
-        format!("TopK({})", self.over)
+        format!("TopK")
     }
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
@@ -271,16 +276,25 @@ mod tests {
 
     use ops;
 
-    fn setup() -> (ops::test::MockGraph, NodeAddress) {
+    fn setup(reversed: bool) -> (ops::test::MockGraph, NodeAddress) {
+        let cmp_rows = if !reversed {
+            Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[2].cmp(&b[2])) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+        } else {
+            Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| b[2].cmp(&a[2])) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+        };
+
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("topk", &["x", "y", "z"], TopK::new(s, 2, vec![1], 3), true);
+        g.set_op("topk",
+                 &["x", "y", "z"],
+                 TopK::new(s, cmp_rows, vec![1], 3),
+                 true);
         (g, s)
     }
 
     #[test]
     fn it_forwards() {
-        let (mut g, s) = setup();
+        let (mut g, s) = setup(false);
 
         let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
         let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
@@ -331,8 +345,60 @@ mod tests {
     }
 
     #[test]
+    fn it_forwards_reversed() {
+        let (mut g, s) = setup(true);
+
+        let r12: Vec<DataType> = vec![1.into(), "z".into(), (-12.123).into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".into(), (0.0431).into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".into(), (-0.082).into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".into(), (5.601).into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".into(), (-15.9).into()];
+        let r10b: Vec<DataType> = vec![6.into(), "z".into(), (0.0431).into()];
+        let r10c: Vec<DataType> = vec![7.into(), "z".into(), (0.0431).into()];
+
+        let a = g.narrow_one_row(r12.clone(), true);
+        assert_eq!(a, vec![r12.clone()].into());
+
+        let a = g.narrow_one_row(r10.clone(), true);
+        assert_eq!(a, vec![r10.clone()].into());
+
+        let a = g.narrow_one_row(r11.clone(), true);
+        assert_eq!(a, vec![r11.clone()].into());
+
+        let a = g.narrow_one_row(r5.clone(), true);
+        assert_eq!(a.len(), 0);
+
+        let a = g.narrow_one_row(r15.clone(), true);
+        assert_eq!(a, vec![(r10.clone(), false), (r15.clone(), true)].into());
+
+        g.seed(s, r12.clone());
+        g.seed(s, r10.clone());
+        g.seed(s, r11.clone());
+        g.seed(s, r5.clone());
+        let a = g.narrow_one_row((r15.clone(), false), true);
+        assert_eq!(a, vec![(r15.clone(), false), (r10.clone(), true)].into());
+        g.unseed(s);
+
+        let a = g.narrow_one_row(r10b.clone(), true);
+        assert_eq!(a.len(), 0);
+
+        let a = g.narrow_one_row(r10c.clone(), true);
+        assert_eq!(a.len(), 0);
+
+        g.seed(s, r12.clone());
+        g.seed(s, r11.clone());
+        g.seed(s, r5.clone());
+        g.seed(s, r10b.clone());
+        g.seed(s, r10c.clone());
+        let a = g.narrow_one_row((r10.clone(), false), true);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a[0], (r10.clone(), false).into());
+        assert!(a[1] == (r10b.clone(), true).into() || a[1] == (r10c.clone(), true).into());
+    }
+
+    #[test]
     fn it_suggests_indices() {
-        let (g, _) = setup();
+        let (g, _) = setup(false);
         let me = NodeAddress::mock_global(1.into());
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
@@ -342,7 +408,7 @@ mod tests {
 
     #[test]
     fn it_resolves() {
-        let (g, _) = setup();
+        let (g, _) = setup(false);
         assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
         assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
         assert_eq!(g.node().resolve(2), Some(vec![(g.narrow_base_id(), 2)]));
@@ -350,7 +416,7 @@ mod tests {
 
     #[test]
     fn it_parent_columns() {
-        let (g, _) = setup();
+        let (g, _) = setup(false);
         assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
         assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
         assert_eq!(g.node().resolve(2), Some(vec![(g.narrow_base_id(), 2)]));
