@@ -522,13 +522,16 @@ impl SqlIncorporator {
                                 -> (Vec<NodeAddress>, NodeAddress) {
         use std::collections::HashMap;
 
+        debug!(mig.log,
+               format!("Making nodes for query named \"{}\"", name));
+        trace!(mig.log, format!("Query \"{}\": {:#?}", name, st));
+
         let qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
 
-        debug!(mig.log,
-               format!("Making nodes for query named \"{}\"", name));
+        trace!(mig.log, format!("QG for \"{}\": {:#?}", name, qg));
 
         // Do we already have this exact query or a subset of it?
         // TODO(malte): make this an O(1) lookup by QG signature
