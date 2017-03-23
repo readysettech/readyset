@@ -773,13 +773,13 @@ impl SqlIncorporator {
 
             // 3. Generate leaf views that expose the query result
             {
-                let final_na = if !join_nodes.is_empty() {
-                    *join_nodes.last().unwrap()
-                } else if !func_nodes.is_empty() {
+                let final_na = if !func_nodes.is_empty() {
                     // XXX(malte): This won't work if (a) there are multiple function nodes in the
                     // query, or (b) computed columns are used within JOIN clauses
                     assert!(func_nodes.len() <= 2);
                     *func_nodes.last().unwrap()
+                } else if !join_nodes.is_empty() {
+                    *join_nodes.last().unwrap()
                 } else if !filter_nodes.is_empty() {
                     assert_eq!(filter_nodes.len(), 1);
                     let filter = filter_nodes.iter().next().as_ref().unwrap().1;
