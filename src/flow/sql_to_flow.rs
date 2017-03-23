@@ -4,7 +4,7 @@ use flow::core::{NodeAddress, DataType};
 use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
-use nom_sql::SelectStatement;
+use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
 use ops;
 use ops::base::Base;
 use ops::identity::Identity;
@@ -15,6 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::str;
 use std::vec::Vec;
+use std::cmp::Ordering;
+use std::sync::Arc;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -394,6 +396,50 @@ impl SqlIncorporator {
             }
             _ => unimplemented!(),
         }
+    }
+
+    fn make_topk_node(&mut self,
+                      name: &str,
+                      parent: NodeAddress,
+                      group_by: Vec<usize>,
+                      order: &Option<OrderClause>,
+                      limit: &LimitClause,
+                      mig: &mut Migration)
+                      -> NodeAddress {
+        let combined_columns = self.node_fields.get(&parent).unwrap().clone();
+
+        let cmp_rows = match order {
+            &Some(ref o) => {
+                assert_eq!(limit.offset, 0); // Non-zero offset not supported
+
+                let columns:Vec<_> = o.columns.iter().map(|c| {
+                    (o.order.clone(), self.field_to_columnid(parent, &c.name).unwrap())
+                }).collect();
+
+                Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
+                    let mut ret = Ordering::Equal;
+                    for &(ref o, c) in columns.iter() {
+                        ret = match o {
+                            &OrderType::OrderAscending => a[c].cmp(&b[c]),
+                            &OrderType::OrderDescending => b[c].cmp(&a[c]),
+                        };
+                        if ret != Ordering::Equal {
+                            return ret;
+                        }
+                    }
+                    ret
+                }) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+            }
+            &None => Box::new(|_: &&_, _: &&_| Ordering::Equal) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>,
+        };
+
+        // make the new operator and record its metadata
+        let na = mig.add_ingredient(String::from(name),
+                                    combined_columns.as_slice(),
+                                    ops::topk::TopK::new(parent, cmp_rows, group_by, limit.limit as usize));
+        self.node_addresses.insert(String::from(name), na);
+        self.node_fields.insert(na, combined_columns);
+        na
     }
 
     fn make_projection_helper(&mut self,
@@ -798,29 +844,54 @@ impl SqlIncorporator {
                 }
             }
 
-            // 3. Generate leaf views that expose the query result
+            // 3. Get the final node
+            let mut final_na = if !func_nodes.is_empty() {
+                // XXX(malte): This won't work if (a) there are multiple function nodes in the
+                // query, or (b) computed columns are used within JOIN clauses
+                assert!(func_nodes.len() <= 2);
+                *func_nodes.last().unwrap()
+            } else if !join_nodes.is_empty() {
+                *join_nodes.last().unwrap()
+            } else if !filter_nodes.is_empty() {
+                assert_eq!(filter_nodes.len(), 1);
+                let filter = filter_nodes.iter()
+                    .next()
+                    .as_ref()
+                    .unwrap()
+                    .1;
+                assert_ne!(filter.len(), 0);
+                *filter.last().unwrap()
+            } else {
+                // no join, filter, or function node --> base node is parent
+                assert_eq!(sorted_rels.len(), 1);
+                self.address_for(&sorted_rels.last().unwrap())
+            };
+
+
+            // 4. Potentially insert TopK node below the final node
+            if let Some(ref limit) = st.limit {
+                let mut group_by:Vec<_> = qg.parameters().iter().map(|col| {
+                    self.field_to_columnid(final_na, &col.name).unwrap()
+                }).collect();
+
+                // no query parameters, so we index on the first column
+                if group_by.is_empty() {
+                    group_by.push(0);
+                }
+
+                let ni = self.make_topk_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
+                                             final_na,
+                                             group_by,
+                                             &st.order,
+                                             limit,
+                                             mig);
+                func_nodes.push(ni);
+                final_na = ni;
+                i += 1;
+            }
+
+            // 5. Generate leaf views that expose the query result
             {
-                let final_na = if !func_nodes.is_empty() {
-                    // XXX(malte): This won't work if (a) there are multiple function nodes in the
-                    // query, or (b) computed columns are used within JOIN clauses
-                    assert!(func_nodes.len() <= 2);
-                    *func_nodes.last().unwrap()
-                } else if !join_nodes.is_empty() {
-                    *join_nodes.last().unwrap()
-                } else if !filter_nodes.is_empty() {
-                    assert_eq!(filter_nodes.len(), 1);
-                    let filter = filter_nodes.iter()
-                        .next()
-                        .as_ref()
-                        .unwrap()
-                        .1;
-                    assert_ne!(filter.len(), 0);
-                    *filter.last().unwrap()
-                } else {
-                    // no join, filter, or function node --> base node is parent
-                    assert_eq!(sorted_rels.len(), 1);
-                    self.address_for(&sorted_rels.last().unwrap())
-                };
                 let projected_columns: Vec<Column> =
                     sorted_rels.iter().fold(Vec::new(), |mut v, s| {
                         v.extend(qg.relations[*s].columns.clone().into_iter());
