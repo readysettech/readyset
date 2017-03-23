@@ -1128,10 +1128,10 @@ fn tpc_w() {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-                String::from(l) + "\n"
-            } else {
-                String::from(l)
-            })
+                     String::from(l) + "\n"
+                 } else {
+                     String::from(l)
+                 })
             .collect();
 
         // Add them one by one

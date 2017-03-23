@@ -50,7 +50,10 @@ impl Recipe {
 
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
-        self.aliases.keys().map(String::as_str).collect()
+        self.aliases
+            .keys()
+            .map(String::as_str)
+            .collect()
     }
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
@@ -148,7 +151,10 @@ impl Recipe {
             //let name = self.versioned_query_name(&n, &q);
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, n, mig)?;
 
             // we currently use a domain per query
             let d = mig.add_domain();

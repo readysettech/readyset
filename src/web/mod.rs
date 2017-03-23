@@ -39,7 +39,10 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
             .map(|(ni, n)| {
                 (n.name().to_owned(),
                  PutEndpoint {
-                     arguments: n.fields().iter().cloned().collect(),
+                     arguments: n.fields()
+                         .iter()
+                         .cloned()
+                         .collect(),
                      mutator: soup.get_mutator(ni),
                  })
             })
@@ -49,7 +52,10 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
             .map(|(_, n, r)| {
                 (n.name().to_owned(),
                  GetEndpoint {
-                     arguments: n.fields().iter().cloned().collect(),
+                     arguments: n.fields()
+                         .iter()
+                         .cloned()
+                         .collect(),
                      f: r.get_reader().unwrap(),
                  })
             })

@@ -42,7 +42,10 @@ impl<T> Map<T> {
     }
 
     pub fn contains_key(&self, addr: &LocalNodeIndex) -> bool {
-        self.things.get(addr.id()).map(|v| v.is_some()).unwrap_or(false)
+        self.things
+            .get(addr.id())
+            .map(|v| v.is_some())
+            .unwrap_or(false)
     }
 
     pub fn remove(&mut self, addr: &LocalNodeIndex) -> Option<T> {
@@ -234,7 +237,11 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
-        self.state.iter().map(|s| &s.0).cloned().collect()
+        self.state
+            .iter()
+            .map(|s| &s.0)
+            .cloned()
+            .collect()
     }
 
     pub fn is_useful(&self) -> bool {

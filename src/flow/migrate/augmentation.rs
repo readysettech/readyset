@@ -33,15 +33,17 @@ pub fn inform(log: &Logger,
 
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(Packet::StartMigration {
-            at: ts,
-            prev_ts: prevs[&domain],
-            ack: ready_tx,
-        });
+                             at: ts,
+                             prev_ts: prevs[&domain],
+                             ack: ready_tx,
+                         });
         let _ = ready_rx.recv();
         trace!(log, "domain ready for migration");
 
-        let old_nodes: HashSet<_> =
-            nodes.iter().filter(|&&(_, new)| !new).map(|&(ni, _)| ni).collect();
+        let old_nodes: HashSet<_> = nodes.iter()
+            .filter(|&&(_, new)| !new)
+            .map(|&(ni, _)| ni)
+            .collect();
 
         if old_nodes.len() == nodes.len() {
             // some domains haven't changed at all
@@ -65,9 +67,9 @@ pub fn inform(log: &Logger,
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(Packet::AddNode {
-                    node: node,
-                    parents: old_parents,
-                })
+                          node: node,
+                          parents: old_parents,
+                      })
                 .unwrap();
         }
     }

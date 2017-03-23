@@ -78,9 +78,17 @@ impl NodeDescriptor {
                 txs.retain(|tx| {
                     left -= 1;
                     if left == 0 {
-                            tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.take()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         } else {
-                            tx.send(data.clone().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.clone()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         }
                         .is_ok()
                 });

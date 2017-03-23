@@ -63,7 +63,10 @@ impl Mutator {
             link: payload::Link::new(self.src, self.addr),
             data: r,
         };
-        self.tx.clone().send(m).unwrap();
+        self.tx
+            .clone()
+            .send(m)
+            .unwrap();
     }
 
     fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
@@ -73,7 +76,10 @@ impl Mutator {
             data: r,
             state: payload::TransactionState::Pending(t, send),
         };
-        self.tx.clone().send(m).unwrap();
+        self.tx
+            .clone()
+            .send(m)
+            .unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
@@ -120,12 +126,12 @@ impl Mutator {
 
         let u = u.into();
         self.send(vec![prelude::Record::DeleteRequest(self.primary_key
-                           .iter()
-                           .map(|&col| &u[col])
-                           .cloned()
-                           .collect()),
+                                                          .iter()
+                                                          .map(|&col| &u[col])
+                                                          .cloned()
+                                                          .collect()),
                        u.into()]
-            .into())
+                          .into())
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
@@ -138,12 +144,12 @@ impl Mutator {
 
         let u = u.into();
         let m = vec![prelude::Record::DeleteRequest(self.primary_key
-                         .iter()
-                         .map(|&col| &u[col])
-                         .cloned()
-                         .collect()),
+                                                        .iter()
+                                                        .map(|&col| &u[col])
+                                                        .cloned()
+                                                        .collect()),
                      u.into()]
-            .into();
+                .into();
         self.tx_send(m, t)
     }
 }
@@ -235,8 +241,9 @@ impl Blender {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .flat_map(|ingress| {
-                self.ingredients.neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-            })
+                          self.ingredients.neighbors_directed(ingress,
+                                                              petgraph::EdgeDirection::Outgoing)
+                      })
             .map(|n| (n, &self.ingredients[n]))
             .filter(|&(_, base)| base.is_internal() && base.is_base())
             .map(|(n, base)| (n.into(), &*base))
@@ -281,10 +288,10 @@ impl Blender {
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
             .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
-                Some(inner)
-            } else {
-                None
-            })
+                            Some(inner)
+                        } else {
+                            None
+                        })
             .next(); // there should be at most one
 
         reader.and_then(|r| r.get_reader())
@@ -322,9 +329,7 @@ impl Blender {
                 s.send(payload::Packet::GetStatistics(tx)).unwrap();
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
-                let node_map = node_stats.into_iter()
-                    .map(|(ni, ns)| (ni.into(), ns))
-                    .collect();
+                let node_map = node_stats.into_iter().map(|(ni, ns)| (ni.into(), ns)).collect();
 
                 (*di, (domain_stats, node_map))
             })
@@ -353,7 +358,10 @@ impl fmt::Display for Blender {
         }
 
         // Output edges.
-        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
+        for (_, edge) in self.ingredients
+                .raw_edges()
+                .iter()
+                .enumerate() {
             indentln(f)?;
             write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
             if !edge.weight {
@@ -451,7 +459,10 @@ impl<'a> Migration<'a> {
 
         debug!(self.log, "told to materialize"; "node" => src.as_global().index());
 
-        let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
+        let mut e = self.mainline
+            .ingredients
+            .edge_weight_mut(e)
+            .unwrap();
         if !*e {
             *e = true;
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
@@ -491,8 +502,10 @@ impl<'a> Migration<'a> {
             unreachable!("tried to add token generator to non-reader node");
         }
 
-        let base_columns: Vec<(_, Option<_>)> = self.mainline.ingredients[*n.as_global()]
-            .base_columns(key, &self.mainline.ingredients, *n.as_global());
+        let base_columns: Vec<(_, Option<_>)> =
+            self.mainline.ingredients[*n.as_global()].base_columns(key,
+                                                                   &self.mainline.ingredients,
+                                                                   *n.as_global());
 
         let coarse_parents = base_columns.iter()
             .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
@@ -500,14 +513,18 @@ impl<'a> Migration<'a> {
 
         let granular_parents = base_columns.into_iter()
             .filter_map(|(ni, o)| if o.is_some() {
-                Some((ni, o.unwrap()))
-            } else {
-                None
-            })
+                            Some((ni, o.unwrap()))
+                        } else {
+                            None
+                        })
             .collect();
 
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
-        self.mainline.checktable.lock().unwrap().track(&token_generator);
+        self.mainline
+            .checktable
+            .lock()
+            .unwrap()
+            .track(&token_generator);
 
         if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
             inner.token_generator = Some(token_generator);
@@ -582,7 +599,10 @@ impl<'a> Migration<'a> {
             }
 
             // cook up a function to query this materialized state
-            let arc = inner.state.as_ref().unwrap().clone();
+            let arc = inner.state
+                .as_ref()
+                .unwrap()
+                .clone();
             let generator = inner.token_generator.clone().unwrap();
             Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
                 arc.find_and(q,
@@ -605,7 +625,11 @@ impl<'a> Migration<'a> {
     pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
-        self.reader_for(n).streamers.lock().unwrap().push(tx);
+        self.reader_for(n)
+            .streamers
+            .lock()
+            .unwrap()
+            .push(tx);
         rx
     }
 
@@ -656,9 +680,9 @@ impl<'a> Migration<'a> {
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .map(|ni| {
-                let domain = mainline.ingredients[ni].domain();
-                (domain, ni, new.contains(&ni))
-            })
+                     let domain = mainline.ingredients[ni].domain();
+                     (domain, ni, new.contains(&ni))
+                 })
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -713,7 +737,10 @@ impl<'a> Migration<'a> {
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
                     trace!(log, "initializing new node"; "node" => ni.index());
-                    mainline.ingredients.node_weight_mut(ni).unwrap().on_commit(&remap);
+                    mainline.ingredients
+                        .node_weight_mut(ni)
+                        .unwrap()
+                        .on_commit(&remap);
                 }
             }
         }
@@ -756,8 +783,10 @@ impl<'a> Migration<'a> {
         let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
                                                                        mainline.source,
                                                                        domain_nodes);
-        let (start_ts, end_ts, prevs) =
-            mainline.checktable.lock().unwrap().perform_migration(&ingresses_from_base);
+        let (start_ts, end_ts, prevs) = mainline.checktable
+            .lock()
+            .unwrap()
+            .perform_migration(&ingresses_from_base);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 

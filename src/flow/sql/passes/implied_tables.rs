@@ -76,14 +76,12 @@ impl ImpliedTableExpansion for SqlQuery {
         let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
             let mut matches = write_schemas.iter()
                 .filter(|&(t, _)| if tables_in_query.len() > 0 {
-                    tables_in_query.contains(&Table::from(t.as_str()))
-                } else {
-                    true
-                })
+                            tables_in_query.contains(&Table::from(t.as_str()))
+                        } else {
+                            true
+                        })
                 .filter_map(|(t, ws)| {
-                    let num_matching = ws.iter()
-                        .filter(|c| **c == f.name)
-                        .count();
+                    let num_matching = ws.iter().filter(|c| **c == f.name).count();
                     assert!(num_matching <= 1);
                     if num_matching == 1 {
                         Some((*t).clone())
@@ -184,8 +182,8 @@ impl ImpliedTableExpansion for SqlQuery {
                     FieldExpression::All => panic!(err),
                     FieldExpression::Seq(fs) => {
                         FieldExpression::Seq(fs.into_iter()
-                            .map(|f| expand_columns(f, &tables))
-                            .collect())
+                                                 .map(|f| expand_columns(f, &tables))
+                                                 .collect())
                     }
                 };
                 // Expand within WHERE clause
@@ -198,15 +196,17 @@ impl ImpliedTableExpansion for SqlQuery {
                     None => None,
                     Some(gbc) => {
                         Some(GroupByClause {
-                            columns: gbc.columns
-                                .into_iter()
-                                .map(|f| expand_columns(f, &tables))
-                                .collect(),
-                            having: match gbc.having {
-                                None => None,
-                                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
-                            },
-                        })
+                                 columns: gbc.columns
+                                     .into_iter()
+                                     .map(|f| expand_columns(f, &tables))
+                                     .collect(),
+                                 having: match gbc.having {
+                                     None => None,
+                                     Some(hc) => {
+                                         Some(rewrite_conditional(&expand_columns, hc, &tables))
+                                     }
+                                 },
+                             })
                     }
                 };
                 // Expand within ORDER BY clause
@@ -214,12 +214,12 @@ impl ImpliedTableExpansion for SqlQuery {
                     None => None,
                     Some(oc) => {
                         Some(OrderClause {
-                            columns: oc.columns
-                                .into_iter()
-                                .map(|f| expand_columns(f, &tables))
-                                .collect(),
-                            order: oc.order,
-                        })
+                                 columns: oc.columns
+                                     .into_iter()
+                                     .map(|f| expand_columns(f, &tables))
+                                     .collect(),
+                                 order: oc.order,
+                             })
                     }
                 };
 
@@ -228,9 +228,7 @@ impl ImpliedTableExpansion for SqlQuery {
             SqlQuery::CreateTable(mut ctq) => {
                 let table = ctq.table.clone();
                 let transform_key = |key_cols: Vec<Column>| {
-                    key_cols.into_iter()
-                        .map(|k| set_table(k, &table))
-                        .collect()
+                    key_cols.into_iter().map(|k| set_table(k, &table)).collect()
                 };
                 // Expand within field list
                 ctq.fields = ctq.fields
@@ -239,18 +237,23 @@ impl ImpliedTableExpansion for SqlQuery {
                     .collect();
                 // Expand tables for key specification
                 if ctq.keys.is_some() {
-                    ctq.keys = Some(ctq.keys
-                        .unwrap()
-                        .into_iter()
-                        .map(|k| match k {
-                            PrimaryKey(key_cols) => PrimaryKey(transform_key(key_cols)),
-                            UniqueKey(name, key_cols) => UniqueKey(name, transform_key(key_cols)),
-                            FulltextKey(name, key_cols) => {
-                                FulltextKey(name, transform_key(key_cols))
-                            }
-                            Key(name, key_cols) => Key(name, transform_key(key_cols)),
-                        })
-                        .collect());
+                    ctq.keys =
+                        Some(ctq.keys
+                                 .unwrap()
+                                 .into_iter()
+                                 .map(|k| match k {
+                                          PrimaryKey(key_cols) => {
+                                              PrimaryKey(transform_key(key_cols))
+                                          }
+                                          UniqueKey(name, key_cols) => {
+                                              UniqueKey(name, transform_key(key_cols))
+                                          }
+                                          FulltextKey(name, key_cols) => {
+                                              FulltextKey(name, transform_key(key_cols))
+                                          }
+                                          Key(name, key_cols) => Key(name, transform_key(key_cols)),
+                                      })
+                                 .collect());
                 }
                 SqlQuery::CreateTable(ctq)
             }

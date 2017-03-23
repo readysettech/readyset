@@ -59,10 +59,12 @@ impl ext::FutureService for Arc<Server> {
     type ListFut = futures::Finished<HashMap<String, (usize, bool)>, Never>;
     fn list(&self) -> Self::ListFut {
         futures::finished(self.get
-            .iter()
-            .map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
-            .chain(self.put.iter().map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), true))))
-            .collect())
+                              .iter()
+                              .map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
+                              .chain(self.put.iter().map(|(&ni, &(ref n, _, _))| {
+                                                             (n.clone(), (ni.into(), true))
+                                                         }))
+                              .collect())
     }
 }
 
@@ -78,9 +80,9 @@ impl Drop for ServerHandle {
         let wait: Vec<_> = self.threads
             .drain(..)
             .map(|(tx, jh)| {
-                tx.send(()).unwrap();
-                jh
-            })
+                     tx.send(()).unwrap();
+                     jh
+                 })
             .collect();
         for jh in wait {
             jh.join().unwrap();
@@ -101,7 +103,12 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
             .into_iter()
             .map(|(ni, n)| {
                 (ni,
-                 (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_mutator(ni)))
+                 (n.name().to_owned(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
+                  soup.get_mutator(ni)))
             })
             .collect();
         let outs: Vec<_> = soup.outputs()
@@ -109,7 +116,10 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
             .map(|(ni, n, r)| {
                 (ni,
                  (n.name().to_owned(),
-                  n.fields().iter().cloned().collect(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
                   r.get_reader().unwrap()))
             })
             .collect();
@@ -119,13 +129,13 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
     let s = Server {
         put: ins.into_iter()
             .map(|(ni, (nm, args, mutator))| {
-                (ni,
-                 (nm, args, Mutex::new(Box::new(move |v: Vec<DataType>| mutator.put(v)) as Box<_>)))
-            })
+                     (ni,
+                      (nm,
+                       args,
+                       Mutex::new(Box::new(move |v: Vec<DataType>| mutator.put(v)) as Box<_>)))
+                 })
             .collect(),
-        get: outs.into_iter()
-            .map(|(ni, (nm, args, getter))| (ni, (nm, args, getter)))
-            .collect(),
+        get: outs.into_iter().map(|(ni, (nm, args, getter))| (ni, (nm, args, getter))).collect(),
         _g: Mutex::new(soup),
     };
 
@@ -140,8 +150,8 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
                 .spawn(move || {
                     let mut core = reactor::Core::new().unwrap();
                     let (_, handle) = s.listen(addr,
-                                &core.handle(),
-                                tarpc::future::server::Options::default())
+                                               &core.handle(),
+                                               tarpc::future::server::Options::default())
                         .unwrap();
                     core.handle().spawn(handle);
 

@@ -41,12 +41,10 @@ impl QueryGraph {
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations
-            .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
-                acc.extend(qgn.parameters.iter());
-                acc
-            })
+        self.relations.values().fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+            acc.extend(qgn.parameters.iter());
+            acc
+        })
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -62,7 +60,10 @@ impl QueryGraph {
             .collect();
 
         // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
+        let mut r_vec: Vec<&str> = self.relations
+            .keys()
+            .map(String::as_str)
+            .collect();
         r_vec.sort();
         for r in &r_vec {
             r.hash(&mut hasher);
@@ -153,8 +154,16 @@ fn classify_conditionals(ce: &ConditionExpression,
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
-            if let ConditionExpression::Base(ref l) = *ct.left.as_ref().unwrap().as_ref() {
-                if let ConditionExpression::Base(ref r) = *ct.right.as_ref().unwrap().as_ref() {
+            if let ConditionExpression::Base(ref l) =
+                *ct.left
+                     .as_ref()
+                     .unwrap()
+                     .as_ref() {
+                if let ConditionExpression::Base(ref r) =
+                    *ct.right
+                         .as_ref()
+                         .unwrap()
+                         .as_ref() {
                     match *r {
                         // right-hand side is field, so this must be a comma join
                         ConditionBase::Field(ref fr) => {
@@ -164,8 +173,8 @@ fn classify_conditionals(ce: &ConditionExpression,
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
                                     if let Ordering::Less = fr.table
-                                        .as_ref()
-                                        .cmp(&fl.table.as_ref()) {
+                                           .as_ref()
+                                           .cmp(&fl.table.as_ref()) {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
                                     }
@@ -293,7 +302,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                 };
                                 if *l.table.as_ref().unwrap() == table.name &&
                                    *r.table.as_ref().unwrap() ==
-                                   st.tables.last().as_ref().unwrap().name {
+                                   st.tables
+                                       .last()
+                                       .as_ref()
+                                       .unwrap()
+                                       .name {
                                     ConditionTree {
                                         operator: ct.operator.clone(),
                                         left: ct.right.clone(),
@@ -312,10 +325,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         ConditionTree {
                             operator: Operator::Equal,
                             left: wrapcol(&st.tables
-                                              .last()
-                                              .as_ref()
-                                              .unwrap()
-                                              .name,
+                                               .last()
+                                               .as_ref()
+                                               .unwrap()
+                                               .name,
                                           &col.name),
                             right: wrapcol(&table.name, &col.name),
                         }
@@ -325,17 +338,22 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 // if this is the first explicit join, we're joining against the last table in
                 // the list of tables
                 if prev_table.is_none() {
-                    prev_table = Some(&st.tables.last().as_ref().unwrap().name);
+                    prev_table = Some(&st.tables
+                                           .last()
+                                           .as_ref()
+                                           .unwrap()
+                                           .name);
                 }
                 // add joined table to relations if not present already
                 let against = table.name.clone();
                 // add edge for join
-                let mut e = qg.edges
-                    .entry((prev_table.unwrap().clone(), against))
-                    .or_insert_with(|| match jc.operator {
-                        JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
-                        JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
-                        _ => unimplemented!(),
+                let mut e =
+                    qg.edges.entry((prev_table.unwrap().clone(), against)).or_insert_with(|| {
+                        match jc.operator {
+                            JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
+                            JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
+                            _ => unimplemented!(),
+                        }
                     });
                 println!("edge added: {:?}", e);
             }
@@ -363,7 +381,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                        preds,
                        rel);
             } else {
-                qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
+                qg.relations
+                    .get_mut(&rel)
+                    .unwrap()
+                    .predicates
+                    .extend(preds);
             }
         }
 
@@ -371,9 +393,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         for jp in join_predicates {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) =
-                *jp.left.as_ref().unwrap().as_ref() {
+                *jp.left
+                     .as_ref()
+                     .unwrap()
+                     .as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) =
-                    *jp.right.as_ref().unwrap().as_ref() {
+                    *jp.right
+                         .as_ref()
+                         .unwrap()
+                         .as_ref() {
                     let mut e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
@@ -386,10 +414,18 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // naive version of the graph construction work.
                     {
                         let left = &mut qg.relations
-                            .entry(l.table.as_ref().unwrap().clone())
-                            .or_insert_with(|| {
-                                new_node(l.table.as_ref().unwrap().clone(), vec![], st)
-                            });
+                                            .entry(l.table
+                                                       .as_ref()
+                                                       .unwrap()
+                                                       .clone())
+                                            .or_insert_with(|| {
+                            new_node(l.table
+                                         .as_ref()
+                                         .unwrap()
+                                         .clone(),
+                                     vec![],
+                                     st)
+                        });
                         if !left.columns.iter().any(|c| c.name == l.name) {
                             left.columns.push(l.clone());
                         }
@@ -397,10 +433,18 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                     {
                         let right = &mut qg.relations
-                            .entry(r.table.as_ref().unwrap().clone())
-                            .or_insert_with(|| {
-                                new_node(r.table.as_ref().unwrap().clone(), vec![], st)
-                            });
+                                             .entry(r.table
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .clone())
+                                             .or_insert_with(|| {
+                            new_node(r.table
+                                         .as_ref()
+                                         .unwrap()
+                                         .clone(),
+                                     vec![],
+                                     st)
+                        });
                         if !right.columns.iter().any(|c| c.name == r.name) {
                             right.columns.push(r.clone());
                         }
@@ -458,7 +502,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
                 let mut e = qg.edges
                     .entry((String::from("computed_columns"),
-                            column.table.as_ref().unwrap().clone()))
+                            column.table
+                                .as_ref()
+                                .unwrap()
+                                .clone()))
                     .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),

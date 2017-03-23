@@ -89,9 +89,7 @@ impl Domain {
                ts: i64)
                -> Self {
         // initially, all nodes are not ready
-        let not_ready = nodes.iter()
-            .map(|n| *n.borrow().addr().as_local())
-            .collect();
+        let not_ready = nodes.iter().map(|n| *n.borrow().addr().as_local()).collect();
 
         Domain {
             _index: index,
@@ -251,9 +249,7 @@ impl Domain {
 
             self.process_times.start(*addr.as_local());
             self.process_ptimes.start(*addr.as_local());
-            self.nodes[addr.as_local()]
-                .borrow_mut()
-                .process(m, &mut self.state, &self.nodes, true);
+            self.nodes[addr.as_local()].borrow_mut().process(m, &mut self.state, &self.nodes, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().children.len(), 0);
@@ -287,7 +283,12 @@ impl Domain {
                 self.not_ready.insert(addr);
 
                 for p in parents {
-                    self.nodes.get_mut(&p).unwrap().borrow_mut().children.push(node.addr());
+                    self.nodes
+                        .get_mut(&p)
+                        .unwrap()
+                        .borrow_mut()
+                        .children
+                        .push(node.addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
@@ -821,7 +822,13 @@ impl Domain {
 
     pub fn boot(mut self, rx: mpsc::Receiver<Packet>) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
+        let name: usize = self.nodes
+            .iter()
+            .next()
+            .unwrap()
+            .borrow()
+            .domain()
+            .into();
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {
