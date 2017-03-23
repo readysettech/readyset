@@ -60,8 +60,8 @@ impl Ingredient for Filter {
             let mut f = self.filter.iter();
             r.iter().all(|d| {
                 // check if this filter matches
-                let fi = f.next()
-                    .expect("should have as many filters as there are columns in ancestor");
+                let fi =
+                    f.next().expect("should have as many filters as there are columns in ancestor");
                 if let Some((ref op, ref f)) = *fi {
                     match *op {
                         Operator::Equal => d == f,
@@ -99,15 +99,15 @@ impl Ingredient for Filter {
                     .iter()
                     .enumerate()
                     .filter_map(|(i, ref e)| match e.as_ref() {
-                        Some(&(ref op, ref x)) => {
-                            Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                        }
-                        None => None,
-                    })
+                                    Some(&(ref op, ref x)) => {
+                                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                    }
+                                    None => None,
+                                })
                     .collect::<Vec<_>>()
                     .as_slice()
                     .join(", "))
-            .into()
+                .into()
     }
 
     fn can_query_through(&self) -> bool {
@@ -145,6 +145,10 @@ impl Ingredient for Filter {
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
         vec![(self.src, Some(column))]
+    }
+
+    fn is_selective(&self) -> bool {
+        true
     }
 }
 

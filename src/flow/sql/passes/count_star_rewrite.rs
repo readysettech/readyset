@@ -13,7 +13,10 @@ impl CountStarRewrite for SqlQuery {
         let rewrite_count_star = |mut c: Column, tables: &Vec<Table>| -> Column {
             assert!(tables.len() > 0);
             let bogo_table = tables.get(0).unwrap();
-            let bogo_column = write_schemas.get(&bogo_table.name).unwrap().last().unwrap();
+            let bogo_column = write_schemas.get(&bogo_table.name)
+                .unwrap()
+                .last()
+                .unwrap();
 
             let rewrite = |fe: FieldExpression| -> FieldExpression {
                 match fe {
@@ -21,8 +24,7 @@ impl CountStarRewrite for SqlQuery {
                         FieldExpression::Seq(vec![Column {
                                                       name: bogo_column.clone(),
                                                       alias: None,
-                                                      table: Some(bogo_table.name
-                                                          .clone()),
+                                                      table: Some(bogo_table.name.clone()),
                                                       function: None,
                                                   }])
                     }
@@ -32,13 +34,13 @@ impl CountStarRewrite for SqlQuery {
             c.function = match c.function {
                 Some(f) => {
                     Some(match f {
-                        Avg(fe) => Avg(rewrite(fe)),
-                        Count(fe) => Count(rewrite(fe)),
-                        Sum(fe) => Sum(rewrite(fe)),
-                        Min(fe) => Min(rewrite(fe)),
-                        Max(fe) => Max(rewrite(fe)),
-                        GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
-                    })
+                             Avg(fe) => Avg(rewrite(fe)),
+                             Count(fe) => Count(rewrite(fe)),
+                             Sum(fe) => Sum(rewrite(fe)),
+                             Min(fe) => Min(rewrite(fe)),
+                             Max(fe) => Max(rewrite(fe)),
+                             GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
+                         })
                 }
                 None => None,
             };
@@ -54,8 +56,8 @@ impl CountStarRewrite for SqlQuery {
                     FieldExpression::All => panic!(err),
                     FieldExpression::Seq(fs) => {
                         FieldExpression::Seq(fs.into_iter()
-                            .map(|c| rewrite_count_star(c, &tables))
-                            .collect())
+                                                 .map(|c| rewrite_count_star(c, &tables))
+                                                 .collect())
                     }
                 };
                 // TODO: also expand function columns within WHERE clause

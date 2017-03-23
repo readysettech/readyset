@@ -6,6 +6,7 @@
 //! module).
 
 use flow;
+use flow::keys;
 use flow::domain;
 use flow::prelude::*;
 
@@ -16,6 +17,8 @@ use std::collections::{HashSet, HashMap};
 use std::sync::mpsc;
 
 use slog::Logger;
+
+const FILTER_SPECIFICITY: usize = 10;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -38,9 +41,7 @@ impl Tag {
 }
 
 pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
-    let nodes: Vec<_> = nodes.iter()
-        .map(|&(ni, new)| (ni, &graph[ni], new))
-        .collect();
+    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (ni, &graph[ni], new)).collect();
 
     let mut materialize: HashSet<_> = nodes.iter()
         .filter_map(|&(ni, n, _)| {
@@ -77,7 +78,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     {
         let mark_parent_inquisitive_or_materialize =
             |ni: NodeIndex,
-             materialize: &mut HashSet<flow::LocalNodeIndex>,
+             materialize: &mut HashSet<LocalNodeIndex>,
              inquisitive_children: &mut HashSet<NodeIndex>|
              -> Option<NodeIndex> {
                 let n = &graph[ni];
@@ -151,8 +152,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 continue;
             }
 
-            if graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                .any(|e| *e.weight()) {
+            if graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing).any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
                 materialize.remove(n.addr().as_local());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
@@ -177,9 +177,7 @@ pub fn index(log: &Logger,
 
     let map: HashMap<_, _> =
         nodes.iter().map(|&(ni, _)| (*graph[ni].addr().as_local(), ni)).collect();
-    let nodes: Vec<_> = nodes.iter()
-        .map(|&(ni, new)| (&graph[ni], new))
-        .collect();
+    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
 
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
@@ -215,7 +213,7 @@ pub fn index(log: &Logger,
                     hm
                 });
 
-        // push down indices
+        // push up indices
         let mut leftover_indices: HashMap<_, _> = indices.drain().collect();
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
@@ -239,27 +237,39 @@ pub fn index(log: &Logger,
                     // doesn't, the previously established materialization on the parent(s) will be
                     // considered unnnecessary and removed in the next step
                     for idx in idxs {
-                        // idx could be compound, so we resolve each contained column separately
-                        let real_idxs =
-                            idx.iter().map(|col| node.resolve(*col)).collect::<Vec<_>>();
-                        for r_idx in real_idxs {
-                            if let Some(r_idx) = r_idx {
-                                // the index should instead be placed on the corresponding
-                                // columns of this view's inputs
-                                let (r_nodes, r_cols): (Vec<_>, Vec<_>) =
-                                    r_idx.iter().cloned().unzip();
-                                // compound index columns must be internally consistent, i.e. all
-                                // derived from the same node
-                                let n = r_nodes[0];
-                                assert!(r_nodes.iter().all(|nd| *nd == n));
-
+                        // idx could be compound, so we resolve each contained column separately.
+                        // Note that a single column can resolve into *multiple* parent columns
+                        // that need to be indexed.
+                        let real_cols: Vec<_> = idx.iter().map(|col| node.resolve(*col)).collect();
+                        // here's the deal:
+                        // real_cols holds a vec of parent colums for each column in a compound
+                        // key. Each element of this vec is (parent_node, parent_col). We need to
+                        // collect these inner tuples and install corresponding indexing
+                        // requirements on the nodes/columns in them.
+                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
+                                                                                |mut acc, nc| {
+                            if let Some(p_cols) = nc {
+                                for (pn, pc) in p_cols {
+                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                                }
+                            }
+                            acc
+                        });
+                        // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
+                        // index on each individual column in the Vec.
+                        // Note that this, and the semantics of node.resolve(), imply that each column
+                        // must resolve to one ore more *single* parent node columns. In other
+                        // words, we never install compound keys by pushing indices upwards; hence
+                        // the two nested loops are required here.
+                        for (n, cols) in cols_to_index_per_node {
+                            for col in cols {
                                 trace!(log,
                                        "pushing up index {:?} on {} into columns {:?} of {}",
                                        idx,
                                        v,
-                                       r_cols,
+                                       col,
                                        n);
-                                tmp.entry(n).or_insert_with(HashSet::new).insert(r_cols);
+                                tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
                             }
                         }
                     }
@@ -324,10 +334,10 @@ pub fn initialize(log: &Logger,
             .and_then(|ss| ss.get(n.addr().as_local()))
             .cloned()
             .map(|idxs| {
-                // we've been told to materialize a node using 0 indices
-                assert!(!idxs.is_empty());
-                idxs
-            })
+                     // we've been told to materialize a node using 0 indices
+                     assert!(!idxs.is_empty());
+                     idxs
+                 })
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
@@ -347,10 +357,10 @@ pub fn initialize(log: &Logger,
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
                 .send(Packet::Ready {
-                    node: *n.addr().as_local(),
-                    index: index_on,
-                    ack: ack_tx,
-                })
+                          node: *n.addr().as_local(),
+                          index: index_on,
+                          ack: ack_tx,
+                      })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -360,8 +370,8 @@ pub fn initialize(log: &Logger,
         };
 
         if graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-            .filter(|&ni| ni != source)
-            .all(|n| empty.contains(&n)) {
+               .filter(|&ni| ni != source)
+               .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             trace!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
@@ -380,15 +390,7 @@ pub fn initialize(log: &Logger,
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
             info!(log, "beginning reconstruction of {:?}", *graph[node]);
-            reconstruct(&log,
-                        graph,
-                        source,
-                        &empty,
-                        &materialize,
-                        txs,
-                        node,
-                        index_on);
-            debug!(log, "reconstruction started");
+            reconstruct(&log, graph, &empty, &materialize, txs, node, index_on);
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
             ready(txs, vec![]);
@@ -399,7 +401,6 @@ pub fn initialize(log: &Logger,
 
 pub fn reconstruct(log: &Logger,
                    graph: &Graph,
-                   source: NodeIndex,
                    empty: &HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
@@ -423,23 +424,67 @@ pub fn reconstruct(log: &Logger,
     //   3. construct a daisy-chain of channels, and pass them to each domain along the path
     //   4. tell the domain nearest to the root to start replaying
     //
-    // so, first things first, let's find our closest materialized parents
-    let paths = trace(graph, source, node, empty, materialized, vec![node]);
+    // so, first things first, let's find all our paths up the tree
+    let mut paths = {
+        let mut on_join = cost_fn(log, graph, empty, materialized, txs);
+        keys::provenance_of(graph, node, 0, &mut *on_join)
+    };
 
+    // next eliminate any that terminate in empty base nodes
+    paths.retain(|path| !empty.contains(&path.last().unwrap().0));
+
+    // cut paths so they contain the shortest replay path
+    let paths = paths.into_iter().map(|path| -> Vec<_> {
+        let mut found = false;
+        path.into_iter()
+            .map(|(node, _)| node)
+            .enumerate()
+            .take_while(|&(i, node)| {
+                if i == 0 {
+                    // first node is target node
+                    return true;
+                }
+
+                // keep taking until we get our first materialized node
+                // (`found` helps us emulate `take_while_inclusive`)
+                let n = &graph[node];
+                if found {
+                    // we've already found a materialized node
+                    return false;
+                }
+
+                let is_materialized = materialized.get(&n.domain())
+                    .map(|dm| dm.contains_key(n.addr().as_local()))
+                    .unwrap_or(false);
+                if is_materialized {
+                    // we want to take this node, but not any later ones
+                    found = true;
+                }
+                true
+            })
+            .map(|(_, node)| node)
+            .collect()
+    });
+
+    // tell the domain in question to create an empty state for the node in question
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
     } else {
         assert!(!index_on.is_empty(),
                 "all non-reader nodes must have a state key");
 
-        // tell the domain in question to create an empty state for the node in question
         txs[&graph[node].domain()]
             .send(Packet::PrepareState {
-                node: *graph[node].addr().as_local(),
-                index: index_on,
-            })
+                      node: *graph[node].addr().as_local(),
+                      index: index_on,
+                  })
             .unwrap();
     }
+
+    // NOTE:
+    // there could be no paths left here. for example, if a symmetric join is joining an existing
+    // view with a newm, empty view, the empty view will be chosen for replay, and will be
+    // eliminated in the parents.retain() above.
 
     // TODO:
     // technically, we can be a bit smarter here. for example, a union with a 1-1 projection does
@@ -449,6 +494,10 @@ pub fn reconstruct(log: &Logger,
 
     // set up channels for replay along each path
     for mut path in paths {
+        // there should always be a replay path
+        assert!(!path.is_empty(),
+                "needed to replay non-empty node, but no materializations found");
+
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
@@ -465,10 +514,13 @@ pub fn reconstruct(log: &Logger,
                 last_domain = Some(domain);
             }
 
-            segments.last_mut().unwrap().1.push(node);
+            segments.last_mut()
+                .unwrap()
+                .1
+                .push(node);
         }
 
-        debug!(log, "domain replay path is {:?}", segments);
+        debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
 
         let locals = |i: usize| -> Vec<NodeAddress> {
             if i == 0 {
@@ -545,10 +597,10 @@ pub fn reconstruct(log: &Logger,
         trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
         txs[&segments[0].0]
             .send(Packet::StartReplay {
-                tag: tag,
-                from: graph[segments[0].1[0]].addr(),
-                ack: wait_tx.clone(),
-            })
+                      tag: tag,
+                      from: graph[segments[0].1[0]].addr(),
+                      ack: wait_tx.clone(),
+                  })
             .unwrap();
 
         // and finally, wait for the last domain to finish the replay
@@ -557,63 +609,143 @@ pub fn reconstruct(log: &Logger,
     }
 }
 
-fn trace<T>(graph: &Graph,
-            source: NodeIndex,
-            node: NodeIndex,
-            empty: &HashSet<NodeIndex>,
-            materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
-            path: Vec<NodeIndex>)
-            -> Vec<Vec<NodeIndex>> {
+fn cost_fn<'a, T>(log: &'a Logger,
+                  graph: &'a Graph,
+                  empty: &'a HashSet<NodeIndex>,
+                  materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
+                  txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
+                  -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
 
-    if node == source {
-        unreachable!("base node was not materialized!");
-    }
+    Box::new(move |node, parents| {
+        assert!(parents.len() > 1);
 
-    let n = &graph[node];
-    let is_materialized = if path.len() == 1 {
-        // the start node is the one we're trying to replay to, so while it'll be marked as
-        // materialized in the map, it isn't really
-        false
-    } else {
-        materialized.get(&n.domain())
-            .map(|dm| dm.contains_key(n.addr().as_local()))
-            .unwrap_or(false)
-    };
+        let in_materialized = |ni: NodeIndex| {
+            let n = &graph[ni];
+            materialized.get(&n.domain())
+                .map(|dm| dm.contains_key(n.addr().as_local()))
+                .unwrap_or(false)
+        };
 
-    if is_materialized {
-        vec![path]
-    } else {
-        let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        // keep track of remaining parents
+        let mut parents: Vec<_> = parents.iter().map(|&ni| ni).collect();
+
+        let n = &graph[node];
+        assert!(n.is_internal());
+
+        // find empty parents
+        let empty: HashSet<_> = parents.iter()
+            .filter(|ni| empty.contains(ni))
+            .map(|ni| graph[*ni].addr())
             .collect();
-        if parents.len() != 1 {
-            // there are two cases where we have multiple parents: joins and unions
-            // for unions, we should replay *all* paths. for joins, we should only replay one path.
-            // in particular, for a join, we should only replay the ancestor that yields the full
-            // result-set (i.e., the left side of a left join).
-            assert!(n.is_internal());
-            // find empty parents
-            let empty: HashSet<_> = parents.iter()
-                .filter(|ni| empty.contains(ni))
-                .map(|ni| graph[*ni].addr())
-                .collect();
-            if let Some(picked_ancestor) = n.replay_ancestor(&empty) {
-                // join, only replay picked ancestor
-                // NOTE: this is a *non-deterministic* choice
-                parents.retain(|&parent| graph[parent].addr() == picked_ancestor);
-            } else {
-                // union; just replay all
-            }
+
+        let options =
+            n.must_replay_among(&empty).expect("join did not have must replay preference");
+
+        // we *must* replay the state of one of the nodes in options
+        parents.retain(|&parent| options.contains(&graph[parent].addr()));
+        assert!(!parents.is_empty());
+
+        if parents.len() == 1 {
+            // no need to pick
+            return parents.pop();
         }
 
-        // there's no point in replaying parents that are empty
-        parents.retain(|&parent| !empty.contains(&parent));
-
+        // we want to pick the ancestor that causes us to do the least amount of work.
+        // this is really a balancing act between
+        //
+        //   a) how many records we are going to push through the filter; and
+        //   b) how much state we need to replay
+        //
+        // consider the case where we are replaying a node downstream of a join, and the
+        // join has two ancestors: a base node (A) and a filter (F) over a base node (B).
+        // when should we choose to replay one or the other?
+        //
+        //  - the cost of replaying A is
+        //        |A| joins
+        //      + |A| lookups in B through F
+        //  - the cost of replaying B through F is
+        //        |B| filter operations
+        //      + |F(B)| join operations
+        //      + |F(B)| lookups in A
+        //
+        // which of these is more costly? even assuming we know |A| and |B|, it is not
+        // clear, because we don't know F's specificity. let's assume some things:
+        //
+        //  - filters are cheaper than joins (~10x)
+        //  - replaying is cheaper than filtering (~10x)
+        //  - a filter emits one record for every FILTER_SPECIFICITY input records
+        //
+        // given those rough estimates, what's the best choice? well, we should pick a node
+        // N with filters F1..Fn to replay which minimizes
+        //
+        //    1   * |N|                                 # replay cost
+        let replay_cost = 1;
+        //  + 10  * ( ∑i |N| / FILTER_SPECIFICITY ^ i ) # filter cost
+        let filter_cost = 10;
+        //  + 100 * |N| / FILTER_SPECIFICITY ^ n        # join cost
+        let join_cost = 100;
+        //
+        // it is worth pointing out that this heuristic does *not* capture the fact that
+        // replaying A above will encounter more expensive lookups on the join path (since
+        // the lookups are in F(B), as opposed to directly in A).
+        //
+        // to compute this, we need to find |N| and n for each candidate node.
+        // let's do that now
         parents.into_iter()
-            .flat_map(|parent| {
-                let mut path = path.clone();
-                path.push(parent);
-                trace(graph, source, parent, empty, materialized, path)
+            .map(|p| {
+                let mut intermediates = vec![];
+                let mut stateful = p;
+                while !in_materialized(stateful) {
+                    let n = &graph[stateful];
+                    // joins require their inputs to be materialized.
+                    // therefore, we know that this node must be query_through.
+                    assert!(n.is_internal());
+                    assert!(n.can_query_through());
+                    // if this node is selective (e.g., a filter), increase the filter factor
+                    // we need to keep track of non-selective project/permute nodes too though,
+                    // as they increase the cost
+                    intermediates.push(n.is_selective());
+                    // now walk to the parent.
+                    let mut ps =
+                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    // of which there must be at least one
+                    stateful = ps.next().expect("recursed all the way to source");
+                    // there shouldn't ever be multiple, because neither join nor union
+                    // are query_through.
+                    assert_eq!(ps.count(), 0);
+                }
+
+                // find the size of the state we would end up replaying
+                let (tx, rx) = mpsc::sync_channel(1);
+                let stateful = &graph[stateful];
+                txs[&stateful.domain()]
+                    .send(Packet::StateSizeProbe {
+                              node: *stateful.addr().as_local(),
+                              ack: tx,
+                          })
+                    .unwrap();
+                let mut size = rx.recv().expect("stateful parent should have state");
+
+                // compute the total cost
+                // replay cost
+                let mut cost = replay_cost * size;
+                // filter cost
+                for does_filter in intermediates {
+                    cost += filter_cost * size;
+                    if does_filter {
+                        size /= FILTER_SPECIFICITY;
+                    }
+                }
+                // join cost
+                cost += join_cost * size;
+
+                debug!(log, "cost of replaying from {:?}: {}", p, cost);
+                (p, cost)
             })
-            .collect()
-    }
+            .min_by_key(|&(_, cost)| cost)
+            .map(|(node, cost)| {
+                     debug!(log, "cost" => cost; "picked replay source {:?}", node);
+                     node
+                 })
+    })
 }

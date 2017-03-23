@@ -1,8 +1,8 @@
 use petgraph::graph::NodeIndex;
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time;
 
 use std::collections::hash_map::Entry;
@@ -16,10 +16,11 @@ use flow::statistics;
 
 use slog::Logger;
 
-use ops;
+use flow::transactions;
+
 use checktable;
 
-const BATCH_SIZE: usize = 128;
+const BATCH_SIZE: usize = 256;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -29,6 +30,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
+#[allow(missing_docs)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
 pub struct Index(usize);
 
@@ -44,6 +46,7 @@ impl Into<usize> for Index {
     }
 }
 
+#[allow(missing_docs)]
 impl Index {
     pub fn index(&self) -> usize {
         self.0
@@ -53,36 +56,22 @@ impl Index {
 pub mod single;
 pub mod local;
 
-enum BufferedTransaction {
-    RemoteTransaction,
-    Transaction(NodeIndex, Vec<Packet>),
-    MigrationStart(mpsc::SyncSender<()>),
-    MigrationEnd(HashMap<NodeIndex, usize>),
-}
-
 type InjectCh = mpsc::SyncSender<Packet>;
 
+
 pub struct Domain {
-    index: Index,
+    _index: Index,
 
     nodes: DomainNodes,
     state: StateMap,
 
     log: Logger,
 
-    /// Map from timestamp to data buffered for that timestamp.
-    buffered_transactions: HashMap<i64, BufferedTransaction>,
-    /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
-    /// that are only connected by timestamp ingress nodes are not included.
-    ingress_from_base: HashMap<NodeIndex, usize>,
-    /// Timestamp that the domain has seen all transactions up to.
-    ts: i64,
-
     not_ready: HashSet<LocalNodeIndex>,
 
-    checktable: Arc<Mutex<checktable::CheckTable>>,
+    transaction_state: transactions::DomainState,
 
-    replaying_to: Option<(LocalNodeIndex, Vec<Packet>)>,
+    replaying_to: Option<(LocalNodeIndex, VecDeque<Packet>, usize)>,
     replay_paths: HashMap<Tag, (Vec<NodeAddress>, Option<mpsc::SyncSender<()>>)>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -99,21 +88,18 @@ impl Domain {
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
-        // initially, all nodes are not ready (except for timestamp egress nodes)!
+        // initially, all nodes are not ready
         let not_ready = nodes.iter()
             .map(|n| *n.borrow().addr().as_local())
             .collect();
 
         Domain {
-            index: index,
+            _index: index,
+            transaction_state: transactions::DomainState::new(index, &nodes, checktable, ts),
             nodes: nodes,
             state: StateMap::default(),
             log: log,
-            buffered_transactions: HashMap::new(),
-            ingress_from_base: HashMap::new(),
             not_ready: not_ready,
-            ts: ts,
-            checktable: checktable,
             replaying_to: None,
             replay_paths: HashMap::new(),
             total_time: Timer::new(),
@@ -126,20 +112,20 @@ impl Domain {
 
     pub fn dispatch(m: Packet,
                     not_ready: &HashSet<LocalNodeIndex>,
-                    replaying_to: &mut Option<(LocalNodeIndex, Vec<Packet>)>,
+                    replaying_to: &mut Option<(LocalNodeIndex, VecDeque<Packet>, usize)>,
                     states: &mut StateMap,
                     nodes: &DomainNodes,
                     process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
                     process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
                     enable_output: bool)
-                    -> HashMap<NodeAddress, Vec<ops::Record>> {
+                    -> HashMap<NodeAddress, Vec<Record>> {
 
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
-        if let Some((ref bufnode, ref mut buffered)) = *replaying_to {
+        if let Some((ref bufnode, ref mut buffered, _)) = *replaying_to {
             if bufnode == me.as_local() {
-                buffered.push(m);
+                buffered.push_back(m);
                 return output_messages;
             }
         }
@@ -215,10 +201,7 @@ impl Domain {
         output_messages
     }
 
-    fn dispatch_(&mut self,
-                 m: Packet,
-                 enable_output: bool)
-                 -> HashMap<NodeAddress, Vec<ops::Record>> {
+    fn dispatch_(&mut self, m: Packet, enable_output: bool) -> HashMap<NodeAddress, Vec<Record>> {
         Self::dispatch(m,
                        &self.not_ready,
                        &mut self.replaying_to,
@@ -277,136 +260,26 @@ impl Domain {
         }
     }
 
-    fn apply_transactions(&mut self) {
-        while !self.buffered_transactions.is_empty() {
-            let e = {
-                // If we don't have anything for this timestamp yet, then stop.
-                let entry = match self.buffered_transactions.entry(self.ts + 1) {
-                    Entry::Occupied(e) => e,
-                    _ => break,
-                };
-
-                // If this is a normal transaction and we don't have all the messages for this
-                // timestamp, then stop.
-                if let BufferedTransaction::Transaction(base, ref messages) = *entry.get() {
-                    if messages.len() < self.ingress_from_base[&base] {
-                        break;
-                    }
-                }
-                entry.remove()
-            };
-
-            match e {
-                BufferedTransaction::RemoteTransaction => {}
-                BufferedTransaction::Transaction(_, messages) => {
-                    self.transactional_dispatch(messages);
-                }
-                BufferedTransaction::MigrationStart(channel) => {
-                    let _ = channel.send(());
-                }
-                BufferedTransaction::MigrationEnd(ingress_from_base) => {
-                    self.ingress_from_base = ingress_from_base;
-                }
-            }
-            self.ts += 1;
-        }
-    }
-
-    // Skip the range of timestamps from start (inclusive) to end (non-inclusive).
-    fn skip_timestamp_range(&mut self, start: i64, end: i64) {
-        use std::cmp::max;
-        for t in max(start, self.ts+1)..end {
-            let o = BufferedTransaction::RemoteTransaction;
-            self.buffered_transactions.insert(t, o);
-        }
-    }
-
-    fn buffer_transaction(&mut self, m: Packet) {
-        // Skip timestamps if possible. Unfortunately, this can't be combined with the if statement
-        // below because that one inserts m into messages, while this one needs to borrow prevs from
-        // within it.
-        if let Packet::Transaction { state: TransactionState::Committed(ts, _, ref prevs), .. } = m {
-            if let Some(prev) = prevs.get(&self.index) {
-                self.skip_timestamp_range(*prev+1, ts);
-            }
-        }
-
-        if let Packet::Transaction { state: TransactionState::Committed(ts, base, _), .. } = m {
-            // Insert message into buffer.
-            match *self.buffered_transactions
-                .entry(ts)
-                .or_insert_with(|| BufferedTransaction::Transaction(base, vec![])) {
-                BufferedTransaction::Transaction(_, ref mut messages) => messages.push(m),
-                _ => unreachable!(),
-            }
-
-            self.apply_transactions();
-        } else {
-            unreachable!();
-        }
-    }
-
-    fn assign_ts(&mut self, packet: &mut Packet) -> bool {
-        match *packet {
-            Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
-            Packet::Transaction { ref mut state, ref link, ref data } => {
-                let empty = TransactionState::Committed(0, 0.into(), HashMap::new());
-                let pending = ::std::mem::replace(state, empty);
-                if let TransactionState::Pending(token, send) = pending {
-                    let ingress = self.nodes[link.dst.as_local()].borrow();
-                    // TODO: is this the correct node?
-                    let base_node = self.nodes[ingress.children[0].as_local()].borrow().index;
-                    let result = self.checktable
-                        .lock()
-                        .unwrap()
-                        .claim_timestamp(&token, base_node, data);
-                    match result {
-                        checktable::TransactionResult::Committed(ts, prevs) => {
-                            ::std::mem::replace(state,
-                                                TransactionState::Committed(ts, base_node, prevs));
-                            let _ = send.send(Ok(ts));
-                            true
-                        }
-                        checktable::TransactionResult::Aborted => {
-                            let _ = send.send(Err(()));
-                            false
-                        }
-                    }
-                } else {
-                    unreachable!();
-                }
-            }
-            _ => true,
-        }
-    }
-
-    fn handle(&mut self,
-              mut m: Packet,
-              domain_rx: &mut mpsc::Receiver<Packet>,
-              inject_tx: &mut InjectCh) {
-
-        // assign ts to pending transactions
-        if !self.assign_ts(&mut m) {
-            // transaction aborted
-            return;
-        }
-
+    fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
             }
-            m @ Packet::Transaction { .. } => {
-                self.buffer_transaction(m);
+            m @ Packet::Transaction { .. } |
+            m @ Packet::StartMigration { .. } |
+            m @ Packet::CompleteMigration { .. } => {
+                self.transaction_state.handle(m);
+                loop {
+                    match self.transaction_state.get_next_event() {
+                        transactions::Event::Transaction(m) => self.transactional_dispatch(m),
+                        transactions::Event::StartMigration => {}
+                        transactions::Event::CompleteMigration => {}
+                        transactions::Event::None => break,
+                    }
+                }
             }
             m @ Packet::Replay { .. } => {
-                self.handle_replay(m, domain_rx, inject_tx);
-            }
-            Packet::Timestamp(ts) => {
-                let o = BufferedTransaction::RemoteTransaction;
-                let o = self.buffered_transactions.insert(ts, o);
-                assert!(o.is_none());
-
-                self.apply_transactions();
+                self.handle_replay(m, inject_tx);
             }
             Packet::AddNode { node, parents } => {
                 use std::cell;
@@ -418,6 +291,13 @@ impl Domain {
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
+            }
+            Packet::StateSizeProbe { node, ack } => {
+                if let Some(state) = self.state.get(&node) {
+                    ack.send(state.len()).unwrap();
+                } else {
+                    drop(ack);
+                }
             }
             Packet::PrepareState { node, index } => {
                 let mut state = State::default();
@@ -466,9 +346,15 @@ impl Domain {
                     data: ReplayData::StateCopy(state),
                 };
 
-                self.handle_replay(m, domain_rx, inject_tx);
+                self.handle_replay(m, inject_tx);
+            }
+            Packet::Finish(tag, ni) => {
+                self.finish_replay(tag, ni, inject_tx);
             }
             Packet::Ready { node, index, ack } => {
+
+                assert!(self.replaying_to.is_none());
+
                 if !index.is_empty() {
                     let mut s = {
                         let n = self.nodes[&node].borrow();
@@ -505,21 +391,6 @@ impl Domain {
 
                 drop(ack);
             }
-            Packet::StartMigration { at, prev_ts, ack } => {
-                self.skip_timestamp_range(prev_ts, at);
-                let o = self.buffered_transactions
-                    .insert(at, BufferedTransaction::MigrationStart(ack));
-                assert!(o.is_none());
-
-                self.apply_transactions();
-            }
-            Packet::CompleteMigration { at, ingress_from_base } => {
-                let o = self.buffered_transactions
-                    .insert(at, BufferedTransaction::MigrationEnd(ingress_from_base));
-                assert!(o.is_none());
-                assert_eq!(at, self.ts + 1);
-                self.apply_transactions();
-            }
             Packet::GetStatistics(sender) => {
                 let domain_stats = statistics::DomainStats {
                     total_time: self.total_time.num_nanoseconds(),
@@ -527,22 +398,26 @@ impl Domain {
                     wait_time: self.wait_time.num_nanoseconds(),
                 };
 
-                let node_stats = self.nodes.iter().filter_map(|nd| {
-                    let ref n: NodeDescriptor = *nd.borrow();
-                    let local_index: LocalNodeIndex = *n.addr().as_local();
-                    let node_index: NodeIndex = n.index;
+                let node_stats = self.nodes
+                    .iter()
+                    .filter_map(|nd| {
+                        let ref n: NodeDescriptor = *nd.borrow();
+                        let local_index: LocalNodeIndex = *n.addr().as_local();
+                        let node_index: NodeIndex = n.index;
 
-                    let time = self.process_times.num_nanoseconds(local_index);
-                    let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                    if time.is_some() && ptime.is_some() {
-                        Some((node_index, statistics::NodeStats{
-                            process_time: time.unwrap(),
-                            process_ptime: ptime.unwrap(),
-                        }))
-                    } else {
-                        None
-                    }
-                }).collect();
+                        let time = self.process_times.num_nanoseconds(local_index);
+                        let ptime = self.process_ptimes.num_nanoseconds(local_index);
+                        if time.is_some() && ptime.is_some() {
+                            Some((node_index,
+                                  statistics::NodeStats {
+                                      process_time: time.unwrap(),
+                                      process_ptime: ptime.unwrap(),
+                                  }))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 sender.send((domain_stats, node_stats)).unwrap();
             }
@@ -551,10 +426,7 @@ impl Domain {
         }
     }
 
-    fn handle_replay(&mut self,
-                     m: Packet,
-                     domain_rx: &mut mpsc::Receiver<Packet>,
-                     inject_tx: &mut InjectCh) {
+    fn handle_replay(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         let mut finished = None;
         let mut playback = None;
         if let Packet::Replay { mut link, tag, last, data } = m {
@@ -568,7 +440,7 @@ impl Domain {
                 // first replay message is that those have already been accounted for in the state
                 // we are being replayed. if we buffered them and applied them after all the state
                 // has been replayed, we would double-apply those changes, which is bad.
-                self.replaying_to = Some((*path.last().unwrap().as_local(), vec![]));
+                self.replaying_to = Some((*path.last().unwrap().as_local(), VecDeque::new(), 0))
             }
 
             // we may be able to just absorb all the state in one go if we're lucky!
@@ -715,7 +587,10 @@ impl Domain {
                                 };
 
                                 trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                inject_tx.send(p).unwrap();
+                                if inject_tx.send(p).is_err() {
+                                    warn!(log, "replayer noticed domain shutdown");
+                                    break;
+                                }
                             }
 
                             debug!(log, "state chunker finished"; "node" => to.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
@@ -762,7 +637,7 @@ impl Domain {
                     }
 
                     if last {
-                        debug!(self.log, "last batch processed {:?}", done_tx.is_some());
+                        debug!(self.log, "last batch processed"; "terminal" => done_tx.is_some());
                     } else {
                         debug!(self.log, "batch processed");
                     }
@@ -779,69 +654,103 @@ impl Domain {
         }
 
         if let Some(p) = playback {
-            self.handle(p, domain_rx, inject_tx);
+            self.handle(p, inject_tx);
         }
         if let Some((tag, ni)) = finished {
-            self.replay_done(tag, ni, domain_rx);
-            trace!(self.log, "node is fully up-to-date"; "local" => ni.id());
+            // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
+            // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
+            // this allows finish_replay to dispatch into the node by overriding replaying_to.
+            self.not_ready.remove(&ni);
+            // NOTE: if this call ever blocks, we're in big trouble: handle_replay is called
+            // directly from the main loop of a domain, so if we block here, we're also blocking
+            // the loop that is supposed to drain the channel we're blocking on. luckily, in this
+            // particular case, we know that sending will not block, because:
+            //
+            //  - inject_tx has a buffer size of 1, so we will block if either inject_tx is
+            //    already full, or if there are other concurrent senders.
+            //  - there are no concurrent senders because:
+            //    - there are only two other places that send on inject_tx: in finish_replay, and in
+            //      state replay.
+            //    - finish_replay is not running, because it is only run from the main domain loop,
+            //      and that's currently executing us.
+            //    - no state replay can be sending, because:
+            //      - there is only one replay: this one
+            //      - that replay sent an entry with last: true (so we got finished.is_some)
+            //      - last: true is the *last* thing the replay thread sends
+            //  - inject_tx must be empty, because
+            //    - if the previous send was from the replay thread, it had last: true (otherwise we
+            //      wouldn't have finished.is_some), and we just recv'd that.
+            //    - if the last send was from finish_replay, it must have been recv'd by the time
+            //      this code runs. the reason for this is a bit more involved:
+            //      - we just received a Packet::Replay with last: true.
+            //      - at some point prior to this, finish_replay sent a Packet::Finish
+            //      - it turns out that there *must* have been a recv on the inject channel between
+            //        these two. by contradiction:
+            //        - assume no packet was received on inject between the two times
+            //        - if we are using local replay, we know the replay thread has finished,
+            //          since handle_replay must have seen last: true from it in order to trigger
+            //          finish_replay
+            //        - if we were being replayed to from another domain, the *previous* Replay we
+            //          received from it must have had last: true (again, to trigger finish_replay)
+            //        - thus, the Replay we are receiving *now* must be a part of the *next* replay
+            //        - we know finish_replay has not acknowledged the previous replay to the
+            //          parent domain:
+            //          - it does so only after receiving a Finish (from the inject channel), and
+            //            *not* emitting another Finish
+            //          - since it *did* emit a Finish, we know it did *not* ack last time
+            //          - by assumption, the Finish it emitted has not been received, so we also
+            //            know it hasn't run again
+            //        - since no replay message is sent after a last: true until the migration sees
+            //          the ack from finish_replay, we know the most recent replay must be the
+            //          last: true that triggered finish_replay.
+            //        - but this is a contradiction, since we just received a Packet::Replay
+            //
+            // phew.
+            // hopefully that made sense.
+            // this (informal) argument relies on there only being one active replay in the system
+            // at any given point in time, so we may need to revisit it for partial materialization
+            // (TODO)
+            match inject_tx.try_send(Packet::Finish(tag, ni)) {
+                Ok(_) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    // can't happen, since we know the reader thread (us) is still running
+                    unreachable!();
+                }
+                Err(mpsc::TrySendError::Full(_)) => {
+                    unreachable!();
+                }
+            }
         }
     }
 
-    fn replay_done(&mut self, tag: Tag, node: LocalNodeIndex, rx: &mut mpsc::Receiver<Packet>) {
-        use std::time;
+    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject_tx: &mut InjectCh) {
+        if self.replaying_to.is_none() {
+            // we're told to continue replay, but nothing is being replayed
+            unreachable!();
+        }
 
-        // node is now ready, and should start accepting "real" updates
-        trace!(self.log, "readying node"; "local" => node.id());
-        self.not_ready.remove(&node);
-
-        let start = time::Instant::now();
-        let mut iterations = 0;
-        while let Some((target, buffered)) = self.replaying_to.take() {
-            assert_eq!(target, node);
-            if buffered.is_empty() {
-                break;
+        let finished = {
+            let replaying_to = self.replaying_to.as_mut().unwrap();
+            if replaying_to.0 != node {
+                // we're told to continue replay for node a, but not b is being replayed
+                unreachable!();
             }
-            if iterations == 0 {
-                info!(self.log, "starting backlog drain");
-            }
+            // log that we did another pass
+            replaying_to.2 += 1;
 
-            // some updates were propagated to this node during the migration. we need to replay
-            // them before we take even newer updates. however, we don't want to completely block
-            // the domain data channel, so we keep processing updates and backlogging them if
-            // necessary.
-
-            // we drain the buffered messages, and for every other message we process. we also
-            // process a domain message. this has the effect of letting us catch up, but also not
-            // stopping the domain entirely. we don't do this if there are fewer than 10 things
-            // left, just to avoid the overhead of the switching.
-            let switching = buffered.len() > 10;
-            let mut even = true;
-
-            debug!(self.log, "draining backlog"; "length" => buffered.len());
-
-            // make sure any updates from rx that we handle, and that hit this node, are buffered
-            // so we can get back to them later.
-            if switching {
-                self.replaying_to = Some((target, Vec::with_capacity(buffered.len() / 2)));
+            let mut handle = replaying_to.1.len();
+            if handle > 100 {
+                handle /= 2;
             }
 
-            for m in buffered {
+            let mut handled = 0;
+            while let Some(m) = replaying_to.1.pop_front() {
+                // some updates were propagated to this node during the migration. we need to
+                // replay them before we take even newer updates. however, we don't want to
+                // completely block the domain data channel, so we only process a few backlogged
+                // updates before yielding to the main loop (which might buffer more things).
+
                 if let m @ Packet::Message { .. } = m {
-                    if switching && !even {
-                        // also process from rx
-                        match rx.try_recv() {
-                            Ok(m @ Packet::Message { .. }) => {
-                                self.dispatch_(m, true);
-                            }
-                            Ok(_) => {
-                                // still no transactions allowed
-                                unreachable!();
-                            }
-                            Err(_) => (),
-                        }
-                    }
-                    even = !even;
-
                     // NOTE: we cannot use self.dispatch_ here, because we specifically need to
                     // override the buffering behavior that our self.replaying_to = Some above would
                     // initiate.
@@ -857,39 +766,66 @@ impl Domain {
                     // no transactions allowed here since we're still in a migration
                     unreachable!();
                 }
+
+                handled += 1;
+                if handled == handle {
+                    // we want to make sure we actually drain the backlog we've accumulated
+                    // but at the same time we don't want to completely stall the system
+                    // therefore we only handle half the backlog at a time
+                    break;
+                }
             }
 
-            iterations += 1;
-        }
+            replaying_to.1.is_empty()
+        };
 
-        if iterations != 0 {
-            info!(self.log, "backlog drained"; "iterations" => iterations, "μs" => dur_to_ns!(start.elapsed()) / 1000);
-        }
+        if finished {
+            // node is now ready, and should start accepting "real" updates
+            let rt = self.replaying_to.take().unwrap();
+            debug!(self.log, "node is fully up-to-date"; "local" => node.id(), "passes" => rt.2);
 
-        if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| p.1.as_mut()) {
-            info!(self.log, "acknowledging replay completed"; "node" => node.id());
-            done_tx.send(()).unwrap();
+            if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| p.1.as_mut()) {
+                info!(self.log, "acknowledging replay completed"; "node" => node.id());
+                done_tx.send(()).unwrap();
+            } else {
+                unreachable!()
+            }
         } else {
-            unreachable!()
+            // we're not done -- inject a request to continue handling buffered things
+            // NOTE: similarly to in handle_replay, if this call ever blocks, we're in big trouble:
+            // finish_replay is also called directly from the main loop of a domain, so if we block
+            // here, we're also blocking the loop that is supposed to drain the channel we're
+            // blocking on. the argument for why this won't block is very similar to for
+            // handle_replay. briefly:
+            //
+            //  - we know there's only one replay going on
+            //  - we know there are no more Replay packets for this replay, since one with last:
+            //    true must have been received for finish_replay to be triggered
+            //  - therefore we know that no replay thread is running
+            //  - since handle_replay will only send Packet::Finish once (when it receives last:
+            //    true), we also know that it will not send again until the replay is over
+            //  - the replay is over when we acknowedge the replay, which we haven't done yet
+            //    (otherwise we'd be hitting the if branch above).
+            match inject_tx.try_send(Packet::Finish(tag, node)) {
+                Ok(_) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    // can't happen, since we know the reader thread (us) is still running
+                    unreachable!();
+                }
+                Err(mpsc::TrySendError::Full(_)) => {
+                    unreachable!();
+                }
+            }
         }
     }
 
-    pub fn boot(mut self, mut rx: mpsc::Receiver<Packet>) {
-        use std::thread;
-
+    pub fn boot(mut self, rx: mpsc::Receiver<Packet>) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.iter().next().unwrap().borrow().domain().into();
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {
-                // we want to keep around a second handle to the data channel so that we can access
-                // it during replay. we know that that's safe, because while handle_control is
-                // executing, we know we're not also using the Select or its handles.
-                let secondary_rx = &mut rx as *mut _;
-                let secondary_rx = unsafe { &mut *secondary_rx };
-
-                let (inject_tx, inject_rx) = mpsc::sync_channel(1);
-                let mut inject_tx = inject_tx;
+                let (mut inject_tx, inject_rx) = mpsc::sync_channel(1);
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
@@ -922,9 +858,16 @@ impl Domain {
                     if let Packet::Quit = m {
                         break;
                     }
-                    self.handle(m, secondary_rx, &mut inject_tx);
+                    self.handle(m, &mut inject_tx);
                 }
             })
-            .unwrap();
+            .unwrap()
+    }
+}
+
+#[cfg(test)]
+impl Drop for Domain {
+    fn drop(&mut self) {
+        //println!("Dropping Domain!")
     }
 }

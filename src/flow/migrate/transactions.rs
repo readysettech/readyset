@@ -28,7 +28,10 @@ fn count_base_ingress(graph: &Graph,
         })
         .map(|base| {
             let num_paths = ingress_nodes.iter()
-                .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
+                .filter(|&&ingress| {
+                    petgraph::algo::has_path_connecting(graph, base, ingress, None) ||
+                    petgraph::algo::has_path_connecting(graph, ingress, base, None)
+                })
                 .count();
             (base, num_paths)
         })

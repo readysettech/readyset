@@ -1,6 +1,5 @@
 use petgraph;
 
-use flow;
 use checktable;
 use flow::domain;
 use flow::statistics;
@@ -37,7 +36,7 @@ pub enum ReplayData {
 
 #[derive(Clone)]
 pub enum TransactionState {
-    Committed(i64, petgraph::graph::NodeIndex, HashMap<domain::Index, i64>),
+    Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
 }
 
@@ -62,20 +61,31 @@ pub enum Packet {
         data: ReplayData,
     },
 
+    //
+    // Internal control
+    //
+    Finish(Tag, LocalNodeIndex),
+
     // Control messages
     //
     /// Add a new node to this domain below the given parents.
     AddNode {
         node: domain::NodeDescriptor,
-        parents: Vec<flow::LocalNodeIndex>,
+        parents: Vec<LocalNodeIndex>,
     },
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
-        node: flow::LocalNodeIndex,
+        node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
+    },
+
+    /// Probe for the number of records in the given node's state
+    StateSizeProbe {
+        node: LocalNodeIndex,
+        ack: mpsc::SyncSender<usize>,
     },
 
     /// Inform domain about a new replay path.
@@ -96,7 +106,7 @@ pub enum Packet {
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.
     Ready {
-        node: flow::LocalNodeIndex,
+        node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
         ack: mpsc::SyncSender<()>,
     },
@@ -132,12 +142,6 @@ pub enum Packet {
     /// Request that a domain send usage statistics on the given sender.
     GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
                                     HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
-
-    /// Notify a domain about a timestamp it would otherwise have missed.
-    ///
-    /// This message will be sent to domains from transactional base nodes with no connection to
-    /// a particular domain.
-    Timestamp(i64),
 
     None,
 }
@@ -180,7 +184,7 @@ impl Packet {
         where F: FnOnce(Records) -> Records
     {
         use std::mem;
-        let m = match mem::replace(self, Packet::Timestamp(0)) {
+        let m = match mem::replace(self, Packet::None) {
             Packet::Message { link, data } => {
                 Packet::Message {
                     link: link,
@@ -279,7 +283,6 @@ impl fmt::Debug for Packet {
                     }
                 }
             }
-            Packet::Timestamp(ts) => write!(f, "Packet::Timestamp({})", ts),
             Packet::None => write!(f, "Packet::Node"),
             _ => write!(f, "Packet::Control"),
         }

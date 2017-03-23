@@ -12,7 +12,7 @@ use std::thread;
 
 /// Available RPC methods
 pub mod ext {
-    use flow::data::DataType;
+    use flow::prelude::DataType;
     use std::collections::HashMap;
     service! {
         /// Query the given `view` for all records whose columns match the given values.
@@ -78,7 +78,7 @@ impl Drop for ServerHandle {
         let wait: Vec<_> = self.threads
             .drain(..)
             .map(|(tx, jh)| {
-                tx.complete(());
+                tx.send(()).unwrap();
                 jh
             })
             .collect();

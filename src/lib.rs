@@ -318,7 +318,6 @@
 #![feature(pub_restricted)]
 #![feature(conservative_impl_trait)]
 #![feature(try_from)]
-#![feature(float_extras)]
 #![deny(missing_docs)]
 #![cfg_attr(feature="b_netsoup", feature(plugin))]
 #![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]
@@ -363,11 +362,11 @@ mod backlog;
 mod recipe;
 
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Migration, NodeAddress, Mutator};
+pub use flow::{Blender, Migration, Mutator};
+pub use flow::core::{NodeAddress, DataType, Datas};
 pub use flow::node::StreamUpdate;
 pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
-pub use flow::data::DataType;
-pub use ops::Datas;
+pub use flow::domain::Index;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
@@ -378,6 +377,7 @@ pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::Filter;
+pub use ops::topk::TopK;
 pub use recipe::Recipe;
 
 #[cfg(feature="web")]

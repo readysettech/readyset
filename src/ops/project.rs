@@ -26,7 +26,12 @@ impl Project {
     }
 
     fn resolve_col(&self, col: usize) -> usize {
-        if self.emit.is_some() && col >= self.emit.as_ref().unwrap().len() {
+        if self.emit.is_some() &&
+           col >=
+           self.emit
+               .as_ref()
+               .unwrap()
+               .len() {
             panic!("can't resolve literal column {} that doesn't come from parent node!",
                    col);
         } else {
@@ -137,7 +142,12 @@ impl Ingredient for Project {
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        let result = if self.emit.is_some() && column >= self.emit.as_ref().unwrap().len() {
+        let result = if self.emit.is_some() &&
+                        column >=
+                        self.emit
+                            .as_ref()
+                            .unwrap()
+                            .len() {
             None
         } else {
             Some(self.resolve_col(column))

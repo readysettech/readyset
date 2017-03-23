@@ -1,4 +1,3 @@
-use ops;
 use flow;
 use petgraph::graph::NodeIndex;
 use flow::prelude::*;
@@ -129,10 +128,13 @@ impl NodeDescriptor {
                         m.as_ref().map(|m| m.clone_data()).unwrap()
                     };
 
-                    m.link_mut().src = NodeAddress::make_global(self.index);
+                    m.link_mut().src = self.index.into();
                     m.link_mut().dst = dst;
 
-                    tx.send(m).unwrap();
+                    if tx.send(m).is_err() {
+                        // we must be shutting down...
+                        break;
+                    }
 
                     if take {
                         break;
@@ -163,9 +165,9 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) {
     let mut state = state.unwrap();
     for r in rs.iter() {
         match *r {
-            ops::Record::Positive(ref r) => state.insert(r.clone()),
-            ops::Record::Negative(ref r) => state.remove(r),
-            ops::Record::DeleteRequest(..) => unreachable!(),
+            Record::Positive(ref r) => state.insert(r.clone()),
+            Record::Negative(ref r) => state.remove(r),
+            Record::DeleteRequest(..) => unreachable!(),
         }
     }
 }

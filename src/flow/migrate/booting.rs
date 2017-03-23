@@ -13,6 +13,7 @@ use petgraph::graph::NodeIndex;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::cell;
+use std::thread;
 
 use slog::Logger;
 
@@ -29,7 +30,8 @@ pub fn boot_new(log: Logger,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 rx: mpsc::Receiver<Packet>,
-                ts: i64) {
+                ts: i64)
+                -> thread::JoinHandle<()> {
     let nodes = build_descriptors(graph, nodes);
     let domain = domain::Domain::new(log, index, nodes, checktable, ts);
     domain.boot(rx)

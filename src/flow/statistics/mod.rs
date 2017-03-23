@@ -22,5 +22,5 @@ pub struct NodeStats {
 /// Struct holding statistics about an entire graph.
 #[derive(Debug)]
 pub struct GraphStats {
-    pub domains: HashMap<domain::Index, (DomainStats, HashMap<NodeAddress, NodeStats>)>
+    pub domains: HashMap<domain::Index, (DomainStats, HashMap<NodeAddress, NodeStats>)>,
 }
