@@ -186,9 +186,21 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                                    .unwrap()
                                    .as_local())
                 .expect("grouped operators must have their own state materialized");
-            let rs = db.lookup(&self.out_key[..], &KeyType::from(&group[..]));
-            debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-            let old = rs.get(0);
+
+            let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
+                LookupResult::Some(rs) => {
+                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                    rs.get(0)
+                }
+                LookupResult::Missing => {
+                    return ProcessingResult::NeedReplay {
+                               node: from,
+                               columns: self.out_key.clone(),
+                               key: group.into_iter().cloned().collect(),
+                               was: rs,
+                           };
+                }
+            };
 
             let (current, new) = {
                 use std::borrow::Cow;

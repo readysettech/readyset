@@ -151,14 +151,19 @@ impl NodeDescriptor {
                     let _ = (); // force rustfmt to not eliminate closure {}
                     match i.on_input(from, data, nodes, state) {
                         ProcessingResult::Done(rs) => rs,
-                        ProcessingResult::NeedReplay { tag, was } => {
-                            need_replay = Some(tag);
+                        ProcessingResult::NeedReplay {
+                            node,
+                            columns,
+                            key,
+                            was,
+                        } => {
+                            need_replay = Some((node, columns, key));
                             was
                         }
                     }
                 });
 
-                if let Some(tag) = need_replay {
+                if let Some(..) = need_replay {
                     unimplemented!();
                 }
                 materialize(m.data(), state.get_mut(&addr));

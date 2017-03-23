@@ -69,6 +69,38 @@ impl Ingredient for Latest {
                 state: &StateMap)
                 -> ProcessingResult {
         debug_assert_eq!(from, self.src);
+
+        // find the current value for each group
+        let db = state.get(self.us.as_ref().unwrap().as_local()).expect("latest must have its own state materialized");
+        let currents: Result<Vec<_>, _> = rs.iter()
+            .filter_map(|r| {
+                if !r.is_positive() {
+                    return None;
+                }
+
+                let r = r.rec();
+                match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
+                    LookupResult::Some(rs) => {
+                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                        Some(Ok(rs.get(0)))
+                    }
+                    LookupResult::Missing => Some(Err((self.key[0], r[self.key[0]].clone()))),
+                }
+            })
+            .collect();
+
+        let currents = match currents {
+            Ok(c) => c,
+            Err((col, key)) => {
+                return ProcessingResult::NeedReplay {
+                           node: from,
+                           columns: vec![col],
+                           key: vec![key],
+                           was: rs,
+                       };
+            }
+        };
+
         // We don't allow standalone negatives as input to a latest. This is because it
         // would be very computationally expensive (and currently impossible) to find what
         // the *previous* latest was if the current latest was revoked. However, if a
@@ -84,24 +116,12 @@ impl Ingredient for Latest {
 
         // buffer emitted records
         let mut out = Vec::with_capacity(pos.len());
-        for r in pos {
+        for (i, r) in pos.into_iter().enumerate() {
             let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
             handled.insert(group);
 
-            {
-                let r = r.rec();
-
-                // find the current value for this group
-                let db = state.get(self.us
-                                       .as_ref()
-                                       .unwrap()
-                                       .as_local())
-                    .expect("latest must have its own state materialized");
-                let rs = db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]]));
-                debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                if let Some(current) = rs.get(0) {
-                    out.push(Record::Negative(current.clone()));
-                }
+            if let Some(current) = currents[i] {
+                out.push(Record::Negative(current.clone()));
             }
 
             // if there was a previous latest for this key, revoke old record

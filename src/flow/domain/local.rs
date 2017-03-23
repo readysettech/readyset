@@ -194,6 +194,11 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
     }
 }
 
+pub enum LookupResult<'a, T: 'a> {
+    Some(&'a [Arc<Vec<T>>]),
+    Missing,
+}
+
 #[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
     state: Vec<(Vec<usize>, KeyedState<T>)>,
@@ -360,13 +365,13 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
-    pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> &[Arc<Vec<T>>] {
+    pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> LookupResult<T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {
-            &rs[..]
+            LookupResult::Some(&rs[..])
         } else {
-            &[]
+            LookupResult::Missing
         }
     }
 

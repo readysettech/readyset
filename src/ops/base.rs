@@ -82,10 +82,14 @@ impl Ingredient for Base {
                                   .unwrap()
                                   .as_local())
                         .expect("base must have its own state materialized to support deletions");
-                let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
-                assert_eq!(rows.len(), 1);
 
-                Record::Negative(rows[0].clone())
+                match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                    LookupResult::Some(rows) => {
+                        assert_eq!(rows.len(), 1);
+                        Record::Negative(rows[0].clone())
+                    }
+                    LookupResult::Missing => unreachable!(),
+                }
             }
                  })
             .collect();

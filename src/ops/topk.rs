@@ -58,10 +58,10 @@ impl TopK {
     /// same number of negatives.
     fn apply(&self,
              current_topk: &[Arc<Vec<DataType>>],
-             new: Vec<Record>,
+             new: Records,
              state: &StateMap,
              group: &[DataType])
-             -> Vec<Record> {
+             -> ProcessingResult {
         let cmp_rows =
             |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[self.over].cmp(&b[self.over]);
 
@@ -87,10 +87,20 @@ impl TopK {
             .collect();
         output_rows.sort_by(|a, b| cmp_rows(&a.0, &b.0));
 
+        let src_db =
+            state.get(self.src.as_local()).expect("topk must have its parent's state materialized");
         if output_rows.len() < self.k {
-            let src_db = state.get(self.src.as_local())
-                .expect("topk must have its parent's state materialized");
-            let rs = src_db.lookup(&self.group_by[..], &KeyType::from(group));
+            let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
+                LookupResult::Some(rs) => rs,
+                LookupResult::Missing => {
+                    return ProcessingResult::NeedReplay {
+                               node: self.src,
+                               columns: self.group_by.clone(),
+                               key: group.into_iter().cloned().collect(),
+                               was: new,
+                           }
+                }
+            };
 
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
@@ -149,7 +159,7 @@ impl TopK {
         delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
                                                                       Record::Positive(p.0.clone())
                                                                   }));
-        delta
+        ProcessingResult::Done(delta.into())
     }
 }
 
@@ -216,6 +226,31 @@ impl Ingredient for TopK {
             consolidate.entry(group).or_insert_with(Vec::new).push(rec.clone());
         }
 
+        // find the current value for each group
+        let db = state.get(self.us
+                                       .as_ref()
+                                       .unwrap()
+                                       .as_local())
+                    .expect("topk must have its own state materialized");
+        let current: Result<Vec<_>, _> = consolidate.iter()
+            .map(|(group, _)| match db.lookup(&self.group_by[..], &KeyType::from(&group[..])) {
+                     LookupResult::Some(rs) => Ok(rs),
+                     LookupResult::Missing => Err((self.group_by.clone(), group.clone())),
+                 })
+            .collect();
+
+        let mut current = match current {
+            Ok(current) => current.into_iter(),
+            Err((columns, key)) => {
+                return ProcessingResult::NeedReplay {
+                           node: from,
+                           columns: columns,
+                           key: key,
+                           was: rs,
+                       };
+            }
+        };
+
         let mut out = Vec::new();
         for (group, mut diffs) in consolidate {
             // Retrieve then update the number of times in this group
@@ -231,16 +266,14 @@ impl Ingredient for TopK {
             if count + count_diff <= self.k as i64 {
                 out.append(&mut diffs);
             } else {
-                // find the current value for this group
-                let db = state.get(self.us
-                                       .as_ref()
-                                       .unwrap()
-                                       .as_local())
-                    .expect("topk must have its own state materialized");
-                let old_rs = db.lookup(&self.group_by[..], &KeyType::from(&group[..]));
+                let old_rs = current.next().unwrap();
                 assert!(count as usize >= old_rs.len());
 
-                out.append(&mut self.apply(old_rs, diffs, state, &group[..]));
+                let mut res = match self.apply(old_rs, diffs.into(), state, &group[..]) {
+                    ProcessingResult::Done(rs) => rs.into(),
+                    ProcessingResult::NeedReplay { .. } => unimplemented!(),
+                };
+                out.append(&mut res);
             }
             self.counts.insert(group, (count + count_diff) as usize);
         }

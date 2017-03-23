@@ -105,19 +105,25 @@ impl Ingredient for Filter {
                          key: &KeyType<DataType>,
                          states: &'a StateMap)
                          -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>> {
-        states.get(self.src.as_local()).map(|state| {
+        states.get(self.src.as_local()).and_then(|state| {
             let f = self.filter.clone();
-            Box::new(state.lookup(columns, key).iter().filter(move |r| {
-                r.iter().enumerate().all(|(i, d)| {
-                    // check if this filter matches
-                    if let Some(ref f) = f[i] {
-                        f == d
-                    } else {
-                        // everything matches no condition
-                        true
-                    }
-                })
-            })) as Box<_>
+            match state.lookup(columns, key) {
+                LookupResult::Some(rs) => {
+                    let r = Box::new(rs.iter().filter(move |r| {
+                        r.iter().enumerate().all(|(i, d)| {
+                            // check if this filter matches
+                            if let Some(ref f) = f[i] {
+                                f == d
+                            } else {
+                                // everything matches no condition
+                                true
+                            }
+                        })
+                    })) as Box<_>;
+                    Some(r)
+                }
+                LookupResult::Missing => None,
+            }
         })
     }
 

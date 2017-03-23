@@ -6,7 +6,9 @@ use flow::prelude;
 pub enum ProcessingResult {
     Done(prelude::Records),
     NeedReplay {
-        tag: prelude::Tag,
+        node: prelude::NodeAddress,
+        columns: Vec<usize>,
+        key: Vec<prelude::DataType>,
         was: prelude::Records,
     },
 }
@@ -106,10 +108,8 @@ pub trait Ingredient
         None
     }
 
-    /// Process a single incoming message, optionally producing an update to be propagated to
-    /// children.
-    ///
-    /// Only addresses of the type `prelude::NodeAddress::Local` may be used in this function.
+    /// Look up the given key in the given parent's state, falling back to query_through if
+    /// necessary.
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
                   columns: &[usize],
@@ -118,7 +118,10 @@ pub trait Ingredient
                   states: &'a prelude::StateMap)
                   -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
         states.get(parent.as_local())
-            .map(move |state| Box::new(state.lookup(columns, key).iter()) as Box<_>)
+            .and_then(move |state| match state.lookup(columns, key) {
+                          prelude::LookupResult::Some(rs) => Some(Box::new(rs.iter()) as Box<_>),
+                          prelude::LookupResult::Missing => None,
+                      })
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
