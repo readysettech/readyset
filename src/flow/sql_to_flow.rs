@@ -1071,7 +1071,7 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
-                                    name: String::from("anon_fn"),
+                                    name: String::from("votes"),
                                     alias: Some(String::from("votes")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
@@ -1079,7 +1079,7 @@ mod tests {
                                                 vec![Column::from("votes.userid")]))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["aid", "anon_fn"]);
+        assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view
         let edge_view = get_node(&inc, &mig, &res.unwrap().name);
@@ -1194,7 +1194,7 @@ mod tests {
         // check project helper node
         let qid = query_id_hash(&["computed_columns", "votes"], &[],
                                 &[&Column {
-                                    name: String::from("anon_fn"),
+                                    name: String::from("count"),
                                     alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
@@ -1206,7 +1206,7 @@ mod tests {
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
         // check aggregation view
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["grp", "anon_fn"]);
+        assert_eq!(agg_view.fields(), &["grp", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)
@@ -1243,7 +1243,7 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
-                                    name: String::from("anon_fn"),
+                                    name: String::from("count"),
                                     alias: Some(String::from("count")),
                                     table: None,
                                     function: Some(FunctionExpression::Count(
@@ -1251,7 +1251,7 @@ mod tests {
                                                 vec![Column::from("votes.aid")]))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
-        assert_eq!(agg_view.fields(), &["userid", "anon_fn"]);
+        assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view -- note that it's not actually currently possible to read from
         // this for a lack of key (the value would be the key)

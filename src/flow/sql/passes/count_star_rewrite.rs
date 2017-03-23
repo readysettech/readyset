@@ -92,7 +92,7 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
                            FieldExpression::Seq(vec![Column {
-                               name: String::from("anon_fn"),
+                               name: String::from("count(all)"),
                                alias: None,
                                table: None,
                                function: Some(FunctionExpression::Count(
