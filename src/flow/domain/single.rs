@@ -96,6 +96,14 @@ impl NodeDescriptor {
                 // readers never have children
                 Packet::None
             }
+            flow::node::Type::Hook(ref mut h) => {
+                if let &mut Some(ref mut h) = h {
+                    h.on_input(m.take_data());
+                } else {
+                    unreachable!();
+                }
+                Packet::None
+            }
             flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
                 let mut txs = txs.lock().unwrap();

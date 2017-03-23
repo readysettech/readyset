@@ -340,6 +340,8 @@ extern crate regex;
 extern crate nom_sql;
 extern crate timekeeper;
 
+extern crate memcached;
+
 #[cfg(feature="web")]
 extern crate rustc_serialize;
 
