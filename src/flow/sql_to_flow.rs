@@ -648,27 +648,35 @@ impl SqlIncorporator {
                     QueryGraphEdge::LeftJoin(ref jps) => unimplemented!(),
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
-                        let left_ni = match prev_ni {
-                            None => {
-                                joined_tables.insert(src);
-                                let filters = &filter_nodes[src];
-                                assert_ne!(filters.len(), 0);
-                                *filters.last().unwrap()
-                            }
-                            Some(ni) => ni,
-                        };
-                        let right_ni = if joined_tables.contains(src) {
-                            joined_tables.insert(dst);
-                            *filter_nodes[dst].last().unwrap()
-                        } else if joined_tables.contains(dst) {
-                            joined_tables.insert(src);
-                            *filter_nodes[src].last().unwrap()
-                        } else {
+                        let left_ni;
+                        let right_ni;
+
+                        if joined_tables.contains(src) && joined_tables.contains(dst) {
                             // We have already handled *both* tables that are part of the join.
                             // This should never occur, because their join predicates must be
                             // associated with the same query graph edge.
                             unreachable!();
+                        } else if joined_tables.contains(src) {
+                            // join left against previous join, right against base
+                            left_ni = prev_ni.unwrap();
+                            right_ni = *filter_nodes[dst].last().unwrap();
+                        } else if joined_tables.contains(dst) {
+                            // join right against previous join, left against base
+                            left_ni = *filter_nodes[src].last().unwrap();
+                            right_ni = prev_ni.unwrap();
+                        } else {
+                            // We've seen neither of these tables before
+                            // If we already have a join in prev_ni, we must assume that some
+                            // future join will bring these unrelated join arms together.
+                            // TODO(malte): make that actually work out...
+                            let src_filters = &filter_nodes[src];
+                            let dst_filters = &filter_nodes[dst];
+                            assert_ne!(src_filters.len(), 0);
+                            assert_ne!(dst_filters.len(), 0);
+                            left_ni = *src_filters.last().unwrap();
+                            right_ni = *dst_filters.last().unwrap();
                         };
+                        // make node
                         let ni =
                             self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
                                                 jps,
@@ -678,6 +686,10 @@ impl SqlIncorporator {
                         join_nodes.push(ni);
                         i += 1;
                         prev_ni = Some(ni);
+
+                        // we've now joined both tables
+                        joined_tables.insert(src);
+                        joined_tables.insert(dst);
                     }
                     // Edge represents a GROUP BY, which we handle later
                     QueryGraphEdge::GroupBy(_) => (),
