@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display};
 use std::str;
 
 use common::FieldExpression;
@@ -11,6 +12,19 @@ pub enum FunctionExpression {
     Max(FieldExpression),
     Min(FieldExpression),
     GroupConcat(FieldExpression, String),
+}
+
+impl Display for FunctionExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FunctionExpression::Avg(ref fe) => write!(f, "avg({})", fe),
+            FunctionExpression::Count(ref fe) => write!(f, "count({})", fe),
+            FunctionExpression::Sum(ref fe) => write!(f, "sum({})", fe),
+            FunctionExpression::Max(ref fe) => write!(f, "max({})", fe),
+            FunctionExpression::Min(ref fe) => write!(f, "min({})", fe),
+            FunctionExpression::GroupConcat(ref fe, _) => write!(f, "group_concat({})", fe),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

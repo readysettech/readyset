@@ -78,6 +78,19 @@ pub enum FieldExpression {
     Seq(Vec<Column>),
 }
 
+impl Display for FieldExpression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            FieldExpression::All => write!(f, "all"),
+            FieldExpression::Seq(ref cols) => {
+                let field_list =
+                    cols.iter().map(|ref c| c.name.as_str()).collect::<Vec<&str>>().join(", ");
+                write!(f, "{}", field_list)
+            }
+        }
+    }
+}
+
 impl Default for FieldExpression {
     fn default() -> FieldExpression {
         FieldExpression::All
@@ -178,7 +191,7 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
             function: column_function,
             || {
                 Column {
-                    name: String::from("anon_fn"),
+                    name: format!("{}", function),
                     alias: None,
                     table: None,
                     function: Some(function),
@@ -217,7 +230,10 @@ named!(pub column_identifier<&[u8], Column>,
             alias: opt!(as_alias),
             || {
                 Column {
-                    name: String::from("anon_fn"),
+                    name: match alias {
+                        None => format!("{}", function),
+                        Some(a) => String::from(a),
+                    },
                     alias: match alias {
                         None => None,
                         Some(a) => Some(String::from(a)),
@@ -487,7 +503,7 @@ mod tests {
         let expected_fields = FieldExpression::Seq(vec![Column::from("addr_id")]);
         let expected_fn = Some(FunctionExpression::Max(expected_fields));
         let expected = Column {
-            name: String::from("anon_fn"),
+            name: String::from("max(addr_id)"),
             alias: None,
             table: None,
             function: expected_fn,

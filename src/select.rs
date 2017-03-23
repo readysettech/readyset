@@ -531,7 +531,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("address")],
                        fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("anon_fn"),
+                                                             name: String::from("max(addr_id)"),
                                                              alias: None,
                                                              table: None,
                                                              function: Some(agg_expr),
@@ -550,7 +550,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("address")],
                        fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("anon_fn"),
+                                                             name: String::from("max_addr"),
                                                              alias: Some(String::from("max_addr")),
                                                              table: None,
                                                              function: Some(agg_expr),
@@ -569,7 +569,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("votes")],
                        fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("anon_fn"),
+                                                             name: String::from("count(all)"),
                                                              alias: None,
                                                              table: None,
                                                              function: Some(agg_expr),
