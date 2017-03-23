@@ -242,7 +242,7 @@ impl Recipe {
 
         let parsed_queries = query_strings.iter()
             .map(|ref q| {
-                let r: Vec<&str> = q.splitn(2, ":").collect();
+                let r: Vec<&str> = q.splitn(2, ":").map(|s| s.trim()).collect();
                 if r.len() == 2 {
                     // named query
                     let q = r[1];
