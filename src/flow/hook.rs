@@ -109,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // #[ignore]
+    #[ignore]
     fn it_works() {
         let mut h = Hook::new(String::from("table_1"),
                               &[("tcp://127.0.0.1:11211", 1)],
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
+    #[ignore]
     fn it_works_multikey() {
         let mut h = Hook::new(String::from("table_2"),
                               &[("tcp://127.0.0.1:11211", 1)],

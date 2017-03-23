@@ -617,13 +617,13 @@ impl<'a> Migration<'a> {
                           n: core::NodeAddress,
                           name: String,
                           servers: &[(&str, usize)],
-                          key: usize) -> io::Result<()> {
+                          key: usize) -> io::Result<core::NodeAddress> {
         let h = try!(hook::Hook::new(name, servers, vec![key]));
         let h = node::Type::Hook(Some(h));
         let h = self.mainline.ingredients[*n.as_global()].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
         self.mainline.ingredients.add_edge(*n.as_global(), h, false);
-        Ok(())
+        Ok(h.into())
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
