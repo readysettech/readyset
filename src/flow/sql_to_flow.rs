@@ -637,10 +637,10 @@ impl SqlIncorporator {
             }
             // queries are different, but one might be a generalization of the other
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
-                info!(mig.log,
-                      "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
-                      qg,
-                      existing_qg);
+                trace!(mig.log,
+                       "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
+                       qg,
+                       existing_qg);
             }
         }
 
