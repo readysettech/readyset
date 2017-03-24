@@ -27,7 +27,11 @@ impl Latest {
                    1,
                    "only latest over a single column is supported");
         keys.sort();
-        let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
+        let key_m = keys.clone()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, col)| (col, idx))
+            .collect();
         keys.reverse();
         Latest {
             us: None,
@@ -85,7 +89,10 @@ impl Ingredient for Latest {
         // buffer emitted records
         let mut out = Vec::with_capacity(pos.len());
         for r in pos {
-            let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
+            let group: Vec<_> = self.key
+                .iter()
+                .map(|&col| r[col].clone())
+                .collect();
             handled.insert(group);
 
             {
@@ -123,7 +130,11 @@ impl Ingredient for Latest {
     }
 
     fn description(&self) -> String {
-        let key_cols = self.key.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
+        let key_cols = self.key
+            .iter()
+            .map(|k| k.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("⧖ γ[{}]", key_cols)
     }
 

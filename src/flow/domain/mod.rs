@@ -214,13 +214,13 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let ts = if let Some(&Packet::Transaction {
-                                  state: ref ts @ TransactionState::Committed(..), ..
-                              }) = messages.iter().next() {
-            ts.clone()
-        } else {
-            unreachable!();
-        };
+        let ts =
+            if let Some(&Packet::Transaction { state: ref ts@TransactionState::Committed(..), .. }) =
+                messages.iter().next() {
+                ts.clone()
+            } else {
+                unreachable!();
+            };
 
         for m in messages {
             let new_messages = self.dispatch_(m, false);
@@ -283,7 +283,12 @@ impl Domain {
                 self.not_ready.insert(addr);
 
                 for p in parents {
-                    self.nodes.get_mut(&p).unwrap().borrow_mut().children.push(node.addr());
+                    self.nodes
+                        .get_mut(&p)
+                        .unwrap()
+                        .borrow_mut()
+                        .children
+                        .push(node.addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
@@ -302,12 +307,7 @@ impl Domain {
                 }
                 self.state.insert(node, state);
             }
-            Packet::SetupReplayPath {
-                tag,
-                path,
-                done_tx,
-                ack,
-            } => {
+            Packet::SetupReplayPath { tag, path, done_tx, ack } => {
                 // let coordinator know that we've registered the tagged path
                 ack.send(()).unwrap();
 
@@ -430,12 +430,7 @@ impl Domain {
     fn handle_replay(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         let mut finished = None;
         let mut playback = None;
-        if let Packet::Replay {
-                   mut link,
-                   tag,
-                   last,
-                   data,
-               } = m {
+        if let Packet::Replay { mut link, tag, last, data } = m {
             let &mut (ref path, ref mut done_tx) = self.replay_paths.get_mut(&tag).unwrap();
 
             if done_tx.is_some() && self.replaying_to.is_none() {

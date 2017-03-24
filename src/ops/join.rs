@@ -127,12 +127,12 @@ impl From<Builder> for Joiner {
                         let pg: Vec<_> = pg.iter()
                             .enumerate()
                             .filter_map(|(pi, g)| {
-                                            // look for ones that share a group with us
-                                            g2c.get(g).map(|srci| {
-                                                               // and emit that mapping
-                                                               (*srci, pi)
-                                                           })
-                                        })
+                                // look for ones that share a group with us
+                                g2c.get(g).map(|srci| {
+                                                   // and emit that mapping
+                                                   (*srci, pi)
+                                               })
+                            })
                             .collect();
 
                         // if there are no shared columns, don't join against this view
@@ -192,7 +192,10 @@ impl Joiner {
                 -> Box<Iterator<Item = Vec<DataType>> + 'a> {
 
         // NOTE: this only works for two-way joins
-        let other = *self.join.keys().find(|&other| other != &left.0).unwrap();
+        let other = *self.join
+                         .keys()
+                         .find(|&other| other != &left.0)
+                         .unwrap();
         let this = &self.join[&left.0];
         let target = &this.against[&other];
 
@@ -210,13 +213,13 @@ impl Joiner {
             return Box::new(Some(self.emit
                                      .iter()
                                      .map(|&(source, column)| {
-                                              if source == other {
-                                                  DataType::None
-                                              } else {
-                                                  // this clone is unnecessary
-                                                  left.1[column].clone()
-                                              }
-                                          })
+                if source == other {
+                    DataType::None
+                } else {
+                    // this clone is unnecessary
+                    left.1[column].clone()
+                }
+            })
                                      .collect::<Vec<_>>())
                                     .into_iter());
         }
@@ -249,7 +252,10 @@ impl Ingredient for Joiner {
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
-        self.join.keys().cloned().collect()
+        self.join
+            .keys()
+            .cloned()
+            .collect()
     }
 
     fn should_materialize(&self) -> bool {
@@ -346,13 +352,13 @@ impl Ingredient for Joiner {
                 let (r, pos) = rec.extract();
 
                 self.join((from, r), nodes, state).map(move |res| {
-                                                           // return new row with appropriate sign
-                                                           if pos {
-                                                               Record::Positive(sync::Arc::new(res))
-                                                           } else {
-                                                               Record::Negative(sync::Arc::new(res))
-                                                           }
-                                                       })
+                    // return new row with appropriate sign
+                    if pos {
+                        Record::Positive(sync::Arc::new(res))
+                    } else {
+                        Record::Negative(sync::Arc::new(res))
+                    }
+                })
             })
             .collect())
     }
@@ -389,10 +395,13 @@ impl Ingredient for Joiner {
         let joins = self.join
             .iter()
             .flat_map(|(left, rs)| {
-                rs.against.iter().filter(move |&(right, _)| left < right).map(move |(right, rs)| {
-                    let op = if rs.outer { "⋉" } else { "⋈" };
-                    format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
-                })
+                rs.against
+                    .iter()
+                    .filter(move |&(right, _)| left < right)
+                    .map(move |(right, rs)| {
+                             let op = if rs.outer { "⋉" } else { "⋈" };
+                             format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
+                         })
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -410,7 +419,10 @@ impl Ingredient for Joiner {
         assert!(j.against.len() == 1); // only two-way joins for now
 
         // figure out how we join with the other view
-        let (&other, &JoinTarget { on: (lcol, rcol), .. }) = j.against.iter().next().unwrap();
+        let (&other, &JoinTarget { on: (lcol, rcol), .. }) = j.against
+            .iter()
+            .next()
+            .unwrap();
 
         // if we join on the same column that col resolves to,
         // then we know that self[col] also comes from other[rcol].

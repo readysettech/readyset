@@ -62,7 +62,11 @@ impl Ingredient for GatedIdentity {
                 rs: Records,
                 _: &DomainNodes,
                 _: &StateMap) -> Option<Records> {
-        self.rx.lock().unwrap().recv().unwrap();
+        self.rx
+            .lock()
+            .unwrap()
+            .recv()
+            .unwrap();
         Some(rs)
     }
 

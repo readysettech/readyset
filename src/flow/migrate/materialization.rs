@@ -246,15 +246,15 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node =
-                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
-                                if let Some(p_cols) = nc {
-                                    for (pn, pc) in p_cols {
-                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
-                                    }
+                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
+                                                                                |mut acc, nc| {
+                            if let Some(p_cols) = nc {
+                                for (pn, pc) in p_cols {
+                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
                                 }
-                                acc
-                            });
+                            }
+                            acc
+                        });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
                         // Note that this, and the semantics of node.resolve(), imply that each column
@@ -514,7 +514,10 @@ pub fn reconstruct(log: &Logger,
                 last_domain = Some(domain);
             }
 
-            segments.last_mut().unwrap().1.push(node);
+            segments.last_mut()
+                .unwrap()
+                .1
+                .push(node);
         }
 
         debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
@@ -522,9 +525,18 @@ pub fn reconstruct(log: &Logger,
         let locals = |i: usize| -> Vec<NodeAddress> {
             if i == 0 {
                 // we're not replaying through the starter node
-                segments[i].1.iter().skip(1).map(|&ni| graph[ni].addr()).collect::<Vec<_>>()
+                segments[i]
+                    .1
+                    .iter()
+                    .skip(1)
+                    .map(|&ni| graph[ni].addr())
+                    .collect::<Vec<_>>()
             } else {
-                segments[i].1.iter().map(|&ni| graph[ni].addr()).collect::<Vec<_>>()
+                segments[i]
+                    .1
+                    .iter()
+                    .map(|&ni| graph[ni].addr())
+                    .collect::<Vec<_>>()
             }
         };
 
@@ -621,8 +633,10 @@ fn cost_fn<'a, T>(log: &'a Logger,
         assert!(n.is_internal());
 
         // find empty parents
-        let empty: HashSet<_> =
-            parents.iter().filter(|ni| empty.contains(ni)).map(|ni| graph[*ni].addr()).collect();
+        let empty: HashSet<_> = parents.iter()
+            .filter(|ni| empty.contains(ni))
+            .map(|ni| graph[*ni].addr())
+            .collect();
 
         let options =
             n.must_replay_among(&empty).expect("join did not have must replay preference");

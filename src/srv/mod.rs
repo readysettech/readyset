@@ -102,20 +102,26 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
         let ins: Vec<_> = soup.inputs()
             .into_iter()
             .map(|(ni, n)| {
-                     (ni,
-                      (n.name().to_owned(),
-                       n.fields().iter().cloned().collect(),
-                       soup.get_mutator(ni)))
-                 })
+                (ni,
+                 (n.name().to_owned(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
+                  soup.get_mutator(ni)))
+            })
             .collect();
         let outs: Vec<_> = soup.outputs()
             .into_iter()
             .map(|(ni, n, r)| {
-                     (ni,
-                      (n.name().to_owned(),
-                       n.fields().iter().cloned().collect(),
-                       r.get_reader().unwrap()))
-                 })
+                (ni,
+                 (n.name().to_owned(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
+                  r.get_reader().unwrap()))
+            })
             .collect();
         (ins, outs)
     };

@@ -317,7 +317,6 @@
 //!
 #![feature(optin_builtin_traits)]
 #![feature(mpsc_select)]
-#![feature(pub_restricted)]
 #![feature(conservative_impl_trait)]
 #![feature(try_from)]
 #![deny(missing_docs)]
@@ -341,6 +340,8 @@ extern crate petgraph;
 extern crate regex;
 extern crate nom_sql;
 extern crate timekeeper;
+
+extern crate memcached;
 
 #[cfg(feature="web")]
 extern crate rustc_serialize;
@@ -383,7 +384,7 @@ pub use ops::permute::Permute;
 pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
-pub use ops::filter::Filter;
+pub use ops::filter::{Operator, Filter};
 pub use ops::topk::TopK;
 pub use recipe::Recipe;
 

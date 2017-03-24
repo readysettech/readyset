@@ -97,7 +97,10 @@ impl DomainState {
                     return None;
                 }
 
-                let ni = *n.borrow().inner.addr().as_local();
+                let ni = *n.borrow()
+                              .inner
+                              .addr()
+                              .as_local();
 
                 Some((ni, child.index))
             })
@@ -117,17 +120,15 @@ impl DomainState {
     fn assign_ts(&mut self, packet: &mut Packet) -> bool {
         match *packet {
             Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
-            Packet::Transaction {
-                ref mut state,
-                ref link,
-                ref data,
-            } => {
+            Packet::Transaction { ref mut state, ref link, ref data } => {
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
                 if let TransactionState::Pending(token, send) = pending {
                     let base_node = self.base_for_ingress[link.dst.as_local()];
-                    let result =
-                        self.checktable.lock().unwrap().claim_timestamp(&token, base_node, data);
+                    let result = self.checktable
+                        .lock()
+                        .unwrap()
+                        .claim_timestamp(&token, base_node, data);
                     match result {
                         checktable::TransactionResult::Committed(ts, prevs) => {
                             let _ = send.send(Ok(ts));
@@ -150,9 +151,7 @@ impl DomainState {
 
     fn buffer_transaction(&mut self, m: Packet) {
         let (ts, base, prev_ts) = match m {
-            Packet::Transaction {
-                state: TransactionState::Committed(ts, base, ref prevs), ..
-            } => {
+            Packet::Transaction { state: TransactionState::Committed(ts, base, ref prevs), .. } => {
                 if self.ts == ts - 1 {
                     (ts, Some(base), ts - 1)
                 } else {
@@ -214,7 +213,10 @@ impl DomainState {
     }
 
     fn update_next_transaction(&mut self) {
-        let has_next = self.buffer.peek().map(|e| e.prev_ts == self.ts).unwrap_or(false);
+        let has_next = self.buffer
+            .peek()
+            .map(|e| e.prev_ts == self.ts)
+            .unwrap_or(false);
 
         if has_next {
             let entry = self.buffer.pop().unwrap();
@@ -223,7 +225,10 @@ impl DomainState {
             match entry.transaction {
                 BufferedTransaction::Transaction(base, p) => {
                     let mut messages = vec![p];
-                    while self.buffer.peek().map(|e| e.ts == ts).unwrap_or(false) {
+                    while self.buffer
+                              .peek()
+                              .map(|e| e.ts == ts)
+                              .unwrap_or(false) {
                         let e = self.buffer.pop().unwrap();
                         if let BufferedTransaction::Transaction(_, p) = e.transaction {
                             messages.push(p);
@@ -255,7 +260,10 @@ impl DomainState {
 
             }
             Bundle::MigrationEnd(ingress_from_base) => {
-                let max_index = ingress_from_base.keys().map(|ni| ni.index()).max().unwrap_or(0);
+                let max_index = ingress_from_base.keys()
+                    .map(|ni| ni.index())
+                    .max()
+                    .unwrap_or(0);
                 self.ingress_from_base = vec![0; max_index + 1];
                 for (ni, count) in ingress_from_base.into_iter() {
                     self.ingress_from_base[ni.index()] = count;

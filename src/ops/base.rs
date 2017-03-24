@@ -299,7 +299,13 @@ impl Ingredient for Base {
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n, self.primary_key.as_ref().unwrap().clone())).into_iter().collect()
+            Some((n,
+                  self.primary_key
+                      .as_ref()
+                      .unwrap()
+                      .clone()))
+                    .into_iter()
+                    .collect()
         } else {
             HashMap::new()
         }

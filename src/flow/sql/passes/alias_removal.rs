@@ -7,7 +7,6 @@ pub trait AliasRemoval {
 }
 
 fn rewrite_conditional(table_aliases: &HashMap<String, String>,
-                       column_aliases: &HashMap<String, Column>,
                        ce: ConditionExpression)
                        -> ConditionExpression {
     let translate_column = |f: Column| {
@@ -36,7 +35,7 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
                     let new_ce = match *bce {
                         ConditionExpression::Base(ConditionBase::Field(f)) => translate_column(f),
                         ConditionExpression::Base(b) => ConditionExpression::Base(b),
-                        x => rewrite_conditional(table_aliases, column_aliases, x),
+                        x => rewrite_conditional(table_aliases, x),
                     };
                     Some(Box::new(new_ce))
                 }
@@ -59,15 +58,11 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
             let rewritten_ct = ConditionTree {
                 operator: ct.operator,
                 left: match ct.left {
-                    Some(lct) => {
-                        Some(Box::new(rewrite_conditional(table_aliases, column_aliases, *lct)))
-                    }
+                    Some(lct) => Some(Box::new(rewrite_conditional(table_aliases, *lct))),
                     x => x,
                 },
                 right: match ct.right {
-                    Some(rct) => {
-                        Some(Box::new(rewrite_conditional(table_aliases, column_aliases, *rct)))
-                    }
+                    Some(rct) => Some(Box::new(rewrite_conditional(table_aliases, *rct))),
                     x => x,
                 },
             };
@@ -80,8 +75,6 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
 impl AliasRemoval for SqlQuery {
     fn expand_table_aliases(self) -> SqlQuery {
         let mut table_aliases = HashMap::new();
-        // TODO(malte): below is unused, and thus need not be mut
-        let column_aliases = HashMap::new();
 
         match self {
             SqlQuery::Select(mut sq) => {
@@ -121,7 +114,7 @@ impl AliasRemoval for SqlQuery {
                 // Remove them from conditions
                 sq.where_clause = match sq.where_clause {
                     None => None,
-                    Some(wc) => Some(rewrite_conditional(&table_aliases, &column_aliases, wc)),
+                    Some(wc) => Some(rewrite_conditional(&table_aliases, wc)),
                 };
                 SqlQuery::Select(sq)
             }
