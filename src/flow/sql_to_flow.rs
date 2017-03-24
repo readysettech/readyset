@@ -417,8 +417,8 @@ impl SqlIncorporator {
             &Some(ref o) => {
                 assert_eq!(limit.offset, 0); // Non-zero offset not supported
 
-                let columns:Vec<_> = o.columns.iter().map(|c| {
-                    (o.order.clone(), self.field_to_columnid(parent, &c.name).unwrap())
+                let columns:Vec<_> = o.columns.iter().map(|&(ref c, ref order_type)| {
+                    (order_type.clone(), self.field_to_columnid(parent, &c.name).unwrap())
                 }).collect();
 
                 Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
