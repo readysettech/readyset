@@ -1365,6 +1365,106 @@ mod tests {
     }
 
     #[test]
+    fn it_incorporates_explicit_multi_join() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish base write types for "users" and "articles" and "votes"
+        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+        assert!(inc.add_query("INSERT INTO votes (aid, uid) VALUES (?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+        assert!(inc.add_query("INSERT INTO articles (aid, title, author) VALUES (?, ?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+
+        // Try an explicit multi-way-join
+        let q = "SELECT users.name, articles.title, votes.uid \
+                 FROM articles
+                 JOIN users ON (users.id = articles.author) \
+                 JOIN votes ON (votes.aid = articles.aid);";
+        let q = inc.add_query(q, None, &mut mig);
+        assert!(q.is_ok());
+        let qid = query_id_hash(&["articles", "users", "votes"],
+                                &[&Column::from("articles.aid"),
+                                  &Column::from("articles.author"),
+                                  &Column::from("users.id"),
+                                  &Column::from("votes.aid")],
+                                &[&Column::from("articles.title"),
+                                  &Column::from("users.name"),
+                                  &Column::from("votes.uid")]);
+        // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
+        // views
+        // leaf view
+        let leaf_view = get_node(&inc, &mig, "q_3");
+        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
+    }
+
+    #[test]
+    fn it_incorporates_implicit_multi_join() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        // Establish base write types for "users" and "articles" and "votes"
+        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+        assert!(inc.add_query("INSERT INTO votes (aid, uid) VALUES (?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+        assert!(inc.add_query("INSERT INTO articles (aid, title, author) VALUES (?, ?, ?);",
+                              None,
+                              &mut mig)
+                    .is_ok());
+
+        // Try an implicit multi-way-join
+        let q = "SELECT users.name, articles.title, votes.uid \
+                 FROM articles, users, votes
+                 WHERE users.id = articles.author \
+                 AND votes.aid = articles.aid;";
+        let q = inc.add_query(q, None, &mut mig);
+        assert!(q.is_ok());
+        // XXX(malte): below over-projects into the final leaf, and is thus inconsistent
+        // with the explicit JOIN case!
+        let qid = query_id_hash(&["articles", "users", "votes"],
+                                &[&Column::from("articles.aid"),
+                                  &Column::from("articles.author"),
+                                  &Column::from("users.id"),
+                                  &Column::from("votes.aid")],
+                                &[&Column::from("articles.aid"),
+                                  &Column::from("articles.author"),
+                                  &Column::from("articles.title"),
+                                  &Column::from("users.id"),
+                                  &Column::from("users.name"),
+                                  &Column::from("votes.aid"),
+                                  &Column::from("votes.uid")]);
+        // XXX(malte): non-deterministic join ordering below
+        let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n3", qid));
+        // articles join votes
+        //assert_eq!(join1_view.fields(),
+        //           &["aid", "title", "author", "id", "name"]);
+        let _join2_view = get_node(&inc, &mig, &format!("q_{:x}_n3", qid));
+        // join1_view join users
+        //assert_eq!(join2_view.fields(),
+        //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
+        // leaf view
+        let leaf_view = get_node(&inc, &mig, "q_3");
+        assert_eq!(leaf_view.fields(),
+                   &["title", "author", "aid", "name", "id", "uid", "aid"]);
+    }
+
+    #[test]
     #[ignore]
     fn it_incorporates_finkelstein1982_naively() {
         use std::io::Read;
