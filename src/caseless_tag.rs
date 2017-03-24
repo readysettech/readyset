@@ -5,9 +5,6 @@
 /// This implementation has some performance issues related to extra memory allocations
 /// (see https://github.com/Geal/nom/issues/251), but it works for the moment.
 
-use nom::{IResult, Err, ErrorKind, Needed};
-use std::str;
-
 macro_rules! caseless_tag (
     ($i:expr, $inp: expr) => (
         {
@@ -56,6 +53,9 @@ macro_rules! caseless_tag_bytes (
 
 #[test]
 fn test_caseless_tag() {
+    use nom::{IResult, Err, ErrorKind, Needed};
+    use std::str;
+
     named!(x, caseless_tag!("AbCD"));
     let r = x(&b"abcdefGH"[..]);
     assert_eq!(r, IResult::Done(&b"efGH"[..], &b"abcd"[..]));
