@@ -5,7 +5,7 @@ use std::str;
 use column::Column;
 use common::FieldExpression;
 use common::{field_definition_expr, field_list, unsigned_number, statement_terminator, table_list,
-             table_reference};
+             table_reference, column_identifier_no_alias};
 use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
@@ -37,8 +37,7 @@ pub enum OrderType {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct OrderClause {
-    pub columns: Vec<Column>, // TODO(malte): can this be an arbitrary expr?
-    pub order: OrderType,
+    pub columns: Vec<(Column, OrderType)>, // TODO(malte): can this be an arbitrary expr?
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
@@ -172,24 +171,37 @@ named!(order_clause<&[u8], OrderClause>,
         multispace? ~
         caseless_tag!("order by") ~
         multispace ~
-        order_expr: field_list ~
-        ordering: opt!(
-            complete!(chain!(
-                multispace? ~
-                ordering: alt_complete!(
-                      map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
-                    | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
+        order_expr: many0!(
+            chain!(
+                fieldname: column_identifier_no_alias ~
+                ordering: opt!(
+                    complete!(chain!(
+                        multispace? ~
+                            ordering: alt_complete!(
+                                map!(caseless_tag!("desc"), |_| OrderType::OrderDescending)
+                                    | map!(caseless_tag!("asc"), |_| OrderType::OrderAscending)
+                            ),
+                        || { ordering }
+                    ))
+                ) ~
+                opt!(
+                    complete!(chain!(
+                        multispace? ~
+                            tag!(",") ~
+                            multispace?,
+                        ||{}
+                    ))
                 ),
-                || { ordering }
-            ))
+                || { (fieldname, ordering.unwrap_or(OrderType::OrderAscending)) }
+            )
         ),
     || {
         OrderClause {
             columns: order_expr,
-            order: match ordering {
-                None => OrderType::OrderAscending,
-                Some(ref o) => o.clone(),
-            },
+            // order: match ordering {
+            //     None => OrderType::OrderAscending,
+            //     Some(ref o) => o.clone(),
+            // },
         }
     }))
 );
@@ -370,20 +382,18 @@ mod tests {
     #[test]
     fn order_clause() {
         let qstring1 = "select * from users order by name desc\n";
-        let qstring2 = "select * from users order by name, age desc\n";
+        let qstring2 = "select * from users order by name asc, age desc\n";
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            columns: columns(&["name"]),
-            order: OrderType::OrderDescending,
+            columns: vec![("name".into(), OrderType::OrderDescending)],
         };
         let expected_ord2 = OrderClause {
-            columns: columns(&["name", "age"]),
-            order: OrderType::OrderDescending,
+            columns: vec![("name".into(), OrderType::OrderAscending),
+                          ("age".into(), OrderType::OrderDescending)],
         };
         let expected_ord3 = OrderClause {
-            columns: columns(&["name"]),
-            order: OrderType::OrderAscending,
+            columns: vec![("name".into(), OrderType::OrderAscending)],
         };
 
         let res1 = selection(qstring1.as_bytes());
@@ -607,8 +617,7 @@ mod tests {
                        fields: FieldExpression::All,
                        where_clause: expected_where_cond,
                        order: Some(OrderClause {
-                           columns: vec![Column::from("item.i_title")],
-                           order: OrderType::OrderAscending,
+                           columns: vec![("item.i_title".into(), OrderType::OrderAscending)],
                        }),
                        limit: Some(LimitClause {
                            limit: 50,
