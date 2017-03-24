@@ -13,7 +13,10 @@ impl CountStarRewrite for SqlQuery {
         let rewrite_count_star = |mut c: Column, tables: &Vec<Table>| -> Column {
             assert!(tables.len() > 0);
             let bogo_table = tables.get(0).unwrap();
-            let bogo_column = write_schemas.get(&bogo_table.name).unwrap().last().unwrap();
+            let bogo_column = write_schemas.get(&bogo_table.name)
+                .unwrap()
+                .last()
+                .unwrap();
 
             let rewrite = |fe: FieldExpression| -> FieldExpression {
                 match fe {
@@ -36,7 +39,7 @@ impl CountStarRewrite for SqlQuery {
                              Sum(fe) => Sum(rewrite(fe)),
                              Min(fe) => Min(rewrite(fe)),
                              Max(fe) => Max(rewrite(fe)),
-                             GroupConcat(fe) => GroupConcat(rewrite(fe)),
+                             GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
                          })
                 }
                 None => None,
@@ -91,7 +94,7 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
                            FieldExpression::Seq(vec![Column {
-                               name: String::from("anon_fn"),
+                               name: String::from("count(all)"),
                                alias: None,
                                table: None,
                                function: Some(FunctionExpression::Count(

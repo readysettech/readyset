@@ -50,7 +50,10 @@ impl Recipe {
 
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
-        self.aliases.keys().map(String::as_str).collect()
+        self.aliases
+            .keys()
+            .map(String::as_str)
+            .collect()
     }
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
@@ -145,17 +148,26 @@ impl Recipe {
         let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            //let name = self.versioned_query_name(&n, &q);
+
+            // add the query
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, n, mig)?;
+
+            // we currently use a domain per query
             let d = mig.add_domain();
             for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
             }
-            new_nodes.insert(qfp.name.clone(), self.node_addr_for(&qfp.name).unwrap());
+            new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 
         // TODO(malte): deal with removal.
-        for _ in removed {
-            unimplemented!()
+        for qid in removed {
+            println!("Query removal of {:?}", qid);
+            //unimplemented!()
         }
 
         Ok(new_nodes)
@@ -220,12 +232,12 @@ impl Recipe {
         let lines: Vec<&str> = recipe_text.lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| {
-                     // remove inline comments, too
-                     match l.find("#") {
-                         None => l.trim(),
-                         Some(pos) => &l[0..pos - 1].trim(),
-                     }
-                 })
+                // remove inline comments, too
+                match l.find("#") {
+                    None => l.trim(),
+                    Some(pos) => &l[0..pos - 1].trim(),
+                }
+            })
             .collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();
@@ -242,7 +254,7 @@ impl Recipe {
 
         let parsed_queries = query_strings.iter()
             .map(|ref q| {
-                let r: Vec<&str> = q.splitn(2, ":").collect();
+                let r: Vec<&str> = q.splitn(2, ":").map(|s| s.trim()).collect();
                 if r.len() == 2 {
                     // named query
                     let q = r[1];
@@ -286,6 +298,22 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    fn versioned_query_name(&self, name: &Option<String>, query: &SqlQuery) -> Option<String> {
+        // for CREATE/INSERT queries, we use the table name as the query name.
+        let base = match *name {
+            None => {
+                match *query {
+                    SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
+                    SqlQuery::Insert(ref iq) => iq.table.name.clone(),
+                    SqlQuery::Select(_) => return None,
+                }
+            }
+            Some(ref name) => name.clone(),
+        };
+
+        Some(format!("{}#{}", base, self.version))
     }
 }
 

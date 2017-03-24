@@ -27,7 +27,11 @@ impl Latest {
                    1,
                    "only latest over a single column is supported");
         keys.sort();
-        let key_m = keys.clone().into_iter().enumerate().map(|(idx, col)| (col, idx)).collect();
+        let key_m = keys.clone()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, col)| (col, idx))
+            .collect();
         keys.reverse();
         Latest {
             us: None,
@@ -71,7 +75,11 @@ impl Ingredient for Latest {
         debug_assert_eq!(from, self.src);
 
         // find the current value for each group
-        let db = state.get(self.us.as_ref().unwrap().as_local()).expect("latest must have its own state materialized");
+        let db = state.get(self.us
+                               .as_ref()
+                               .unwrap()
+                               .as_local())
+            .expect("latest must have its own state materialized");
         let currents: Result<Vec<_>, _> = rs.iter()
             .filter_map(|r| {
                 if !r.is_positive() {
@@ -117,7 +125,10 @@ impl Ingredient for Latest {
         // buffer emitted records
         let mut out = Vec::with_capacity(pos.len());
         for (i, r) in pos.into_iter().enumerate() {
-            let group: Vec<_> = self.key.iter().map(|&col| r[col].clone()).collect();
+            let group: Vec<_> = self.key
+                .iter()
+                .map(|&col| r[col].clone())
+                .collect();
             handled.insert(group);
 
             if let Some(current) = currents[i] {
@@ -143,7 +154,11 @@ impl Ingredient for Latest {
     }
 
     fn description(&self) -> String {
-        let key_cols = self.key.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
+        let key_cols = self.key
+            .iter()
+            .map(|k| k.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("⧖ γ[{}]", key_cols)
     }
 

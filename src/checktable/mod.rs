@@ -241,9 +241,12 @@ impl CheckTable {
         self.last_migration = Some(ts + 1);
         self.domain_dependencies = ingresses_from_base.iter()
             .map(|(domain, ingress_from_base)| {
-                     (*domain,
-                      ingress_from_base.iter().filter(|&(_, n)| *n > 0).map(|(k, _)| *k).collect())
-                 })
+                (*domain,
+                 ingress_from_base.iter()
+                     .filter(|&(_, n)| *n > 0)
+                     .map(|(k, _)| *k)
+                     .collect())
+            })
             .collect();
 
         (ts, ts + 1, prevs)

@@ -15,6 +15,7 @@ use flow::keys;
 use flow::payload::Packet;
 use flow::migrate::materialization::Tag;
 use flow::prelude::*;
+use flow::hook;
 
 use backlog;
 
@@ -55,13 +56,13 @@ impl Reader {
         (&self)
          -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>> {
         self.state.clone().map(|arc| {
-                                   Box::new(move |q: &DataType| -> Result<Datas, ()> {
-                                                arc.find_and(q, |rs| {
+            Box::new(move |q: &DataType| -> Result<Datas, ()> {
+                         arc.find_and(q, |rs| {
                         rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
                     })
-                                                    .map(|r| r.0)
-                                            }) as Box<_>
-                               })
+                             .map(|r| r.0)
+                     }) as Box<_>
+        })
     }
 
     pub fn key(&self) -> Result<usize, String> {
@@ -135,6 +136,7 @@ pub enum Type {
         tags: sync::Arc<sync::Mutex<HashMap<Tag, NodeAddress>>>,
     },
     Reader(Option<backlog::WriteHandle>, Reader),
+    Hook(Option<hook::Hook>),
     Source,
 }
 
@@ -166,6 +168,7 @@ impl fmt::Debug for Type {
             Type::Egress { .. } => write!(f, "egress node"),
             Type::Reader(..) => write!(f, "reader node"),
             Type::Internal(ref i) => write!(f, "internal {} node", i.description()),
+            Type::Hook(..) => write!(f, "hook node"),
         }
     }
 }
@@ -274,6 +277,7 @@ impl Node {
             }
             Type::Ingress => Type::Ingress,
             Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
+            Type::Hook(ref mut h) => Type::Hook(h.take()),
             Type::Internal(_) |
             Type::Source => unreachable!(),
         };
@@ -312,6 +316,7 @@ impl Node {
             Type::Source => write!(f, "(source)"),
             Type::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
+            Type::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
             Type::Reader(_, ref r) => {
                 let key = match r.key() {
                     Err(_) => String::from("none"),
@@ -386,7 +391,8 @@ impl Node {
     pub fn is_output(&self) -> bool {
         match *self.inner {
             Type::Egress { .. } |
-            Type::Reader(..) => true,
+            Type::Reader(..) |
+            Type::Hook(..) => true,
             _ => false,
         }
     }

@@ -40,8 +40,10 @@ pub fn inform(log: &Logger,
         let _ = ready_rx.recv();
         trace!(log, "domain ready for migration");
 
-        let old_nodes: HashSet<_> =
-            nodes.iter().filter(|&&(_, new)| !new).map(|&(ni, _)| ni).collect();
+        let old_nodes: HashSet<_> = nodes.iter()
+            .filter(|&&(_, new)| !new)
+            .map(|&(ni, _)| ni)
+            .collect();
 
         if old_nodes.len() == nodes.len() {
             // some domains haven't changed at all

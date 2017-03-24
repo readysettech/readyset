@@ -60,9 +60,8 @@ impl NodeDescriptor {
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     state.add(m.data().iter().cloned());
-                    if let Packet::Transaction {
-                               state: TransactionState::Committed(ts, ..), ..
-                           } = m {
+                    if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } =
+                        m {
                         state.update_ts(ts);
                     }
 
@@ -79,14 +78,30 @@ impl NodeDescriptor {
                 txs.retain(|tx| {
                     left -= 1;
                     if left == 0 {
-                            tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.take()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         } else {
-                            tx.send(data.clone().unwrap().into_iter().map(|r| r.into()).collect())
+                            tx.send(data.clone()
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|r| r.into())
+                                        .collect())
                         }
                         .is_ok()
                 });
 
                 // readers never have children
+                Packet::None
+            }
+            flow::node::Type::Hook(ref mut h) => {
+                if let &mut Some(ref mut h) = h {
+                    h.on_input(m.take_data());
+                } else {
+                    unreachable!();
+                }
                 Packet::None
             }
             flow::node::Type::Egress { ref txs, ref tags } => {

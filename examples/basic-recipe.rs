@@ -1,10 +1,14 @@
 extern crate distributary;
+extern crate slog;
+extern crate slog_term;
 
 mod backend;
 
 use std::{thread, time};
 use distributary::{Blender, Recipe};
 use backend::Backend;
+
+use slog::DrainExt;
 
 fn load_recipe() -> Result<Backend, String> {
     // inline recipe definition
@@ -22,6 +26,8 @@ fn load_recipe() -> Result<Backend, String> {
 
     // set up Soup via recipe
     let mut soup = Blender::new();
+    soup.log_with(slog::Logger::root(slog_term::streamer().full().build().fuse(), None));
+
     let recipe;
     {
         let mut mig = soup.start_migration();

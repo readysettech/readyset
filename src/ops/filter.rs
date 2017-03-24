@@ -1,20 +1,21 @@
 use std::collections::HashMap;
 use std::sync;
 
+pub use nom_sql::Operator;
 use flow::prelude::*;
 
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone)]
 pub struct Filter {
     src: NodeAddress,
-    filter: sync::Arc<Vec<Option<DataType>>>,
+    filter: sync::Arc<Vec<Option<(Operator, DataType)>>>,
 }
 
 impl Filter {
     /// Construct a new filter operator. The `filter` vector must have as many elements as the
     /// `src` node has columns. Each column that is set to `None` matches any value, while columns
     /// in the filter that have values set will check for equality on that column.
-    pub fn new(src: NodeAddress, filter: &[Option<DataType>]) -> Filter {
+    pub fn new(src: NodeAddress, filter: &[Option<(Operator, DataType)>]) -> Filter {
         Filter {
             src: src,
             filter: sync::Arc::new(Vec::from(filter)),
@@ -61,8 +62,16 @@ impl Ingredient for Filter {
                 // check if this filter matches
                 let fi =
                     f.next().expect("should have as many filters as there are columns in ancestor");
-                if let Some(ref f) = *fi {
-                    f == d
+                if let Some((ref op, ref f)) = *fi {
+                    match *op {
+                        Operator::Equal => d == f,
+                        Operator::NotEqual => d != f,
+                        Operator::Greater => d > f,
+                        Operator::GreaterOrEqual => d >= f,
+                        Operator::Less => d < f,
+                        Operator::LessOrEqual => d <= f,
+                        _ => unimplemented!(),
+                    }
                 } else {
                     // everything matches no condition
                     true
@@ -82,12 +91,17 @@ impl Ingredient for Filter {
     }
 
     fn description(&self) -> String {
+        use regex::Regex;
+
+        let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
         format!("σ[{}]",
                 self.filter
                     .iter()
                     .enumerate()
                     .filter_map(|(i, ref e)| match e.as_ref() {
-                                    Some(ref x) => Some(format!("{}={}", i, x)),
+                                    Some(&(ref op, ref x)) => {
+                                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                                    }
                                     None => None,
                                 })
                     .collect::<Vec<_>>()
@@ -112,8 +126,16 @@ impl Ingredient for Filter {
                     let r = Box::new(rs.iter().filter(move |r| {
                         r.iter().enumerate().all(|(i, d)| {
                             // check if this filter matches
-                            if let Some(ref f) = f[i] {
-                                f == d
+                            if let Some((ref op, ref f)) = f[i] {
+                                match *op {
+                                    Operator::Equal => d == f,
+                                    Operator::NotEqual => d != f,
+                                    Operator::Greater => d > f,
+                                    Operator::GreaterOrEqual => d >= f,
+                                    Operator::Less => d < f,
+                                    Operator::LessOrEqual => d <= f,
+                                    _ => unimplemented!(),
+                                }
                             } else {
                                 // everything matches no condition
                                 true
@@ -142,12 +164,15 @@ mod tests {
 
     use ops;
 
-    fn setup(materialized: bool, filters: Option<&[Option<DataType>]>) -> ops::test::MockGraph {
+    fn setup(materialized: bool,
+             filters: Option<&[Option<(Operator, DataType)>]>)
+             -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
         g.set_op("filter",
                  &["x", "y"],
-                 Filter::new(s, filters.unwrap_or(&[None, Some("a".into())])),
+                 Filter::new(s,
+                             filters.unwrap_or(&[None, Some((Operator::Equal, "a".into()))])),
                  materialized);
         g
     }
@@ -186,7 +211,9 @@ mod tests {
 
     #[test]
     fn it_forwards_mfilter() {
-        let mut g = setup(false, Some(&[Some(1.into()), Some("a".into())]));
+        let mut g = setup(false,
+                          Some(&[Some((Operator::Equal, 1.into())),
+                                 Some((Operator::Equal, "a".into()))]));
 
         let mut left: Vec<DataType>;
 
@@ -229,5 +256,30 @@ mod tests {
         }
 
         assert_eq!(g.narrow_one(many.clone(), false), many.into());
+    }
+
+    #[test]
+    fn it_works_with_inequalities() {
+        let mut g = setup(false,
+                          Some(&[Some((Operator::LessOrEqual, 2.into())),
+                                 Some((Operator::NotEqual, "a".into()))]));
+
+        let mut left: Vec<DataType>;
+
+        // both conditions match (2 <= 2, "b" != "a")
+        left = vec![2.into(), "b".into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
+
+        // second condition fails ("a" != "a")
+        left = vec![2.into(), "a".into()];
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
+
+        // first condition fails (3 <= 2)
+        left = vec![3.into(), "b".into()];
+        assert!(g.narrow_one_row(left.clone(), false).is_empty());
+
+        // both conditions match (1 <= 2, "b" != "a")
+        left = vec![1.into(), "b".into()];
+        assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 }
