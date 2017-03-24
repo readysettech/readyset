@@ -2,27 +2,32 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::str;
 
-use common::FieldExpression;
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum FunctionExpression {
-    Avg(FieldExpression),
-    Count(FieldExpression),
-    Sum(FieldExpression),
-    Max(FieldExpression),
-    Min(FieldExpression),
-    GroupConcat(FieldExpression, String),
+    Avg(Column, bool),
+    Count(Column, bool),
+    CountStar,
+    Sum(Column, bool),
+    Max(Column),
+    Min(Column),
+    GroupConcat(Column, String),
 }
 
 impl Display for FunctionExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FunctionExpression::Avg(ref fe) => write!(f, "avg({})", fe),
-            FunctionExpression::Count(ref fe) => write!(f, "count({})", fe),
-            FunctionExpression::Sum(ref fe) => write!(f, "sum({})", fe),
-            FunctionExpression::Max(ref fe) => write!(f, "max({})", fe),
-            FunctionExpression::Min(ref fe) => write!(f, "min({})", fe),
-            FunctionExpression::GroupConcat(ref fe, _) => write!(f, "group_concat({})", fe),
+            FunctionExpression::Avg(ref col, d) if d => write!(f, "avg(distinct {})", col.name.as_str()),
+            FunctionExpression::Count(ref col, d) if d => write!(f, "count(distinct {})", col.name.as_str()),
+            FunctionExpression::Sum(ref col, d) if d => write!(f, "sum(distinct {})", col.name.as_str()),
+
+            FunctionExpression::Avg(ref col, _) => write!(f, "avg({})", col.name.as_str()),
+            FunctionExpression::Count(ref col, _) => write!(f, "count({})", col.name.as_str()),
+            FunctionExpression::CountStar => write!(f, "count(all)"),
+            FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col.name.as_str()),
+            FunctionExpression::Max(ref col) => write!(f, "max({})", col.name.as_str()),
+            FunctionExpression::Min(ref col) => write!(f, "min({})", col.name.as_str()),
+            FunctionExpression::GroupConcat(ref col, ref s) => write!(f, "group_concat({}, {})",
+                                                                      col.name.as_str(), s),
         }
     }
 }
@@ -32,7 +37,7 @@ pub struct Column {
     pub name: String,
     pub alias: Option<String>,
     pub table: Option<String>,
-    pub function: Option<FunctionExpression>,
+    pub function: Option<Box<FunctionExpression>>,
 }
 
 impl<'a> From<&'a str> for Column {

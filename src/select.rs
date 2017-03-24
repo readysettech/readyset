@@ -44,7 +44,7 @@ pub struct OrderClause {
 pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,
-    pub fields: FieldExpression,
+    pub fields: Vec<FieldExpression>,
     pub join: Vec<JoinClause>,
     pub where_clause: Option<ConditionExpression>,
     pub group_by: Option<GroupByClause>,
@@ -259,9 +259,9 @@ mod tests {
     use condition::ConditionTree;
     use table::Table;
 
-    fn columns(cols: &[&str]) -> Vec<Column> {
+    fn columns(cols: &[&str]) -> Vec<FieldExpression> {
         cols.iter()
-            .map(|c| Column::from(*c))
+            .map(|c| FieldExpression::Col(Column::from(*c)))
             .collect()
     }
 
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::Seq(columns(&["id", "name"])),
+                       fields: columns(&["id", "name"]),
                        ..Default::default()
                    });
     }
@@ -286,8 +286,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::Seq(vec![Column::from("users.id"),
-                                                         Column::from("users.name")]),
+                       fields: columns(&["users.id", "users.name"]),
                        ..Default::default()
                    });
     }
@@ -301,7 +300,20 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::All,
+                       fields: vec![FieldExpression::All],
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn select_all_in_table() {
+        let qstring = "SELECT users.* FROM users, votes;";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("users"), Table::from("votes")],
+                       fields: vec![FieldExpression::AllInTable(String::from("users"))],
                        ..Default::default()
                    });
     }
@@ -314,7 +326,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::Seq(columns(&["id", "name"])),
+                       fields: columns(&["id", "name"]),
                        ..Default::default()
                    });
     }
@@ -353,7 +365,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("ContactInfo")],
-                       fields: FieldExpression::All,
+                       fields: vec![FieldExpression::All],
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -417,7 +429,7 @@ mod tests {
                                         name: String::from("PaperTag"),
                                         alias: Some(String::from("t")),
                                     }],
-                       fields: FieldExpression::All,
+                       fields: vec![FieldExpression::All],
                        ..Default::default()
                    });
         // let res2 = selection(qstring2.as_bytes());
@@ -433,24 +445,24 @@ mod tests {
         assert_eq!(res1.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperTag")],
-                       fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("name"),
-                                                             alias: Some(String::from("TagName")),
-                                                             table: None,
-                                                             function: None,
-                                                         }]),
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("name"),
+                           alias: Some(String::from("TagName")),
+                           table: None,
+                           function: None,
+                       })],
                        ..Default::default()
                    });
         let res2 = selection(qstring2.as_bytes());
         assert_eq!(res2.clone().unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperTag")],
-                       fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("name"),
-                                                             alias: Some(String::from("TagName")),
-                                                             table: Some(String::from("PaperTag")),
-                                                             function: None,
-                                                         }]),
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("name"),
+                           alias: Some(String::from("TagName")),
+                           table: Some(String::from("PaperTag")),
+                           function: None,
+                       })],
                        ..Default::default()
                    });
     }
@@ -470,7 +482,7 @@ mod tests {
                    SelectStatement {
                        tables: vec![Table::from("PaperTag")],
                        distinct: true,
-                       fields: FieldExpression::Seq(columns(&["tag"])),
+                       fields: columns(&["tag"]),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -500,7 +512,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperStorage")],
-                       fields: FieldExpression::Seq(columns(&["infoJson"])),
+                       fields: columns(&["infoJson"]),
                        where_clause: expected_where_cond,
                        ..Default::default()
                    });
@@ -524,7 +536,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("users")],
-                       fields: FieldExpression::All,
+                       fields: vec![FieldExpression::All],
                        where_clause: expected_where_cond,
                        limit: expected_lim,
                        ..Default::default()
@@ -536,16 +548,16 @@ mod tests {
         let qstring = "SELECT max(addr_id) FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]));
+        let agg_expr = FunctionExpression::Max(Column::from("addr_id"));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("address")],
-                       fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("max(addr_id)"),
-                                                             alias: None,
-                                                             table: None,
-                                                             function: Some(agg_expr),
-                                                         }]),
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("max(addr_id)"),
+                           alias: None,
+                           table: None,
+                           function: Some(Box::new(agg_expr)),
+                       })],
                        ..Default::default()
                    });
     }
@@ -555,16 +567,16 @@ mod tests {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Max(FieldExpression::Seq(vec![Column::from("addr_id")]));
+        let agg_expr = FunctionExpression::Max(Column::from("addr_id"));
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("address")],
-                       fields: FieldExpression::Seq(vec![Column {
-                                                             name: String::from("max_addr"),
-                                                             alias: Some(String::from("max_addr")),
-                                                             table: None,
-                                                             function: Some(agg_expr),
-                                                         }]),
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("max_addr"),
+                           alias: Some(String::from("max_addr")),
+                           table: None,
+                           function: Some(Box::new(agg_expr)),
+                       })],
                        ..Default::default()
                    });
     }
@@ -574,16 +586,39 @@ mod tests {
         let qstring = "SELECT COUNT(*) FROM votes GROUP BY aid;";
 
         let res = selection(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Count(FieldExpression::All);
+        let agg_expr = FunctionExpression::CountStar;
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("votes")],
-                       fields: FieldExpression::Seq(vec![Column {
+                       fields: vec![FieldExpression::Col(Column {
                                                              name: String::from("count(all)"),
                                                              alias: None,
                                                              table: None,
-                                                             function: Some(agg_expr),
-                                                         }]),
+                                                             function: Some(Box::new(agg_expr)),
+                                                         })],
+                       group_by: Some(GroupByClause {
+                           columns: vec![Column::from("aid")],
+                           having: None,
+                       }),
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
+    fn count_distinct() {
+        let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
+
+        let res = selection(qstring.as_bytes());
+        let agg_expr = FunctionExpression::Count(Column::from("vote_id"), true);
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("votes")],
+                       fields: vec![FieldExpression::Col(Column {
+                                                             name: String::from("count(distinct vote_id)"),
+                                                             alias: None,
+                                                             table: None,
+                                                             function: Some(Box::new(agg_expr)),
+                                                         })],
                        group_by: Some(GroupByClause {
                            columns: vec![Column::from("aid")],
                            having: None,
@@ -614,7 +649,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("item"), Table::from("author")],
-                       fields: FieldExpression::All,
+                       fields: vec![FieldExpression::All],
                        where_clause: expected_where_cond,
                        order: Some(OrderClause {
                            columns: vec![("item.i_title".into(), OrderType::OrderAscending)],
@@ -635,7 +670,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PaperConflict")],
-                       fields: FieldExpression::Seq(columns(&["paperId"])),
+                       fields: columns(&["paperId"]),
                        join: vec![JoinClause {
                                       operator: JoinOperator::Join,
                                       right: JoinRightSide::Table(Table::from("PCMember")),
@@ -661,7 +696,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("PCMember")],
-                       fields: FieldExpression::Seq(columns(&["PCMember.contactId"])),
+                       fields: columns(&["PCMember.contactId"]),
                        join: vec![JoinClause {
                                       operator: JoinOperator::Join,
                                       right: JoinRightSide::Table(Table::from("PaperReview")),
@@ -703,9 +738,9 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    SelectStatement {
                        tables: vec![Table::from("ContactInfo")],
-                       fields: FieldExpression::Seq(columns(&["PCMember.contactId",
-                                                              "ChairAssistant.contactId",
-                                                              "Chair.contactId"])),
+                       fields: columns(&["PCMember.contactId",
+                                         "ChairAssistant.contactId",
+                                         "Chair.contactId"]),
                        join: vec![mkjoin("PaperReview", "contactId"),
                                   mkjoin("PaperConflict", "contactId"),
                                   mkjoin("PCMember", "contactId"),

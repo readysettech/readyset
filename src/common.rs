@@ -75,18 +75,16 @@ pub enum TableKey {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum FieldExpression {
     All,
-    Seq(Vec<Column>),
+    AllInTable(String),
+    Col(Column),
 }
 
 impl Display for FieldExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FieldExpression::All => write!(f, "all"),
-            FieldExpression::Seq(ref cols) => {
-                let field_list =
-                    cols.iter().map(|ref c| c.name.as_str()).collect::<Vec<&str>>().join(", ");
-                write!(f, "{}", field_list)
-            }
+            FieldExpression::All => write!(f, "*"),
+            FieldExpression::AllInTable(ref table) => write!(f, "{}.*", table),
+            FieldExpression::Col(ref col) => write!(f, "{}", col.name.as_str()),
         }
     }
 }
@@ -116,48 +114,70 @@ named!(pub fp_number<&[u8], &[u8]>,
     take_while1!(is_fp_number)
 );
 
+/// Parses the arguments for an agregation function, and also returns whether the distinct flag is
+/// present.
+named!(pub function_arguments<&[u8], (Column, bool)>,
+       chain!(
+           distinct: opt!(chain!(
+               caseless_tag!("distinct") ~
+               multispace,
+               ||{}
+           )) ~
+           column: column_identifier_no_alias,
+           || {
+               (column, distinct.is_some())
+           }
+       )
+);
+
 named!(pub column_function<&[u8], FunctionExpression>,
     alt_complete!(
         chain!(
-            caseless_tag!("count") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            caseless_tag!("count(*)"),
             || {
-                FunctionExpression::Count(columns)
+                FunctionExpression::CountStar
+            }
+        )
+    |   chain!(
+            caseless_tag!("count") ~
+            args: delimited!(tag!("("), function_arguments, tag!(")")),
+            || {
+                FunctionExpression::Count(args.0.clone(), args.1)
             }
         )
     |   chain!(
             caseless_tag!("sum") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
-                FunctionExpression::Sum(columns)
+                FunctionExpression::Sum(args.0.clone(), args.1)
             }
         )
     |   chain!(
             caseless_tag!("avg") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
-                FunctionExpression::Avg(columns)
+                FunctionExpression::Avg(args.0.clone(), args.1)
             }
         )
     |   chain!(
             caseless_tag!("max") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
-                FunctionExpression::Max(columns)
+                FunctionExpression::Max(args.0.clone())
             }
         )
     |   chain!(
             caseless_tag!("min") ~
-            columns: delimited!(tag!("("), field_expr, tag!(")")),
+            args: delimited!(tag!("("), function_arguments, tag!(")")),
             || {
-                FunctionExpression::Min(columns)
+                FunctionExpression::Min(args.0.clone())
             }
         )
     |   chain!(
             caseless_tag!("group_concat") ~
             spec: delimited!(tag!("("),
                        complete!(chain!(
-                               columns: field_expr ~
+                               column: column_identifier_no_alias ~
                                seperator: opt!(
                                    chain!(
                                        multispace? ~
@@ -167,18 +187,18 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                        || { sep }
                                    )
                                ),
-                               || { (columns, seperator) }
+                               || { (column, seperator) }
                        )),
                        tag!(")")),
             || {
-                let (ref cols, ref sep) = spec;
+                let (ref col, ref sep) = spec;
                 let sep = match *sep {
                     // default separator is a comma, see MySQL manual §5.7
                     None => String::from(","),
                     Some(s) => String::from_utf8(s.to_vec()).unwrap(),
                 };
 
-                FunctionExpression::GroupConcat(cols.clone(), sep)
+                FunctionExpression::GroupConcat(col.clone(), sep)
             }
         )
     )
@@ -194,7 +214,7 @@ named!(pub column_identifier_no_alias<&[u8], Column>,
                     name: format!("{}", function),
                     alias: None,
                     table: None,
-                    function: Some(function),
+                    function: Some(Box::new(function)),
                 }
             }
         )
@@ -239,7 +259,7 @@ named!(pub column_identifier<&[u8], Column>,
                         Some(a) => Some(String::from(a)),
                     },
                     table: None,
-                    function: Some(function),
+                    function: Some(Box::new(function)),
                 }
             }
         )
@@ -356,24 +376,6 @@ named!(pub as_alias<&[u8], &str>,
     )
 );
 
-/// Parse rule for a comma-separated list of field definitions (can have aliases).
-named!(pub field_definition_list<&[u8], Vec<Column> >,
-       many0!(
-           chain!(
-               fieldname: column_identifier ~
-               opt!(
-                   complete!(chain!(
-                       multispace? ~
-                       tag!(",") ~
-                       multispace?,
-                       ||{}
-                   ))
-               ),
-               || { fieldname }
-           )
-       )
-);
-
 /// Parse rule for a comma-separated list of fields without aliases.
 named!(pub field_list<&[u8], Vec<Column> >,
        many0!(
@@ -394,19 +396,39 @@ named!(pub field_list<&[u8], Vec<Column> >,
 
 /// Parse list of column/field definitions.
 /// XXX(malte): add support for named table notation
-named!(pub field_definition_expr<&[u8], FieldExpression>,
-       alt_complete!(
-           tag!("*") => { |_| FieldExpression::All }
-         | map!(field_definition_list, |v| FieldExpression::Seq(v))
-       )
-);
-
-/// Parse list of columns/fields.
-/// XXX(malte): add support for named table notation
-named!(pub field_expr<&[u8], FieldExpression>,
-       alt_complete!(
-           tag!("*") => { |_| FieldExpression::All }
-         | map!(field_list, |v| FieldExpression::Seq(v))
+named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
+       many0!(
+           chain!(
+               field: alt_complete!(
+                   chain!(
+                       tag!("*"),
+                       || {
+                           FieldExpression::All
+                       }
+                   )
+                 | chain!(
+                     table: table_reference ~ tag!(".*"),
+                     || {
+                         FieldExpression::AllInTable(table.name.clone())
+                     }
+                 )
+                 | chain!(
+                     column: column_identifier,
+                     || {
+                         FieldExpression::Col(column)
+                     }
+                 )
+               ) ~
+               opt!(
+                   complete!(chain!(
+                       multispace? ~
+                           tag!(",") ~
+                           multispace?,
+                       ||{}
+                   ))
+               ),
+               || { field }
+           )
        )
 );
 
@@ -500,13 +522,11 @@ mod tests {
         let qs = b"max(addr_id)";
 
         let res = column_identifier(qs);
-        let expected_fields = FieldExpression::Seq(vec![Column::from("addr_id")]);
-        let expected_fn = Some(FunctionExpression::Max(expected_fields));
         let expected = Column {
             name: String::from("max(addr_id)"),
             alias: None,
             table: None,
-            function: expected_fn,
+            function: Some(Box::new(FunctionExpression::Max(Column::from("addr_id")))),
         };
         assert_eq!(res.unwrap().1, expected);
     }
