@@ -61,55 +61,56 @@ pub fn new(src: NodeAddress, cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<Da
              group: &[DataType])
              -> ProcessingResult {
 
-        let mut delta: Vec<Record> = Vec::new();
-        let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
-        current.sort_by(self.cmp_rows.as_ref());
-        for r in new.iter() {
-            if let &Record::Negative(ref a) = r {
-                let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
-                if let Ok(idx) = idx {
-                    current.remove(idx);
-                    delta.push(r.clone())
+        let mut missing = None;
+        // this loop is frustrating. it is *only* here so that we have a way of
+        // releasing all borrows of new, so that new can be returned in the case of an
+        // error.
+        for _ in 0..1 {
+            let mut delta: Vec<Record> = Vec::new();
+            let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
+            current.sort_by(self.cmp_rows.as_ref());
+            for r in new.iter() {
+                if let &Record::Negative(ref a) = r {
+                    let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
+                    if let Ok(idx) = idx {
+                        current.remove(idx);
+                        delta.push(r.clone())
+                    }
                 }
             }
-        }
 
-        let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
-            .filter_map(|r| match r {
-                            &Record::Positive(ref a) => Some((a, false)),
-                            _ => None,
-                        })
-            .chain(current.into_iter().map(|a| (a, true)))
-            .collect();
-        output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+            let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
+                .filter_map(|r| match r {
+                                &Record::Positive(ref a) => Some((a, false)),
+                                _ => None,
+                            })
+                .chain(current.into_iter().map(|a| (a, true)))
+                .collect();
+            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
 
-        let src_db =
+            let src_db =
             state.get(self.src.as_local()).expect("topk must have its parent's state materialized");
-        if output_rows.len() < self.k {
-            let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
-                LookupResult::Some(rs) => rs,
-                LookupResult::Missing => {
-                    return ProcessingResult::NeedReplay {
-                               node: self.src,
-                               columns: self.group_by.clone(),
-                               key: group.into_iter().cloned().collect(),
-                               was: new,
-                           }
-                }
-            };
-
-            // Get the minimum element of output_rows.
-            if let Some((min, _)) = output_rows.iter().cloned().next() {
-                let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
-                    (self.cmp_rows)(&&r, &&min) == Ordering::Equal
+            if output_rows.len() < self.k {
+                let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
+                    LookupResult::Some(rs) => rs,
+                    LookupResult::Missing => {
+                        missing = Some(group.into_iter().cloned().collect());
+                        break;
+                    }
                 };
 
-                let mut current_mins: Vec<_> = output_rows.iter()
-                    .filter(is_min)
-                    .cloned()
-                    .collect();
+                // Get the minimum element of output_rows.
+                if let Some((min, _)) = output_rows.iter().cloned().next() {
+                    let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
+                        (self.cmp_rows)(&&r, &&min) == Ordering::Equal
+                    };
 
-                output_rows = rs.iter()
+                    let mut current_mins: Vec<_> = output_rows.iter()
+                        .filter(is_min)
+                        .cloned()
+                        .collect();
+
+                    output_rows = rs.iter()
                     .filter_map(|r| {
                         // Make sure that no duplicates are added to output_rows. This is simplified
                         // by the fact that it currently contains all rows greater than `min`, and
@@ -132,33 +133,42 @@ pub fn new(src: NodeAddress, cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<Da
                     })
                     .chain(output_rows.into_iter())
                     .collect();
-            } else {
-                output_rows = rs.iter().map(|rs| (rs, false)).collect();
+                } else {
+                    output_rows = rs.iter().map(|rs| (rs, false)).collect();
+                }
+                output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
             }
-            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
-        }
 
-        if output_rows.len() > self.k {
-            // Remove the topk elements from `output_rows`, splitting them off into `rows`. Then
-            // swap and rename so that `output_rows` contains the top K elements, and `bottom_rows`
-            // contains the rest.
-            let i = output_rows.len() - self.k;
-            let mut rows = output_rows.split_off(i);
-            mem::swap(&mut output_rows, &mut rows);
-            let bottom_rows = rows;
+            if output_rows.len() > self.k {
+                // Remove the topk elements from `output_rows`, splitting them off into `rows`. Then
+                // swap and rename so that `output_rows` contains the top K elements, and `bottom_rows`
+                // contains the rest.
+                let i = output_rows.len() - self.k;
+                let mut rows = output_rows.split_off(i);
+                mem::swap(&mut output_rows, &mut rows);
+                let bottom_rows = rows;
 
-            // Emit negatives for any elements in `bottom_rows` that were originally in
-            // current_topk.
-            delta.extend(bottom_rows.into_iter()
+                // Emit negatives for any elements in `bottom_rows` that were originally in
+                // current_topk.
+                delta.extend(bottom_rows.into_iter()
                 .filter(|p| p.1)
                 .map(|p| Record::Negative(p.0.clone())));
-        }
+            }
 
-        // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
+            // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
+            delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
                                                                       Record::Positive(p.0.clone())
                                                                   }));
-        ProcessingResult::Done(delta.into())
+            return ProcessingResult::Done(delta.into());
+        }
+
+        assert!(missing.is_some());
+        ProcessingResult::NeedReplay {
+            node: self.src,
+            columns: self.group_by.clone(),
+            key: missing.unwrap(),
+            was: new,
+        }
     }
 }
 

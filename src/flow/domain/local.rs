@@ -378,7 +378,8 @@ impl<T: Hash + Eq + Clone> State<T> {
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {
-            LookupResult::Missing
+            // TODO: check for materialization holes
+            LookupResult::Some(&[])
         }
     }
 

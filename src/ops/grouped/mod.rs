@@ -163,99 +163,109 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             return ProcessingResult::Done(rs);
         }
 
-        // First, we want to be smart about multiple added/removed rows with same group.
-        // For example, if we get a -, then a +, for the same group, we don't want to
-        // execute two queries.
-        let mut consolidate = HashMap::new();
-        for rec in rs.iter() {
-            let val = self.inner.to_diff(&rec[..], rec.is_positive());
-            let group = rec.iter()
-                .enumerate()
-                .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                                Some(v)
-                            } else {
-                                None
-                            })
-                .collect::<Vec<_>>();
+        let mut missing = None;
+        // this loop is frustrating. it is *only* here so that we have a way of
+        // releasing all borrows of new, so that new can be returned in the case of an
+        // error.
+        'outer: for _ in 0..1 {
+            // First, we want to be smart about multiple added/removed rows with same group.
+            // For example, if we get a -, then a +, for the same group, we don't want to
+            // execute two queries.
+            let mut consolidate = HashMap::new();
+            for rec in rs.iter() {
+                let val = self.inner.to_diff(&rec[..], rec.is_positive());
+                let group = rec.iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
+                                    Some(v)
+                                } else {
+                                    None
+                                })
+                    .collect::<Vec<_>>();
 
-            consolidate.entry(group).or_insert_with(Vec::new).push(val);
-        }
+                consolidate.entry(group).or_insert_with(Vec::new).push(val);
+            }
 
-        let mut out = Vec::with_capacity(2 * consolidate.len());
-        for (group, diffs) in consolidate {
-            // find the current value for this group
-            let db = state.get(self.us
-                                   .as_ref()
-                                   .unwrap()
-                                   .as_local())
-                .expect("grouped operators must have their own state materialized");
+            let mut out = Vec::with_capacity(2 * consolidate.len());
+            for (group, diffs) in consolidate {
+                // find the current value for this group
+                let db = state.get(self.us
+                                       .as_ref()
+                                       .unwrap()
+                                       .as_local())
+                    .expect("grouped operators must have their own state materialized");
 
-            let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
-                LookupResult::Some(rs) => {
-                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                    rs.get(0)
-                }
-                LookupResult::Missing => {
-                    return ProcessingResult::NeedReplay {
-                               node: from,
-                               columns: self.out_key.clone(),
-                               key: group.into_iter().cloned().collect(),
-                               was: rs,
-                           };
-                }
-            };
-
-            let (current, new) = {
-                use std::borrow::Cow;
-
-                // current value is in the last output column
-                // or "" if there is no current group
-                let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
-                    .unwrap_or_else(|| self.inner.zero().map(Cow::Owned));
-
-                // new is the result of applying all diffs for the group to the current value
-                let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
-                (current, new)
-            };
-
-            match current {
-                None => {
-                    // emit positive, which is group + new.
-                    let rec: Vec<_> = group.into_iter()
-                        .cloned()
-                        .chain(Some(new.into()).into_iter())
-                        .collect();
-                    out.push(Record::Positive(sync::Arc::new(rec)));
-                }
-                Some(ref current) if new == **current => {
-                    // no change
-                }
-                Some(current) => {
-                    // construct prefix of output record used for both - and +
-                    let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend(group.into_iter().cloned());
-
-                    // revoke old value
-                    if old.is_none() {
-                        // we're generating a zero row
-                        // revoke old value
-                        rec.push(current.into_owned());
-                        out.push(Record::Negative(sync::Arc::new(rec.clone())));
-
-                        // remove the old value from the end of the record
-                        rec.pop();
-                    } else {
-                        out.push(Record::Negative(old.unwrap().clone()));
+                let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
+                    LookupResult::Some(rs) => {
+                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                        rs.get(0)
                     }
+                    LookupResult::Missing => {
+                        missing = Some(group.into_iter().cloned().collect());
+                        break 'outer;
+                    }
+                };
 
-                    // emit new value
-                    rec.push(new.into());
-                    out.push(Record::Positive(sync::Arc::new(rec)));
+                let (current, new) = {
+                    use std::borrow::Cow;
+
+                    // current value is in the last output column
+                    // or "" if there is no current group
+                    let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
+                        .unwrap_or_else(|| self.inner.zero().map(Cow::Owned));
+
+                    // new is the result of applying all diffs for the group to the current value
+                    let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
+                    (current, new)
+                };
+
+                match current {
+                    None => {
+                        // emit positive, which is group + new.
+                        let rec: Vec<_> = group.into_iter()
+                            .cloned()
+                            .chain(Some(new.into()).into_iter())
+                            .collect();
+                        out.push(Record::Positive(sync::Arc::new(rec)));
+                    }
+                    Some(ref current) if new == **current => {
+                        // no change
+                    }
+                    Some(current) => {
+                        // construct prefix of output record used for both - and +
+                        let mut rec = Vec::with_capacity(group.len() + 1);
+                        rec.extend(group.into_iter().cloned());
+
+                        // revoke old value
+                        if old.is_none() {
+                            // we're generating a zero row
+                            // revoke old value
+                            rec.push(current.into_owned());
+                            out.push(Record::Negative(sync::Arc::new(rec.clone())));
+
+                            // remove the old value from the end of the record
+                            rec.pop();
+                        } else {
+                            out.push(Record::Negative(old.unwrap().clone()));
+                        }
+
+                        // emit new value
+                        rec.push(new.into());
+                        out.push(Record::Positive(sync::Arc::new(rec)));
+                    }
                 }
             }
+
+            return ProcessingResult::Done(out.into());
         }
 
-        ProcessingResult::Done(out.into())
+        assert!(missing.is_some());
+        ProcessingResult::NeedReplay {
+            node: self.src,
+            columns: self.out_key.clone(),
+            key: missing.unwrap(),
+            was: rs,
+        }
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
