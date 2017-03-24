@@ -90,7 +90,12 @@ impl SqlIncorporator {
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
     fn field_to_columnid(&self, na: NodeAddress, f: &str) -> Result<usize, String> {
         match self.fields_for(na).iter().position(|s| *s == f) {
-            None => Err(format!("field {} not found in view {}", f, na)),
+            None => {
+                Err(format!("field {} not found in view {} (which has: {:?})",
+                            f,
+                            na,
+                            self.fields_for(na)))
+            }
             Some(i) => Ok(i),
         }
     }
