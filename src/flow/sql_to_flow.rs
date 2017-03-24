@@ -192,6 +192,8 @@ impl SqlIncorporator {
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
+        info!(mig.log, "Computing nodes for query \"{}\"", query_name);
+
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
