@@ -338,7 +338,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 // add joined table to relations if not present already
                 let against = table.name.clone();
                 // add edge for join
-                let mut e =
+                let mut _e =
                     qg.edges.entry((prev_table.unwrap().clone(), against)).or_insert_with(|| {
                         match jc.operator {
                             JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
