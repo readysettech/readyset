@@ -27,6 +27,7 @@ pub struct Base {
     durable_log_path: Option<PathBuf>,
     global_address: Option<NodeAddress>,
     primary_key: Option<Vec<usize>>,
+    should_delete_log_on_drop: bool,
 
     // This id is unique within the same process.
     //
@@ -65,9 +66,17 @@ impl Base {
             durable_log_path: None,
             global_address: None,
             primary_key: Some(primary_key),
+            should_delete_log_on_drop: false,
             unique_id: ProcessUniqueId::new(),
             us: None,
         }
+    }
+
+    /// Whether this base node should delete its durable log on drop.  Used when durable log is not
+    /// intended to be used for future recovery, e.g., on tests.
+    pub fn delete_log_on_drop(mut self) -> Base {
+        self.should_delete_log_on_drop = true;
+        self
     }
 
     /// Write records to durable log.
@@ -144,8 +153,9 @@ impl Base {
         self.global_address = Some(n);
     }
 
-    #[cfg(test)]
-    fn cleanup_durable_log(&mut self) {
+    /// XXX: This should only be used by tests.  We don't hide it behind cfg test, however, since it
+    /// needs to be available for integration tests, which get compiled against the regular build.
+    pub fn delete_durable_log(&mut self) {
         // Cleanup any durable log files.
         if self.durable_log_path.is_some() {
             fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
@@ -165,6 +175,7 @@ impl Clone for Base {
             durable_log_path: None,
             global_address: self.global_address,
             primary_key: self.primary_key.clone(),
+            should_delete_log_on_drop: self.should_delete_log_on_drop,
             unique_id: ProcessUniqueId::new(),
             us: self.us,
         }
@@ -180,8 +191,17 @@ impl Default for Base {
             durable_log_path: None,
             global_address: None,
             primary_key: None,
+            should_delete_log_on_drop: false,
             unique_id: ProcessUniqueId::new(),
             us: None,
+        }
+    }
+}
+
+impl Drop for Base {
+    fn drop(&mut self) {
+        if self.should_delete_log_on_drop {
+            self.delete_durable_log();
         }
     }
 }

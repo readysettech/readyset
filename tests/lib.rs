@@ -81,9 +81,9 @@ fn it_sees_writes_w_durability_sync_immediately() {
     let (a, b, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately));
+                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately).delete_log_on_drop());
         let b = mig.add_ingredient("b", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately));
+                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately).delete_log_on_drop());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -147,9 +147,9 @@ fn it_sees_writes_w_durability_buffered() {
     let (a, _, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered));
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
         let b = mig.add_ingredient("b", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered));
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -1164,13 +1164,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-                               let user: DataType = 0.into();
-                               for _ in 0..votes {
-                                   for i in 0..ids {
-                                       add.put(vec![user.clone(), i.into()]);
-                                   }
-                               }
-                           });
+        let user: DataType = 0.into();
+        for _ in 0..votes {
+            for i in 0..ids {
+                add.put(vec![user.clone(), i.into()]);
+            }
+        }
+    });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
@@ -1282,10 +1282,10 @@ fn tpc_w() {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-                     String::from(l) + "\n"
-                 } else {
-                     String::from(l)
-                 })
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            })
             .collect();
 
         // Add them one by one
