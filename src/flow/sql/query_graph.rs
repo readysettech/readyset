@@ -284,6 +284,16 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
+                // if this is the first explicit join, we're joining against the last table in
+                // the list of tables
+                if prev_table.is_none() {
+                    prev_table = Some(&st.tables
+                                           .last()
+                                           .as_ref()
+                                           .unwrap()
+                                           .name);
+                }
+
                 let join_pred = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
                         match *cond {
@@ -301,12 +311,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     _ => unimplemented!(),
                                 };
                                 if *l.table.as_ref().unwrap() == table.name &&
-                                   *r.table.as_ref().unwrap() ==
-                                   st.tables
-                                       .last()
-                                       .as_ref()
-                                       .unwrap()
-                                       .name {
+                                   *r.table.as_ref().unwrap() == *prev_table.unwrap() {
                                     ConditionTree {
                                         operator: ct.operator.clone(),
                                         left: ct.right.clone(),
@@ -324,26 +329,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         let col = cols.iter().next().unwrap();
                         ConditionTree {
                             operator: Operator::Equal,
-                            left: wrapcol(&st.tables
-                                               .last()
-                                               .as_ref()
-                                               .unwrap()
-                                               .name,
-                                          &col.name),
+                            left: wrapcol(prev_table.unwrap(), &col.name),
                             right: wrapcol(&table.name, &col.name),
                         }
                     }
                 };
 
-                // if this is the first explicit join, we're joining against the last table in
-                // the list of tables
-                if prev_table.is_none() {
-                    prev_table = Some(&st.tables
-                                           .last()
-                                           .as_ref()
-                                           .unwrap()
-                                           .name);
-                }
                 // add joined table to relations if not present already
                 let against = table.name.clone();
                 // add edge for join
