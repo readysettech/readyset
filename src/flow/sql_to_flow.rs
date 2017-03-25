@@ -798,7 +798,7 @@ impl SqlIncorporator {
                                                                               new_node_count),
                                                                      fn_col,
                                                                      gb_and_param_cols.as_slice(),
-                                                                     None,
+                                                                     prev_ni,
                                                                      mig);
                                     func_nodes.push(ni);
                                     grouped_fn_columns.insert(fn_col);
