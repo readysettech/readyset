@@ -51,7 +51,7 @@ fn load_recipe() -> Result<Backend, String> {
 fn main() {
     let mut backend = load_recipe().unwrap();
 
-    // println!("Soup graph:\n{}", backend.soup);
+    println!("Soup graph:\n{}", backend.soup);
 
     println!("Writing...");
     let aid = 1;
