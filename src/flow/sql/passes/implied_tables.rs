@@ -216,9 +216,8 @@ impl ImpliedTableExpansion for SqlQuery {
                         Some(OrderClause {
                                  columns: oc.columns
                                      .into_iter()
-                                     .map(|f| expand_columns(f, &tables))
+                                     .map(|(f, o)| (expand_columns(f, &tables), o))
                                      .collect(),
-                                 order: oc.order,
                              })
                     }
                 };

@@ -192,7 +192,7 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
             2 => KeyedState::Double(FnvHashMap::default()),
             3 => KeyedState::Tri(FnvHashMap::default()),
             4 => KeyedState::Quad(FnvHashMap::default()),
-            _ => unimplemented!(),
+            x => panic!("invalid compound key of length: {}", x),
         }
     }
 }

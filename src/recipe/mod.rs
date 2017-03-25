@@ -148,7 +148,6 @@ impl Recipe {
         let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
-            //let name = self.versioned_query_name(&n, &q);
 
             // add the query
             let qfp = self.inc
@@ -298,22 +297,6 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
-    }
-
-    fn versioned_query_name(&self, name: &Option<String>, query: &SqlQuery) -> Option<String> {
-        // for CREATE/INSERT queries, we use the table name as the query name.
-        let base = match *name {
-            None => {
-                match *query {
-                    SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-                    SqlQuery::Insert(ref iq) => iq.table.name.clone(),
-                    SqlQuery::Select(_) => return None,
-                }
-            }
-            Some(ref name) => name.clone(),
-        };
-
-        Some(format!("{}#{}", base, self.version))
     }
 }
 

@@ -192,6 +192,8 @@ impl SqlIncorporator {
         use flow::sql::passes::implied_tables::ImpliedTableExpansion;
         use flow::sql::passes::star_expansion::StarExpansion;
 
+        info!(mig.log, "Computing nodes for query \"{}\"", query_name);
+
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
@@ -417,8 +419,8 @@ impl SqlIncorporator {
             &Some(ref o) => {
                 assert_eq!(limit.offset, 0); // Non-zero offset not supported
 
-                let columns:Vec<_> = o.columns.iter().map(|c| {
-                    (o.order.clone(), self.field_to_columnid(parent, &c.name).unwrap())
+                let columns:Vec<_> = o.columns.iter().map(|&(ref c, ref order_type)| {
+                    (order_type.clone(), self.field_to_columnid(parent, &c.name).unwrap())
                 }).collect();
 
                 Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
@@ -637,17 +639,17 @@ impl SqlIncorporator {
             }
             // queries are different, but one might be a generalization of the other
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
-                info!(mig.log,
-                      "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
-                      qg,
-                      existing_qg);
+                trace!(mig.log,
+                       "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
+                       qg,
+                       existing_qg);
             }
         }
 
-        let nodes_added;
+        let nodes_added: Vec<NodeAddress>;
         let leaf_na;
+        let mut new_node_count = 0;
 
-        let mut i = 0;
         {
             // 1. Generate the necessary filter node for each relation node in the query graph.
             let mut filter_nodes = HashMap::<String, Vec<NodeAddress>>::new();
@@ -668,18 +670,19 @@ impl SqlIncorporator {
                         // has: 1) projected columns; or 2) a filter condition
                         let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
-                                                                              i),
+                                                                              new_node_count),
                                                                      qgn,
                                                                      mig);
                         filter_nodes.insert((*rel).clone(), fns.clone());
+                        new_node_count += fns.len();
                         new_filter_nodes.extend(fns);
                     } else {
                         // otherwise, just record the node index of the base node for the relation
                         // that is being selected from
+                        // N.B.: no need to update `new_node_count` as no nodes are added
                         filter_nodes.insert((*rel).clone(), vec![self.address_for(rel)]);
                     }
                 }
-                i += 1;
             }
 
             // 2. Generate join nodes for the query. This starts out by joining two of the filter
@@ -696,7 +699,7 @@ impl SqlIncorporator {
             for &(&(ref src, ref dst), edge) in &sorted_edges {
                 match *edge {
                     // Edge represents a LEFT JOIN
-                    QueryGraphEdge::LeftJoin(ref jps) => unimplemented!(),
+                    QueryGraphEdge::LeftJoin(_) => unimplemented!(),
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
                         let left_ni;
@@ -729,13 +732,13 @@ impl SqlIncorporator {
                         };
                         // make node
                         let ni =
-                            self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
+                            self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
                                                 jps,
                                                 left_ni,
                                                 right_ni,
                                                 mig);
                         join_nodes.push(ni);
-                        i += 1;
+                        new_node_count += 1;
                         prev_ni = Some(ni);
 
                         // we've now joined both tables
@@ -792,14 +795,14 @@ impl SqlIncorporator {
                                         .collect();
                                     let ni = self.make_function_node(&format!("q_{:x}_n{}",
                                                                               qg.signature().hash,
-                                                                              i),
+                                                                              new_node_count),
                                                                      fn_col,
                                                                      gb_and_param_cols.as_slice(),
-                                                                     None,
+                                                                     prev_ni,
                                                                      mig);
                                     func_nodes.push(ni);
                                     grouped_fn_columns.insert(fn_col);
-                                    i += 1;
+                                    new_node_count += 1;
                                 }
                             }
                         }
@@ -810,7 +813,8 @@ impl SqlIncorporator {
                             .filter(|c| !grouped_fn_columns.contains(c))
                             .collect::<Vec<_>>() {
 
-                        let agg_node_name = &format!("q_{:x}_n{}", qg.signature().hash, i);
+                        let agg_node_name =
+                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
                         let over_cols = target_columns_from_computed_column(computed_col);
                         let ref proj_cols_from_target_table = qg.relations
@@ -831,6 +835,7 @@ impl SqlIncorporator {
                             let proj_name = format!("{}_prj_hlpr", agg_node_name);
                             let proj = self.make_projection_helper(&proj_name, computed_col, mig);
                             func_nodes.push(proj);
+                            new_node_count += 1;
 
                             let bogo_group_col = Column::from(format!("{}.grp", proj_name)
                                                                   .as_str());
@@ -844,7 +849,7 @@ impl SqlIncorporator {
                                                          parent_ni,
                                                          mig);
                         func_nodes.push(ni);
-                        i += 1;
+                        new_node_count += 1;
                     }
                 }
             }
@@ -884,7 +889,9 @@ impl SqlIncorporator {
                     group_by.push(0);
                 }
 
-                let ni = self.make_topk_node(&format!("q_{:x}_n{}", qg.signature().hash, i),
+                let ni = self.make_topk_node(&format!("q_{:x}_n{}",
+                                                      qg.signature().hash,
+                                                      new_node_count),
                                              final_na,
                                              group_by,
                                              &st.order,
@@ -892,7 +899,7 @@ impl SqlIncorporator {
                                              mig);
                 func_nodes.push(ni);
                 final_na = ni;
-                i += 1;
+                new_node_count += 1;
             }
 
             // 5. Generate leaf views that expose the query result
@@ -917,6 +924,7 @@ impl SqlIncorporator {
                                        Permute::new(final_na, projected_column_ids.as_slice()));
                 self.node_addresses.insert(String::from(name), leaf_na);
                 self.node_fields.insert(leaf_na, fields);
+                new_node_count += 1;
 
                 // We always materialize leaves of queries (at least currently)
                 let query_params = qg.parameters();
@@ -944,6 +952,7 @@ impl SqlIncorporator {
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
                 .collect();
+            assert_eq!(nodes_added.len(), new_node_count);
         }
 
         (nodes_added, leaf_na)
@@ -1100,7 +1109,7 @@ mod tests {
                                   &Column::from("users.id"),
                                   &Column::from("users.name")]);
         // join node
-        let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(new_join_view.fields(),
                    &["id", "author", "title", "id", "name"]);
         // leaf node
@@ -1184,7 +1193,7 @@ mod tests {
                                             FieldExpression::Seq(
                                                 vec![Column::from("votes.userid")]))),
                                 }]);
-        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view
@@ -1310,11 +1319,11 @@ mod tests {
                                             FieldExpression::Seq(
                                                 vec![Column::from("votes.userid")]))),
                                 }]);
-        let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n2_prj_hlpr", qid));
+        let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
         // check aggregation view
-        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["grp", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[1]"));
         // check edge view -- note that it's not actually currently possible to read from
@@ -1359,7 +1368,7 @@ mod tests {
                                             FieldExpression::Seq(
                                                 vec![Column::from("votes.aid")]))),
                                 }]);
-        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n2", qid));
+        let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
         // check edge view -- note that it's not actually currently possible to read from
@@ -1455,11 +1464,11 @@ mod tests {
                                   &Column::from("votes.aid"),
                                   &Column::from("votes.uid")]);
         // XXX(malte): non-deterministic join ordering below
-        let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n3", qid));
+        let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         // articles join votes
         //assert_eq!(join1_view.fields(),
         //           &["aid", "title", "author", "id", "name"]);
-        let _join2_view = get_node(&inc, &mig, &format!("q_{:x}_n3", qid));
+        let _join2_view = get_node(&inc, &mig, &format!("q_{:x}_n1", qid));
         // join1_view join users
         //assert_eq!(join2_view.fields(),
         //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
