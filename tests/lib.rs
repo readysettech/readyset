@@ -112,7 +112,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     mutb.put(vec![id.clone(), 4.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // check that value was updated again
     let res = cq(&id).unwrap();
@@ -123,7 +123,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     muta.delete(vec![id.clone()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 4.into()]]));
@@ -132,7 +132,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     mutb.update(vec![id.clone(), 6.into()]);
 
     // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // send a query to c
     assert_eq!(cq(&id), Ok(vec![vec![1.into(), 6.into()]]));
@@ -171,7 +171,7 @@ fn it_propagates_writes_w_durability_buffered() {
     }
 
     // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // Send a query to check that we do not see our updates yet, as they're still buffered.
     assert_eq!(cq(&id), Ok(vec![]));
@@ -180,7 +180,7 @@ fn it_propagates_writes_w_durability_buffered() {
     muta.put(vec![id.clone(), base_buffer_capacity.into()]);
 
     // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // Check that we see our writes.
     let res = cq(&id).unwrap();
@@ -222,7 +222,7 @@ fn it_propagates_writes_w_durability_buffered_flush_interval() {
     assert!(SETTLE_TIME_MS < base_buffer_flush_interval_ms);
 
     // Give it some time to propagate, but do not cross the Base buffer's flush interval.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // Send a query to check that we do not see our updates yet.
     assert_eq!(cq(&id), Ok(vec![]));
@@ -235,7 +235,7 @@ fn it_propagates_writes_w_durability_buffered_flush_interval() {
     muta.put(vec![id.clone(), 1.into()]);
 
     // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
 
     // Check that we see our two writes.
     let res = cq(&id).unwrap();
