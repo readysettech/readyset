@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use time;
 
 // 4k buffered log.
@@ -13,6 +14,9 @@ const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
 
 // We store at most this many write records before flushing to disk.
 const BUFFERED_WRITES_CAPACITY: usize = 512;
+
+// We spend at least this many milliseconds without flushing write records to disk.
+const BUFFERED_WRITES_FLUSH_INTERVAL_MS: u64 = 1000;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -26,6 +30,7 @@ pub struct Base {
     durable_log: Option<BufWriter<File, WhenFull>>,
     durable_log_path: Option<PathBuf>,
     global_address: Option<NodeAddress>,
+    last_flushed_at: Option<Instant>,
     primary_key: Option<Vec<usize>>,
     should_delete_log_on_drop: bool,
 
@@ -65,6 +70,7 @@ impl Base {
             durable_log: None,
             durable_log_path: None,
             global_address: None,
+            last_flushed_at: Some(Instant::now()),
             primary_key: Some(primary_key),
             should_delete_log_on_drop: false,
             unique_id: ProcessUniqueId::new(),
@@ -174,6 +180,7 @@ impl Clone for Base {
             durable_log: None,
             durable_log_path: None,
             global_address: self.global_address,
+            last_flushed_at: self.last_flushed_at,
             primary_key: self.primary_key.clone(),
             should_delete_log_on_drop: self.should_delete_log_on_drop,
             unique_id: ProcessUniqueId::new(),
@@ -190,6 +197,7 @@ impl Default for Base {
             durable_log: None,
             durable_log_path: None,
             global_address: None,
+            last_flushed_at: Some(Instant::now()),
             primary_key: None,
             should_delete_log_on_drop: false,
             unique_id: ProcessUniqueId::new(),
@@ -244,14 +252,19 @@ impl Ingredient for Base {
             BaseDurabilityLevel::Buffered => {
                 // Perform a synchronous flush if one of the following conditions are met:
                 //
-                // 1. TODO: Enough time has passed since the last time we flushed.
+                // 1. Enough time has passed since the last time we flushed.
                 // 2. Our buffer of write records reaches capacity.
                 let num_buffered_writes = self.buffered_writes.as_ref().unwrap().len();
-                if num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY {
+                let has_reached_capacity = num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY;
+                let elapsed = self.last_flushed_at.unwrap().elapsed();
+                let has_reached_time_limit = elapsed >= Duration::from_millis(BUFFERED_WRITES_FLUSH_INTERVAL_MS);
+
+                if has_reached_capacity || has_reached_time_limit {
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
 
                     let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
                     self.persist_to_log(&copy_buffered_writes);
+                    self.last_flushed_at = Some(Instant::now());
 
                     // This returns everything that was buffered, plus the newly inserted records.
                     records_to_return = Some(copy_buffered_writes);

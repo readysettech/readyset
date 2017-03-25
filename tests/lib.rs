@@ -73,7 +73,7 @@ fn it_works() {
 }
 
 #[test]
-fn it_sees_writes_w_durability_sync_immediately() {
+fn it_propagates_writes_w_durability_sync_immediately() {
     use distributary::{Base, BaseDurabilityLevel};
 
     // set up graph
@@ -139,7 +139,7 @@ fn it_sees_writes_w_durability_sync_immediately() {
 }
 
 #[test]
-fn it_sees_writes_w_durability_buffered() {
+fn it_propagates_writes_w_durability_buffered() {
     use distributary::{Base, BaseDurabilityLevel};
 
     // set up graph
@@ -173,7 +173,7 @@ fn it_sees_writes_w_durability_buffered() {
     // Give it some time to propagate.
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
-    // Send a query to check that we do not see our updates yet.
+    // Send a query to check that we do not see our updates yet, as they're still buffered.
     assert_eq!(cq(&id), Ok(vec![]));
 
     // Send one more value so that we go over what Base's buffer will hold before flushing.
@@ -187,6 +187,61 @@ fn it_sees_writes_w_durability_buffered() {
     assert_eq!(res.iter().len(), 512);
     assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
     assert!(res.iter().any(|r| r == &vec![id.clone(), base_buffer_capacity.into()]));
+}
+
+#[test]
+fn it_propagates_writes_w_durability_buffered_flush_interval() {
+    use distributary::{Base, BaseDurabilityLevel};
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, _, cq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+        let b = mig.add_ingredient("b", &["a", "b"],
+                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+
+        let mut emits = HashMap::new();
+        emits.insert(a, vec![0, 1]);
+        emits.insert(b, vec![0, 1]);
+        let u = distributary::Union::new(emits);
+        let c = mig.add_ingredient("c", &["a", "b"], u);
+        let cq = mig.maintain(c, 0);
+        mig.commit();
+        (a, b, cq)
+    };
+
+    let muta = g.get_mutator(a);
+    let id: distributary::DataType = 1.into();
+
+    // Send less values than what Base's buffer will hold before flushing.
+    let base_buffer_flush_interval_ms = 1000;
+    muta.put(vec![id.clone(), 0.into()]);
+
+    assert!(SETTLE_TIME_MS < base_buffer_flush_interval_ms);
+
+    // Give it some time to propagate, but do not cross the Base buffer's flush interval.
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Send a query to check that we do not see our updates yet.
+    assert_eq!(cq(&id), Ok(vec![]));
+
+    // Wait a little longer, enough so that we cross the Base buffer's flush interval.
+    thread::sleep(time::Duration::from_millis(base_buffer_flush_interval_ms));
+
+    // Send one more value to force a flush.
+    // TODO: Remove this put once Base's buffer flush is triggered by a Flush Packet instead.
+    muta.put(vec![id.clone(), 1.into()]);
+
+    // Give it some time to propagate.
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Check that we see our two writes.
+    let res = cq(&id).unwrap();
+    assert_eq!(res.iter().len(), 2);
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
+    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
 }
 
 #[test]
