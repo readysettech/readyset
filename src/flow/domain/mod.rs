@@ -144,7 +144,9 @@ impl Domain {
                 return output_messages;
             }
             DomainMode::Replaying { .. } => (),
-            DomainMode::Waiting { .. } => unimplemented!(),
+            DomainMode::Waiting { .. } => {
+                unreachable!();
+            }
         }
 
         if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
@@ -158,6 +160,32 @@ impl Domain {
         process_ptimes.stop();
         process_times.stop();
         drop(n);
+
+        let m = match m {
+            single::FinalProcessingResult::Done(m) => m,
+            single::FinalProcessingResult::NeedReplay { was, .. } => {
+                use std::mem;
+                // TODO: we need to send a message to the source domain(s) responsible for
+                // replaying to this node to replay the given key.
+                unimplemented!();
+
+                // make sure we get back to this message when the state is available
+                let mut buffered = VecDeque::new();
+                buffered.push_front(was);
+                let wait = DomainMode::Waiting {
+                    buffered: buffered,
+                    tag: unimplemented!(),
+                };
+
+                // we're now waiting, but what were we doing?
+                match mem::replace(mode, wait) {
+                    DomainMode::Forwarding => (),
+                    DomainMode::Replaying { .. } => unimplemented!(),
+                    DomainMode::Waiting { .. } => unreachable!(),
+                }
+                return output_messages;
+            }
+        };
 
         match m {
             Packet::Message { .. } if m.is_empty() => {
@@ -277,6 +305,15 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
+        if let DomainMode::Waiting {
+                   ref tag,
+                   ref mut buffered,
+                   ..
+               } = self.mode {
+            buffered.push_back(m);
+            return;
+        }
+
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
@@ -487,9 +524,15 @@ impl Domain {
                 DomainMode::Replaying { .. } => {
                     // another packet the local state we are constructing
                 }
-                DomainMode::Waiting { .. } => {
+                DomainMode::Waiting { tag: waiting_on, .. } => {
+                    // if we're in the waiting state, exactly *one* packet will ever be sent to us,
+                    // and that is the packet that releases the waiting state.
                     assert!(last);
-                    unimplemented!();
+                    assert_eq!(waiting_on, tag);
+                    match data {
+                        ReplayData::Records(..) => (),
+                        ReplayData::StateCopy(..) => unreachable!(),
+                    }
                 }
             }
 
@@ -660,7 +703,21 @@ impl Domain {
                     for (i, ni) in path.iter().enumerate() {
                         // process the current message in this node
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
-                        m = n.process(m, &mut self.state, &self.nodes, false);
+                        m = match n.process(m, &mut self.state, &self.nodes, false) {
+                            single::FinalProcessingResult::Done(m) => m,
+                            single::FinalProcessingResult::NeedReplay { was, .. } => {
+                                // we've already received something with the key contained in m,
+                                // which is what triggered this replay in the first place. that
+                                // original message *should* have triggered a replay further up
+                                // before arriving here, so by this time I *think* it's safe to
+                                // assume that we won't see any materialization misses.
+                                //
+                                // TODO FIXME
+                                // actually, damn, that's not true if m.data.len() != 1
+                                assert_ne!(was.data().len(), 1);
+                                unimplemented!()
+                            }
+                        };
                         drop(n);
 
                         if i == path.len() - 1 {
@@ -687,15 +744,17 @@ impl Domain {
                     }
 
                     if last {
+                        let ni = *path.last().unwrap().as_local();
                         debug!(self.log, "last batch processed"; "terminal" => done_tx.is_some());
+                        if done_tx.is_some() {
+                            debug!(self.log, "last batch received"; "local" => ni.id());
+                            finished = Some((tag, ni));
+                        } else if let DomainMode::Waiting { .. } = self.mode {
+                            trace!(self.log, "partial replay completed"; "local" => ni.id());
+                            finished = Some((tag, ni));
+                        }
                     } else {
                         debug!(self.log, "batch processed");
-                    }
-
-                    if last && done_tx.is_some() {
-                        let ni = *path.last().unwrap().as_local();
-                        debug!(self.log, "last batch received"; "local" => ni.id());
-                        finished = Some((tag, ni));
                     }
                 }
             }
@@ -707,6 +766,55 @@ impl Domain {
             self.handle(p, inject_tx);
         }
         if let Some((tag, ni)) = finished {
+            if let DomainMode::Waiting { .. } = self.mode {
+                use std::mem;
+                if let DomainMode::Waiting { mut buffered, .. } =
+                    mem::replace(&mut self.mode, DomainMode::Forwarding) {
+                    // TODO: remove anything from buffered with the same key as was just replayed
+                    while let Some(m) = buffered.pop_front() {
+                        self.handle(m, inject_tx);
+                        // check if we've changed into another mode and should stop
+                        match self.mode {
+                            DomainMode::Forwarding => {
+                                // nope, keep going
+                            }
+                            DomainMode::Waiting { buffered: ref mut new_buffered, .. } => {
+                                // seems we hit another missing entry. transfer over the remaining
+                                // buffered things and leave it up to the next arrival of a replay
+                                // for that to continue.
+                                new_buffered.extend(buffered.drain(..));
+                                return;
+                            }
+                            DomainMode::Replaying { .. } => {
+                                // what do we even do here?
+                                // a control message was buffered, and made us start a replay!
+                                // except that we can't just go along with that, since we still
+                                // have more messages buffered that need to be replayed!
+                                //
+                                // how can this even happen? must have *previously* received a
+                                // SetupReplay, and *now* received the first Replay in that path,
+                                // *and* we are the target domain. we can't have *both* in buffer,
+                                // because we wouldn't have responded to the SetupReplay message
+                                // (and thus the Replay wouldn't have started yet).
+                                //
+                                // two options as far as I see it:
+                                //
+                                //  1. place Replay messages destined for us *last* (i.e., those
+                                //     where we are the terminating domain). there *could* be
+                                //     multiple though...
+                                //  2. add a global buffer to the Replaying mode struct. this would
+                                //     have wider repercussions too, as *all* messages need to be
+                                //     buffered when this is non-empty. also, what even happens if
+                                //     you need to do a partially materialized replay *while*
+                                //     replaying?
+                                unimplemented!();
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+
             // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
             // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
             // this allows finish_replay to dispatch into the node by overriding replaying_to.

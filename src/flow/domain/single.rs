@@ -26,6 +26,16 @@ pub struct NodeDescriptor {
     pub children: Vec<NodeAddress>,
 }
 
+pub enum FinalProcessingResult {
+    Done(Packet),
+    NeedReplay {
+        node: NodeAddress,
+        columns: Vec<usize>,
+        key: Vec<DataType>,
+        was: Packet,
+    },
+}
+
 impl NodeDescriptor {
     pub fn new(graph: &mut Graph, node: NodeIndex) -> Self {
         use petgraph;
@@ -48,14 +58,14 @@ impl NodeDescriptor {
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    swap: bool)
-                   -> Packet {
+                   -> FinalProcessingResult {
 
         use flow::payload::TransactionState;
         let addr = *self.addr().as_local();
         match *self.inner {
             flow::node::Type::Ingress => {
                 materialize(m.data(), state.get_mut(&addr));
-                m
+                FinalProcessingResult::Done(m)
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
@@ -95,7 +105,7 @@ impl NodeDescriptor {
                 });
 
                 // readers never have children
-                Packet::None
+                FinalProcessingResult::Done(Packet::None)
             }
             flow::node::Type::Hook(ref mut h) => {
                 if let &mut Some(ref mut h) = h {
@@ -103,7 +113,7 @@ impl NodeDescriptor {
                 } else {
                     unreachable!();
                 }
-                Packet::None
+                FinalProcessingResult::Done(Packet::None)
             }
             flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
@@ -158,7 +168,7 @@ impl NodeDescriptor {
                     }
                 }
                 debug_assert!(m.is_none());
-                Packet::None
+                FinalProcessingResult::Done(Packet::None)
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
@@ -179,11 +189,20 @@ impl NodeDescriptor {
                     }
                 });
 
-                if let Some(..) = need_replay {
-                    unimplemented!();
+                match need_replay {
+                    None => {
+                        materialize(m.data(), state.get_mut(&addr));
+                        FinalProcessingResult::Done(m)
+                    }
+                    Some((node, columns, key)) => {
+                        FinalProcessingResult::NeedReplay {
+                            node: node,
+                            columns: columns,
+                            key: key,
+                            was: m,
+                        }
+                    }
                 }
-                materialize(m.data(), state.get_mut(&addr));
-                m
             }
             flow::node::Type::Source => unreachable!(),
         }
