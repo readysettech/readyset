@@ -58,6 +58,18 @@ pub mod local;
 
 type InjectCh = mpsc::SyncSender<Packet>;
 
+enum DomainMode {
+    Forwarding,
+    Replaying {
+        to: LocalNodeIndex,
+        buffered: VecDeque<Packet>,
+        passes: usize,
+    },
+    Waiting {
+        tag: Tag,
+        buffered: VecDeque<Packet>,
+    },
+}
 
 pub struct Domain {
     _index: Index,
@@ -71,7 +83,7 @@ pub struct Domain {
 
     transaction_state: transactions::DomainState,
 
-    replaying_to: Option<(LocalNodeIndex, VecDeque<Packet>, usize)>,
+    mode: DomainMode,
     replay_paths: HashMap<Tag, (Vec<NodeAddress>, Option<mpsc::SyncSender<()>>)>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -98,7 +110,7 @@ impl Domain {
             state: StateMap::default(),
             log: log,
             not_ready: not_ready,
-            replaying_to: None,
+            mode: DomainMode::Forwarding,
             replay_paths: HashMap::new(),
             total_time: Timer::new(),
             total_ptime: Timer::new(),
@@ -108,25 +120,33 @@ impl Domain {
         }
     }
 
-    pub fn dispatch(m: Packet,
-                    not_ready: &HashSet<LocalNodeIndex>,
-                    replaying_to: &mut Option<(LocalNodeIndex, VecDeque<Packet>, usize)>,
-                    states: &mut StateMap,
-                    nodes: &DomainNodes,
-                    process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
-                    process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
-                    enable_output: bool)
-                    -> HashMap<NodeAddress, Vec<Record>> {
+    fn dispatch(m: Packet,
+                not_ready: &HashSet<LocalNodeIndex>,
+                mode: &mut DomainMode,
+                states: &mut StateMap,
+                nodes: &DomainNodes,
+                process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
+                process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
+                enable_output: bool)
+                -> HashMap<NodeAddress, Vec<Record>> {
 
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
-        if let Some((ref bufnode, ref mut buffered, _)) = *replaying_to {
-            if bufnode == me.as_local() {
+        match *mode {
+            DomainMode::Forwarding => (),
+            DomainMode::Replaying {
+                ref to,
+                ref mut buffered,
+                ..
+            } if to == me.as_local() => {
                 buffered.push_back(m);
                 return output_messages;
             }
+            DomainMode::Replaying { .. } => (),
+            DomainMode::Waiting { .. } => unimplemented!(),
         }
+
         if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
             return output_messages;
         }
@@ -175,7 +195,7 @@ impl Domain {
 
                 for (k, mut v) in Self::dispatch(m,
                                                  not_ready,
-                                                 replaying_to,
+                                                 mode,
                                                  states,
                                                  nodes,
                                                  process_times,
@@ -202,7 +222,7 @@ impl Domain {
     fn dispatch_(&mut self, m: Packet, enable_output: bool) -> HashMap<NodeAddress, Vec<Record>> {
         Self::dispatch(m,
                        &self.not_ready,
-                       &mut self.replaying_to,
+                       &mut self.mode,
                        &mut self.state,
                        &self.nodes,
                        &mut self.process_times,
@@ -214,13 +234,13 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let ts =
-            if let Some(&Packet::Transaction { state: ref ts@TransactionState::Committed(..), .. }) =
-                messages.iter().next() {
-                ts.clone()
-            } else {
-                unreachable!();
-            };
+        let ts = if let Some(&Packet::Transaction {
+                                  state: ref ts @ TransactionState::Committed(..), ..
+                              }) = messages.iter().next() {
+            ts.clone()
+        } else {
+            unreachable!();
+        };
 
         for m in messages {
             let new_messages = self.dispatch_(m, false);
@@ -307,7 +327,12 @@ impl Domain {
                 }
                 self.state.insert(node, state);
             }
-            Packet::SetupReplayPath { tag, path, done_tx, ack } => {
+            Packet::SetupReplayPath {
+                tag,
+                path,
+                done_tx,
+                ack,
+            } => {
                 // let coordinator know that we've registered the tagged path
                 ack.send(()).unwrap();
 
@@ -354,7 +379,10 @@ impl Domain {
             }
             Packet::Ready { node, index, ack } => {
 
-                assert!(self.replaying_to.is_none());
+                if let DomainMode::Forwarding = self.mode {
+                } else {
+                    unreachable!();
+                }
 
                 if !index.is_empty() {
                     let mut s = {
@@ -430,18 +458,39 @@ impl Domain {
     fn handle_replay(&mut self, m: Packet, inject_tx: &mut InjectCh) {
         let mut finished = None;
         let mut playback = None;
-        if let Packet::Replay { mut link, tag, last, data } = m {
+        if let Packet::Replay {
+                   mut link,
+                   tag,
+                   last,
+                   data,
+               } = m {
             let &mut (ref path, ref mut done_tx) = self.replay_paths.get_mut(&tag).unwrap();
 
-            if done_tx.is_some() && self.replaying_to.is_none() {
-                // this is the first message we receive for this tagged replay path. only at this
-                // point should we start buffering messages for the target node. since the node is
-                // not yet marked ready, all previous messages for this node will automatically be
-                // discarded by dispatch(). the reason we should ignore all messages preceeding the
-                // first replay message is that those have already been accounted for in the state
-                // we are being replayed. if we buffered them and applied them after all the state
-                // has been replayed, we would double-apply those changes, which is bad.
-                self.replaying_to = Some((*path.last().unwrap().as_local(), VecDeque::new(), 0))
+            match self.mode {
+                DomainMode::Forwarding if done_tx.is_some() => {
+                    // this is the first message we receive for this tagged replay path. only at this
+                    // point should we start buffering messages for the target node. since the node is
+                    // not yet marked ready, all previous messages for this node will automatically be
+                    // discarded by dispatch(). the reason we should ignore all messages preceeding the
+                    // first replay message is that those have already been accounted for in the state
+                    // we are being replayed. if we buffered them and applied them after all the state
+                    // has been replayed, we would double-apply those changes, which is bad.
+                    self.mode = DomainMode::Replaying {
+                        to: *path.last().unwrap().as_local(),
+                        buffered: VecDeque::new(),
+                        passes: 0,
+                    };
+                }
+                DomainMode::Forwarding => {
+                    // we're replaying to forward to another domain
+                }
+                DomainMode::Replaying { .. } => {
+                    // another packet the local state we are constructing
+                }
+                DomainMode::Waiting { .. } => {
+                    assert!(last);
+                    unimplemented!();
+                }
             }
 
             // we may be able to just absorb all the state in one go if we're lucky!
@@ -725,27 +774,25 @@ impl Domain {
     }
 
     fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject_tx: &mut InjectCh) {
-        if self.replaying_to.is_none() {
-            // we're told to continue replay, but nothing is being replayed
-            unreachable!();
-        }
-
-        let finished = {
-            let replaying_to = self.replaying_to.as_mut().unwrap();
-            if replaying_to.0 != node {
+        let finished = if let DomainMode::Replaying {
+                   ref to,
+                   ref mut buffered,
+                   ref mut passes,
+               } = self.mode {
+            if *to != node {
                 // we're told to continue replay for node a, but not b is being replayed
                 unreachable!();
             }
             // log that we did another pass
-            replaying_to.2 += 1;
+            *passes += 1;
 
-            let mut handle = replaying_to.1.len();
+            let mut handle = buffered.len();
             if handle > 100 {
                 handle /= 2;
             }
 
             let mut handled = 0;
-            while let Some(m) = replaying_to.1.pop_front() {
+            while let Some(m) = buffered.pop_front() {
                 // some updates were propagated to this node during the migration. we need to
                 // replay them before we take even newer updates. however, we don't want to
                 // completely block the domain data channel, so we only process a few backlogged
@@ -757,7 +804,7 @@ impl Domain {
                     // initiate.
                     Self::dispatch(m,
                                    &self.not_ready,
-                                   &mut None,
+                                   &mut DomainMode::Forwarding,
                                    &mut self.state,
                                    &self.nodes,
                                    &mut self.process_times,
@@ -777,13 +824,21 @@ impl Domain {
                 }
             }
 
-            replaying_to.1.is_empty()
+            buffered.is_empty()
+        } else {
+            // we're told to continue replay, but nothing is being replayed
+            unreachable!();
         };
 
         if finished {
+            use std::mem;
             // node is now ready, and should start accepting "real" updates
-            let rt = self.replaying_to.take().unwrap();
-            debug!(self.log, "node is fully up-to-date"; "local" => node.id(), "passes" => rt.2);
+            if let DomainMode::Replaying { passes, .. } =
+                mem::replace(&mut self.mode, DomainMode::Forwarding) {
+                debug!(self.log, "node is fully up-to-date"; "local" => node.id(), "passes" => passes);
+            } else {
+                unreachable!();
+            }
 
             if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| p.1.as_mut()) {
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());

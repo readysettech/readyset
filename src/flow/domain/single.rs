@@ -60,8 +60,9 @@ impl NodeDescriptor {
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
                     state.add(m.data().iter().cloned());
-                    if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } =
-                        m {
+                    if let Packet::Transaction {
+                               state: TransactionState::Committed(ts, ..), ..
+                           } = m {
                         state.update_ts(ts);
                     }
 
