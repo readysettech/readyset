@@ -1,6 +1,3 @@
-pub mod sql_to_flow;
-mod sql;
-
 use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
@@ -893,7 +890,7 @@ mod tests {
 
         let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
                      INSERT INTO b (r, s) VALUES (?, ?);\n";
-        let mut r = Recipe::from_str(r_txt).unwrap();
+        let mut r = Recipe::from_str(r_txt, None).unwrap();
 
         let mut b = Blender::new();
         {

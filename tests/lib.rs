@@ -1116,7 +1116,7 @@ fn tpc_w() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut r = distributary::Recipe::blank();
+    let mut r = distributary::Recipe::blank(None);
     {
         let mut mig = g.start_migration();
 

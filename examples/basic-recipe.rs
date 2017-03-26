@@ -33,7 +33,7 @@ fn load_recipe() -> Result<Backend, String> {
         let mut mig = soup.start_migration();
 
         // install recipe
-        recipe = match Recipe::from_str(&sql) {
+        recipe = match Recipe::from_str(&sql, None) {
             Ok(mut recipe) => {
                 recipe.activate(&mut mig)?;
                 recipe
@@ -51,7 +51,7 @@ fn load_recipe() -> Result<Backend, String> {
 fn main() {
     let mut backend = load_recipe().unwrap();
 
-    // println!("Soup graph:\n{}", backend.soup);
+    println!("Soup graph:\n{}", backend.soup);
 
     println!("Writing...");
     let aid = 1;

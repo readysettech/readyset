@@ -1,7 +1,6 @@
 use nom_sql::parser as sql_parser;
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
-use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
@@ -10,13 +9,19 @@ use ops::base::Base;
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
+use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 
+use slog;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::str;
 use std::vec::Vec;
 use std::cmp::Ordering;
 use std::sync::Arc;
+
+pub mod passes;
+pub mod query_graph;
+pub mod query_signature;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -59,8 +64,9 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SqlIncorporator {
+    log: slog::Logger,
     write_schemas: HashMap<String, Vec<String>>,
     node_addresses: HashMap<String, NodeAddress>,
     node_fields: HashMap<NodeAddress, Vec<String>>,
@@ -69,9 +75,9 @@ pub struct SqlIncorporator {
 }
 
 impl Default for SqlIncorporator {
-    /// Creates a new `SqlIncorporator` for an empty flow graph.
     fn default() -> Self {
         SqlIncorporator {
+            log: slog::Logger::root(slog::Discard, None),
             write_schemas: HashMap::default(),
             node_addresses: HashMap::default(),
             node_fields: HashMap::default(),
@@ -82,6 +88,13 @@ impl Default for SqlIncorporator {
 }
 
 impl SqlIncorporator {
+    /// Creates a new `SqlIncorporator` for an empty flow graph.
+    pub fn new(log: slog::Logger) -> Self {
+        let mut inc = SqlIncorporator::default();
+        inc.log = log;
+        inc
+    }
+
     /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
     fn fields_for(&self, na: NodeAddress) -> &[String] {
         self.node_fields[&na].as_slice()
@@ -114,7 +127,6 @@ impl SqlIncorporator {
                      ct: &ConditionTree,
                      na: &NodeAddress)
                      -> Vec<Option<(Operator, DataType)>> {
-        // TODO(malte): support other types of operators
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left
                    .as_ref()
@@ -187,12 +199,12 @@ impl SqlIncorporator {
                              query_name: String,
                              mut mig: &mut Migration)
                              -> QueryFlowParts {
-        use flow::sql::passes::alias_removal::AliasRemoval;
-        use flow::sql::passes::count_star_rewrite::CountStarRewrite;
-        use flow::sql::passes::implied_tables::ImpliedTableExpansion;
-        use flow::sql::passes::star_expansion::StarExpansion;
+        use sql::passes::alias_removal::AliasRemoval;
+        use sql::passes::count_star_rewrite::CountStarRewrite;
+        use sql::passes::implied_tables::ImpliedTableExpansion;
+        use sql::passes::star_expansion::StarExpansion;
 
-        info!(mig.log, "Computing nodes for query \"{}\"", query_name);
+        info!(self.log, "Computing nodes for query \"{}\"", query_name);
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
@@ -250,8 +262,18 @@ impl SqlIncorporator {
                       mig: &mut Migration)
                       -> (NodeAddress, bool) {
         if self.write_schemas.contains_key(name) {
-            println!("WARNING: base table for write type {} already exists: ignoring query.",
-                     name);
+            let ref existing_schema = self.write_schemas[name];
+
+            // TODO(malte): check the keys too
+            if *existing_schema == cols.iter().map(|c| c.name.as_str()).collect::<Vec<&str>>() {
+                info!(self.log,
+                      "base table for {} already exists with identical schema; ignoring it.",
+                      name);
+            } else {
+                error!(self.log,
+                       "base table for write type {} already exists, but has a different schema!",
+                       name);
+            }
             return (self.node_addresses[name], false);
         }
 
@@ -274,7 +296,7 @@ impl SqlIncorporator {
         let na = if !primary_keys.is_empty() {
             match **primary_keys.iter().next().unwrap() {
                 TableKey::PrimaryKey(ref key_cols) => {
-                    debug!(mig.log,
+                    debug!(self.log,
                            "Assigning primary key {:?} for base {}",
                            key_cols,
                            name);
@@ -413,15 +435,21 @@ impl SqlIncorporator {
                       limit: &LimitClause,
                       mig: &mut Migration)
                       -> NodeAddress {
-        let combined_columns = self.node_fields.get(&parent).unwrap().clone();
+        let combined_columns = self.node_fields
+            .get(&parent)
+            .unwrap()
+            .clone();
 
         let cmp_rows = match order {
             &Some(ref o) => {
                 assert_eq!(limit.offset, 0); // Non-zero offset not supported
 
-                let columns:Vec<_> = o.columns.iter().map(|&(ref c, ref order_type)| {
-                    (order_type.clone(), self.field_to_columnid(parent, &c.name).unwrap())
-                }).collect();
+                let columns: Vec<_> = o.columns
+                    .iter()
+                    .map(|&(ref c, ref order_type)| {
+                             (order_type.clone(), self.field_to_columnid(parent, &c.name).unwrap())
+                         })
+                    .collect();
 
                 Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
                     let mut ret = Ordering::Equal;
@@ -437,13 +465,19 @@ impl SqlIncorporator {
                     ret
                 }) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
             }
-            &None => Box::new(|_: &&_, _: &&_| Ordering::Equal) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>,
+            &None => {
+                Box::new(|_: &&_, _: &&_| Ordering::Equal) as
+                Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+            }
         };
 
         // make the new operator and record its metadata
         let na = mig.add_ingredient(String::from(name),
                                     combined_columns.as_slice(),
-                                    ops::topk::TopK::new(parent, cmp_rows, group_by, limit.limit as usize));
+                                    ops::topk::TopK::new(parent,
+                                                         cmp_rows,
+                                                         group_by,
+                                                         limit.limit as usize));
         self.node_addresses.insert(String::from(name), na);
         self.node_fields.insert(na, combined_columns);
         na
@@ -583,16 +617,16 @@ impl SqlIncorporator {
                                 -> (Vec<NodeAddress>, NodeAddress) {
         use std::collections::HashMap;
 
-        debug!(mig.log,
+        debug!(self.log,
                format!("Making nodes for query named \"{}\"", name));
-        trace!(mig.log, format!("Query \"{}\": {:#?}", name, st));
+        trace!(self.log, format!("Query \"{}\": {:#?}", name, st));
 
         let qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
 
-        trace!(mig.log, format!("QG for \"{}\": {:#?}", name, qg));
+        trace!(self.log, format!("QG for \"{}\": {:#?}", name, qg));
 
         // Do we already have this exact query or a subset of it?
         // TODO(malte): make this an O(1) lookup by QG signature
@@ -603,13 +637,13 @@ impl SqlIncorporator {
                existing_qg.parameters() == qg.parameters() {
                 // we already have this exact query, down to the exact same reader key columns
                 // in exactly the same order
-                info!(mig.log,
+                info!(self.log,
                       "An exact match for query \"{}\" already exists, reusing it",
                       name);
                 return (vec![], leaf);
             } else if existing_qg.signature() == qg.signature() {
                 // QGs are identical, except for parameters (or their order)
-                info!(mig.log,
+                info!(self.log,
                       "Query \"{}\" has an exact match modulo parameters, so making a new reader",
                       name);
 
@@ -639,7 +673,7 @@ impl SqlIncorporator {
             }
             // queries are different, but one might be a generalization of the other
             if existing_qg.signature().is_generalization_of(&qg.signature()) {
-                trace!(mig.log,
+                trace!(self.log,
                        "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
                        qg,
                        existing_qg);
@@ -731,12 +765,13 @@ impl SqlIncorporator {
                             right_ni = *dst_filters.last().unwrap();
                         };
                         // make node
-                        let ni =
-                            self.make_join_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                                jps,
-                                                left_ni,
-                                                right_ni,
-                                                mig);
+                        let ni = self.make_join_node(&format!("q_{:x}_n{}",
+                                                              qg.signature().hash,
+                                                              new_node_count),
+                                                     jps,
+                                                     left_ni,
+                                                     right_ni,
+                                                     mig);
                         join_nodes.push(ni);
                         new_node_count += 1;
                         prev_ni = Some(ni);
@@ -880,9 +915,10 @@ impl SqlIncorporator {
 
             // 4. Potentially insert TopK node below the final node
             if let Some(ref limit) = st.limit {
-                let mut group_by:Vec<_> = qg.parameters().iter().map(|col| {
-                    self.field_to_columnid(final_na, &col.name).unwrap()
-                }).collect();
+                let mut group_by: Vec<_> = qg.parameters()
+                    .iter()
+                    .map(|col| self.field_to_columnid(final_na, &col.name).unwrap())
+                    .collect();
 
                 // no query parameters, so we index on the first column
                 if group_by.is_empty() {
@@ -940,7 +976,7 @@ impl SqlIncorporator {
                     mig.maintain(leaf_na, 0);
                 }
             }
-            debug!(mig.log, format!("Added final node for query named \"{}\"", name);
+            debug!(self.log, format!("Added final node for query named \"{}\"", name);
                    "node" => leaf_na.as_global().index());
             new_filter_nodes.push(leaf_na);
 

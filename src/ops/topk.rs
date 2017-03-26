@@ -5,6 +5,9 @@ use std::sync::Arc;
 use flow::prelude::*;
 use std::cmp::Ordering;
 
+pub type OrderedRecordComparator =
+    Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static;
+
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
@@ -20,7 +23,7 @@ pub struct TopK {
     // precomputed datastructures
     group_by: Vec<usize>,
 
-    cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static>,
+    cmp_rows: Box<OrderedRecordComparator>,
     k: usize,
 
     counts: HashMap<Vec<DataType>, usize>,
@@ -32,7 +35,11 @@ impl TopK {
     /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
     /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
     /// of results per group.
-pub fn new(src: NodeAddress, cmp_rows: Box<Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static>, group_by: Vec<usize>, k: usize) -> Self{
+    pub fn new(src: NodeAddress,
+               cmp_rows: Box<OrderedRecordComparator>,
+               group_by: Vec<usize>,
+               k: usize)
+               -> Self {
         let mut group_by = group_by;
         group_by.sort();
 
@@ -326,10 +333,10 @@ mod tests {
     fn setup(reversed: bool) -> (ops::test::MockGraph, NodeAddress) {
         let cmp_rows = if !reversed {
             Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[2].cmp(&b[2])) as
-            Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+            Box<OrderedRecordComparator>
         } else {
             Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| b[2].cmp(&a[2])) as
-            Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+            Box<OrderedRecordComparator>
         };
 
         let mut g = ops::test::MockGraph::new();

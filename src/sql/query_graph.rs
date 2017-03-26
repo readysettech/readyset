@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
 
-use flow::sql::query_signature::QuerySignature;
+use sql::query_signature::QuerySignature;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
