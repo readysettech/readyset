@@ -402,7 +402,7 @@ impl Domain {
             Packet::PrepareState { node, index } => {
                 let mut state = State::default();
                 for idx in index {
-                    state.add_key(&idx[..]);
+                    state.add_key(&idx[..], false);
                 }
                 self.state.insert(node, state);
             }
@@ -478,7 +478,7 @@ impl Domain {
                         }
                     };
                     for idx in index {
-                        s.add_key(&idx[..]);
+                        s.add_key(&idx[..], false);
                     }
                     assert!(self.state.insert(node, s).is_none());
                 } else {

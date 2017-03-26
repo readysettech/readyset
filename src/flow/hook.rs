@@ -36,7 +36,7 @@ impl Hook {
         let client = try!(memcached::Client::connect(&servers, ProtoType::Binary));
 
         let mut s = State::default();
-        s.add_key(&key_columns[..]);
+        s.add_key(&key_columns[..], false);
 
         Ok(Self {
                client: Memcache(client),

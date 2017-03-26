@@ -204,7 +204,7 @@ pub enum LookupResult<'a, T: 'a> {
 
 #[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
-    state: Vec<(Vec<usize>, KeyedState<T>)>,
+    state: Vec<(Vec<usize>, KeyedState<T>, bool)>,
     rows: usize,
 }
 
@@ -227,7 +227,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.iter().position(|s| &s.0[..] == cols)
     }
 
-    pub fn add_key(&mut self, columns: &[usize]) {
+    pub fn add_key(&mut self, columns: &[usize], partial: bool) {
         if self.state_for(columns).is_some() {
             // already keyed
             return;
@@ -238,7 +238,7 @@ impl<T: Hash + Eq + Clone> State<T> {
             unimplemented!();
         }
 
-        self.state.push((Vec::from(columns), columns.into()));
+        self.state.push((Vec::from(columns), columns.into(), partial));
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
@@ -261,6 +261,13 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.rows = self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
+            // TODO
+            // if s.2 && !s.1.contains_key(r[s.0]..)
+            // this state is partially materialized, and the insert is trying to fill a hole.
+            // this should *never* happen. holes should *always* first be filled through
+            // mark_filled. this indicates that a replay was needed, but not detected, which can
+            // happen if there is an operator whose output is materialized, but that does not also
+            // do lookups into that state before writing to it.
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     // treat this specially to avoid the extra Vec
@@ -347,8 +354,11 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
-        for &(_, ref state) in &self.state {
+        for &(_, ref state, partial) in &self.state {
             if let KeyedState::Single(ref map) = *state {
+                if partial {
+                    unimplemented!();
+                }
                 return map.values();
             }
         }
@@ -410,10 +420,12 @@ impl<T: Hash + Eq + Clone> State<T> {
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {
-            // TODO
-            // check for materialization holes.
-            // return ::Missing *only* if hole *and* partially materialized
-            LookupResult::Some(&[])
+            if state.2 {
+                // partially materialized, so this is a hole (empty results would be vec![])
+                LookupResult::Missing
+            } else {
+                LookupResult::Some(&[])
+            }
         }
     }
 
@@ -434,8 +446,11 @@ impl<T: Hash + Eq + Clone> IntoIterator for State<T> {
     type Item = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::Item;
     type IntoIter = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter {
-        for (_, state) in self.state {
+        for (_, state, partial) in self.state {
             if let KeyedState::Single(map) = state {
+                if partial {
+                    unimplemented!();
+                }
                 return map.into_iter();
             }
         }
