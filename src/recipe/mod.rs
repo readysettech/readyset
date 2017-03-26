@@ -2,6 +2,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 use {SqlIncorporator, Migration, NodeAddress};
 
+use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
@@ -9,7 +10,7 @@ use std::vec::Vec;
 type QueryID = u64;
 
 /// Represents a Soup recipe.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Recipe {
     /// SQL queries represented in the recipe. Value tuple is (name, query).
     expressions: HashMap<QueryID, (Option<String>, SqlQuery)>,
@@ -25,6 +26,15 @@ pub struct Recipe {
     inc: Option<SqlIncorporator>,
 }
 
+impl PartialEq for Recipe {
+    /// Equality for recipes is defined in terms of all members apart from `inc`.
+    fn eq(&self, other: &Recipe) -> bool {
+        self.expressions == other.expressions && self.expression_order == other.expression_order &&
+        self.aliases == other.aliases && self.version == other.version &&
+        self.prior == other.prior
+    }
+}
+
 fn hash_query(q: &SqlQuery) -> QueryID {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -37,14 +47,17 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 impl Recipe {
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
-    pub fn blank() -> Recipe {
+    pub fn blank(log: Option<slog::Logger>) -> Recipe {
         Recipe {
             expressions: HashMap::default(),
             expression_order: Vec::default(),
             aliases: HashMap::default(),
             version: 0,
             prior: None,
-            inc: None,
+            inc: match log {
+                None => Some(SqlIncorporator::default()),
+                Some(log) => Some(SqlIncorporator::new(log)),
+            },
         }
     }
 
@@ -78,7 +91,7 @@ impl Recipe {
     /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    pub fn from_str(recipe_text: &str) -> Result<Recipe, String> {
+    pub fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> Result<Recipe, String> {
         // remove comment lines
         let lines: Vec<String> = recipe_text.lines()
             .map(str::trim)
@@ -89,13 +102,13 @@ impl Recipe {
 
         // parse and compute differences to current recipe
         let parsed_queries = Recipe::parse(&cleaned_recipe_text)?;
-        Ok(Recipe::from_queries(parsed_queries))
+        Ok(Recipe::from_queries(parsed_queries, log))
     }
 
     /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>) -> Recipe {
+    pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>, log: Option<slog::Logger>) -> Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
         let expressions = qs.into_iter()
@@ -112,13 +125,18 @@ impl Recipe {
             })
             .collect::<HashMap<QueryID, (Option<String>, SqlQuery)>>();
 
+        let inc = match log {
+            None => SqlIncorporator::default(),
+            Some(log) => SqlIncorporator::new(log),
+        };
+
         Recipe {
             expressions: expressions,
             expression_order: expression_order,
             aliases: aliases,
             version: 0,
             prior: None,
-            inc: None,
+            inc: Some(inc),
         }
     }
 
@@ -129,18 +147,12 @@ impl Recipe {
                     mig: &mut Migration)
                     -> Result<HashMap<String, NodeAddress>, String> {
         let (added, removed) = match self.prior {
-            None => self.compute_delta(&Recipe::blank()),
+            None => self.compute_delta(&Recipe::blank(None)),
             Some(ref pr) => {
                 // compute delta over prior recipe
                 self.compute_delta(pr)
             }
         };
-
-        // lazily instantiate `SqlIncorporator` if we don't have one already
-        match self.inc {
-            None => self.inc = Some(SqlIncorporator::default()),
-            Some(_) => (),
-        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
@@ -199,7 +211,7 @@ impl Recipe {
     /// Consumes `self` and returns a replacement recipe.
     pub fn extend(mut self, additions: &str) -> Result<Recipe, String> {
         // parse and compute differences to current recipe
-        let add_rp = Recipe::from_str(additions)?;
+        let add_rp = Recipe::from_str(additions, None)?;
         let (added, _) = add_rp.compute_delta(&self);
 
         // move the incorporator state from the old recipe to the new one
@@ -306,7 +318,7 @@ mod tests {
 
     #[test]
     fn it_computes_delta() {
-        let r0 = Recipe::blank();
+        let r0 = Recipe::blank(None);
         let q0 = sql_parser::parse_query("SELECT a FROM b;").unwrap();
         let q1 = sql_parser::parse_query("SELECT a, c FROM b WHERE x = 42;").unwrap();
 
@@ -314,7 +326,7 @@ mod tests {
         let q1_id = hash_query(&q1);
 
         let pq_a = vec![(None, q0.clone()), (None, q1.clone())];
-        let r1 = Recipe::from_queries(pq_a);
+        let r1 = Recipe::from_queries(pq_a, None);
 
         // delta from empty recipe
         let (added, removed) = r1.compute_delta(&r0);
@@ -332,7 +344,7 @@ mod tests {
         let q2 = sql_parser::parse_query("SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
         let pq_b = vec![(None, q0), (None, q2.clone())];
-        let r2 = Recipe::from_queries(pq_b);
+        let r2 = Recipe::from_queries(pq_b, None);
 
         // delta should show addition and removal
         let (added, removed) = r2.compute_delta(&r1);
@@ -344,7 +356,7 @@ mod tests {
 
     #[test]
     fn it_replaces() {
-        let r0 = Recipe::blank();
+        let r0 = Recipe::blank(None);
         assert_eq!(r0.version, 0);
         assert_eq!(r0.expressions.len(), 0);
         assert_eq!(r0.prior, None);
@@ -352,7 +364,7 @@ mod tests {
         let r0_copy = r0.clone();
 
         let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE x = 42;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
+        let r1_t = Recipe::from_str(r1_txt, None).unwrap();
         let r1 = r0.replace(r1_t).unwrap();
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 2);
@@ -361,7 +373,7 @@ mod tests {
         let r1_copy = r1.clone();
 
         let r2_txt = "SELECT c FROM b;\nSELECT a, c FROM b;";
-        let r2_t = Recipe::from_str(r2_txt).unwrap();
+        let r2_t = Recipe::from_str(r2_txt, None).unwrap();
         let r2 = r1.replace(r2_t).unwrap();
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
@@ -373,7 +385,7 @@ mod tests {
         use Blender;
 
         let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
-        let mut r = Recipe::from_str(r_txt).unwrap();
+        let mut r = Recipe::from_str(r_txt, None).unwrap();
         assert_eq!(r.version, 0);
         assert_eq!(r.expressions.len(), 1);
         assert_eq!(r.prior, None);
@@ -394,7 +406,7 @@ mod tests {
         use Blender;
 
         let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
-        let mut r = Recipe::from_str(r_txt).unwrap();
+        let mut r = Recipe::from_str(r_txt, None).unwrap();
         assert_eq!(r.version, 0);
         assert_eq!(r.expressions.len(), 1);
         assert_eq!(r.prior, None);
@@ -431,7 +443,7 @@ mod tests {
 
         let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
                      INSERT INTO b (r, s) VALUES (?, ?);\n";
-        let mut r = Recipe::from_str(r_txt).unwrap();
+        let mut r = Recipe::from_str(r_txt, None).unwrap();
         assert_eq!(r.version, 0);
         assert_eq!(r.expressions.len(), 2);
         assert_eq!(r.prior, None);

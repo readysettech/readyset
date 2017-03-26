@@ -367,7 +367,6 @@ pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, Mutator};
 pub use flow::core::{NodeAddress, DataType, Datas};
 pub use flow::node::StreamUpdate;
-pub use flow::sql_to_flow::{SqlIncorporator, ToFlowParts};
 pub use flow::domain::Index;
 pub use ops::base::Base;
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
@@ -381,6 +380,7 @@ pub use ops::latest::Latest;
 pub use ops::filter::{Operator, Filter};
 pub use ops::topk::TopK;
 pub use recipe::Recipe;
+pub use sql::{SqlIncorporator, ToFlowParts};
 
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
