@@ -752,11 +752,14 @@ impl Domain {
                         data: ReplayData::Records(data),
                     };
 
-                    if let DomainMode::Waiting { .. } = self.mode {
+                    if let DomainMode::Waiting { ref on, .. } = self.mode {
                         // mark the state for the key being replayed as *not* a hole in path.last()
                         // otherwise we'll just end up with the same NeedReply response that
                         // triggered this replay initially.
-                        unimplemented!();
+                        self.state
+                            .get_mut(path.last().unwrap().as_local())
+                            .unwrap()
+                            .mark_filled(&on.0[..], on.1.clone());
                     }
 
                     for (i, ni) in path.iter().enumerate() {

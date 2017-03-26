@@ -372,6 +372,38 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
+    pub fn mark_filled(&mut self, columns: &[usize], key: Vec<T>) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        let state = self.state_for(columns).expect("filling non-indexed column set");
+        let state = &mut self.state[state];
+        let mut key = key.into_iter();
+        match state.1 {
+            KeyedState::Single(ref mut map) => {
+                map.entry(key.next().unwrap()).or_insert_with(Vec::new);
+            }
+            _ => {
+                match state.1 {
+                    KeyedState::Double(ref mut map) => {
+                        map.entry((key.next().unwrap(), key.next().unwrap()))
+                            .or_insert_with(Vec::new);
+                    }
+                    KeyedState::Tri(ref mut map) => {
+                        map.entry((key.next().unwrap(), key.next().unwrap(), key.next().unwrap()))
+                            .or_insert_with(Vec::new);
+                    }
+                    KeyedState::Quad(ref mut map) => {
+                        map.entry((key.next().unwrap(),
+                                    key.next().unwrap(),
+                                    key.next().unwrap(),
+                                    key.next().unwrap()))
+                            .or_insert_with(Vec::new);
+                    }
+                    KeyedState::Single(..) => unreachable!(),
+                }
+            }
+        }
+    }
+
     pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> LookupResult<T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
