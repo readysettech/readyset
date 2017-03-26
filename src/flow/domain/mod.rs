@@ -69,6 +69,7 @@ enum DomainMode {
         tag: Tag,
         buffered: VecDeque<Packet>,
         interrupted: Box<DomainMode>,
+        on: (Vec<usize>, Vec<DataType>),
     },
 }
 
@@ -171,7 +172,7 @@ impl Domain {
 
         let m = match m {
             single::FinalProcessingResult::Done(m) => m,
-            single::FinalProcessingResult::NeedReplay { was, .. } => {
+            single::FinalProcessingResult::NeedReplay { was, columns, key, .. } => {
                 use std::mem;
                 // find tag we should use for replay
                 // TODO: this needs to also consider the *key* of that tag
@@ -188,6 +189,7 @@ impl Domain {
                 let wait = DomainMode::Waiting {
                     buffered: buffered,
                     tag: tag,
+                    on: (columns.clone(), key.clone()),
                     interrupted: Box::new(DomainMode::Forwarding),
                 };
 
@@ -811,18 +813,30 @@ impl Domain {
                 if let DomainMode::Waiting {
                            mut buffered,
                            interrupted,
+                           on,
                            ..
                        } = mem::replace(&mut self.mode, DomainMode::Forwarding) {
 
                     // restore the state before the partial replay
                     mem::replace(&mut self.mode, *interrupted);
 
-                    // remove buffered messages with the same key as was just replayed,
-                    // since the state they represent is already contained within the replayed
-                    // state (the replay happens after all of them).
-                    buffered.retain(|m| {
-                                        unimplemented!();
-                                    });
+                    // remove buffered messages with the same key as was just replayed, since the
+                    // state they represent is already contained within the replayed state (the
+                    // replay happens after all of them).
+                    for m in &mut buffered {
+                        if !m.is_regular() {
+                            continue;
+                        }
+                        m.map_data(|mut rs| {
+                            rs.retain(|r| {
+                                          !on.0
+                                               .iter()
+                                               .enumerate()
+                                               .all(|(i, &c)| r[c] == on.1[i])
+                                      });
+                            rs
+                        });
+                    }
 
                     while let Some(m) = buffered.pop_front() {
                         self.handle(m, inject_tx);

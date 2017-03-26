@@ -213,6 +213,14 @@ impl Packet {
         mem::replace(self, m);
     }
 
+    pub fn is_regular(&self) -> bool {
+        match *self {
+            Packet::Message { .. } => true,
+            Packet::Transaction { .. } => true,
+            _ => false,
+        }
+    }
+
     pub fn data(&self) -> &Records {
         match *self {
             Packet::Message { ref data, .. } => data,
