@@ -76,7 +76,7 @@ enum DomainMode {
 struct ReplayPath {
     path: Vec<NodeAddress>,
     done_tx: Option<mpsc::SyncSender<()>>,
-    trigger: Option<mpsc::SyncSender<()>>,
+    trigger: Option<mpsc::SyncSender<Vec<DataType>>>,
 }
 
 pub struct Domain {
@@ -176,12 +176,22 @@ impl Domain {
                 use std::mem;
                 // find tag we should use for replay
                 // TODO: this needs to also consider the *key* of that tag
-                let tag = paths.iter()
-                    .find(|&(_, ref info)| {
-                              info.trigger.is_some() && info.path.last().unwrap() == &was.link().dst
-                          })
-                    .map(|(tag, _)| *tag)
-                    .expect("partial replay attempted on node with no partial path");
+                let node = was.link().dst;
+                let tag = {
+                    let mut tags = paths.iter()
+                        .filter(|&(_, ref info)| {
+                                    info.trigger.is_some() && info.path.last().unwrap() == &node
+                                })
+                        .map(|(tag, _)| *tag);
+
+                    let tag = tags.next();
+                    if tags.count() == 0 {
+                        // union for example
+                        unimplemented!();
+                    }
+
+                    tag.expect("partial replay attempted on node with no partial path")
+                };
 
                 // make sure we get back to this message when the state is available
                 let mut buffered = VecDeque::new();
@@ -211,8 +221,11 @@ impl Domain {
                 // send a message to the source domain(s) responsible for the chosen tag so they'll
                 // start replay.
                 let replay = paths.get_mut(&tag).unwrap();
-                assert!(replay.trigger.is_some());
-                unimplemented!();
+                if let Some(ref mut trigger) = replay.trigger {
+                    trigger.send(key).unwrap();
+                } else {
+                    unreachable!("asked to replay along non-existing path");
+                }
 
                 return output_messages;
             }
