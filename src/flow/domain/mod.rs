@@ -68,7 +68,14 @@ enum DomainMode {
     Waiting {
         tag: Tag,
         buffered: VecDeque<Packet>,
+        interrupted: Box<DomainMode>,
     },
+}
+
+struct ReplayPath {
+    path: Vec<NodeAddress>,
+    done_tx: Option<mpsc::SyncSender<()>>,
+    trigger: Option<mpsc::SyncSender<()>>,
 }
 
 pub struct Domain {
@@ -84,7 +91,7 @@ pub struct Domain {
     transaction_state: transactions::DomainState,
 
     mode: DomainMode,
-    replay_paths: HashMap<Tag, (Vec<NodeAddress>, Option<mpsc::SyncSender<()>>)>,
+    replay_paths: HashMap<Tag, ReplayPath>,
 
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
@@ -125,6 +132,7 @@ impl Domain {
                 mode: &mut DomainMode,
                 states: &mut StateMap,
                 nodes: &DomainNodes,
+                paths: &mut HashMap<Tag, ReplayPath>,
                 process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
                 process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
                 enable_output: bool)
@@ -165,24 +173,45 @@ impl Domain {
             single::FinalProcessingResult::Done(m) => m,
             single::FinalProcessingResult::NeedReplay { was, .. } => {
                 use std::mem;
-                // TODO: we need to send a message to the source domain(s) responsible for
-                // replaying to this node to replay the given key.
-                unimplemented!();
+                // find tag we should use for replay
+                // TODO: this needs to also consider the *key* of that tag
+                let tag = paths.iter()
+                    .find(|&(_, ref info)| {
+                              info.trigger.is_some() && info.path.last().unwrap() == &was.link().dst
+                          })
+                    .map(|(tag, _)| *tag)
+                    .expect("partial replay attempted on node with no partial path");
 
                 // make sure we get back to this message when the state is available
                 let mut buffered = VecDeque::new();
                 buffered.push_front(was);
                 let wait = DomainMode::Waiting {
                     buffered: buffered,
-                    tag: unimplemented!(),
+                    tag: tag,
+                    interrupted: Box::new(DomainMode::Forwarding),
                 };
 
                 // we're now waiting, but what were we doing?
                 match mem::replace(mode, wait) {
                     DomainMode::Forwarding => (),
-                    DomainMode::Replaying { .. } => unimplemented!(),
+                    r @ DomainMode::Replaying { .. } => {
+                        // we interrupted an ongoing full replay -- we need to make sure continue
+                        // it when the partial replay finishes.
+                        if let DomainMode::Waiting { ref mut interrupted, .. } = *mode {
+                            *interrupted = Box::new(r);
+                        } else {
+                            unreachable!();
+                        }
+                    }
                     DomainMode::Waiting { .. } => unreachable!(),
                 }
+
+                // send a message to the source domain(s) responsible for the chosen tag so they'll
+                // start replay.
+                let replay = paths.get_mut(&tag).unwrap();
+                assert!(replay.trigger.is_some());
+                unimplemented!();
+
                 return output_messages;
             }
         };
@@ -226,6 +255,7 @@ impl Domain {
                                                  mode,
                                                  states,
                                                  nodes,
+                                                 paths,
                                                  process_times,
                                                  process_ptimes,
                                                  enable_output) {
@@ -253,6 +283,7 @@ impl Domain {
                        &mut self.mode,
                        &mut self.state,
                        &self.nodes,
+                       &mut self.replay_paths,
                        &mut self.process_times,
                        &mut self.process_ptimes,
                        enable_output)
@@ -305,11 +336,7 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
-        if let DomainMode::Waiting {
-                   ref tag,
-                   ref mut buffered,
-                   ..
-               } = self.mode {
+        if let DomainMode::Waiting { ref mut buffered, .. } = self.mode {
             buffered.push_back(m);
             return;
         }
@@ -379,7 +406,12 @@ impl Domain {
                 } else {
                     info!(self.log, "tag" => tag.id(); "told about replay path {:?}", path);
                 }
-                self.replay_paths.insert(tag, (path, done_tx));
+                self.replay_paths.insert(tag,
+                                         ReplayPath {
+                                             path: path,
+                                             done_tx: done_tx,
+                                             trigger: None,
+                                         });
             }
             Packet::StartReplay { tag, from, ack } => {
                 // let coordinator know that we've entered replay loop
@@ -501,7 +533,11 @@ impl Domain {
                    last,
                    data,
                } = m {
-            let &mut (ref path, ref mut done_tx) = self.replay_paths.get_mut(&tag).unwrap();
+            let &mut ReplayPath {
+                         ref path,
+                         ref mut done_tx,
+                         ..
+                     } = self.replay_paths.get_mut(&tag).unwrap();
 
             match self.mode {
                 DomainMode::Forwarding if done_tx.is_some() => {
@@ -700,22 +736,26 @@ impl Domain {
                         last: last,
                         data: ReplayData::Records(data),
                     };
+
+                    if let DomainMode::Waiting { .. } = self.mode {
+                        // mark the state for the key being replayed as *not* a hole in path.last()
+                        // otherwise we'll just end up with the same NeedReply response that
+                        // triggered this replay initially.
+                        unimplemented!();
+                    }
+
                     for (i, ni) in path.iter().enumerate() {
                         // process the current message in this node
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
                         m = match n.process(m, &mut self.state, &self.nodes, false) {
                             single::FinalProcessingResult::Done(m) => m,
-                            single::FinalProcessingResult::NeedReplay { was, .. } => {
+                            single::FinalProcessingResult::NeedReplay { .. } => {
                                 // we've already received something with the key contained in m,
                                 // which is what triggered this replay in the first place. that
                                 // original message *should* have triggered a replay further up
                                 // before arriving here, so by this time I *think* it's safe to
                                 // assume that we won't see any materialization misses.
-                                //
-                                // TODO FIXME
-                                // actually, damn, that's not true if m.data.len() != 1
-                                assert_ne!(was.data().len(), 1);
-                                unimplemented!()
+                                unreachable!()
                             }
                         };
                         drop(n);
@@ -768,9 +808,22 @@ impl Domain {
         if let Some((tag, ni)) = finished {
             if let DomainMode::Waiting { .. } = self.mode {
                 use std::mem;
-                if let DomainMode::Waiting { mut buffered, .. } =
-                    mem::replace(&mut self.mode, DomainMode::Forwarding) {
-                    // TODO: remove anything from buffered with the same key as was just replayed
+                if let DomainMode::Waiting {
+                           mut buffered,
+                           interrupted,
+                           ..
+                       } = mem::replace(&mut self.mode, DomainMode::Forwarding) {
+
+                    // restore the state before the partial replay
+                    mem::replace(&mut self.mode, *interrupted);
+
+                    // remove buffered messages with the same key as was just replayed,
+                    // since the state they represent is already contained within the replayed
+                    // state (the replay happens after all of them).
+                    buffered.retain(|m| {
+                                        unimplemented!();
+                                    });
+
                     while let Some(m) = buffered.pop_front() {
                         self.handle(m, inject_tx);
                         // check if we've changed into another mode and should stop
@@ -786,28 +839,8 @@ impl Domain {
                                 return;
                             }
                             DomainMode::Replaying { .. } => {
-                                // what do we even do here?
-                                // a control message was buffered, and made us start a replay!
-                                // except that we can't just go along with that, since we still
-                                // have more messages buffered that need to be replayed!
-                                //
-                                // how can this even happen? must have *previously* received a
-                                // SetupReplay, and *now* received the first Replay in that path,
-                                // *and* we are the target domain. we can't have *both* in buffer,
-                                // because we wouldn't have responded to the SetupReplay message
-                                // (and thus the Replay wouldn't have started yet).
-                                //
-                                // two options as far as I see it:
-                                //
-                                //  1. place Replay messages destined for us *last* (i.e., those
-                                //     where we are the terminating domain). there *could* be
-                                //     multiple though...
-                                //  2. add a global buffer to the Replaying mode struct. this would
-                                //     have wider repercussions too, as *all* messages need to be
-                                //     buffered when this is non-empty. also, what even happens if
-                                //     you need to do a partially materialized replay *while*
-                                //     replaying?
-                                unimplemented!();
+                                // a buffered message caused us to start a replay.
+                                // that's fine, we can just keep moving through the buffer.
                             }
                         }
                     }
@@ -915,6 +948,7 @@ impl Domain {
                                    &mut DomainMode::Forwarding,
                                    &mut self.state,
                                    &self.nodes,
+                                   &mut self.replay_paths,
                                    &mut self.process_times,
                                    &mut self.process_ptimes,
                                    true);
@@ -948,7 +982,9 @@ impl Domain {
                 unreachable!();
             }
 
-            if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| p.1.as_mut()) {
+            if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| {
+                                                                                p.done_tx.as_mut()
+                                                                            }) {
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
                 done_tx.send(()).unwrap();
             } else {
