@@ -250,8 +250,18 @@ impl SqlIncorporator {
                       mig: &mut Migration)
                       -> (NodeAddress, bool) {
         if self.write_schemas.contains_key(name) {
-            println!("WARNING: base table for write type {} already exists: ignoring query.",
-                     name);
+            let ref existing_schema = self.write_schemas[name];
+
+            // TODO(malte): check the keys too
+            if *existing_schema == cols.iter().map(|c| c.name.as_str()).collect::<Vec<&str>>() {
+                info!(mig.log,
+                      "base table for {} already exists with identical schema; ignoring it.",
+                      name);
+            } else {
+                error!(mig.log,
+                       "base table for write type {} already exists, but has a different schema!",
+                       name);
+            }
             return (self.node_addresses[name], false);
         }
 
