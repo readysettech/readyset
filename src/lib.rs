@@ -356,11 +356,12 @@ extern crate futures;
 #[cfg(feature="b_netsoup")]
 extern crate tokio_core;
 
+mod backlog;
 mod checktable;
 mod flow;
 mod ops;
-mod backlog;
 mod recipe;
+mod sql;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, Mutator};

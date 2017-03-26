@@ -1,7 +1,6 @@
 use nom_sql::parser as sql_parser;
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
-use flow::sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
@@ -10,6 +9,7 @@ use ops::base::Base;
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
+use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -187,10 +187,10 @@ impl SqlIncorporator {
                              query_name: String,
                              mut mig: &mut Migration)
                              -> QueryFlowParts {
-        use flow::sql::passes::alias_removal::AliasRemoval;
-        use flow::sql::passes::count_star_rewrite::CountStarRewrite;
-        use flow::sql::passes::implied_tables::ImpliedTableExpansion;
-        use flow::sql::passes::star_expansion::StarExpansion;
+        use sql::passes::alias_removal::AliasRemoval;
+        use sql::passes::count_star_rewrite::CountStarRewrite;
+        use sql::passes::implied_tables::ImpliedTableExpansion;
+        use sql::passes::star_expansion::StarExpansion;
 
         info!(mig.log, "Computing nodes for query \"{}\"", query_name);
 

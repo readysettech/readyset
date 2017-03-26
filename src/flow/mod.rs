@@ -1,6 +1,3 @@
-pub mod sql_to_flow;
-mod sql;
-
 use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
@@ -24,6 +21,7 @@ pub mod payload;
 pub mod statistics;
 pub mod keys;
 pub mod core;
+pub mod sql_to_flow;
 mod migrate;
 mod transactions;
 mod hook;
