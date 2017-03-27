@@ -1,5 +1,6 @@
 use nom_sql::{Column, Operator};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
@@ -9,11 +10,20 @@ use sql::QueryFlowParts;
 
 pub struct MirQuery {
     pub name: String,
-    pub roots: Vec<Box<MirNode>>,
-    pub leaf: Option<MirNode>,
+    pub roots: Vec<Rc<MirNode>>,
+    pub leaf: Rc<MirNode>,
 }
 
 impl MirQuery {
+    pub fn singleton(name: &str, node: MirNode) -> MirQuery {
+        let rcn = Rc::new(node);
+        MirQuery {
+            name: String::from(name),
+            roots: vec![rcn.clone()],
+            leaf: rcn,
+        }
+    }
+
     pub fn into_flow_parts(mut self, mut mig: &mut Migration) -> QueryFlowParts {
         let mut new_nodes = Vec::new();
 
@@ -47,14 +57,20 @@ pub struct MirNode {
     pub from_version: u64,
     pub columns: Vec<Column>,
     pub inner: MirNodeType,
+    pub ancestors: Vec<Rc<MirNode>>,
+    pub children: Vec<Rc<MirNode>>,
 }
 
 impl MirNode {
-    fn name(&self) -> &str {
+    pub fn columns(&self) -> &[Column] {
+        self.columns.as_slice()
+    }
+
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    fn versioned_name(&self) -> String {
+    pub fn versioned_name(&self) -> String {
         format!("{}_v{}", self.name, self.from_version)
     }
 
@@ -151,11 +167,6 @@ impl MirNodeType {
                                                ops::base::Base::default());
                     vec![n]
                 }
-
-                //self.node_addresses.insert(String::from(name), na);
-                // TODO(malte): get rid of annoying duplication
-                //self.node_fields.insert(na, fields.clone());
-                //self.write_schemas.insert(String::from(name), fields);
             }
             _ => unimplemented!(),
         }

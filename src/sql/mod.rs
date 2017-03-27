@@ -1,7 +1,11 @@
+mod mir;
+mod passes;
+mod query_graph;
+mod query_signature;
+
 use nom_sql::parser as sql_parser;
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
-use mir::{MirNode, MirNodeType, MirQuery};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
@@ -10,19 +14,17 @@ use ops::base::Base;
 use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
+use self::mir::SqlToMirConverter;
 use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 
 use slog;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
+use std::rc::Rc;
 use std::str;
 use std::vec::Vec;
 use std::cmp::Ordering;
 use std::sync::Arc;
-
-pub mod passes;
-pub mod query_graph;
-pub mod query_signature;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -36,54 +38,28 @@ pub struct QueryFlowParts {
     pub query_leaf: NodeAddress,
 }
 
-/// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
-enum GroupedNodeType {
-    Aggregation(ops::grouped::aggregate::Aggregation),
-    Extremum(ops::grouped::extremum::Extremum),
-    GroupConcat(String),
-}
-
-fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
-    use nom_sql::FunctionExpression::*;
-    use nom_sql::FieldExpression::*;
-
-    match *computed_col.function.as_ref().unwrap() {
-        Avg(Seq(ref cols)) |
-        Count(Seq(ref cols)) |
-        GroupConcat(Seq(ref cols), _) |
-        Max(Seq(ref cols)) |
-        Min(Seq(ref cols)) |
-        Sum(Seq(ref cols)) => cols,
-        Count(All) => {
-            // see comment re COUNT(*) rewriting in make_aggregation_node
-            panic!("COUNT(*) should have been rewritten earlier!")
-        }
-        _ => panic!("invalid aggregation function"),
-    }
-}
-
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the Soup graph `grap`.
 /// The incorporator shares the lifetime of the flow graph it is associated with.
 #[derive(Clone, Debug)]
 pub struct SqlIncorporator {
     log: slog::Logger,
-    write_schemas: HashMap<String, Vec<String>>,
+    mir_converter: SqlToMirConverter,
     node_addresses: HashMap<String, NodeAddress>,
-    node_fields: HashMap<NodeAddress, Vec<String>>,
-    query_graphs: Vec<(QueryGraph, NodeAddress)>,
     num_queries: usize,
+    query_graphs: Vec<(QueryGraph, NodeAddress)>,
+    view_schemas: HashMap<String, Vec<String>>,
 }
 
 impl Default for SqlIncorporator {
     fn default() -> Self {
         SqlIncorporator {
             log: slog::Logger::root(slog::Discard, None),
-            write_schemas: HashMap::default(),
+            mir_converter: SqlToMirConverter::default(),
             node_addresses: HashMap::default(),
-            node_fields: HashMap::default(),
-            query_graphs: Vec::new(),
             num_queries: 0,
+            query_graphs: Vec::new(),
+            view_schemas: HashMap::default(),
         }
     }
 }
@@ -91,63 +67,20 @@ impl Default for SqlIncorporator {
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
     pub fn new(log: slog::Logger) -> Self {
-        let mut inc = SqlIncorporator::default();
-        inc.log = log;
-        inc
-    }
-
-    /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
-    fn fields_for(&self, na: NodeAddress) -> &[String] {
-        self.node_fields[&na].as_slice()
-    }
-
-    /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
-    fn field_to_columnid(&self, na: NodeAddress, f: &str) -> Result<usize, String> {
-        match self.fields_for(na).iter().position(|s| *s == f) {
-            None => {
-                Err(format!("field {} not found in view {} (which has: {:?})",
-                            f,
-                            na,
-                            self.fields_for(na)))
-            }
-            Some(i) => Ok(i),
+        let lc = log.clone();
+        SqlIncorporator {
+            log: log,
+            mir_converter: SqlToMirConverter::with_logger(lc),
+            ..Default::default()
         }
     }
 
-    /// TODO(malte): modify once `SqlIntegrator` has a better intermediate graph representation.
+    /// TODO(malte): modify once `SqlIncorporator` has a better intermediate graph representation.
     pub fn address_for(&self, name: &str) -> NodeAddress {
         match self.node_addresses.get(name) {
             None => panic!("node {} unknown!", name),
             Some(na) => *na,
         }
-    }
-
-    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
-    /// vector of conditions that `shortcut` understands.
-    fn to_conditions(&self,
-                     ct: &ConditionTree,
-                     na: &NodeAddress)
-                     -> Vec<Option<(Operator, DataType)>> {
-        // TODO(malte): we only support one level of condition nesting at this point :(
-        let l = match *ct.left
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-            _ => unimplemented!(),
-        };
-        let r = match *ct.right
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
-            ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
-            _ => unimplemented!(),
-        };
-        let num_columns = self.fields_for(*na).len();
-        let mut filter = vec![None; num_columns];
-        filter[self.field_to_columnid(*na, &l.name).unwrap()] = Some((ct.operator.clone(),
-                                                                      DataType::from(r)));
-        filter
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
@@ -210,135 +143,35 @@ impl SqlIncorporator {
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
-            .expand_stars(&self.write_schemas)
-            .expand_implied_tables(&self.write_schemas)
-            .rewrite_count_star(&self.write_schemas);
+            .expand_stars(&self.view_schemas)
+            .expand_implied_tables(&self.view_schemas)
+            .rewrite_count_star(&self.view_schemas);
 
         // compute MIR representation of the SQL query
-        let mut mir = self.mir_for_named_query(&query_name, q);
+        let mut mir = self.mir_converter.named_query_to_mir(&query_name, q);
 
         // run MIR-level optimizations
         mir = mir.optimize();
+        // TODO(malte): we currently need to remember these for local state, but should figure out
+        // a better plan (see below)
+        let fields = mir.leaf
+            .columns()
+            .into_iter()
+            .map(|c| String::from(c.name.as_str()))
+            .collect::<Vec<_>>();
 
+        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
+        let qfp = mir.into_flow_parts(&mut mig);
+
+        // record info about query
         self.num_queries += 1;
-        // push it into the flow graph using the migration in `mig`
-        mir.into_flow_parts(&mut mig)
-    }
+        self.node_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
 
-    fn mir_for_named_query(&self, name: &str, query: SqlQuery) -> MirQuery {
-        match query {
-            SqlQuery::CreateTable(ctq) => {
-                assert_eq!(name, ctq.table.name);
-                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref());
+        // TODO(malte): get rid of duplication and figure out where to track this state
+        //self.node_fields.insert(qfp.query_leaf, fields.clone());
+        self.view_schemas.insert(String::from(query_name.as_str()), fields);
 
-                MirQuery {
-                    name: String::from(name),
-                    roots: vec![Box::new(n)],
-                    leaf: None,
-                }
-            }
-            SqlQuery::Insert(iq) => {
-                assert_eq!(name, iq.table.name);
-                let (cols, _): (Vec<Column>, Vec<String>) = iq.fields
-                    .iter()
-                    .cloned()
-                    .unzip();
-                let n = self.make_base_node(&name, &cols, None);
-
-                MirQuery {
-                    name: String::from(name),
-                    roots: vec![Box::new(n)],
-                    leaf: None,
-                }
-            }
-            _ => unimplemented!(),
-            /*SqlQuery::Select(sq) => {
-                let nodes = self.make_nodes_for_selection(&sq, &name);
-                let roots = nodes.iter()
-                    .filter(|mn| mn.ancestors().len() == 0)
-                    .map(|mn| Box::new(mn))
-                    .collect();
-                let leaves = nodes.iter()
-                    .filter(|mn| mn.children().len() == 0)
-                    .map(|mn| Box::new(mn))
-                    .collect();
-                assert_eq!(leaves.len(), 1);
-
-                MirQuery {
-                    name: String::from(name),
-                    roots: roots,
-                    leaf: leaves.into_iter().next().unwrap(),
-                }
-            }*/
-        }
-    }
-
-    /// Return is (`node`, `is_new`)
-    fn make_base_node(&self,
-                      name: &str,
-                      cols: &Vec<Column>,
-                      keys: Option<&Vec<TableKey>>)
-                      -> MirNode {
-        /*if self.write_schemas.contains_key(name) {
-            let ref existing_schema = self.write_schemas[name];
-
-            // TODO(malte): check the keys too
-            if *existing_schema == cols.iter().map(|c| c.name.as_str()).collect::<Vec<&str>>() {
-                info!(self.log,
-                      "base table for {} already exists with identical schema; ignoring it.",
-                      name);
-            } else {
-                error!(self.log,
-                       "base table for write type {} already exists, but has a different schema!",
-                       name);
-            }
-            return (self.node_addresses[name], false);
-        }*/
-
-        assert!(cols.iter().all(|c| c.table == Some(String::from(name))));
-
-        let primary_keys = match keys {
-            None => vec![],
-            Some(keys) => {
-                keys.iter()
-                    .filter_map(|k| match *k {
-                                    ref k @ TableKey::PrimaryKey(..) => Some(k),
-                                    _ => None,
-                                })
-                    .collect()
-            }
-        };
-        assert!(primary_keys.len() <= 1);
-
-        if !primary_keys.is_empty() {
-            match **primary_keys.iter().next().unwrap() {
-                TableKey::PrimaryKey(ref key_cols) => {
-                    debug!(self.log,
-                           "Assigning primary key {:?} for base {}",
-                           key_cols,
-                           name);
-                    MirNode {
-                        name: String::from(name),
-                        from_version: 0,
-                        columns: cols.clone(),
-                        inner: MirNodeType::Base(cols.clone(), key_cols.clone()),
-                    }
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            MirNode {
-                name: String::from(name),
-                from_version: 0,
-                columns: cols.clone(),
-                inner: MirNodeType::Base(cols.clone(), vec![]),
-            }
-        }
-    }
-
-    /// Return is (`new_nodes`, `leaf_node`).
-    fn make_nodes_for_selection(&mut self, st: &SelectStatement, name: &str) -> Vec<MirNode> {
-        vec![]
+        qfp
     }
 }
 
