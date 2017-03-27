@@ -88,29 +88,22 @@ impl AliasRemoval for SqlQuery {
                     }
                 }
                 // Remove them from fields
-                sq.fields = match sq.fields {
-                    FieldExpression::All => FieldExpression::All,
-                    FieldExpression::Seq(fs) => {
-                        let new_fs = fs.into_iter()
-                            .map(|f| match f.table {
-                                     None => f,
-                                     Some(t) => {
-                                         Column {
-                                             name: f.name,
-                                             alias: f.alias,
-                                             table: if table_aliases.contains_key(&t) {
-                                                 Some(table_aliases[&t].clone())
-                                             } else {
-                                                 Some(t)
-                                             },
-                                             function: None,
-                                         }
-                                     }
-                                 })
-                            .collect();
-                        FieldExpression::Seq(new_fs)
+                for field in sq.fields.iter_mut() {
+                    match field {
+                        &mut FieldExpression::Col(ref mut col) => {
+                            if col.table.is_some() {
+                                let t = col.table.take().unwrap();
+                                col.table = if table_aliases.contains_key(&t) {
+                                    Some(table_aliases[&t].clone())
+                                } else {
+                                    Some(t.clone())
+                                };
+                                col.function = None;
+                            }
+                        }
+                        _ => {}
                     }
-                };
+                }
                 // Remove them from conditions
                 sq.where_clause = match sq.where_clause {
                     None => None,
@@ -140,7 +133,7 @@ mod tests {
                              name: String::from("PaperTag"),
                              alias: Some(String::from("t")),
                          }],
-            fields: FieldExpression::Seq(vec![Column::from("t.id")]),
+            fields: vec![FieldExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("t.id"))),
@@ -153,7 +146,7 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("PaperTag.id")]));
+                           vec![FieldExpression::Col(Column::from("PaperTag.id"))]);
                 assert_eq!(tq.where_clause,
                            Some(ConditionExpression::ComparisonOp(ConditionTree {
                                operator: Operator::Equal,

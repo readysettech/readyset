@@ -1,39 +1,44 @@
 use nom_sql::{Column, FieldExpression, SqlQuery};
 
 use std::collections::HashMap;
+use std::mem;
 
 pub trait StarExpansion {
     fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
 }
 
 impl StarExpansion for SqlQuery {
-    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
-        match self {
-            SqlQuery::Select(mut sq) => {
-                sq.fields = match sq.fields {
-                    FieldExpression::All => {
-                        // TODO(malte): not currently compatible with a "table.*" syntax, but only
-                        // with "* FROM table" or "* FROM table1, table2".
-                        let new_fs = sq.tables.iter().fold(Vec::new(), |mut acc, ref t| {
-                            let fs = write_schemas.get(&t.name)
-                                .unwrap()
-                                .clone()
-                                .iter()
-                                .map(|f| Column::from(format!("{}.{}", t.name, f).as_ref()))
-                                .collect::<Vec<_>>();
-                            acc.extend(fs);
-                            acc
-                        });
-                        FieldExpression::Seq(new_fs)
-                    }
-                    x => x,
-                };
+    fn expand_stars(mut self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
+        let expand_table = |table_name: String| {
+            write_schemas.get(&table_name)
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(move |f| {
+                    FieldExpression::Col(Column::from(format!("{}.{}", table_name, f).as_ref()))
+                })
+        };
 
-                SqlQuery::Select(sq)
-            }
-            // nothing to do for other query types, as they cannot have aliases
-            x => x,
+        if let SqlQuery::Select(ref mut sq) = self {
+            let old_fields = mem::replace(&mut sq.fields, vec![]);
+            sq.fields = old_fields.into_iter().flat_map(|field| {
+                match field {
+                    FieldExpression::All => {
+                        let v: Vec<_> = sq.tables.iter()
+                            .map(|t| t.name.clone())
+                            .flat_map(&expand_table)
+                            .collect();
+                        v.into_iter()
+                    }
+                    FieldExpression::AllInTable(t) => {
+                        let v: Vec<_> = expand_table(t).collect();
+                        v.into_iter()
+                    }
+                    FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
+                }
+            }).collect();
         }
+        self
     }
 }
 
@@ -54,7 +59,7 @@ mod tests {
                              name: String::from("PaperTag"),
                              alias: None,
                          }],
-            fields: FieldExpression::All,
+            fields: vec![FieldExpression::All],
             ..Default::default()
         };
         let mut schema = HashMap::new();
@@ -65,8 +70,8 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("PaperTag.paper_id"),
-                                                     Column::from("PaperTag.tag_id")]));
+                           vec![FieldExpression::Col(Column::from("PaperTag.paper_id")),
+                                FieldExpression::Col(Column::from("PaperTag.tag_id"))]);
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
@@ -80,7 +85,7 @@ mod tests {
         // SELECT paper_id, tag_id, uid, name FROM PaperTag, Users [...]
         let q = SelectStatement {
             tables: vec![Table::from("PaperTag"), Table::from("Users")],
-            fields: FieldExpression::All,
+            fields: vec![FieldExpression::All],
             ..Default::default()
         };
         let mut schema = HashMap::new();
@@ -92,14 +97,44 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("PaperTag.paper_id"),
-                                                     Column::from("PaperTag.tag_id"),
-                                                     Column::from("Users.uid"),
-                                                     Column::from("Users.name")]));
+                           vec![FieldExpression::Col(Column::from("PaperTag.paper_id")),
+                                FieldExpression::Col(Column::from("PaperTag.tag_id")),
+                                FieldExpression::Col(Column::from("Users.uid")),
+                                FieldExpression::Col(Column::from("Users.name"))]);
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
         }
     }
 
+    #[test]
+    fn it_expands_table_stars_from_multiple_tables() {
+        // SELECT Users.*, * FROM PaperTag, Users [...]
+        // -->
+        // SELECT uid, name, paper_id, tag_id, uid, name FROM PaperTag, Users [...]
+        let q = SelectStatement {
+            tables: vec![Table::from("PaperTag"), Table::from("Users")],
+            fields: vec![FieldExpression::AllInTable("Users".into()), FieldExpression::All],
+            ..Default::default()
+        };
+        let mut schema = HashMap::new();
+        schema.insert("PaperTag".into(), vec!["paper_id".into(), "tag_id".into()]);
+        schema.insert("Users".into(), vec!["uid".into(), "name".into()]);
+
+        let res = SqlQuery::Select(q).expand_stars(&schema);
+        // * selector has been expanded to field list
+        match res {
+            SqlQuery::Select(tq) => {
+                assert_eq!(tq.fields,
+                           vec![FieldExpression::Col(Column::from("Users.uid")),
+                                FieldExpression::Col(Column::from("Users.name")),
+                                FieldExpression::Col(Column::from("PaperTag.paper_id")),
+                                FieldExpression::Col(Column::from("PaperTag.tag_id")),
+                                FieldExpression::Col(Column::from("Users.uid")),
+                                FieldExpression::Col(Column::from("Users.name"))]);
+            }
+            // if we get anything other than a selection query back, something really weird is up
+            _ => panic!(),
+        }
+    }
 }

@@ -2,6 +2,7 @@ use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinR
               Table};
 
 use std::collections::HashMap;
+use std::ops::Deref;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
@@ -103,6 +104,8 @@ impl ImpliedTableExpansion for SqlQuery {
             }
         };
 
+        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
+
         // Traverses a query and calls `find_table` on any column that has no explicit table set,
         // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
         // which can use the simpler `set_table`.
@@ -114,23 +117,17 @@ impl ImpliedTableExpansion for SqlQuery {
                             // There is no implied table (other than "self") for anonymous function
                             // columns, but we have to peek inside the function to expand implied
                             // tables in its specification
-                            match *f {
-                                Avg(ref mut fe) |
-                                Count(ref mut fe) |
-                                Sum(ref mut fe) |
-                                Min(ref mut fe) |
-                                Max(ref mut fe) |
-                                GroupConcat(ref mut fe, _) => {
-                                    match *fe {
-                                        FieldExpression::Seq(ref mut fields) => {
-                                            for f in fields.iter_mut() {
-                                                f.table = find_table(f, tables_in_query);
-                                            }
-                                        }
-                                        _ => (),
-                                    }
+                            match (*f).as_mut() {
+                                &mut Avg(ref mut fe, _) |
+                                &mut Count(ref mut fe, _) |
+                                &mut Sum(ref mut fe, _) |
+                                &mut Min(ref mut fe) |
+                                &mut Max(ref mut fe) |
+                                &mut GroupConcat(ref mut fe, _) => {
+                                    fe.table = find_table(fe, tables_in_query);
                                     None
                                 }
+                                &mut CountStar => None,
                             }
                         }
                         None => find_table(&f, tables_in_query),
@@ -162,8 +159,6 @@ impl ImpliedTableExpansion for SqlQuery {
             f
         };
 
-
-        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
         match self {
             SqlQuery::Select(mut sq) => {
                 let mut tables: Vec<Table> = sq.tables.clone();
@@ -178,12 +173,13 @@ impl ImpliedTableExpansion for SqlQuery {
                     }
                 }
                 // Expand within field list
-                sq.fields = match sq.fields {
-                    FieldExpression::All => panic!(err),
-                    FieldExpression::Seq(fs) => {
-                        FieldExpression::Seq(fs.into_iter()
-                                                 .map(|f| expand_columns(f, &tables))
-                                                 .collect())
+                for field in sq.fields.iter_mut() {
+                    match field {
+                        &mut FieldExpression::All => panic!(err),
+                        &mut FieldExpression::AllInTable(_) => panic!(err),
+                        &mut FieldExpression::Col(ref mut f) => {
+                            *f = expand_columns(f.clone(), &tables);
+                        }
                     }
                 };
                 // Expand within WHERE clause
@@ -314,7 +310,8 @@ mod tests {
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
-            fields: FieldExpression::Seq(vec![Column::from("name"), Column::from("title")]),
+            fields: vec![FieldExpression::Col(Column::from("name")),
+                         FieldExpression::Col(Column::from("title"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("users.id"))),
@@ -332,8 +329,8 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("users.name"),
-                                                     Column::from("articles.title")]));
+                           vec![FieldExpression::Col(Column::from("users.name")),
+                                FieldExpression::Col(Column::from("articles.title"))]);
                 assert_eq!(tq.where_clause,
                            Some(ConditionExpression::ComparisonOp(ConditionTree {
                                operator: Operator::Equal,
