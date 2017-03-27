@@ -234,6 +234,7 @@ impl Domain {
                         unimplemented!();
                     }
                     TriggerEndpoint::End(ref mut trigger) => {
+                        // TODO: potential deadlock (other domain tries to send to us)
                         trigger.send(Packet::PartialReplay { tag, key }).unwrap();
                     }
                     TriggerEndpoint::Start(..) => unreachable!(),
