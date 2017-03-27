@@ -468,6 +468,37 @@ mod tests {
     }
 
     #[test]
+    fn column_alias_no_as() {
+        let qstring1 = "select name TagName from PaperTag;";
+        let qstring2 = "select PaperTag.name TagName from PaperTag;";
+
+        let res1 = selection(qstring1.as_bytes());
+        assert_eq!(res1.clone().unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PaperTag")],
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("name"),
+                           alias: Some(String::from("TagName")),
+                           table: None,
+                           function: None,
+                       })],
+                       ..Default::default()
+                   });
+        let res2 = selection(qstring2.as_bytes());
+        assert_eq!(res2.clone().unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("PaperTag")],
+                       fields: vec![FieldExpression::Col(Column {
+                           name: String::from("name"),
+                           alias: Some(String::from("TagName")),
+                           table: Some(String::from("PaperTag")),
+                           function: None,
+                       })],
+                       ..Default::default()
+                   });
+    }
+
+    #[test]
     fn distinct() {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 

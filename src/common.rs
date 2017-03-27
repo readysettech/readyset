@@ -368,8 +368,7 @@ named!(pub as_alias<&[u8], &str>,
     complete!(
         chain!(
             multispace ~
-            caseless_tag!("as") ~
-            multispace ~
+            opt!(chain!(caseless_tag!("as") ~ multispace, ||{})) ~
             alias: map_res!(sql_identifier, str::from_utf8),
             || { alias }
         )
