@@ -45,6 +45,14 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 }
 
 impl Recipe {
+    /// Return active aliases for expressions
+    pub fn aliases(&self) -> Vec<&str> {
+        self.aliases
+            .keys()
+            .map(String::as_str)
+            .collect()
+    }
+
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
     pub fn blank(log: Option<slog::Logger>) -> Recipe {
@@ -59,14 +67,6 @@ impl Recipe {
                 Some(log) => Some(SqlIncorporator::new(log)),
             },
         }
-    }
-
-    /// Return active aliases for expressions
-    pub fn aliases(&self) -> Vec<&str> {
-        self.aliases
-            .keys()
-            .map(String::as_str)
-            .collect()
     }
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
@@ -205,6 +205,14 @@ impl Recipe {
         (added_queries, removed_queries)
     }
 
+    /// Returns the query expressions in the recipe.
+    pub fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
+        self.expressions
+            .values()
+            .map(|&(ref n, ref q)| (n.as_ref(), q))
+            .collect()
+    }
+
     /// Append the queries in the `additions` argument to this recipe. This will attempt to parse
     /// `additions`, and if successful, will extend the recipe. No expressions are removed from the
     /// recipe; use `replace` if removal of unused expressions is desired.
@@ -293,6 +301,11 @@ impl Recipe {
         Ok(parsed_queries.into_iter().map(|t| (t.0, t.2.unwrap())).collect::<Vec<_>>())
     }
 
+    /// Returns the predecessor from which this `Recipe` was migrated to.
+    pub fn prior(&self) -> Option<&Box<Recipe>> {
+        self.prior.as_ref()
+    }
+
     /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
     /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
     /// `new` will be removed.
@@ -309,6 +322,11 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    /// Returns the version number of this recipe.
+    pub fn version(&self) -> usize {
+        self.version
     }
 }
 
@@ -378,97 +396,5 @@ mod tests {
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
         assert_eq!(r2.prior, Some(Box::new(r1_copy)));
-    }
-
-    #[test]
-    fn it_activates() {
-        use Blender;
-
-        let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
-        let mut r = Recipe::from_str(r_txt, None).unwrap();
-        assert_eq!(r.version, 0);
-        assert_eq!(r.expressions.len(), 1);
-        assert_eq!(r.prior, None);
-
-        let mut g = Blender::new();
-        {
-            let mut mig = g.start_migration();
-            assert!(r.activate(&mut mig).is_ok());
-            mig.commit();
-        }
-        // source, base, ingress
-        assert_eq!(g.graph().node_count(), 3);
-        println!("{}", g);
-    }
-
-    #[test]
-    fn it_activates_and_migrates() {
-        use Blender;
-
-        let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
-        let mut r = Recipe::from_str(r_txt, None).unwrap();
-        assert_eq!(r.version, 0);
-        assert_eq!(r.expressions.len(), 1);
-        assert_eq!(r.prior, None);
-
-        let mut g = Blender::new();
-        {
-            let mut mig = g.start_migration();
-            assert!(r.activate(&mut mig).is_ok());
-            mig.commit();
-        }
-        println!("{}", g);
-
-        let mut r_copy = r.clone();
-        // the incorporator is moved to the new recipe
-        r_copy.inc = None;
-
-        let r1_txt = "SELECT a FROM b;\n
-                      SELECT a, c FROM b WHERE a = 42;";
-        let mut r1 = r.extend(r1_txt).unwrap();
-        assert_eq!(r1.version, 1);
-        assert_eq!(r1.expressions.len(), 3);
-        assert_eq!(r1.prior, Some(Box::new(r_copy)));
-        {
-            let mut mig = g.start_migration();
-            assert!(r1.activate(&mut mig).is_ok());
-            mig.commit();
-        }
-        println!("{}", g);
-    }
-
-    #[test]
-    fn it_activates_and_migrates_with_join() {
-        use Blender;
-
-        let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
-                     INSERT INTO b (r, s) VALUES (?, ?);\n";
-        let mut r = Recipe::from_str(r_txt, None).unwrap();
-        assert_eq!(r.version, 0);
-        assert_eq!(r.expressions.len(), 2);
-        assert_eq!(r.prior, None);
-
-        let mut g = Blender::new();
-        {
-            let mut mig = g.start_migration();
-            assert!(r.activate(&mut mig).is_ok());
-            mig.commit();
-        }
-
-        let mut r_copy = r.clone();
-        // the incorporator is moved to the new recipe
-        r_copy.inc = None;
-
-        let r1_txt = "SELECT y, s FROM a, b WHERE a.x = b.r;";
-        let mut r1 = r.extend(r1_txt).unwrap();
-        assert_eq!(r1.version, 1);
-        assert_eq!(r1.expressions.len(), 3);
-        assert_eq!(r1.prior, Some(Box::new(r_copy)));
-        {
-            let mut mig = g.start_migration();
-            assert!(r1.activate(&mut mig).is_ok());
-            mig.commit();
-        }
-        println!("{}", g);
     }
 }
