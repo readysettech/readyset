@@ -635,15 +635,22 @@ pub fn reconstruct(log: &Logger,
                     }
                 }
             } else if i == segments.len() - 1 {
-                // last domain should report when it's done
-                assert!(main_done_tx.is_some());
-                if let Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
-                    *done_tx = main_done_tx.take();
-                }
-                // and should know what domain to contact if it needs to trigger partial replay
-                if partial.is_some() {
-                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
-                        *trigger = TriggerEndpoint::End(txs[&segments[0].0].clone());
+                // last domain
+                if let Packet::SetupReplayPath {
+                           ref mut done_tx,
+                           ref mut trigger,
+                           ..
+                       } = setup {
+                    match partial {
+                        None => {
+                            // should report when it's done if it is to be fully replayed
+                            assert!(main_done_tx.is_some());
+                            *done_tx = main_done_tx.take();
+                        }
+                        Some(..) => {
+                            // otherwise, should know what how to trigger partial replay
+                            *trigger = TriggerEndpoint::End(txs[&segments[0].0].clone());
+                        }
                     }
                 }
             }
