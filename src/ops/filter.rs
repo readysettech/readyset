@@ -114,11 +114,12 @@ impl Ingredient for Filter {
         true
     }
 
-    fn query_through<'a>(&self,
-                         columns: &[usize],
-                         key: &KeyType<DataType>,
-                         states: &'a StateMap)
-                         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>> {
+    fn query_through<'a>
+        (&self,
+         columns: &[usize],
+         key: &KeyType<DataType>,
+         states: &'a StateMap)
+         -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
         states.get(self.src.as_local()).and_then(|state| {
             let f = self.filter.clone();
             match state.lookup(columns, key) {
@@ -142,9 +143,9 @@ impl Ingredient for Filter {
                             }
                         })
                     })) as Box<_>;
-                    Some(r)
+                    Some(Some(r))
                 }
-                LookupResult::Missing => None,
+                LookupResult::Missing => Some(None),
             }
         })
     }

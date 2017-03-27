@@ -100,27 +100,34 @@ pub trait Ingredient
         false
     }
 
-    fn query_through<'a>(&self,
-                         _columns: &[usize],
-                         _key: &prelude::KeyType<prelude::DataType>,
-                         _states: &'a prelude::StateMap)
-                         -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
+    fn query_through<'a>
+        (&self,
+         _columns: &[usize],
+         _key: &prelude::KeyType<prelude::DataType>,
+         _states: &'a prelude::StateMap)
+         -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
         None
     }
 
     /// Look up the given key in the given parent's state, falling back to query_through if
-    /// necessary.
+    /// necessary. The return values signifies:
+    ///
+    ///  - `None` => no materialization of the parent state exists
+    ///  - `Some(None)` => materialization exists, but lookup got a miss
+    ///  - `Some(Some(rs))` => materialization exists, and got results rs
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
                   columns: &[usize],
                   key: &prelude::KeyType<prelude::DataType>,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
-                  -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
+                  -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
         states.get(parent.as_local())
             .and_then(move |state| match state.lookup(columns, key) {
-                          prelude::LookupResult::Some(rs) => Some(Box::new(rs.iter()) as Box<_>),
-                          prelude::LookupResult::Missing => None,
+                          prelude::LookupResult::Some(rs) => {
+                              Some(Some(Box::new(rs.iter()) as Box<_>))
+                          }
+                          prelude::LookupResult::Missing => Some(None),
                       })
             .or_else(|| {
                 // this is a long-shot.

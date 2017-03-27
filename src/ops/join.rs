@@ -127,12 +127,12 @@ impl From<Builder> for Joiner {
                         let pg: Vec<_> = pg.iter()
                             .enumerate()
                             .filter_map(|(pi, g)| {
-                                // look for ones that share a group with us
-                                g2c.get(g).map(|srci| {
-                                                   // and emit that mapping
-                                                   (*srci, pi)
-                                               })
-                            })
+                                            // look for ones that share a group with us
+                                            g2c.get(g).map(|srci| {
+                                                               // and emit that mapping
+                                                               (*srci, pi)
+                                                           })
+                                        })
                             .collect();
 
                         // if there are no shared columns, don't join against this view
@@ -185,11 +185,12 @@ pub struct Joiner {
 }
 
 impl Joiner {
-    fn join<'a>(&'a self,
-                left: (NodeAddress, sync::Arc<Vec<DataType>>),
-                domain: &DomainNodes,
-                states: &StateMap)
-                -> Box<Iterator<Item = Vec<DataType>> + 'a> {
+    fn join<'a>
+        (&'a self,
+         left: (NodeAddress, sync::Arc<Vec<DataType>>),
+         domain: &DomainNodes,
+         states: &StateMap)
+         -> Result<Box<Iterator<Item = Vec<DataType>> + 'a>, (NodeAddress, usize, DataType)> {
 
         // NOTE: this only works for two-way joins
         let other = *self.join
@@ -200,31 +201,35 @@ impl Joiner {
         let target = &this.against[&other];
 
         // send the parameters to start the query.
-        let rx: Vec<_> = self.lookup(other,
-                                     &[target.on.1],
-                                     &KeyType::Single(&left.1[target.on.0]),
-                                     domain,
-                                     states)
-            .expect("joins must have inputs materialized")
-            .cloned()
-            .collect();
+        let rx: Vec<_> = match self.lookup(other,
+                                           &[target.on.1],
+                                           &KeyType::Single(&left.1[target.on.0]),
+                                           domain,
+                                           states) {
+            None => unreachable!("joins must have inputs materialized"),
+            Some(None) => {
+                // partial materialization miss
+                return Err((other, target.on.1, left.1[target.on.0].clone()));
+            }
+            Some(Some(rs)) => rs.cloned().collect(),
+        };
 
         if rx.is_empty() && target.outer {
-            return Box::new(Some(self.emit
-                                     .iter()
-                                     .map(|&(source, column)| {
-                if source == other {
-                    DataType::None
-                } else {
-                    // this clone is unnecessary
-                    left.1[column].clone()
-                }
-            })
-                                     .collect::<Vec<_>>())
-                                    .into_iter());
+            return Ok(Box::new(Some(self.emit
+                                        .iter()
+                                        .map(|&(source, column)| {
+                                                 if source == other {
+                                                     DataType::None
+                                                 } else {
+                                                     // this clone is unnecessary
+                                                     left.1[column].clone()
+                                                 }
+                                             })
+                                        .collect::<Vec<_>>())
+                                       .into_iter()));
         }
 
-        Box::new(rx.into_iter().map(move |right| {
+        Ok(Box::new(rx.into_iter().map(move |right| {
             // weave together r and j according to join rules
             self.emit
                 .iter()
@@ -242,7 +247,7 @@ impl Joiner {
                     }
                 })
                 .collect()
-        }))
+        })))
     }
 }
 
@@ -345,23 +350,41 @@ impl Ingredient for Joiner {
         // other side(s) for records matching the incoming records on that side's join
         // fields.
 
+        let rs2 = rs.clone(); // well, this clone is annoying
+
         // TODO: we should be clever here, and only query once per *distinct join value*,
         // instead of once per received record.
-        let rs = rs.into_iter()
-            .flat_map(|rec| {
-                let (r, pos) = rec.extract();
+        let mut rs = rs.into_iter().map(|rec| {
+            let (r, pos) = rec.extract();
 
-                self.join((from, r), nodes, state).map(move |res| {
-                    // return new row with appropriate sign
-                    if pos {
-                        Record::Positive(sync::Arc::new(res))
-                    } else {
-                        Record::Negative(sync::Arc::new(res))
-                    }
-                })
+            self.join((from, r), nodes, state).map(|it| {
+                it.map(move |res| {
+                           // return new row with appropriate sign
+                           if pos {
+                               Record::Positive(sync::Arc::new(res))
+                           } else {
+                               Record::Negative(sync::Arc::new(res))
+                           }
+                       })
             })
-            .collect();
-        ProcessingResult::Done(rs)
+        });
+
+        let mut results = Vec::new();
+        while let Some(it) = rs.next() {
+            match it {
+                Ok(rs) => results.extend(rs),
+                Err((node, col, key)) => {
+                    return ProcessingResult::NeedReplay {
+                               node: node,
+                               columns: vec![col],
+                               key: vec![key],
+                               was: rs2,
+                           };
+                }
+            }
+        }
+
+        ProcessingResult::Done(results.into())
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

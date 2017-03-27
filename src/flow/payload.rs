@@ -17,10 +17,7 @@ pub struct Link {
 
 impl Link {
     pub fn new(src: NodeAddress, dst: NodeAddress) -> Self {
-        Link {
-            src: src,
-            dst: dst,
-        }
+        Link { src: src, dst: dst }
     }
 }
 
@@ -32,6 +29,13 @@ impl fmt::Debug for Link {
 pub enum ReplayData {
     Records(Records),
     StateCopy(State),
+}
+
+pub enum TriggerEndpoint {
+    None,
+    Start(Vec<usize>),
+    End(mpsc::SyncSender<Packet>),
+    Local(Vec<usize>),
 }
 
 #[derive(Clone)]
@@ -80,6 +84,7 @@ pub enum Packet {
     PrepareState {
         node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
+        partial: bool,
     },
 
     /// Probe for the number of records in the given node's state
@@ -91,10 +96,15 @@ pub enum Packet {
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,
+        source: Option<NodeAddress>,
         path: Vec<NodeAddress>,
         done_tx: Option<mpsc::SyncSender<()>>,
+        trigger: TriggerEndpoint,
         ack: mpsc::SyncSender<()>,
     },
+
+    /// Ask domain (nicely) to replay a particular key.
+    PartialReplay { tag: Tag, key: Vec<DataType> },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
     StartReplay {
@@ -198,7 +208,12 @@ impl Packet {
                     state: state,
                 }
             }
-            Packet::Replay { link, tag, last, data: ReplayData::Records(data) } => {
+            Packet::Replay {
+                link,
+                tag,
+                last,
+                data: ReplayData::Records(data),
+            } => {
                 Packet::Replay {
                     link: link,
                     tag: tag,
@@ -247,7 +262,11 @@ impl Packet {
                     data: data.clone(),
                 }
             }
-            Packet::Transaction { ref link, ref data, ref state } => {
+            Packet::Transaction {
+                ref link,
+                ref data,
+                ref state,
+            } => {
                 Packet::Transaction {
                     link: link.clone(),
                     data: data.clone(),
@@ -263,7 +282,11 @@ impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::Transaction { ref link, ref state, .. } => {
+            Packet::Transaction {
+                ref link,
+                ref state,
+                ..
+            } => {
                 match *state {
                     TransactionState::Committed(ts, ..) => {
                         write!(f, "Packet::Transaction({:?}, {})", link, ts)
@@ -273,7 +296,12 @@ impl fmt::Debug for Packet {
                     }
                 }
             }
-            Packet::Replay { ref link, ref tag, ref data, .. } => {
+            Packet::Replay {
+                ref link,
+                ref tag,
+                ref data,
+                ..
+            } => {
                 match *data {
                     ReplayData::Records(ref data) => {
                         write!(f,

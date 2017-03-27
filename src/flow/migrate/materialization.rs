@@ -246,15 +246,15 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
-                                                                                |mut acc, nc| {
-                            if let Some(p_cols) = nc {
-                                for (pn, pc) in p_cols {
-                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                        let cols_to_index_per_node =
+                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
+                                if let Some(p_cols) = nc {
+                                    for (pn, pc) in p_cols {
+                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                                    }
                                 }
-                            }
-                            acc
-                        });
+                                acc
+                            });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
                         // Note that this, and the semantics of node.resolve(), imply that each column
@@ -427,44 +427,80 @@ pub fn reconstruct(log: &Logger,
     // so, first things first, let's find all our paths up the tree
     let mut paths = {
         let mut on_join = cost_fn(log, graph, empty, materialized, txs);
-        keys::provenance_of(graph, node, 0, &mut *on_join)
+        // TODO: what if we're constructing multiple indices?
+        // TODO: what if we have a compound index?
+        let trace_col = if index_on.is_empty() {
+            // must be reconstructing a reader
+            0
+        } else {
+            index_on[0][0]
+        };
+        keys::provenance_of(graph, node, trace_col, &mut *on_join)
     };
 
     // next eliminate any that terminate in empty base nodes
     paths.retain(|path| !empty.contains(&path.last().unwrap().0));
 
-    // cut paths so they contain the shortest replay path
-    let paths = paths.into_iter().map(|path| -> Vec<_> {
-        let mut found = false;
-        path.into_iter()
-            .map(|(node, _)| node)
-            .enumerate()
-            .take_while(|&(i, node)| {
-                if i == 0 {
-                    // first node is target node
-                    return true;
-                }
+    // cut paths so they only reach to the the closest materialized node
+    let mut paths = paths.into_iter()
+        .map(|path| -> Vec<_> {
+            let mut found = false;
+            path.into_iter()
+                .enumerate()
+                .take_while(|&(i, (node, _))| {
+                    if i == 0 {
+                        // first node is target node
+                        return true;
+                    }
 
-                // keep taking until we get our first materialized node
-                // (`found` helps us emulate `take_while_inclusive`)
-                let n = &graph[node];
-                if found {
-                    // we've already found a materialized node
-                    return false;
-                }
+                    // keep taking until we get our first materialized node
+                    // (`found` helps us emulate `take_while_inclusive`)
+                    let n = &graph[node];
+                    if found {
+                        // we've already found a materialized node
+                        return false;
+                    }
 
-                let is_materialized = materialized.get(&n.domain())
-                    .map(|dm| dm.contains_key(n.addr().as_local()))
-                    .unwrap_or(false);
-                if is_materialized {
-                    // we want to take this node, but not any later ones
-                    found = true;
-                }
-                true
-            })
-            .map(|(_, node)| node)
-            .collect()
-    });
+                    let is_materialized = materialized.get(&n.domain())
+                        .map(|dm| dm.contains_key(n.addr().as_local()))
+                        .unwrap_or(false);
+                    if is_materialized {
+                        // we want to take this node, but not any later ones
+                        found = true;
+                    }
+                    true
+                })
+                .map(|(_, segment)| segment)
+                .collect()
+        })
+        .peekable();
+
+    // can we do partial materialization?
+    //
+    // probably only makes sense if index_on.len() == 1, because otherwise we still have to fully
+    // replay the ancestor to construct the other index, at which point we might as well fill both
+    // indices.
+    //
+    // futhermore, we need index_on[0].len() == 1, because partial replay with compound indices
+    // would require us to do more key provenance resolution, and make sure they all source from
+    // the same view. parent state!
+    //
+    // if there are multiple paths (for example through a union), we'd need more mechanism for
+    // partial replay that we don't yet have (like multiple triggers, waiting for *multiple*
+    // messages from multiple sources with multiple tags).
+    //
+    // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
+    // `key` in the materialized state we're replaying?
+    let partial_ok = index_on.len() == 1 && index_on[0].len() == 1 && paths.len() == 1 &&
+                     paths.peek()
+                         .unwrap()
+                         .last()
+                         .unwrap()
+                         .1
+                         .is_some();
+    if partial_ok {
+        warn!(log, "using partial materialization");
+    }
 
     // tell the domain in question to create an empty state for the node in question
     if let flow::node::Type::Reader(..) = *graph[node] {
@@ -477,6 +513,7 @@ pub fn reconstruct(log: &Logger,
             .send(Packet::PrepareState {
                       node: *graph[node].addr().as_local(),
                       index: index_on,
+                      partial: partial_ok,
                   })
             .unwrap();
     }
@@ -504,10 +541,18 @@ pub fn reconstruct(log: &Logger,
         let tag = Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32);
         trace!(log, "tag" => tag.id(); "replaying along path {:?}", path);
 
+        // partial materialization possible?
+        let mut partial = None;
+        if partial_ok {
+            if let Some(&(_, Some(ref key))) = path.first() {
+                partial = Some(key.clone());
+            }
+        }
+
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
         let mut last_domain = None;
-        for node in path {
+        for (node, _) in path {
             let domain = graph[node].domain();
             if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
@@ -563,17 +608,47 @@ pub fn reconstruct(log: &Logger,
 
             let mut setup = Packet::SetupReplayPath {
                 tag: tag,
+                source: None,
                 path: locals,
                 done_tx: None,
+                trigger: TriggerEndpoint::None,
                 ack: wait_tx.clone(),
             };
-            if i == segments.len() - 1 {
+            if i == 0 {
+                // first domain also gets to know source node
+                if let Packet::SetupReplayPath { ref mut source, .. } = setup {
+                    *source = Some(graph[nodes[0]].addr());
+                }
+            }
+            if segments.len() == 1 {
+                // replay is entirely contained within one domain
+                if let Some(ref key) = partial {
+                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                        *trigger = TriggerEndpoint::Local(vec![*key]);
+                    }
+                }
+            } else if i == 0 {
+                // first domain needs to be told about partial replay trigger (if we have one)
+                if let Some(ref key) = partial {
+                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                        *trigger = TriggerEndpoint::Start(vec![*key]);
+                    }
+                }
+            } else if i == segments.len() - 1 {
                 // last domain should report when it's done
                 assert!(main_done_tx.is_some());
                 if let Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
                     *done_tx = main_done_tx.take();
                 }
-            } else {
+                // and should know what domain to contact if it needs to trigger partial replay
+                if partial.is_some() {
+                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                        *trigger = TriggerEndpoint::End(txs[&segments[0].0].clone());
+                    }
+                }
+            }
+
+            if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
                 if let flow::node::Type::Egress { ref tags, .. } = *graph[*nodes.last().unwrap()] {
                     let mut tags = tags.lock().unwrap();
@@ -593,19 +668,21 @@ pub fn reconstruct(log: &Logger,
         }
         trace!(log, "all domains ready for replay");
 
-        // next, tell the first domain to start playing
-        trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
-        txs[&segments[0].0]
-            .send(Packet::StartReplay {
-                      tag: tag,
-                      from: graph[segments[0].1[0]].addr(),
-                      ack: wait_tx.clone(),
-                  })
-            .unwrap();
+        if !partial_ok {
+            // tell the first domain to start playing
+            trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
+            txs[&segments[0].0]
+                .send(Packet::StartReplay {
+                          tag: tag,
+                          from: graph[segments[0].1[0]].addr(),
+                          ack: wait_tx.clone(),
+                      })
+                .unwrap();
 
-        // and finally, wait for the last domain to finish the replay
-        trace!(log, "waiting for done message from target"; "domain" => segments.last().unwrap().0.index());
-        done_rx.recv().unwrap();
+            // and finally, wait for the last domain to finish the replay
+            trace!(log, "waiting for done message from target"; "domain" => segments.last().unwrap().0.index());
+            done_rx.recv().unwrap();
+        }
     }
 }
 

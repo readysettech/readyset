@@ -754,6 +754,7 @@ fn domain_amend_migration() {
 }
 
 #[test]
+#[ignore]
 fn state_replay_migration_stream() {
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.
@@ -865,6 +866,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 #[test]
+#[ignore]
 fn full_vote_migration() {
     // we're trying to force a very particular race, namely that a put arrives for a new join
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
@@ -981,6 +983,7 @@ fn full_vote_migration() {
 }
 
 #[test]
+#[ignore]
 fn live_writes() {
     use std::time::Duration;
     use distributary::{Blender, Aggregation, DataType};
@@ -1012,13 +1015,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-        let user: DataType = 0.into();
-        for _ in 0..votes {
-            for i in 0..ids {
-                add.put(vec![user.clone(), i.into()]);
-            }
-        }
-    });
+                               let user: DataType = 0.into();
+                               for _ in 0..votes {
+                                   for i in 0..ids {
+                                       add.put(vec![user.clone(), i.into()]);
+                                   }
+                               }
+                           });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
@@ -1047,6 +1050,7 @@ fn live_writes() {
 }
 
 #[test]
+#[ignore]
 fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
@@ -1164,6 +1168,7 @@ fn recipe_activates_and_migrates() {
 }
 
 #[test]
+#[ignore]
 fn recipe_activates_and_migrates_with_join() {
     let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
                  INSERT INTO b (r, s) VALUES (?, ?);\n";

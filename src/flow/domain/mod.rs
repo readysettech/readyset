@@ -74,9 +74,10 @@ enum DomainMode {
 }
 
 struct ReplayPath {
+    source: Option<NodeAddress>,
     path: Vec<NodeAddress>,
     done_tx: Option<mpsc::SyncSender<()>>,
-    trigger: Option<mpsc::SyncSender<Vec<DataType>>>,
+    trigger: TriggerEndpoint,
 }
 
 pub struct Domain {
@@ -172,20 +173,27 @@ impl Domain {
 
         let m = match m {
             single::FinalProcessingResult::Done(m) => m,
-            single::FinalProcessingResult::NeedReplay { was, columns, key, .. } => {
+            single::FinalProcessingResult::NeedReplay {
+                node,
+                was,
+                columns,
+                key,
+                ..
+            } => {
                 use std::mem;
                 // find tag we should use for replay
                 // TODO: this needs to also consider the *key* of that tag
-                let node = was.link().dst;
                 let tag = {
                     let mut tags = paths.iter()
-                        .filter(|&(_, ref info)| {
-                                    info.trigger.is_some() && info.path.last().unwrap() == &node
+                        .filter(|&(_, ref info)| if let TriggerEndpoint::End(..) = info.trigger {
+                                    info.path.last().unwrap() == &node
+                                } else {
+                                    false
                                 })
                         .map(|(tag, _)| *tag);
 
                     let tag = tags.next();
-                    if tags.count() == 0 {
+                    if tags.next().is_some() {
                         // union for example
                         unimplemented!();
                     }
@@ -221,10 +229,15 @@ impl Domain {
                 // send a message to the source domain(s) responsible for the chosen tag so they'll
                 // start replay.
                 let replay = paths.get_mut(&tag).unwrap();
-                if let Some(ref mut trigger) = replay.trigger {
-                    trigger.send(key).unwrap();
-                } else {
-                    unreachable!("asked to replay along non-existing path");
+                match replay.trigger {
+                    TriggerEndpoint::Local(ref key) => {
+                        unimplemented!();
+                    }
+                    TriggerEndpoint::End(ref mut trigger) => {
+                        trigger.send(Packet::PartialReplay { tag, key }).unwrap();
+                    }
+                    TriggerEndpoint::Start(..) => unreachable!(),
+                    TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
                 }
 
                 return output_messages;
@@ -399,17 +412,24 @@ impl Domain {
                     drop(ack);
                 }
             }
-            Packet::PrepareState { node, index } => {
+            Packet::PrepareState {
+                node,
+                index,
+                partial,
+            } => {
+                assert!(!partial || index.len() == 1);
                 let mut state = State::default();
                 for idx in index {
-                    state.add_key(&idx[..], false);
+                    state.add_key(&idx[..], partial);
                 }
                 self.state.insert(node, state);
             }
             Packet::SetupReplayPath {
                 tag,
+                source,
                 path,
                 done_tx,
+                trigger,
                 ack,
             } => {
                 // let coordinator know that we've registered the tagged path
@@ -423,14 +443,53 @@ impl Domain {
                 }
                 self.replay_paths.insert(tag,
                                          ReplayPath {
-                                             path: path,
-                                             done_tx: done_tx,
-                                             trigger: None,
+                                             source,
+                                             path,
+                                             done_tx,
+                                             trigger,
                                          });
+            }
+            Packet::PartialReplay { tag, key } => {
+                let (from, rs) = {
+                    if let ReplayPath {
+                               source: Some(source),
+                               trigger: TriggerEndpoint::Start(ref cols),
+                               ..
+                           } = self.replay_paths[&tag] {
+                        let rs = self.state
+                            .get(source.as_local())
+                            .expect("migration replay path started with non-materialized node")
+                            .lookup(&cols[..], &KeyType::Single(&key[0]));
+
+                        let rs = match rs {
+                            LookupResult::Some(rs) => rs,
+                            LookupResult::Missing => {
+                                // partial replay through partial replay
+                                unimplemented!()
+                            }
+                        };
+
+
+                        (source, rs.iter().cloned().collect::<Vec<_>>())
+                    } else {
+                        unreachable!()
+                    }
+                };
+
+                let m = Packet::Replay {
+                    link: Link::new(from, from),
+                    tag: tag,
+                    last: true,
+                    data: ReplayData::Records(rs.into()),
+                };
+
+                self.handle_replay(m, inject_tx);
             }
             Packet::StartReplay { tag, from, ack } => {
                 // let coordinator know that we've entered replay loop
                 ack.send(()).unwrap();
+
+                assert_eq!(self.replay_paths[&tag].source, Some(from));
 
                 let start = time::Instant::now();
                 info!(self.log, "starting replay");
