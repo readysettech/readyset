@@ -182,9 +182,9 @@ named!(pub column_function<&[u8], FunctionExpression>,
                                    chain!(
                                        multispace? ~
                                        caseless_tag!("separator") ~
-                                       sep: delimited!(tag!("'"), alphanumeric, tag!("'")) ~
+                                       sep: delimited!(tag!("'"), opt!(alphanumeric), tag!("'")) ~
                                        multispace?,
-                                       || { sep }
+                                       || { sep.unwrap_or("".as_bytes()) }
                                    )
                                ),
                                || { (column, seperator) }
