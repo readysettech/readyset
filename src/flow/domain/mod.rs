@@ -365,9 +365,21 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
-        if let DomainMode::Waiting { ref mut buffered, .. } = self.mode {
-            buffered.push_back(m);
-            return;
+        if let DomainMode::Waiting {
+                   ref mut buffered,
+                   tag,
+                   ..
+               } = self.mode {
+            // buffer, unless it's the releasing replay message
+            if let Packet::Replay { tag: m_tag, .. } = m {
+                if tag != m_tag {
+                    buffered.push_back(m);
+                    return;
+                }
+            } else {
+                buffered.push_back(m);
+                return;
+            }
         }
 
         match m {
