@@ -87,7 +87,7 @@ fn fold_cond_exprs(initial: ConditionExpression,
 named!(pub condition_expr<&[u8], ConditionExpression>,
     chain!(
         neg_op: opt!(unary_negation_operator) ~
-        initial: boolean_primary ~
+        initial: alt_complete!(boolean_primary | delimited!(tag!("("), condition_expr, tag!(")"))) ~
         remainder: many0!(
             complete!(
                 chain!(
@@ -273,5 +273,46 @@ mod tests {
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from(""))));
+    }
+
+    #[test]
+    fn brackets() {
+        let cond = "(foo = ? and bar = 12) or foobar = 'a'";
+
+        use ConditionExpression::*;
+        use ConditionBase::*;
+
+        let a = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("foo".into())))),
+            right: Some(Box::new(Base(Placeholder))),
+        });
+
+        let b = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("bar".into())))),
+            right: Some(Box::new(Base(Literal("12".into())))),
+        });
+
+        let left = LogicalOp(ConditionTree {
+            operator: Operator::And,
+            left: Some(Box::new(a)),
+            right: Some(Box::new(b)),
+        });
+
+        let right = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("foobar".into())))),
+            right: Some(Box::new(Base(Literal("a".into())))),
+        });
+
+        let complete = LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            left: Some(Box::new(left)),
+            right: Some(Box::new(right)),
+        });
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(res.unwrap().1, complete);
     }
 }
