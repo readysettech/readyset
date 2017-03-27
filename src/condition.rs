@@ -158,11 +158,12 @@ named!(predicate<&[u8], ConditionExpression>,
         |   chain!(
                 field: delimited!(opt!(multispace),
                                   alt_complete!(
-                                        delimited!(tag!("\""), alphanumeric, tag!("\""))
-                                      | delimited!(tag!("'"), alphanumeric, tag!("'"))
+                                        delimited!(tag!("\""), opt!(alphanumeric), tag!("\""))
+                                      | delimited!(tag!("'"), opt!(alphanumeric), tag!("'"))
                                   ),
                                   opt!(multispace)),
                 || {
+                    let field = field.unwrap_or("".as_bytes());
                     ConditionExpression::Base(
                         ConditionBase::Literal(String::from(str::from_utf8(field).unwrap()))
                     )
@@ -261,5 +262,16 @@ mod tests {
                    flat_condition_tree(Operator::LessOrEqual,
                                        ConditionBase::Field(Column::from("foo")),
                                        ConditionBase::Literal(String::from("5"))));
+    }
+
+    #[test]
+    fn empty_string_literal() {
+        let cond = "foo = ''";
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   flat_condition_tree(Operator::Equal,
+                                       ConditionBase::Field(Column::from("foo")),
+                                       ConditionBase::Literal(String::from(""))));
     }
 }
