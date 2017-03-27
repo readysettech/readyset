@@ -908,9 +908,32 @@ impl Domain {
                     // restore the state before the partial replay
                     mem::replace(&mut self.mode, *interrupted);
 
-                    // remove buffered messages with the same key as was just replayed, since the
-                    // state they represent is already contained within the replayed state (the
-                    // replay happens after all of them).
+                    // FIXME TODO XXX TODO FIXME
+                    // we actually need to be a lot more clever here than I initially thought:
+                    //
+                    //   1. a hole is encountered during a lookup of key K in node D's state
+                    //   2. replay is requested on path P from node S
+                    //   3. S's state for K is replayed along P
+                    //      (note that we know that P does not contain any materializations)
+                    //   4. the state arrives at D and fills the hole
+                    //   5. we *should* now convert the output into a Packet::Message, and
+                    //      propagate *normally* through the graph (i.e., not as a replay along a
+                    //      tagged path). this provides downstream nodes with state eagerly, and
+                    //      allows streaming outputs to not miss updates (e.g., a Reader). as an
+                    //      optimization, this Message should also carry a marker to indicate that
+                    //      it is "complete" for its key. this would let downstream nodes that are
+                    //      also partially materialized (on the same key) avoid an extra replay.
+                    //   6. next, we must look at all messages buffered during the replay, and from
+                    //      each one, remove *all* records that *will* reach D with K as their key.
+                    //      this is necessary as the replay already includes any such rows.
+                    //      luckily, it is safe to simply process along the path to D, and then do
+                    //      the drop check, since we know there's nothing materialized along the
+                    //      path.
+                    //
+                    // TODO: we probably need to deal with materialized nodes that are downstream
+                    // of partially materialized nodes somewhere.
+                    unimplemented!();
+                    /*
                     for m in &mut buffered {
                         if !m.is_regular() {
                             continue;
@@ -925,6 +948,7 @@ impl Domain {
                             rs
                         });
                     }
+                    */
 
                     while let Some(m) = buffered.pop_front() {
                         self.handle(m, inject_tx);
