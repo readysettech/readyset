@@ -1,5 +1,7 @@
 use nom_sql::{Column, Operator};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Error, Formatter, Debug};
 use std::rc::Rc;
 
 use flow::Migration;
@@ -8,41 +10,58 @@ use ops;
 use ops::topk::OrderedRecordComparator;
 use sql::QueryFlowParts;
 
+#[derive(Clone, Debug)]
+enum FlowNode {
+    New(NodeAddress),
+    Existing(NodeAddress),
+}
+
+pub type MirNodeRef = Rc<RefCell<MirNode>>;
+
+#[derive(Debug)]
 pub struct MirQuery {
     pub name: String,
-    pub roots: Vec<Rc<MirNode>>,
-    pub leaf: Rc<MirNode>,
+    pub roots: Vec<MirNodeRef>,
+    pub leaf: MirNodeRef,
 }
 
 impl MirQuery {
-    pub fn singleton(name: &str, node: MirNode) -> MirQuery {
-        let rcn = Rc::new(node);
+    pub fn singleton(name: &str, node: MirNodeRef) -> MirQuery {
         MirQuery {
             name: String::from(name),
-            roots: vec![rcn.clone()],
-            leaf: rcn,
+            roots: vec![node.clone()],
+            leaf: node,
         }
     }
 
-    pub fn into_flow_parts(mut self, mut mig: &mut Migration) -> QueryFlowParts {
+    pub fn into_flow_parts(&mut self, mut mig: &mut Migration) -> QueryFlowParts {
         let mut new_nodes = Vec::new();
+        let mut reused_nodes = Vec::new();
 
         // starting at the roots, add nodes in topological order
-        for n in self.roots.drain(..) {
-            new_nodes.extend(n.into_flow_parts(mig));
+        // XXX(malte): topo sort
+        for n in self.roots.iter_mut() {
+            let flow_node = n.borrow_mut().into_flow_parts(mig);
+            match flow_node {
+                FlowNode::New(na) => new_nodes.push(na),
+                FlowNode::Existing(na) => reused_nodes.push(na),
+            }
         }
 
-        let leaf = new_nodes.iter()
-            .last()
-            .unwrap()
-            .clone()
-            .into();
+        let leaf_na = match *self.leaf
+                   .borrow()
+                   .flow_node
+                   .as_ref()
+                   .expect("Leaf must have FlowNode by now") {
+            FlowNode::New(na) |
+            FlowNode::Existing(na) => na,
+        };
 
         QueryFlowParts {
-            name: self.name,
+            name: self.name.clone(),
             new_nodes: new_nodes,
-            reused_nodes: vec![],
-            query_leaf: leaf,
+            reused_nodes: reused_nodes,
+            query_leaf: leaf_na,
         }
     }
 
@@ -52,16 +71,58 @@ impl MirQuery {
     }
 }
 
+#[derive(Debug)]
 pub struct MirNode {
-    pub name: String,
-    pub from_version: u64,
-    pub columns: Vec<Column>,
-    pub inner: MirNodeType,
-    pub ancestors: Vec<Rc<MirNode>>,
-    pub children: Vec<Rc<MirNode>>,
+    name: String,
+    from_version: usize,
+    columns: Vec<Column>,
+    inner: MirNodeType,
+    ancestors: Vec<MirNodeRef>,
+    children: Vec<MirNodeRef>,
+    flow_node: Option<FlowNode>,
 }
 
 impl MirNode {
+    pub fn new(name: &str,
+               v: usize,
+               columns: Vec<Column>,
+               inner: MirNodeType,
+               ancestors: Vec<MirNodeRef>,
+               children: Vec<MirNodeRef>)
+               -> Self {
+        MirNode {
+            name: String::from(name),
+            from_version: 0,
+            columns: columns,
+            inner: inner,
+            ancestors: ancestors,
+            children: children,
+            flow_node: None,
+        }
+    }
+
+    pub fn reuse(node: MirNodeRef, v: usize) -> Self {
+        let rcn = node.clone();
+
+        MirNode {
+            name: node.borrow().name.clone(),
+            from_version: v,
+            columns: node.borrow().columns.clone(),
+            inner: MirNodeType::Reuse(rcn),
+            ancestors: node.borrow().ancestors.clone(),
+            children: node.borrow().children.clone(),
+            flow_node: None, // will be set in `into_flow_parts`
+        }
+    }
+
+    pub fn ancestors(&self) -> &[MirNodeRef] {
+        self.ancestors.as_slice()
+    }
+
+    pub fn children(&self) -> &[MirNodeRef] {
+        self.children.as_slice()
+    }
+
     pub fn columns(&self) -> &[Column] {
         self.columns.as_slice()
     }
@@ -71,7 +132,7 @@ impl MirNode {
     }
 
     pub fn versioned_name(&self) -> String {
-        format!("{}_v{}", self.name, self.from_version)
+        format!("{}:v{}", self.name, self.from_version)
     }
 
     /// Produce a compact, human-readable description of this node; analogous to the method of the
@@ -89,7 +150,14 @@ impl MirNode {
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
     fn description(&self) -> String {
-        unimplemented!()
+        format!("{}: {} / {}",
+                self.versioned_name(),
+                self.inner.description(),
+                self.columns
+                    .iter()
+                    .map(|ref c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "))
     }
 
     /// Translate a column in this ingredient into the corresponding column(s) in
@@ -106,11 +174,19 @@ impl MirNode {
         unimplemented!()
     }
 
-    fn into_flow_parts(&self, mig: &mut Migration) -> Vec<NodeAddress> {
+    fn into_flow_parts(&mut self, mig: &mut Migration) -> FlowNode {
         let name = self.name.clone();
-        self.inner.into_flow_parts(&name, mig)
+        match self.flow_node {
+            None => {
+                let flow_node = self.inner.into_flow_parts(&name, mig);
+                self.flow_node = Some(flow_node.clone());
+                flow_node
+            }
+            Some(ref flow_node) => flow_node.clone(),
+        }
     }
 }
+
 pub enum MirNodeType {
     /// over column, group_by columns
     Aggregation(Column, Vec<Column>),
@@ -138,35 +214,68 @@ pub enum MirNodeType {
     Union(Vec<Column>, Vec<Column>),
     /// order function, group columns, k
     TopK(Box<OrderedRecordComparator>, Vec<Column>, usize),
+    /// reuse another node
+    Reuse(MirNodeRef),
 }
 
 impl MirNodeType {
-    fn into_flow_parts(&self, name: &str, mut mig: &mut Migration) -> Vec<NodeAddress> {
+    fn description(&self) -> String {
+        format!("{:?}", self)
+    }
+
+    fn into_flow_parts(&mut self, name: &str, mut mig: &mut Migration) -> FlowNode {
         match *self {
             MirNodeType::Base(ref cols, ref keys) => {
-                if keys.len() > 0 {
+                let node = if keys.len() > 0 {
                     let pkey_column_ids = keys.iter()
                         .map(|pkc| {
                                  //assert_eq!(pkc.table.as_ref().unwrap(), name);
                                  cols.iter().position(|c| c == pkc).unwrap()
                              })
                         .collect();
-                    let n = mig.add_ingredient(name,
-                                               cols.iter()
-                                                   .map(|c| &c.name)
-                                                   .collect::<Vec<_>>()
-                                                   .as_slice(),
-                                               ops::base::Base::new(pkey_column_ids));
-                    vec![n]
+                    mig.add_ingredient(name,
+                                       cols.iter()
+                                           .map(|c| &c.name)
+                                           .collect::<Vec<_>>()
+                                           .as_slice(),
+                                       ops::base::Base::new(pkey_column_ids))
                 } else {
-                    let n = mig.add_ingredient(name,
-                                               cols.iter()
-                                                   .map(|c| &c.name)
-                                                   .collect::<Vec<_>>()
-                                                   .as_slice(),
-                                               ops::base::Base::default());
-                    vec![n]
+                    mig.add_ingredient(name,
+                                       cols.iter()
+                                           .map(|c| &c.name)
+                                           .collect::<Vec<_>>()
+                                           .as_slice(),
+                                       ops::base::Base::default())
+                };
+                FlowNode::New(node)
+            }
+            MirNodeType::Reuse(ref node) => {
+                match *node.borrow()
+                           .flow_node
+                           .as_ref()
+                           .expect("Reused MirNode must have FlowNode") {
+                    // "New" => flow node was originally created for the node that we
+                    // are reusing
+                    FlowNode::New(na) |
+                    // "Existing" => flow node was already reused from some other MIR node
+                    FlowNode::Existing(na) => FlowNode::Existing(na),
                 }
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Debug for MirNodeType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        match *self {
+            MirNodeType::Base(_, ref keys) => {
+                write!(f,
+                       "B [⚷: {}]",
+                       keys.iter()
+                           .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(","))
             }
             _ => unimplemented!(),
         }

@@ -48,6 +48,7 @@ pub struct SqlIncorporator {
     node_addresses: HashMap<String, NodeAddress>,
     num_queries: usize,
     query_graphs: Vec<(QueryGraph, NodeAddress)>,
+    schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
 }
 
@@ -59,6 +60,7 @@ impl Default for SqlIncorporator {
             node_addresses: HashMap::default(),
             num_queries: 0,
             query_graphs: Vec::new(),
+            schema_version: 0,
             view_schemas: HashMap::default(),
         }
     }
@@ -155,6 +157,7 @@ impl SqlIncorporator {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir.leaf
+            .borrow()
             .columns()
             .into_iter()
             .map(|c| String::from(c.name.as_str()))
@@ -171,7 +174,16 @@ impl SqlIncorporator {
         //self.node_fields.insert(qfp.query_leaf, fields.clone());
         self.view_schemas.insert(String::from(query_name.as_str()), fields);
 
+        println!("{:#?}", qfp);
         qfp
+    }
+
+    /// Upgrades the schema version that any nodes created for queries will be tagged with.
+    /// `new_version` must be strictly greater than the current version in `self.schema_version`.
+    pub fn upgrade_schema(&mut self, new_version: usize) {
+        assert!(new_version > self.schema_version);
+        self.schema_version = new_version;
+        self.mir_converter.upgrade_schema(new_version);
     }
 }
 

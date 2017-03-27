@@ -154,6 +154,13 @@ impl Recipe {
             }
         };
 
+        // upgrade schema version *before* applying changes, so that new queries are correctly
+        // tagged with the new version
+        self.inc
+            .as_mut()
+            .unwrap()
+            .upgrade_schema(self.version);
+
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
         // returned to the caller (who may use them to obtain mutators and getters)
