@@ -359,6 +359,7 @@ extern crate tokio_core;
 mod backlog;
 mod checktable;
 mod flow;
+mod mir;
 mod ops;
 mod recipe;
 mod sql;
