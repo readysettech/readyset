@@ -1,7 +1,6 @@
 use nom_sql::{Column, FieldExpression, SqlQuery, Table};
 
 use std::collections::HashMap;
-use std::ops::Deref;
 
 pub trait CountStarRewrite {
     fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;

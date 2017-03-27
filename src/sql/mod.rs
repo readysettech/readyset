@@ -45,7 +45,6 @@ enum GroupedNodeType {
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
-    use nom_sql::FieldExpression::*;
 
     match *computed_col.function.as_ref().unwrap().deref() {
         Avg(ref col, _) |
@@ -58,7 +57,6 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
         }
-        _ => panic!("invalid aggregation function"),
     }
 }
 
@@ -381,7 +379,6 @@ impl SqlIncorporator {
         use ops::grouped::aggregate::Aggregation;
         use ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
-        use nom_sql::FieldExpression::*;
 
         let mut mknode = |over: &Column, t: GroupedNodeType| {
             let parent_ni = match parent {
@@ -1032,7 +1029,7 @@ mod tests {
     use flow::Migration;
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
-    use nom_sql::{FieldExpression, FunctionExpression};
+    use nom_sql::FunctionExpression;
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {

@@ -2,7 +2,6 @@ use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinR
               Table};
 
 use std::collections::HashMap;
-use std::ops::Deref;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
