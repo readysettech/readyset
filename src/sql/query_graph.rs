@@ -225,30 +225,32 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             QueryGraphNode {
                 rel_name: rel.clone(),
                 predicates: preds,
-                columns: match st.fields {
-                    FieldExpression::All => unimplemented!(),
-                    FieldExpression::Seq(ref s) => {
-                        s.iter()
-                            .cloned()
-                            .filter(|c| {
-                                match c.table.as_ref() {
+                columns: st.fields.iter().filter_map(|field| match field {
+                    &FieldExpression::All => unimplemented!(),
+                    &FieldExpression::AllInTable(_) => unimplemented!(),
+                    &FieldExpression::Col(ref c) => {
+                        match c.table.as_ref() {
+                            None => {
+                                match c.function {
+                                    // XXX(malte): don't drop aggregation columns
+                                    Some(_) => None,
                                     None => {
-                                        match c.function {
-                                            // XXX(malte): don't drop aggregation columns
-                                            Some(_) => false,
-                                            None => {
-                                                panic!("No table name set for column {} on {}",
-                                                       c.name,
-                                                       rel)
-                                            }
-                                        }
+                                        panic!("No table name set for column {} on {}",
+                                               c.name,
+                                               rel)
                                     }
-                                    Some(t) => *t == rel,
                                 }
-                            })
-                            .collect()
+                            }
+                            Some(t) => {
+                                if *t == rel {
+                                    Some(c.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                        }
                     }
-                },
+                }).collect(),
                 parameters: Vec::new(),
             }
         };
@@ -466,24 +468,26 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
-    match st.fields {
-        FieldExpression::All => panic!("Stars should have been expanded by now!"),
-        FieldExpression::Seq(ref fields) => {
-            for column in fields.iter() {
-                match column.function {
+    for field in st.fields.iter() {
+        match field {
+            &FieldExpression::All |
+            &FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
+            &FieldExpression::Col(ref c) => {
+                match c.function {
                     None => (),  // we've already dealt with this column as part of some relation
                     Some(_) => {
                         // add a special node representing the computed columns
                         // TODO(malte): the predicates here should probably reflect HAVING
                         // conditions, if any are present
                         let mut n = new_node(String::from("computed_columns"), vec![], st);
-                        n.columns.push(column.clone());
+                        n.columns.push(c.clone());
                         qg.relations.insert(String::from("computed_columns"), n);
                     }
                 }
             }
         }
     }
+
     match st.group_by {
         None => (),
         Some(ref clause) => {

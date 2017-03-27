@@ -18,6 +18,7 @@ use std::str;
 use std::vec::Vec;
 use std::cmp::Ordering;
 use std::sync::Arc;
+use std::ops::Deref;
 
 pub mod passes;
 pub mod query_graph;
@@ -42,18 +43,18 @@ enum GroupedNodeType {
     GroupConcat(String),
 }
 
-fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
+fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
     use nom_sql::FieldExpression::*;
 
-    match *computed_col.function.as_ref().unwrap() {
-        Avg(Seq(ref cols)) |
-        Count(Seq(ref cols)) |
-        GroupConcat(Seq(ref cols), _) |
-        Max(Seq(ref cols)) |
-        Min(Seq(ref cols)) |
-        Sum(Seq(ref cols)) => cols,
-        Count(All) => {
+    match *computed_col.function.as_ref().unwrap().deref() {
+        Avg(ref col, _) |
+        Count(ref col, _) |
+        GroupConcat(ref col, _) |
+        Max(ref col) |
+        Min(ref col) |
+        Sum(ref col, _) => col,
+        CountStar => {
             // see comment re COUNT(*) rewriting in make_aggregation_node
             panic!("COUNT(*) should have been rewritten earlier!")
         }
@@ -382,11 +383,7 @@ impl SqlIncorporator {
         use nom_sql::FunctionExpression::*;
         use nom_sql::FieldExpression::*;
 
-        let mut mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
-            // No support for multi-columns functions at this point
-            assert_eq!(cols.len(), 1);
-
-            let over = cols.iter().next().unwrap();
+        let mut mknode = |over: &Column, t: GroupedNodeType| {
             let parent_ni = match parent {
                 // If no explicit parent node is specified, we extract the base node from the
                 // "over" column's specification
@@ -406,10 +403,10 @@ impl SqlIncorporator {
         };
 
         let func = func_col.function.as_ref().unwrap();
-        match *func {
-            Sum(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::SUM)),
-            Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
-            Count(All) => {
+        match *func.deref() {
+            Sum(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::SUM)),
+            Count(ref col, _) => mknode(col, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            CountStar => {
                 // XXX(malte): there is no "over" column, but our aggregation operators' API
                 // requires one to be specified, so we earlier rewrote it to use the last parent
                 // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
@@ -418,10 +415,10 @@ impl SqlIncorporator {
                 // (but we also don't have a NULL value, so maybe we're okay).
                 panic!("COUNT(*) should have been rewritten earlier!")
             }
-            Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
-            Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
-            GroupConcat(Seq(ref cols), ref separator) => {
-                mknode(cols, GroupedNodeType::GroupConcat(separator.clone()))
+            Max(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MAX)),
+            Min(ref col) => mknode(col, GroupedNodeType::Extremum(Extremum::MIN)),
+            GroupConcat(ref col, ref separator) => {
+                mknode(col, GroupedNodeType::GroupConcat(separator.clone()))
             }
             _ => unimplemented!(),
         }
@@ -488,11 +485,7 @@ impl SqlIncorporator {
                               computed_col: &Column,
                               mig: &mut Migration)
                               -> NodeAddress {
-        let target_cols = target_columns_from_computed_column(computed_col);
-        // TODO(malte): we only support a single column argument at this point
-        assert_eq!(target_cols.len(), 1);
-        let fn_col = target_cols.last().unwrap();
-
+        let fn_col = target_columns_from_computed_column(computed_col);
         self.make_project_node(name,
                                fn_col.table.as_ref().unwrap(),
                                vec![fn_col],
@@ -803,12 +796,8 @@ impl SqlIncorporator {
                                 // tables involved.
                                 for fn_col in &computed_cols_cgn.columns {
                                     // we must also push parameter columns through the group by
-                                    let over_cols = target_columns_from_computed_column(fn_col);
-                                    // TODO(malte): we only support a single `over` column here
-                                    assert_eq!(over_cols.len(), 1);
-                                    let over_table = over_cols.iter()
-                                        .next()
-                                        .unwrap()
+                                    let over_col = target_columns_from_computed_column(fn_col);
+                                    let over_table = over_col
                                         .table
                                         .as_ref()
                                         .unwrap()
@@ -851,12 +840,9 @@ impl SqlIncorporator {
                         let agg_node_name =
                             &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
-                        let over_cols = target_columns_from_computed_column(computed_col);
+                        let over_col = target_columns_from_computed_column(computed_col);
                         let ref proj_cols_from_target_table = qg.relations
-                            .get(over_cols.iter()
-                                     .next()
-                                     .as_ref()
-                                     .unwrap()
+                            .get(over_col
                                      .table
                                      .as_ref()
                                      .unwrap())
@@ -1225,9 +1211,8 @@ mod tests {
                                     name: String::from("votes"),
                                     alias: Some(String::from("votes")),
                                     table: None,
-                                    function: Some(FunctionExpression::Count(
-                                            FieldExpression::Seq(
-                                                vec![Column::from("votes.userid")]))),
+                                    function: Some(Box::new(FunctionExpression::Count(
+                                                Column::from("votes.userid"), false))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
@@ -1351,9 +1336,8 @@ mod tests {
                                     name: String::from("count"),
                                     alias: Some(String::from("count")),
                                     table: None,
-                                    function: Some(FunctionExpression::Count(
-                                            FieldExpression::Seq(
-                                                vec![Column::from("votes.userid")]))),
+                                    function: Some(Box::new(FunctionExpression::Count(
+                                        Column::from("votes.userid"), false))),
                                 }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
@@ -1400,9 +1384,8 @@ mod tests {
                                     name: String::from("count"),
                                     alias: Some(String::from("count")),
                                     table: None,
-                                    function: Some(FunctionExpression::Count(
-                                            FieldExpression::Seq(
-                                                vec![Column::from("votes.aid")]))),
+                                    function: Some(Box::new(FunctionExpression::Count(
+                                                Column::from("votes.aid"), false))),
                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);

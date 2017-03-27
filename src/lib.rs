@@ -317,6 +317,7 @@
 #![feature(mpsc_select)]
 #![feature(conservative_impl_trait)]
 #![feature(try_from)]
+#![feature(box_patterns)]
 #![deny(missing_docs)]
 #![cfg_attr(feature="b_netsoup", feature(plugin))]
 #![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]

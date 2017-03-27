@@ -13,6 +13,7 @@ b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_
 b_hybrid = ["mysql", "memcached-rs"]
 default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
 profiling = ["timekeeper/default"]
+binaries = ["default"]
 
 [dependencies]
 chrono = "0.3.0"
@@ -28,7 +29,7 @@ evmap = "0.2.0"
 arccstr = "0.3.2"
 
 spmc = "0.2.1"
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3ee053b68283fe17668c3028e978b1c3dcda8f2f" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "a436962362357be9adf8fd5d7c8b8c5f54f35917" }
 
 # for benchmarks
 # cli
@@ -78,47 +79,59 @@ path = "src/lib.rs"
 
 [[example]]
 name = "basic-recipe"
+required-features = ["binaries"]
 
 [[bin]]
 name = "web"
 path = "src/web/main.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "web_sql"
 path = "src/web/sql_main.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "bank"
 path = "benchmarks/bank/bank.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "vote"
 path = "benchmarks/vote/vote.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "vote-server"
 path = "benchmarks/vote/vote-server.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "vote-client"
 path = "benchmarks/vote/vote-client.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "multitail"
 path = "benchmarks/multitail/multitail.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "tpc_w"
 path = "benchmarks/tpc_w/tpc_w.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "hotsoup"
 path = "benchmarks/hotsoup/hotsoup.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "extract_hotcrp_queries"
 path = "benchmarks/hotsoup/extract_queries.rs"
+required-features = ["binaries"]
 
 [[bin]]
 name = "piazza"
 path = "benchmarks/piazza/piazza.rs"
+required-features = ["binaries"]
