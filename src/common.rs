@@ -335,34 +335,6 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
     )
 );
 
-/// Parse logical operators
-named!(pub binary_logical_operator<&[u8], Operator>,
-    alt_complete!(
-           map!(delimited!(opt!(multispace), caseless_tag!("and"), multispace), |_| Operator::And)
-         | map!(delimited!(opt!(multispace), caseless_tag!("or"), multispace), |_| Operator::Or)
-    )
-);
-
-/// Parse unary comparison operators
-named!(pub unary_comparison_operator<&[u8], &str>,
-    map_res!(
-        alt_complete!(
-               tag_s!(b"ISNULL")
-             | tag_s!(b"NOT")
-             | tag_s!(b"-") // ??? (number neg)
-        ),
-        str::from_utf8
-    )
-);
-
-/// Parse unary comparison operators
-named!(pub unary_negation_operator<&[u8], Operator>,
-    alt_complete!(
-          map!(caseless_tag!("not"), |_| Operator::Not)
-        | map!(caseless_tag!("!"), |_| Operator::Not)
-    )
-);
-
 /// Parse rule for AS-based aliases for SQL entities.
 named!(pub as_alias<&[u8], &str>,
     complete!(

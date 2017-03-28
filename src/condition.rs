@@ -1,10 +1,10 @@
 use nom::{alphanumeric, digit, multispace};
+use nom::{IResult, Err, ErrorKind, Needed};
 use std::collections::{HashSet, VecDeque};
 use std::str;
 
 use column::Column;
-use common::{binary_comparison_operator, binary_logical_operator, column_identifier,
-             unary_negation_operator, Operator};
+use common::{binary_comparison_operator, column_identifier, Operator};
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum ConditionBase {
@@ -51,88 +51,87 @@ impl<'a> ConditionTree {
 pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),
+    NegationOp(Box<ConditionExpression>),
     Base(ConditionBase),
-}
-
-fn fold_cond_exprs(initial: ConditionExpression,
-                   remainder: Vec<(Operator, ConditionExpression)>)
-                   -> ConditionExpression {
-    remainder.into_iter().fold(initial, |acc, pair| {
-        let (oper, expr) = pair;
-        match oper {
-            Operator::Equal | Operator::Less | Operator::Greater | Operator::LessOrEqual |
-            Operator::Like | Operator::GreaterOrEqual | Operator::NotEqual => {
-                ConditionExpression::ComparisonOp(ConditionTree {
-                    operator: oper.clone(),
-                    left: Some(Box::new(acc)),
-                    right: Some(Box::new(expr)),
-                })
-            }
-            Operator::And | Operator::Or => {
-                ConditionExpression::LogicalOp(ConditionTree {
-                    operator: oper.clone(),
-                    left: Some(Box::new(acc)),
-                    right: Some(Box::new(expr)),
-                })
-            }
-            o => {
-                println!("unsupported op {:?}", o);
-                unimplemented!()
-            }
-        }
-    })
 }
 
 /// Parse a conditional expression into a condition tree structure
 named!(pub condition_expr<&[u8], ConditionExpression>,
-    chain!(
-        neg_op: opt!(unary_negation_operator) ~
-        initial: alt_complete!(boolean_primary | delimited!(tag!("("), condition_expr, tag!(")"))) ~
-        remainder: many0!(
-            complete!(
-                chain!(
-                    log_op: binary_logical_operator ~
-                    right_expr: condition_expr,
-                    || {
-                        (log_op, right_expr)
-                    }
-                )
-            )
-        ),
-        || {
-            if let Some(Operator::Not) = neg_op {
-                ConditionExpression::LogicalOp(
-                    ConditionTree {
-                        operator: Operator::Not,
-                        left: Some(Box::new(fold_cond_exprs(initial, remainder))),
-                        right: None,
-                    }
-                )
-            } else {
-                fold_cond_exprs(initial, remainder)
-            }
-        }
-    )
+       alt_complete!(
+           chain!(
+               left: and_expr ~
+               caseless_tag!("or") ~
+               multispace ~
+               right: condition_expr,
+               || {
+                   ConditionExpression::LogicalOp(
+                       ConditionTree {
+                           operator: Operator::Or,
+                           left: Some(Box::new(left)),
+                           right: Some(Box::new(right)),
+                       }
+                   )
+               }
+           )
+       |   and_expr)
+);
+
+named!(pub and_expr<&[u8], ConditionExpression>,
+       alt_complete!(
+           chain!(
+               left: parenthetical_expr ~
+               caseless_tag!("and") ~
+               multispace ~
+               right: and_expr,
+               || {
+                   ConditionExpression::LogicalOp(
+                       ConditionTree {
+                           operator: Operator::And,
+                           left: Some(Box::new(left)),
+                           right: Some(Box::new(right)),
+                       }
+                   )
+               }
+           )
+       |   parenthetical_expr)
+);
+
+named!(pub parenthetical_expr<&[u8], ConditionExpression>,
+       alt_complete!(
+           delimited!(tag!("("), condition_expr, chain!(tag!(")") ~ multispace?, ||{}))
+       |   not_expr)
+);
+
+named!(pub not_expr<&[u8], ConditionExpression>,
+       alt_complete!(
+           chain!(
+               caseless_tag!("not") ~
+               multispace ~
+               right: parenthetical_expr,
+               || {
+                   ConditionExpression::NegationOp(Box::new(right))
+               }
+           )
+       |   boolean_primary)
 );
 
 named!(boolean_primary<&[u8], ConditionExpression>,
     chain!(
-        initial: predicate ~
-        remainder:
-        many0!(
-            complete!(
-                chain!(
-                    op: delimited!(opt!(multispace),
-                                   binary_comparison_operator,
-                                   opt!(multispace)) ~
-                    right_expr: boolean_primary,
-                    || {
-                        (op, right_expr)
-                    }
-                )
+        left: predicate ~
+        multispace? ~
+        op: binary_comparison_operator ~
+        multispace? ~
+        right: predicate,
+        || {
+            ConditionExpression::ComparisonOp(
+                ConditionTree {
+                    operator: op,
+                    left: Some(Box::new(left)),
+                    right: Some(Box::new(right)),
+                }
             )
-        ),
-        || { fold_cond_exprs(initial, remainder) }
+
+        }
     )
 );
 
@@ -276,8 +275,49 @@ mod tests {
     }
 
     #[test]
-    fn brackets() {
-        let cond = "(foo = ? and bar = 12) or foobar = 'a'";
+    fn parenthesis() {
+        let cond = "(foo = ? or bar = 12) and foobar = 'a'";
+
+        use ConditionExpression::*;
+        use ConditionBase::*;
+
+        let a = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("foo".into())))),
+            right: Some(Box::new(Base(Placeholder))),
+        });
+
+        let b = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("bar".into())))),
+            right: Some(Box::new(Base(Literal("12".into())))),
+        });
+
+        let left = LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            left: Some(Box::new(a)),
+            right: Some(Box::new(b)),
+        });
+
+        let right = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("foobar".into())))),
+            right: Some(Box::new(Base(Literal("a".into())))),
+        });
+
+        let complete = LogicalOp(ConditionTree {
+            operator: Operator::And,
+            left: Some(Box::new(left)),
+            right: Some(Box::new(right)),
+        });
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(res.unwrap().1, complete);
+    }
+
+    #[test]
+    fn order_of_operations() {
+        let cond = "foo = ? and bar = 12 or foobar = 'a'";
 
         use ConditionExpression::*;
         use ConditionBase::*;
@@ -315,4 +355,34 @@ mod tests {
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1, complete);
     }
+
+    #[test]
+    fn negation() {
+        let cond = "not bar = 12 or foobar = 'a'";
+
+        use ConditionExpression::*;
+        use ConditionBase::*;
+
+        let left = NegationOp(Box::new(ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("bar".into())))),
+            right: Some(Box::new(Base(Literal("12".into())))),
+        })));
+
+        let right = ComparisonOp(ConditionTree {
+            operator: Operator::Equal,
+            left: Some(Box::new(Base(Field("foobar".into())))),
+            right: Some(Box::new(Base(Literal("a".into())))),
+        });
+
+        let complete = LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            left: Some(Box::new(left)),
+            right: Some(Box::new(right)),
+        });
+
+        let res = condition_expr(cond.as_bytes());
+        assert_eq!(res.unwrap().1, complete);
+    }
+
 }
