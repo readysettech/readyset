@@ -141,12 +141,12 @@ fn classify_conditionals(ce: &ConditionExpression,
         ConditionExpression::LogicalOp(ref ct) => {
             // conjunction, check both sides (which must be selection predicates or
             // atomatic selection predicates)
-            classify_conditionals(ct.left.as_ref().unwrap(),
+            classify_conditionals(ct.left.as_ref(),
                                   &mut local,
                                   &mut join,
                                   &mut global,
                                   &mut params);
-            classify_conditionals(ct.right.as_ref().unwrap(),
+            classify_conditionals(ct.right.as_ref(),
                                   &mut local,
                                   &mut join,
                                   &mut global,
@@ -154,16 +154,8 @@ fn classify_conditionals(ce: &ConditionExpression,
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
-            if let ConditionExpression::Base(ref l) =
-                *ct.left
-                     .as_ref()
-                     .unwrap()
-                     .as_ref() {
-                if let ConditionExpression::Base(ref r) =
-                    *ct.right
-                         .as_ref()
-                         .unwrap()
-                         .as_ref() {
+            if let ConditionExpression::Base(ref l) = *ct.left.as_ref() {
+                if let ConditionExpression::Base(ref r) = *ct.right.as_ref() {
                     match *r {
                         // right-hand side is field, so this must be a comma join
                         ConditionBase::Field(ref fr) => {
@@ -215,11 +207,7 @@ fn classify_conditionals(ce: &ConditionExpression,
         }
         ConditionExpression::NegationOp(ref ce) => {
             // TODO: actually handle negation
-            classify_conditionals(ce.as_ref(),
-                                  &mut local,
-                                  &mut join,
-                                  &mut global,
-                                  &mut params);
+            classify_conditionals(ce.as_ref(), &mut local, &mut join, &mut global, &mut params);
         }
     }
 }
@@ -233,32 +221,27 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             QueryGraphNode {
                 rel_name: rel.clone(),
                 predicates: preds,
-                columns: st.fields.iter().filter_map(|field| match field {
-                    &FieldExpression::All => unimplemented!(),
-                    &FieldExpression::AllInTable(_) => unimplemented!(),
-                    &FieldExpression::Col(ref c) => {
+                columns: st.fields
+                    .iter()
+                    .filter_map(|field| match field {
+                                    &FieldExpression::All => unimplemented!(),
+                                    &FieldExpression::AllInTable(_) => unimplemented!(),
+                                    &FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
                                 match c.function {
                                     // XXX(malte): don't drop aggregation columns
                                     Some(_) => None,
                                     None => {
-                                        panic!("No table name set for column {} on {}",
-                                               c.name,
-                                               rel)
+                                        panic!("No table name set for column {} on {}", c.name, rel)
                                     }
                                 }
                             }
-                            Some(t) => {
-                                if *t == rel {
-                                    Some(c.clone())
-                                } else {
-                                    None
-                                }
-                            }
+                            Some(t) => if *t == rel { Some(c.clone()) } else { None },
                         }
                     }
-                }).collect(),
+                                })
+                    .collect(),
                 parameters: Vec::new(),
             }
         };
@@ -285,9 +268,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
     let mut join_predicates = Vec::new();
-    let wrapcol = |tbl: &str, col: &str| -> Option<Box<ConditionExpression>> {
+    let wrapcol = |tbl: &str, col: &str| -> Box<ConditionExpression> {
         let col = Column::from(format!("{}.{}", tbl, col).as_str());
-        Some(Box::new(ConditionExpression::Base(ConditionBase::Field(col))))
+        Box::new(ConditionExpression::Base(ConditionBase::Field(col)))
     };
     // 2a. Explicit joins
     let mut prev_table = None;
@@ -312,11 +295,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                 // they're specified in the query; if so, flip them
                                 // TODO(malte): this only deals with simple, flat join
                                 // conditions for now.
-                                let l = match **ct.left.as_ref().unwrap() {
+                                let l = match *ct.left.as_ref() {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
                                     _ => unimplemented!(),
                                 };
-                                let r = match **ct.right.as_ref().unwrap() {
+                                let r = match *ct.right.as_ref() {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
                                     _ => unimplemented!(),
                                 };
@@ -392,16 +375,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         // 2. Add predicates for implied (comma) joins
         for jp in join_predicates {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
-            if let ConditionExpression::Base(ConditionBase::Field(ref l)) =
-                *jp.left
-                     .as_ref()
-                     .unwrap()
-                     .as_ref() {
-                if let ConditionExpression::Base(ConditionBase::Field(ref r)) =
-                    *jp.right
-                         .as_ref()
-                         .unwrap()
-                         .as_ref() {
+            if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
+                if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
                     let mut e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));

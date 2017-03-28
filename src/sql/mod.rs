@@ -127,17 +127,11 @@ impl SqlIncorporator {
                      na: &NodeAddress)
                      -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): we only support one level of condition nesting at this point :(
-        let l = match *ct.left
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
+        let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
-        let r = match *ct.right
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
+        let r = match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
             _ => unimplemented!(),
         };
@@ -573,11 +567,11 @@ impl SqlIncorporator {
             for (i, p) in jps.iter().enumerate() {
                 // equi-join only
                 assert_eq!(p.operator, Operator::Equal);
-                let l_col = match **p.left.as_ref().unwrap() {
+                let l_col = match *p.left.as_ref() {
                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                     _ => unimplemented!(),
                 };
-                let r_col = match **p.right.as_ref().unwrap() {
+                let r_col = match *p.right.as_ref() {
                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                     _ => unimplemented!(),
                 };

@@ -28,43 +28,29 @@ fn rewrite_conditional(table_aliases: &HashMap<String, String>,
         ConditionExpression::Base(ConditionBase::Field(new_f))
     };
 
-    let translate_ct_arm =
-        |i: Option<Box<ConditionExpression>>| -> Option<Box<ConditionExpression>> {
-            match i {
-                Some(bce) => {
-                    let new_ce = match *bce {
-                        ConditionExpression::Base(ConditionBase::Field(f)) => translate_column(f),
-                        ConditionExpression::Base(b) => ConditionExpression::Base(b),
-                        x => rewrite_conditional(table_aliases, x),
-                    };
-                    Some(Box::new(new_ce))
-                }
-                x => x,
-            }
+    let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
+        let new_ce = match bce {
+            box ConditionExpression::Base(ConditionBase::Field(f)) => translate_column(f),
+            box ConditionExpression::Base(b) => ConditionExpression::Base(b),
+            box x => rewrite_conditional(table_aliases, x),
         };
+        Box::new(new_ce)
+    };
 
     match ce {
         ConditionExpression::ComparisonOp(ct) => {
-            let l = translate_ct_arm(ct.left);
-            let r = translate_ct_arm(ct.right);
             let rewritten_ct = ConditionTree {
                 operator: ct.operator,
-                left: l,
-                right: r,
+                left: translate_ct_arm(ct.left),
+                right: translate_ct_arm(ct.right),
             };
             ConditionExpression::ComparisonOp(rewritten_ct)
         }
-        ConditionExpression::LogicalOp(ct) => {
+        ConditionExpression::LogicalOp(ConditionTree { operator, box left, box right }) => {
             let rewritten_ct = ConditionTree {
-                operator: ct.operator,
-                left: match ct.left {
-                    Some(lct) => Some(Box::new(rewrite_conditional(table_aliases, *lct))),
-                    x => x,
-                },
-                right: match ct.right {
-                    Some(rct) => Some(Box::new(rewrite_conditional(table_aliases, *rct))),
-                    x => x,
-                },
+                operator: operator,
+                left: Box::new(rewrite_conditional(table_aliases, left)),
+                right: Box::new(rewrite_conditional(table_aliases, right)),
             };
             ConditionExpression::LogicalOp(rewritten_ct)
         }
@@ -127,7 +113,7 @@ mod tests {
     fn it_removes_aliases() {
         use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator};
 
-        let wrap = |cb| Some(Box::new(ConditionExpression::Base(cb)));
+        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let q = SelectStatement {
             tables: vec![Table {
                              name: String::from("PaperTag"),
