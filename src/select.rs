@@ -150,7 +150,8 @@ named!(join_clause<&[u8], JoinClause>,
             | chain!(
                   caseless_tag!("on") ~
                   multispace ~
-                  cond: delimited!(tag!("("), condition_expr, tag!(")")),
+                  cond: alt_complete!(delimited!(tag!("("), condition_expr, tag!(")"))
+                                      | condition_expr),
                   || {
                       JoinConstraint::On(cond)
                   }
@@ -716,7 +717,7 @@ mod tests {
         // group by PCMember.contactId"
         let qstring = "select PCMember.contactId \
                        from PCMember \
-                       join PaperReview on (PCMember.contactId=PaperReview.contactId);";
+                       join PaperReview on (PCMember.contactId=PaperReview.contactId) order by contactId;";
 
         let res = selection(qstring.as_bytes());
         let join_cond = ConditionExpression::ComparisonOp(ConditionTree {
@@ -724,17 +725,25 @@ mod tests {
             right: Box::new(Base(Field(Column::from("PaperReview.contactId")))),
             operator: Operator::Equal,
         });
-        assert_eq!(res.unwrap().1,
-                   SelectStatement {
-                       tables: vec![Table::from("PCMember")],
-                       fields: columns(&["PCMember.contactId"]),
-                       join: vec![JoinClause {
-                                      operator: JoinOperator::Join,
-                                      right: JoinRightSide::Table(Table::from("PaperReview")),
-                                      constraint: JoinConstraint::On(join_cond),
-                                  }],
-                       ..Default::default()
-                   });
+        let expected = SelectStatement {
+            tables: vec![Table::from("PCMember")],
+            fields: columns(&["PCMember.contactId"]),
+            join: vec![JoinClause {
+                operator: JoinOperator::Join,
+                right: JoinRightSide::Table(Table::from("PaperReview")),
+                constraint: JoinConstraint::On(join_cond),
+            }],
+            order: Some(OrderClause{columns: vec![("contactId".into(), OrderType::OrderAscending)]}),
+            ..Default::default()
+        };
+        assert_eq!(res.unwrap().1, expected);
+
+        // Same as above, but no brackets
+        let qstring = "select PCMember.contactId \
+                       from PCMember \
+                       join PaperReview on PCMember.contactId=PaperReview.contactId order by contactId;";
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, expected);
     }
 
     #[test]
