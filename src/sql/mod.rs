@@ -196,12 +196,14 @@ impl SqlIncorporator {
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
+        use sql::passes::negation_removal::NegationRemoval;
 
         info!(self.log, "Computing nodes for query \"{}\"", query_name);
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
+            .remove_negation()
             .expand_stars(&self.write_schemas)
             .expand_implied_tables(&self.write_schemas)
             .rewrite_count_star(&self.write_schemas);
