@@ -213,6 +213,14 @@ fn classify_conditionals(ce: &ConditionExpression,
             // parent selection predicate
             panic!("encountered unexpected standalone base of condition expression");
         }
+        ConditionExpression::NegationOp(ref ce) => {
+            // TODO: actually handle negation
+            classify_conditionals(ce.as_ref(),
+                                  &mut local,
+                                  &mut join,
+                                  &mut global,
+                                  &mut params);
+        }
     }
 }
 
