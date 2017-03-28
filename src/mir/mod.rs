@@ -200,8 +200,8 @@ pub enum MirNodeType {
     GroupConcat(Column, String),
     /// no extra info required
     Identity,
-    /// on left column, on right column, emit columns
-    Join(Column, Column, Vec<Column>),
+    /// on left columns, on right columns, emit columns
+    Join(Vec<Column>, Vec<Column>, Vec<Column>),
     /// on left column, on right column, emit columns
     LeftJoin(Column, Column, Vec<Column>),
     /// group columns
@@ -277,6 +277,8 @@ impl Debug for MirNodeType {
                            .collect::<Vec<_>>()
                            .join(","))
             }
+            MirNodeType::Join(ref l_cols, ref r_cols, ref proj_cols) => write!(f, "⋈ []"),
+            MirNodeType::Reuse(ref reused) => write!(f, "Reuse [{:?}]", reused),
             _ => unimplemented!(),
         }
     }

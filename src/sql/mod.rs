@@ -139,7 +139,10 @@ impl SqlIncorporator {
         self.nodes_for_named_query(q, name, mig)
     }
 
-    fn consider_query_graph(&mut self, query_name: &str, st: &SelectStatement) -> QueryGraphReuse {
+    fn consider_query_graph(&mut self,
+                            query_name: &str,
+                            st: &SelectStatement)
+                            -> (QueryGraph, QueryGraphReuse) {
         debug!(self.log, format!("Making QG for \"{}\"", query_name));
         trace!(self.log, format!("Query \"{}\": {:#?}", query_name, st));
 
@@ -152,8 +155,8 @@ impl SqlIncorporator {
 
         // Do we already have this exact query or a subset of it?
         // TODO(malte): make this an O(1) lookup by QG signature
-        let qg_sig = qg.signature();
-        match self.query_graphs.get(&qg_sig.hash) {
+        let qg_hash = qg.signature().hash;
+        match self.query_graphs.get(&qg_hash) {
             None => (),
             Some(&(ref existing_qg, ref leaf_mir_node)) => {
                 // note that this also checks the *order* in which parameters are specified; a
@@ -165,18 +168,18 @@ impl SqlIncorporator {
                     info!(self.log,
                           "An exact match for query \"{}\" already exists, reusing it",
                           query_name);
-                    return QueryGraphReuse::ExactMatch(leaf_mir_node.clone());
+                    return (qg, QueryGraphReuse::ExactMatch(leaf_mir_node.clone()));
                 } else if existing_qg.signature() == qg.signature() {
                     // QGs are identical, except for parameters (or their order)
                     info!(self.log,
                           "Query \"{}\" has an exact match modulo parameters, so making a new reader",
                           query_name);
 
-                    return QueryGraphReuse::ReaderOntoExisting(leaf_mir_node.clone(),
-                                                               qg.parameters()
-                                                                   .into_iter()
-                                                                   .cloned()
-                                                                   .collect());
+                    let params = qg.parameters()
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    return (qg, QueryGraphReuse::ReaderOntoExisting(leaf_mir_node.clone(), params));
                 }
             }
         }
@@ -200,7 +203,7 @@ impl SqlIncorporator {
                   reuse_candidates);
         }
 
-        return QueryGraphReuse::None;
+        (qg, QueryGraphReuse::None)
     }
 
     fn add_reader_to_existing_query(&mut self,
@@ -254,14 +257,47 @@ impl SqlIncorporator {
                };
     }
 
+    fn add_base_via_mir(&mut self,
+                        query_name: &str,
+                        query: &SqlQuery,
+                        mut mig: &mut Migration)
+                        -> QueryFlowParts {
+        // first, compute the MIR representation of the SQL query
+        let mut mir = self.mir_converter.named_base_to_mir(query_name, query);
+
+        trace!(self.log, "Base node MIR: {:#?}", mir);
+
+        // no optimization, because standalone base nodes can't be optimized
+
+        // TODO(malte): we currently need to remember these for local state, but should figure out
+        // a better plan (see below)
+        let fields = mir.leaf
+            .borrow()
+            .columns()
+            .into_iter()
+            .map(|c| String::from(c.name.as_str()))
+            .collect::<Vec<_>>();
+
+        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
+        let qfp = mir.into_flow_parts(&mut mig);
+
+        // TODO(malte): get rid of duplication and figure out where to track this state
+        self.view_schemas.insert(String::from(query_name), fields);
+
+        qfp
+    }
+
     fn add_query_via_mir(&mut self,
                          query_name: &str,
-                         query: SqlQuery,
+                         query: &SelectStatement,
+                         qg: QueryGraph,
                          mut mig: &mut Migration)
                          -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_query_to_mir(query_name, query);
+        let mut mir = self.mir_converter.named_query_to_mir(query_name, query, &qg);
+
+        trace!(self.log, "Unoptimized MIR: {:#?}", mir);
 
         // run MIR-level optimizations
         mir = mir.optimize();
@@ -283,7 +319,7 @@ impl SqlIncorporator {
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        //self.query_graphs.insert(qg_sig, (qg, mir.leaf));
+        self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
 
         qfp
     }
@@ -311,7 +347,8 @@ impl SqlIncorporator {
         // hold for reuse or extension
         let mut qfp = match q {
             SqlQuery::Select(ref sq) => {
-                match self.consider_query_graph(&query_name, sq) {
+                let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+                match reuse {
                     QueryGraphReuse::ExactMatch(mn) => {
                         let flow_node = match *mn.borrow()
                                    .flow_node
@@ -320,30 +357,29 @@ impl SqlIncorporator {
                             FlowNode::New(na) |
                             FlowNode::Existing(na) => na,
                         };
-                        Some(QueryFlowParts {
-                                 name: query_name.clone(),
-                                 new_nodes: vec![],
-                                 reused_nodes: vec![flow_node],
-                                 query_leaf: flow_node,
-                             })
+                        QueryFlowParts {
+                            name: query_name.clone(),
+                            new_nodes: vec![],
+                            reused_nodes: vec![flow_node],
+                            query_leaf: flow_node,
+                        }
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
-                        Some(self.add_reader_to_existing_query(&query_name, &params, mn, mig))
+                        self.add_reader_to_existing_query(&query_name, &params, mn, mig)
                     }
                     QueryGraphReuse::ExtendExisting(_) => unimplemented!(),
-                    QueryGraphReuse::None => None,
+                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
             }
-            _ => None,
+            ref q @ SqlQuery::CreateTable { .. } |
+            ref q @ SqlQuery::Insert { .. } => self.add_base_via_mir(&query_name, q, mig),
         };
-
-        qfp = Some(self.add_query_via_mir(&query_name, q, mig));
 
         // record info about query
         self.num_queries += 1;
-        self.node_addresses.insert(String::from(query_name.as_str()),
-                                   qfp.as_ref().unwrap().query_leaf);
-        qfp.unwrap()
+        self.node_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
+
+        qfp
     }
 
     /// Upgrades the schema version that any nodes created for queries will be tagged with.
