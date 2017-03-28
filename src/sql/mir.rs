@@ -1,5 +1,7 @@
 use flow::core::{NodeAddress, DataType};
-use mir::{MirNode, MirNodeRef, MirNodeType, MirQuery};
+use mir::{MirNode, MirNodeType};
+// TODO(malte): remove if possible
+pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};

@@ -11,14 +11,14 @@ use ops::topk::OrderedRecordComparator;
 use sql::QueryFlowParts;
 
 #[derive(Clone, Debug)]
-enum FlowNode {
+pub enum FlowNode {
     New(NodeAddress),
     Existing(NodeAddress),
 }
 
 pub type MirNodeRef = Rc<RefCell<MirNode>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MirQuery {
     pub name: String,
     pub roots: Vec<MirNodeRef>,
@@ -79,7 +79,7 @@ pub struct MirNode {
     inner: MirNodeType,
     ancestors: Vec<MirNodeRef>,
     children: Vec<MirNodeRef>,
-    flow_node: Option<FlowNode>,
+    pub flow_node: Option<FlowNode>,
 }
 
 impl MirNode {
