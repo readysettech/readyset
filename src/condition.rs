@@ -16,8 +16,8 @@ pub enum ConditionBase {
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct ConditionTree {
     pub operator: Operator,
-    pub left: Option<Box<ConditionExpression>>,
-    pub right: Option<Box<ConditionExpression>>,
+    pub left: Box<ConditionExpression>,
+    pub right: Box<ConditionExpression>,
 }
 
 impl<'a> ConditionTree {
@@ -26,7 +26,7 @@ impl<'a> ConditionTree {
         let mut q = VecDeque::<&'a ConditionTree>::new();
         q.push_back(self);
         while let Some(ref ct) = q.pop_front() {
-            match **ct.left.as_ref().unwrap() {
+            match *ct.left.as_ref() {
                 ConditionExpression::Base(ConditionBase::Field(ref c)) => {
                     s.insert(c);
                 }
@@ -34,7 +34,7 @@ impl<'a> ConditionTree {
                 ConditionExpression::ComparisonOp(ref ct) => q.push_back(ct),
                 _ => (),
             }
-            match **ct.right.as_ref().unwrap() {
+            match *ct.right.as_ref() {
                 ConditionExpression::Base(ConditionBase::Field(ref c)) => {
                     s.insert(c);
                 }
@@ -67,8 +67,8 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
                    ConditionExpression::LogicalOp(
                        ConditionTree {
                            operator: Operator::Or,
-                           left: Some(Box::new(left)),
-                           right: Some(Box::new(right)),
+                           left: Box::new(left),
+                           right: Box::new(right),
                        }
                    )
                }
@@ -87,8 +87,8 @@ named!(pub and_expr<&[u8], ConditionExpression>,
                    ConditionExpression::LogicalOp(
                        ConditionTree {
                            operator: Operator::And,
-                           left: Some(Box::new(left)),
-                           right: Some(Box::new(right)),
+                           left: Box::new(left),
+                           right: Box::new(right),
                        }
                    )
                }
@@ -126,8 +126,8 @@ named!(boolean_primary<&[u8], ConditionExpression>,
             ConditionExpression::ComparisonOp(
                 ConditionTree {
                     operator: op,
-                    left: Some(Box::new(left)),
-                    right: Some(Box::new(right)),
+                    left: Box::new(left),
+                    right: Box::new(right),
                 }
             )
 
@@ -191,8 +191,8 @@ mod tests {
                            -> ConditionExpression {
         ConditionExpression::ComparisonOp(ConditionTree {
             operator: op,
-            left: Some(Box::new(ConditionExpression::Base(l))),
-            right: Some(Box::new(ConditionExpression::Base(r))),
+            left: Box::new(ConditionExpression::Base(l)),
+            right: Box::new(ConditionExpression::Base(r)),
         })
     }
 
@@ -283,32 +283,32 @@ mod tests {
 
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("foo".into())))),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(Base(Field("foo".into()))),
+            right: Box::new(Base(Placeholder)),
         });
 
         let b = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("bar".into())))),
-            right: Some(Box::new(Base(Literal("12".into())))),
+            left: Box::new(Base(Field("bar".into()))),
+            right: Box::new(Base(Literal("12".into()))),
         });
 
         let left = LogicalOp(ConditionTree {
             operator: Operator::Or,
-            left: Some(Box::new(a)),
-            right: Some(Box::new(b)),
+            left: Box::new(a),
+            right: Box::new(b),
         });
 
         let right = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("foobar".into())))),
-            right: Some(Box::new(Base(Literal("a".into())))),
+            left: Box::new(Base(Field("foobar".into()))),
+            right: Box::new(Base(Literal("a".into()))),
         });
 
         let complete = LogicalOp(ConditionTree {
             operator: Operator::And,
-            left: Some(Box::new(left)),
-            right: Some(Box::new(right)),
+            left: Box::new(left),
+            right: Box::new(right),
         });
 
         let res = condition_expr(cond.as_bytes());
@@ -324,32 +324,32 @@ mod tests {
 
         let a = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("foo".into())))),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(Base(Field("foo".into()))),
+            right: Box::new(Base(Placeholder)),
         });
 
         let b = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("bar".into())))),
-            right: Some(Box::new(Base(Literal("12".into())))),
+            left: Box::new(Base(Field("bar".into()))),
+            right: Box::new(Base(Literal("12".into()))),
         });
 
         let left = LogicalOp(ConditionTree {
             operator: Operator::And,
-            left: Some(Box::new(a)),
-            right: Some(Box::new(b)),
+            left: Box::new(a),
+            right: Box::new(b),
         });
 
         let right = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("foobar".into())))),
-            right: Some(Box::new(Base(Literal("a".into())))),
+            left: Box::new(Base(Field("foobar".into()))),
+            right: Box::new(Base(Literal("a".into()))),
         });
 
         let complete = LogicalOp(ConditionTree {
             operator: Operator::Or,
-            left: Some(Box::new(left)),
-            right: Some(Box::new(right)),
+            left: Box::new(left),
+            right: Box::new(right),
         });
 
         let res = condition_expr(cond.as_bytes());
@@ -365,20 +365,20 @@ mod tests {
 
         let left = NegationOp(Box::new(ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("bar".into())))),
-            right: Some(Box::new(Base(Literal("12".into())))),
+            left: Box::new(Base(Field("bar".into()))),
+            right: Box::new(Base(Literal("12".into()))),
         })));
 
         let right = ComparisonOp(ConditionTree {
             operator: Operator::Equal,
-            left: Some(Box::new(Base(Field("foobar".into())))),
-            right: Some(Box::new(Base(Literal("a".into())))),
+            left: Box::new(Base(Field("foobar".into()))),
+            right: Box::new(Base(Literal("a".into()))),
         });
 
         let complete = LogicalOp(ConditionTree {
             operator: Operator::Or,
-            left: Some(Box::new(left)),
-            right: Some(Box::new(right)),
+            left: Box::new(left),
+            right: Box::new(right),
         });
 
         let res = condition_expr(cond.as_bytes());

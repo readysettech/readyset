@@ -358,8 +358,8 @@ mod tests {
 
         let expected_left = Base(Field(Column::from("email")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Some(Box::new(expected_left)),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(expected_left),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
@@ -505,8 +505,8 @@ mod tests {
         let res = selection(qstring.as_bytes());
         let expected_left = Base(Field(Column::from("paperId")));
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Some(Box::new(expected_left)),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(expected_left),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
         }));
         assert_eq!(res.unwrap().1,
@@ -525,16 +525,16 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
 
-        let left_comp = Some(Box::new(ComparisonOp(ConditionTree {
-            left: Some(Box::new(Base(Field(Column::from("paperId"))))),
-            right: Some(Box::new(Base(Placeholder))),
+        let left_comp = Box::new(ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("paperId")))),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
-        })));
-        let right_comp = Some(Box::new(ComparisonOp(ConditionTree {
-            left: Some(Box::new(Base(Field(Column::from("paperStorageId"))))),
-            right: Some(Box::new(Base(Placeholder))),
+        }));
+        let right_comp = Box::new(ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("paperStorageId")))),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
-        })));
+        }));
         let expected_where_cond = Some(LogicalOp(ConditionTree {
             left: left_comp,
             right: right_comp,
@@ -559,8 +559,8 @@ mod tests {
             offset: 0,
         });
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Some(Box::new(Base(Field(Column::from("id"))))),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(Base(Field(Column::from("id")))),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
         }));
 
@@ -665,16 +665,16 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
         let expected_where_cond = Some(LogicalOp(ConditionTree {
-            left: Some(Box::new(ComparisonOp(ConditionTree {
-                left: Some(Box::new(Base(Field(Column::from("item.i_a_id"))))),
-                right: Some(Box::new(Base(Field(Column::from("author.a_id"))))),
+            left: Box::new(ComparisonOp(ConditionTree {
+                left: Box::new(Base(Field(Column::from("item.i_a_id")))),
+                right: Box::new(Base(Field(Column::from("author.a_id")))),
                 operator: Operator::Equal,
-            }))),
-            right: Some(Box::new(ComparisonOp(ConditionTree {
-                left: Some(Box::new(Base(Field(Column::from("item.i_subject"))))),
-                right: Some(Box::new(Base(Placeholder))),
+            })),
+            right: Box::new(ComparisonOp(ConditionTree {
+                left: Box::new(Base(Field(Column::from("item.i_subject")))),
+                right: Box::new(Base(Placeholder)),
                 operator: Operator::Equal,
-            }))),
+            })),
             operator: Operator::And,
         }));
         assert_eq!(res.unwrap().1,
@@ -720,8 +720,8 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
         let join_cond = ConditionExpression::ComparisonOp(ConditionTree {
-            left: Some(Box::new(Base(Field(Column::from("PCMember.contactId"))))),
-            right: Some(Box::new(Base(Field(Column::from("PaperReview.contactId"))))),
+            left: Box::new(Base(Field(Column::from("PCMember.contactId")))),
+            right: Box::new(Base(Field(Column::from("PaperReview.contactId")))),
             operator: Operator::Equal,
         });
         assert_eq!(res.unwrap().1,
@@ -755,8 +755,8 @@ mod tests {
 
         let res = selection(qstring.as_bytes());
         let expected_where_cond = Some(ComparisonOp(ConditionTree {
-            left: Some(Box::new(Base(Field(Column::from("ContactInfo.contactId"))))),
-            right: Some(Box::new(Base(Placeholder))),
+            left: Box::new(Base(Field(Column::from("ContactInfo.contactId")))),
+            right: Box::new(Base(Placeholder)),
             operator: Operator::Equal,
         }));
         let mkjoin = |tbl: &str, col: &str| -> JoinClause {
