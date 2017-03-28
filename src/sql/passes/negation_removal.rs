@@ -7,8 +7,8 @@ pub trait NegationRemoval {
 }
 
 fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
-    match ce {
-        &mut ConditionExpression::LogicalOp(ConditionTree { ref mut operator,
+    match *ce {
+        ConditionExpression::LogicalOp(ConditionTree { ref mut operator,
                                                             box ref mut left,
                                                             box ref mut right }) => {
             if negate {
@@ -22,7 +22,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(left, negate);
             normalize_condition_expr(right, negate);
         }
-        &mut ConditionExpression::ComparisonOp(ConditionTree { ref mut operator,
+        ConditionExpression::ComparisonOp(ConditionTree { ref mut operator,
                                                                box ref mut left,
                                                                box ref mut right }) => {
             if negate {
@@ -40,7 +40,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(left, false);
             normalize_condition_expr(right, false);
         }
-        &mut ConditionExpression::NegationOp(_) => {
+        ConditionExpression::NegationOp(_) => {
             let inner = if let &mut ConditionExpression::NegationOp(box ref mut inner) = ce {
                 mem::replace(inner, ConditionExpression::Base(ConditionBase::Placeholder))
             } else {
@@ -49,7 +49,7 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             mem::replace(ce, inner);
             normalize_condition_expr(ce, !negate);
         }
-        &mut ConditionExpression::Base(_) => {}
+        ConditionExpression::Base(_) => {}
     }
 }
 
