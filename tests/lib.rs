@@ -1131,6 +1131,7 @@ fn recipe_activates() {
 }
 
 #[test]
+#[ignore]
 fn recipe_activates_and_migrates() {
     let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
     let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
