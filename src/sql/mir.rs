@@ -818,18 +818,9 @@ impl SqlToMirConverter {
                              None => c.clone(),
                          })
                     .collect::<Vec<Column>>();
-                let leaf_proj_node = MirNode::new(name,
-                                                  self.schema_version,
-                                                  fields,
-                                                  MirNodeType::Permute { emit: projected_columns },
-                                                  vec![final_node.clone()],
-                                                  vec![]);
-                leaf_node = Rc::new(RefCell::new(leaf_proj_node));
-                final_node.borrow_mut().add_child(leaf_node.clone());
+                leaf_node =
+                    self.make_project_node(name, final_node, fields.iter().collect(), vec![]);
                 new_node_count += 1;
-
-                //self.node_addresses.insert(String::from(name), leaf_node);
-                //self.node_fields.insert(leaf_node, fields);
 
                 // We always materialize leaves of queries (at least currently)
                 let query_params = qg.parameters();
