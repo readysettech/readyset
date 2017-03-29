@@ -431,7 +431,7 @@ fn make_join_node(name: &str,
 
     let join_column_pairs = on_left.into_iter().zip(on_right.into_iter());
     for (i, (l, r)) in join_column_pairs.enumerate() {
-        // equi-join only
+        // implied equality between i^th left/right column (equi-join only)
         left_join_group[left.borrow()
             .columns
             .iter()
