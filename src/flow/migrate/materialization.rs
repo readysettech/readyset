@@ -406,7 +406,20 @@ pub fn reconstruct(log: &Logger,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                    node: NodeIndex,
-                   index_on: Vec<Vec<usize>>) {
+                   mut index_on: Vec<Vec<usize>>) {
+
+    if index_on.is_empty() {
+        // we must be reconstructing a Reader.
+        // figure out what key that Reader is using
+        if let flow::node::Type::Reader(_, ref r) = *graph[node] {
+            assert!(r.state.is_some());
+            if let Some(ref rh) = r.state {
+                index_on.push(vec![rh.key()]);
+            }
+        } else {
+            unreachable!();
+        }
+    }
 
     // okay, so here's the situation: `node` is a node that
     //
@@ -429,12 +442,7 @@ pub fn reconstruct(log: &Logger,
         let mut on_join = cost_fn(log, graph, empty, materialized, txs);
         // TODO: what if we're constructing multiple indices?
         // TODO: what if we have a compound index?
-        let trace_col = if index_on.is_empty() {
-            // must be reconstructing a reader
-            0
-        } else {
-            index_on[0][0]
-        };
+        let trace_col = index_on[0][0];
         keys::provenance_of(graph, node, trace_col, &mut *on_join)
     };
 
@@ -505,6 +513,9 @@ pub fn reconstruct(log: &Logger,
     // tell the domain in question to create an empty state for the node in question
     if let flow::node::Type::Reader(..) = *graph[node] {
         // readers have their own internal state
+        if partial_ok {
+            unimplemented!();
+        }
     } else {
         assert!(!index_on.is_empty(),
                 "all non-reader nodes must have a state key");
