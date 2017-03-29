@@ -238,7 +238,10 @@ impl SqlToMirConverter {
                     MirNode::new(name,
                                  self.schema_version,
                                  cols.clone(),
-                                 MirNodeType::Base(cols.clone(), key_cols.clone()),
+                                 MirNodeType::Base {
+                                     columns: cols.clone(),
+                                     keys: key_cols.clone(),
+                                 },
                                  vec![],
                                  vec![])
                 }
@@ -248,7 +251,10 @@ impl SqlToMirConverter {
             MirNode::new(name,
                          self.schema_version,
                          cols.clone(),
-                         MirNodeType::Base(cols.clone(), vec![]),
+                         MirNodeType::Base {
+                             columns: cols.clone(),
+                             keys: vec![],
+                         },
                          vec![],
                          vec![])
         }
@@ -293,7 +299,11 @@ impl SqlToMirConverter {
             right_join_columns.push(r_col);
         }
         assert_eq!(left_join_columns.len(), right_join_columns.len());
-        let inner = MirNodeType::Join(left_join_columns, right_join_columns, fields.clone());
+        let inner = MirNodeType::Join {
+            on_left: left_join_columns,
+            on_right: right_join_columns,
+            project: fields.clone(),
+        };
         let n = MirNode::new(name,
                              self.schema_version,
                              fields,
@@ -614,7 +624,7 @@ impl SqlToMirConverter {
                 let leaf_proj_node = MirNode::new(name,
                                                   self.schema_version,
                                                   fields,
-                                                  MirNodeType::Permute(projected_columns),
+                                                  MirNodeType::Permute { emit: projected_columns },
                                                   vec![final_node.clone()],
                                                   vec![]);
                 leaf_node = Rc::new(RefCell::new(leaf_proj_node));

@@ -7,6 +7,7 @@ use std::rc::Rc;
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
 use ops;
+use ops::join::Builder as JoinBuilder;
 use ops::topk::OrderedRecordComparator;
 use sql::QueryFlowParts;
 
@@ -107,7 +108,7 @@ impl MirNode {
             name: node.borrow().name.clone(),
             from_version: v,
             columns: node.borrow().columns.clone(),
-            inner: MirNodeType::Reuse(rcn),
+            inner: MirNodeType::Reuse { node: rcn },
             ancestors: node.borrow().ancestors.clone(),
             children: node.borrow().children.clone(),
             flow_node: None, // will be set in `into_flow_parts`
@@ -181,7 +182,33 @@ impl MirNode {
         let name = self.name.clone();
         match self.flow_node {
             None => {
-                let flow_node = self.inner.into_flow_parts(&name, mig);
+                let flow_node = match self.inner {
+                    MirNodeType::Base { ref columns, ref keys } => {
+                        make_base_node(&name, columns, keys, mig)
+                    }
+                    MirNodeType::Join { ref on_left, ref on_right, ref project } => {
+                        assert!(self.ancestors.len() == 2);
+                        let left = self.ancestors[0].clone();
+                        let right = self.ancestors[1].clone();
+                        make_join_node(&name, left, right, on_left, on_right, project, mig)
+                    }
+                    MirNodeType::Permute { ref emit } |
+                    MirNodeType::Project { ref emit } => make_permute_node(&name, emit, mig),
+                    MirNodeType::Reuse { ref node } => {
+                        match *node.borrow()
+                           .flow_node
+                           .as_ref()
+                           .expect("Reused MirNode must have FlowNode") {
+                    // "New" => flow node was originally created for the node that we
+                    // are reusing
+                    FlowNode::New(na) |
+                    // "Existing" => flow node was already reused from some other MIR node
+                    FlowNode::Existing(na) => FlowNode::Existing(na),
+                }
+                    }
+                    _ => unimplemented!(),
+                };
+
                 self.flow_node = Some(flow_node.clone());
                 flow_node
             }
@@ -192,64 +219,58 @@ impl MirNode {
 
 pub enum MirNodeType {
     /// over column, group_by columns
-    Aggregation(Column, Vec<Column>),
+    Aggregation { on: Column, group_by: Vec<Column> },
     /// columns, keys (non-compound)
-    Base(Vec<Column>, Vec<Column>),
+    Base {
+        columns: Vec<Column>,
+        keys: Vec<Column>,
+    },
     /// over column, group_by columns
-    Extremum(Column, Vec<Column>),
+    Extremum { on: Column, group_by: Vec<Column> },
     /// filter conditions (one for each parent column)
-    Filter(Vec<(Operator, DataType)>),
+    Filter { conditions: Vec<(Operator, DataType)>, },
     /// over column, separator
-    GroupConcat(Column, String),
+    GroupConcat { on: Column, separator: String },
     /// no extra info required
     Identity,
-    /// on left columns, on right columns, emit columns
-    Join(Vec<Column>, Vec<Column>, Vec<Column>),
+    /// left node, right node, on left columns, on right columns, emit columns
+    Join {
+        on_left: Vec<Column>,
+        on_right: Vec<Column>,
+        project: Vec<Column>,
+    },
     /// on left column, on right column, emit columns
-    LeftJoin(Vec<Column>, Vec<Column>, Vec<Column>),
+    LeftJoin {
+        on_left: Vec<Column>,
+        on_right: Vec<Column>,
+        project: Vec<Column>,
+    },
     /// group columns
-    Latest(Vec<Column>),
+    Latest { group_by: Vec<Column> },
     /// emit columns
-    Project(Vec<Column>),
+    Project { emit: Vec<Column> },
     /// emit columns
-    Permute(Vec<Column>),
+    Permute { emit: Vec<Column> },
     /// emit columns left, emit columns right
-    Union(Vec<Column>, Vec<Column>),
+    Union {
+        emit_left: Vec<Column>,
+        emit_right: Vec<Column>,
+    },
     /// order function, group columns, k
-    TopK(Box<OrderedRecordComparator>, Vec<Column>, usize),
+    TopK {
+        order: Box<OrderedRecordComparator>,
+        group_by: Vec<Column>,
+        k: usize,
+    },
     /// reuse another node
-    Reuse(MirNodeRef),
+    Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
-    Leaf(MirNodeRef, Vec<Column>),
+    Leaf { node: MirNodeRef, keys: Vec<Column> },
 }
 
 impl MirNodeType {
     fn description(&self) -> String {
         format!("{:?}", self)
-    }
-
-    fn into_flow_parts(&self, name: &str, mut mig: &mut Migration) -> FlowNode {
-        match *self {
-            MirNodeType::Base(ref cols, ref keys) => make_base_node(name, cols, keys, mig),
-            MirNodeType::Join(ref left_cols, ref right_cols, ref proj_cols) => {
-                make_join_node(name, left_cols, right_cols, proj_cols, mig)
-            }
-            MirNodeType::Permute(ref cols) |
-            MirNodeType::Project(ref cols) => make_permute_node(name, cols, mig),
-            MirNodeType::Reuse(ref node) => {
-                match *node.borrow()
-                           .flow_node
-                           .as_ref()
-                           .expect("Reused MirNode must have FlowNode") {
-                    // "New" => flow node was originally created for the node that we
-                    // are reusing
-                    FlowNode::New(na) |
-                    // "Existing" => flow node was already reused from some other MIR node
-                    FlowNode::Existing(na) => FlowNode::Existing(na),
-                }
-            }
-            _ => unimplemented!(),
-        }
     }
 }
 
@@ -262,7 +283,7 @@ impl Debug for MirNode {
 impl Debug for MirNodeType {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
-            MirNodeType::Base(_, ref keys) => {
+            MirNodeType::Base { ref columns, ref keys } => {
                 write!(f,
                        "B [⚷: {}]",
                        keys.iter()
@@ -270,12 +291,12 @@ impl Debug for MirNodeType {
                            .collect::<Vec<_>>()
                            .join(","))
             }
-            MirNodeType::Join(ref l_cols, ref r_cols, ref proj_cols) => write!(f, "⋈ []"),
-            MirNodeType::Reuse(ref reused) => write!(f, "Reuse [{:#?}]", reused),
-            MirNodeType::Permute(ref cols) => {
+            MirNodeType::Join { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
+            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::Permute { ref emit } => {
                 write!(f,
                        "π [{}]",
-                       cols.iter()
+                       emit.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
                            .join(", "))
