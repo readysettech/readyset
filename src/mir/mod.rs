@@ -188,7 +188,7 @@ impl MirNode {
                         make_base_node(&name, columns, keys, mig)
                     }
                     MirNodeType::Join { ref on_left, ref on_right, ref project } => {
-                        assert!(self.ancestors.len() == 2);
+                        assert_eq!(self.ancestors.len(), 2);
                         let left = self.ancestors[0].clone();
                         let right = self.ancestors[1].clone();
                         make_join_node(&name, left, right, on_left, on_right, project, mig)
@@ -406,12 +406,12 @@ fn make_join_node(name: &str,
     }
 
     let left_na = match left.borrow().flow_node {
-        Some(FlowNode::New(na)) => na,
+        Some(FlowNode::New(na)) |
         Some(FlowNode::Existing(na)) => na,
         None => panic!("Join parents must have FlowNodes by now!"),
     };
     let right_na = match right.borrow().flow_node {
-        Some(FlowNode::New(na)) => na,
+        Some(FlowNode::New(na)) |
         Some(FlowNode::Existing(na)) => na,
         None => panic!("Join parents must have FlowNodes by now!"),
     };
