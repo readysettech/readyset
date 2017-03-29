@@ -529,6 +529,9 @@ pub fn reconstruct(log: &Logger,
     // unfortunately, skipping things this way would make `Message::to` and `Message::from` contain
     // weird values, and cause breakage.
 
+    // TODO FIXME:
+    // we need to detect materialized nodes downstream of partially materialized nodes.
+
     // set up channels for replay along each path
     for mut path in paths {
         // there should always be a replay path

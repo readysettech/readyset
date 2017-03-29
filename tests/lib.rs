@@ -754,7 +754,6 @@ fn domain_amend_migration() {
 }
 
 #[test]
-#[ignore]
 fn state_replay_migration_stream() {
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.

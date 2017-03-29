@@ -268,6 +268,7 @@ impl<T: Hash + Eq + Clone> State<T> {
             // mark_filled. this indicates that a replay was needed, but not detected, which can
             // happen if there is an operator whose output is materialized, but that does not also
             // do lookups into that state before writing to it.
+            // FIXME FIXME FIXME FIXME XXX XXX XXX TODO TODO TODO
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     // treat this specially to avoid the extra Vec

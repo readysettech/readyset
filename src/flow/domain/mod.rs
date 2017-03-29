@@ -65,12 +65,6 @@ enum DomainMode {
         buffered: VecDeque<Packet>,
         passes: usize,
     },
-    Waiting {
-        tag: Tag,
-        buffered: VecDeque<Packet>,
-        interrupted: Box<DomainMode>,
-        on: (Vec<usize>, Vec<DataType>),
-    },
 }
 
 struct ReplayPath {
@@ -78,6 +72,22 @@ struct ReplayPath {
     path: Vec<NodeAddress>,
     done_tx: Option<mpsc::SyncSender<()>>,
     trigger: TriggerEndpoint,
+}
+
+enum Waiting {
+    /// A paused node is waiting for the state of *another* node to be filled.
+    Paused { buffer: VecDeque<Packet> },
+
+    /// A target node is waiting for an incoming replay.
+    ///
+    /// Note that the Tag isn't needed, since we can just look for any Replay whose destination is
+    /// this node. We know that other replays that go *through* this node won't have this node as
+    /// the last node in the path, because the last node in the path must then be an Egress node.
+    Target {
+        buffer: VecDeque<Packet>,
+        prune: (Vec<usize>, Vec<DataType>),
+        releases: Option<LocalNodeIndex>,
+    },
 }
 
 pub struct Domain {
@@ -93,6 +103,7 @@ pub struct Domain {
     transaction_state: transactions::DomainState,
 
     mode: DomainMode,
+    waiting: local::Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -120,6 +131,7 @@ impl Domain {
             log: log,
             not_ready: not_ready,
             mode: DomainMode::Forwarding,
+            waiting: local::Map::new(),
             replay_paths: HashMap::new(),
             total_time: Timer::new(),
             total_ptime: Timer::new(),
@@ -132,6 +144,7 @@ impl Domain {
     fn dispatch(m: Packet,
                 not_ready: &HashSet<LocalNodeIndex>,
                 mode: &mut DomainMode,
+                waiting: &mut local::Map<Waiting>,
                 states: &mut StateMap,
                 nodes: &DomainNodes,
                 paths: &mut HashMap<Tag, ReplayPath>,
@@ -154,9 +167,18 @@ impl Domain {
                 return output_messages;
             }
             DomainMode::Replaying { .. } => (),
-            DomainMode::Waiting { .. } => {
-                unreachable!();
+        }
+
+        match waiting.get_mut(me.as_local()) {
+            Some(&mut Waiting::Paused { ref mut buffer }) => {
+                buffer.push_back(m);
+                return output_messages;
             }
+            Some(&mut Waiting::Target { ref mut buffer, .. }) => {
+                buffer.push_back(m);
+                return output_messages;
+            }
+            None => {}
         }
 
         if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
@@ -180,9 +202,7 @@ impl Domain {
                 key,
                 ..
             } => {
-                use std::mem;
                 // find tag we should use for replay
-                // TODO: this needs to also consider the *key* of that tag
                 let tag = {
                     let mut tags = paths.iter()
                         .filter(|&(_, ref info)| if let TriggerEndpoint::End(..) = info.trigger {
@@ -201,30 +221,65 @@ impl Domain {
                     tag.expect("partial replay attempted on node with no partial path")
                 };
 
-                // make sure we get back to this message when the state is available
-                let mut buffered = VecDeque::new();
-                buffered.push_front(was);
-                let wait = DomainMode::Waiting {
-                    buffered: buffered,
-                    tag: tag,
-                    on: (columns.clone(), key.clone()),
-                    interrupted: Box::new(DomainMode::Forwarding),
-                };
+                // if the lookup failure occured on a *different* node than the one we were
+                // processing the update for, we need to be a bit trickier. specifically, we need
+                // to buffer both at the node being replayed into (so that we can prune), *and* the
+                // node at which we were processing (it is still conceptually blocking on the
+                // update the caused the lookup miss). we also have to make sure that when the
+                // replay finishes, the processing of this node continues.
+                let mut release = None;
+                let mut was = Some(was);
+                if node != me {
+                    release = Some(*me.as_local());
 
-                // we're now waiting, but what were we doing?
-                match mem::replace(mode, wait) {
-                    DomainMode::Forwarding => (),
-                    r @ DomainMode::Replaying { .. } => {
-                        // we interrupted an ongoing full replay -- we need to make sure continue
-                        // it when the partial replay finishes.
-                        if let DomainMode::Waiting { ref mut interrupted, .. } = *mode {
-                            *interrupted = Box::new(r);
-                        } else {
+                    let wait = match waiting.remove(me.as_local()) {
+                        None => {
+                            let mut buffered = VecDeque::new();
+                            buffered.push_front(was.take().unwrap());
+                            Waiting::Paused { buffer: buffered }
+                        }
+                        Some(Waiting::Paused { .. }) => {
+                            // the join was waiting for a replay into one of its ancestors when
+                            // processing this update. but since dispatch() was called, we must be
+                            // processing normally.
                             unreachable!();
                         }
-                    }
-                    DomainMode::Waiting { .. } => unreachable!(),
+                        Some(Waiting::Target { .. }) => {
+                            // the join is waiting for a replay, but somehow dispatch was called?
+                            unreachable!();
+                        }
+                    };
+                    waiting.insert(*me.as_local(), wait);
                 }
+
+                // make sure we buffer until the replay comes in
+                let wait = match waiting.remove(node.as_local()) {
+                    None => {
+                        // the easy case -- we're not currently up to anything funky, just buffer
+                        // until the replay finishes.
+                        let mut buffered = VecDeque::new();
+                        if let Some(was) = was {
+                            // also process the message that just missed again
+                            buffered.push_front(was);
+                        }
+                        Waiting::Target {
+                            buffer: buffered,
+                            prune: (columns.clone(), key.clone()),
+                            releases: release,
+                        }
+                    }
+                    Some(Waiting::Paused { .. }) => {
+                        // we did a lookup into a node that is already awaiting a replay from one
+                        // of its children, and missed.
+                        unimplemented!();
+                    }
+                    Some(Waiting::Target { .. }) => {
+                        // we did a lookup into a node that is already being replayed into by some
+                        // *other* node (note that it cannot be us, because then we'd be paused).
+                        unimplemented!();
+                    }
+                };
+                waiting.insert(*node.as_local(), wait);
 
                 // send a message to the source domain(s) responsible for the chosen tag so they'll
                 // start replay.
@@ -282,6 +337,7 @@ impl Domain {
                 for (k, mut v) in Self::dispatch(m,
                                                  not_ready,
                                                  mode,
+                                                 waiting,
                                                  states,
                                                  nodes,
                                                  paths,
@@ -310,6 +366,7 @@ impl Domain {
         Self::dispatch(m,
                        &self.not_ready,
                        &mut self.mode,
+                       &mut self.waiting,
                        &mut self.state,
                        &self.nodes,
                        &mut self.replay_paths,
@@ -365,23 +422,6 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
-        if let DomainMode::Waiting {
-                   ref mut buffered,
-                   tag,
-                   ..
-               } = self.mode {
-            // buffer, unless it's the releasing replay message
-            if let Packet::Replay { tag: m_tag, .. } = m {
-                if tag != m_tag {
-                    buffered.push_back(m);
-                    return;
-                }
-            } else {
-                buffered.push_back(m);
-                return;
-            }
-        }
-
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
@@ -647,16 +687,6 @@ impl Domain {
                 DomainMode::Replaying { .. } => {
                     // another packet the local state we are constructing
                 }
-                DomainMode::Waiting { tag: waiting_on, .. } => {
-                    // if we're in the waiting state, exactly *one* packet will ever be sent to us,
-                    // and that is the packet that releases the waiting state.
-                    assert!(last);
-                    assert_eq!(waiting_on, tag);
-                    match data {
-                        ReplayData::Records(..) => (),
-                        ReplayData::StateCopy(..) => unreachable!(),
-                    }
-                }
             }
 
             // we may be able to just absorb all the state in one go if we're lucky!
@@ -816,23 +846,30 @@ impl Domain {
                 ReplayData::Records(data) => {
                     debug!(self.log, "replaying batch"; "#" => data.len());
 
-                    // forward the current message through all local nodes
+                    let dst = *path.last().unwrap().as_local();
+                    if let Some(&Waiting::Target { ref prune, .. }) = self.waiting.get(&dst) {
+                        // we're waiting for this particular replay packet to release a buffer.
+                        // mark the state for the key being replayed as *not* a hole in path.last()
+                        // otherwise we'll just end up with the same NeedReply response that
+                        // triggered this replay initially.
+                        self.state
+                            .get_mut(&dst)
+                            .unwrap()
+                            .mark_filled(&prune.0[..], prune.1.clone());
+                    }
+
+                    // forward the current message through all local nodes.
+                    // note that it's okay to bypass all the extra buffering logic in dispatch()
+                    // here, because we know that no nodes along path are materialized (replay is
+                    // always just across non-materialized nodes), except potentially the last one.
+                    // the last one is materialized if we're the target domain, and we're replaying
+                    // into it.
                     let mut m = Packet::Replay {
                         link: link,
                         tag: tag,
                         last: last,
                         data: ReplayData::Records(data),
                     };
-
-                    if let DomainMode::Waiting { ref on, .. } = self.mode {
-                        // mark the state for the key being replayed as *not* a hole in path.last()
-                        // otherwise we'll just end up with the same NeedReply response that
-                        // triggered this replay initially.
-                        self.state
-                            .get_mut(path.last().unwrap().as_local())
-                            .unwrap()
-                            .mark_filled(&on.0[..], on.1.clone());
-                    }
 
                     for (i, ni) in path.iter().enumerate() {
                         // process the current message in this node
@@ -874,14 +911,16 @@ impl Domain {
                     }
 
                     if last {
-                        let ni = *path.last().unwrap().as_local();
                         debug!(self.log, "last batch processed"; "terminal" => done_tx.is_some());
                         if done_tx.is_some() {
-                            debug!(self.log, "last batch received"; "local" => ni.id());
-                            finished = Some((tag, ni));
-                        } else if let DomainMode::Waiting { .. } = self.mode {
-                            trace!(self.log, "partial replay completed"; "local" => ni.id());
-                            finished = Some((tag, ni));
+                            debug!(self.log, "last batch received"; "local" => dst.id());
+                            finished = Some((tag, dst));
+                        } else if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
+                            debug!(self.log, "partial replay completed"; "local" => dst.id());
+                            finished = Some((tag, dst));
+                        } else if let Some(..) = self.waiting.get(&dst) {
+                            // replay to a node that's not waiting for it?
+                            unreachable!();
                         }
                     } else {
                         debug!(self.log, "batch processed");
@@ -896,82 +935,111 @@ impl Domain {
             self.handle(p, inject_tx);
         }
         if let Some((tag, ni)) = finished {
-            if let DomainMode::Waiting { .. } = self.mode {
-                use std::mem;
-                if let DomainMode::Waiting {
-                           mut buffered,
-                           interrupted,
-                           on,
-                           ..
-                       } = mem::replace(&mut self.mode, DomainMode::Forwarding) {
+            if let Some(Waiting::Target {
+                            mut buffer,
+                            prune,
+                            releases,
+                            ..
+                        }) = self.waiting.remove(&ni) {
 
-                    // restore the state before the partial replay
-                    mem::replace(&mut self.mode, *interrupted);
+                // we got a partial replay result that we were waiting for.
+                // we now need to process any messages that got held up waiting for it.
 
-                    // FIXME TODO XXX TODO FIXME
-                    // we actually need to be a lot more clever here than I initially thought:
-                    //
-                    //   1. a hole is encountered during a lookup of key K in node D's state
-                    //   2. replay is requested on path P from node S
-                    //   3. S's state for K is replayed along P
-                    //      (note that we know that P does not contain any materializations)
-                    //   4. the state arrives at D and fills the hole
-                    //   5. we *should* now convert the output into a Packet::Message, and
-                    //      propagate *normally* through the graph (i.e., not as a replay along a
-                    //      tagged path). this provides downstream nodes with state eagerly, and
-                    //      allows streaming outputs to not miss updates (e.g., a Reader). as an
-                    //      optimization, this Message should also carry a marker to indicate that
-                    //      it is "complete" for its key. this would let downstream nodes that are
-                    //      also partially materialized (on the same key) avoid an extra replay.
-                    //   6. next, we must look at all messages buffered during the replay, and from
-                    //      each one, remove *all* records that *will* reach D with K as their key.
-                    //      this is necessary as the replay already includes any such rows.
-                    //      luckily, it is safe to simply process along the path to D, and then do
-                    //      the drop check, since we know there's nothing materialized along the
-                    //      path.
-                    //
-                    // TODO: we probably need to deal with materialized nodes that are downstream
-                    // of partially materialized nodes somewhere.
-                    unimplemented!();
-                    /*
-                    for m in &mut buffered {
-                        if !m.is_regular() {
-                            continue;
-                        }
-                        m.map_data(|mut rs| {
-                            rs.retain(|r| {
-                                          !on.0
-                                               .iter()
-                                               .enumerate()
-                                               .all(|(i, &c)| r[c] == on.1[i])
-                                      });
-                            rs
-                        });
+                // NOTE: some of the data in the buffered messages may already be contained within
+                // the data we just replayed. we need to prune those out so we don't end up
+                // double-applying them!
+                for m in &mut buffer {
+                    if !m.is_regular() {
+                        continue;
                     }
-                    */
 
-                    while let Some(m) = buffered.pop_front() {
-                        self.handle(m, inject_tx);
-                        // check if we've changed into another mode and should stop
-                        match self.mode {
-                            DomainMode::Forwarding => {
-                                // nope, keep going
-                            }
-                            DomainMode::Waiting { buffered: ref mut new_buffered, .. } => {
-                                // seems we hit another missing entry. transfer over the remaining
-                                // buffered things and leave it up to the next arrival of a replay
-                                // for that to continue.
-                                new_buffered.extend(buffered.drain(..));
-                                return;
-                            }
-                            DomainMode::Replaying { .. } => {
-                                // a buffered message caused us to start a replay.
-                                // that's fine, we can just keep moving through the buffer.
-                            }
-                        }
-                    }
-                    return;
+                    m.map_data(|mut rs| {
+                        rs.retain(|r| {
+                                      !prune.0
+                                           .iter()
+                                           .enumerate()
+                                           .all(|(i, &c)| r[c] == prune.1[i])
+                                  });
+                        rs
+                    });
                 }
+
+                // did we fill a hole that someone else was waiting on?
+                if let Some(node) = releases {
+                    // yes, so we need to replay their buffer first.
+                    if let Some(Waiting::Paused { buffer: mut pbuffer }) =
+                        self.waiting.remove(&node) {
+                        while let Some(m) = pbuffer.pop_front() {
+                            self.handle(m, inject_tx);
+                            match self.waiting.remove(&node) {
+                                None => {}
+                                Some(Waiting::Paused { buffer: mut next_buffer }) => {
+                                    // seems we hit another missing entry while replaying. transfer
+                                    // over the remaining buffered things and leave it up to the
+                                    // next arrival of a replay for that to continue.
+                                    next_buffer.append(&mut pbuffer);
+
+                                    // we also need to ensure that the messages the ancestor we
+                                    // *were* waiting on are still eventually processed.
+                                    match self.waiting.get_mut(&ni) {
+                                        None => {
+                                            // okay, this is pretty bad...
+                                            // while processing a buffered update, we hit a hole in
+                                            // a *different* ancestor, who is now replaying. this
+                                            // means we don't have anywhere to put the buffered
+                                            // elements of the ancestor that we *previously* missed
+                                            // in. If we only ever have two-way joins, this
+                                            // shouldn't happen (if we miss in R, all buffered
+                                            // updates should be L, so all misses during buffer
+                                            // replay should remain in R), but with more elaborate
+                                            // joins (and possibly unions) this could happen.
+                                            unimplemented!();
+                                        }
+                                        Some(&mut Waiting::Target {
+                                                      buffer: ref mut next_buffer,
+                                                      releases,
+                                                      ..
+                                                  }) => {
+                                            assert_eq!(releases, Some(node));
+                                            next_buffer.append(&mut buffer);
+                                        }
+                                        Some(&mut Waiting::Paused { .. }) => unreachable!(),
+                                    }
+
+                                    self.waiting.insert(node,
+                                                        Waiting::Paused { buffer: next_buffer });
+
+                                    return;
+                                }
+                                Some(..) => unreachable!(),
+                            }
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
+
+                // finally, replay our (pruned) buffer
+                while let Some(m) = buffer.pop_front() {
+                    self.handle(m, inject_tx);
+                    match self.waiting.get_mut(&ni) {
+                        None => {}
+                        Some(&mut Waiting::Paused { buffer: ref mut next_buffer }) => {
+                            // while processing this update, *we* missed in some other node.
+                            // we need to make sure we keep working through our backlog when the
+                            // hole is eventually filled.
+                            next_buffer.append(&mut buffer);
+                            return;
+                        }
+                        Some(&mut Waiting::Target { buffer: ref mut next_buffer, .. }) => {
+                            // a downstream node missed on us while processing this update.
+                            // make sure we keep our backlog so it eventually gets processed.
+                            next_buffer.append(&mut buffer);
+                            return;
+                        }
+                    }
+                }
+                return;
             }
 
             // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
@@ -1072,6 +1140,7 @@ impl Domain {
                     Self::dispatch(m,
                                    &self.not_ready,
                                    &mut DomainMode::Forwarding,
+                                   &mut self.waiting,
                                    &mut self.state,
                                    &self.nodes,
                                    &mut self.replay_paths,
