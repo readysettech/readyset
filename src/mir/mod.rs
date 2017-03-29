@@ -220,12 +220,13 @@ impl MirNode {
                            .flow_node
                            .as_ref()
                            .expect("Reused MirNode must have FlowNode") {
-                    // "New" => flow node was originally created for the node that we
-                    // are reusing
-                    FlowNode::New(na) |
-                    // "Existing" => flow node was already reused from some other MIR node
-                    FlowNode::Existing(na) => FlowNode::Existing(na),
-                }
+                               // "New" => flow node was originally created for the node that we
+                               // are reusing
+                               FlowNode::New(na) |
+                               // "Existing" => flow node was already reused from some other
+                               // MIR node
+                               FlowNode::Existing(na) => FlowNode::Existing(na),
+                        }
                     }
                     _ => unimplemented!(),
                 };
