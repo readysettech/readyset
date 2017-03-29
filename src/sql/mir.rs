@@ -89,7 +89,7 @@ impl SqlToMirConverter {
     /// vector of conditions that `shortcut` understands.
     fn to_conditions(&self,
                      ct: &ConditionTree,
-                     na: &NodeAddress)
+                     n: &MirNodeRef)
                      -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left
@@ -106,10 +106,13 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
             _ => unimplemented!(),
         };
-        let num_columns = self.fields_for(*na).len();
+        let num_columns = n.borrow().columns().len();
         let mut filter = vec![None; num_columns];
-        filter[self.field_to_columnid(*na, &l.name).unwrap()] = Some((ct.operator.clone(),
-                                                                      DataType::from(r)));
+        filter[n.borrow()
+            .columns()
+            .iter()
+            .position(|c| *c == l)
+            .unwrap()] = Some((ct.operator.clone(), DataType::from(r)));
         filter
     }
 
@@ -260,6 +263,42 @@ impl SqlToMirConverter {
                          vec![])
         }
     }
+
+    fn make_filter_nodes(&mut self,
+                         name: &str,
+                         parent: MirNodeRef,
+                         predicates: &Vec<ConditionTree>)
+                         -> Vec<MirNodeRef> {
+        use ops::filter::Filter;
+
+        let mut new_nodes = vec![];
+
+        let mut prev_node = parent;
+        for (i, cond) in predicates.iter().enumerate() {
+            // convert ConditionTree to a chain of Filter operators.
+            // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
+            let filter = self.to_conditions(cond, &prev_node);
+            let parent_fields = prev_node.borrow()
+                .columns()
+                .iter()
+                .cloned()
+                .collect();
+            let f_name = format!("{}_f{}", name, i);
+            let n = MirNode::new(&f_name,
+                                 self.schema_version,
+                                 parent_fields,
+                                 MirNodeType::Filter { conditions: filter },
+                                 vec![prev_node.clone()],
+                                 vec![]);
+            let rcn = Rc::new(RefCell::new(n));
+            prev_node.borrow_mut().add_child(rcn.clone());
+            new_nodes.push(rcn.clone());
+            prev_node = rcn;
+        }
+
+        new_nodes
+    }
+
 
     fn make_function_node(&mut self,
                           name: &str,
@@ -712,64 +751,54 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 1. Generate the necessary filter node for each relation node in the query graph.
-            let mut filter_nodes = HashMap::<String, Vec<MirNodeRef>>::new();
-            let mut new_filter_nodes = Vec::new();
+            // 3. Generate the necessary filter node for each relation node in the query graph.
+            let mut filter_nodes = Vec::new();
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be
             // added in a different order every time, which will yield different node identifiers
             // and make it difficult for applications to check what's going on.
-            /*let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
+            let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             sorted_rels.sort();
             for rel in &sorted_rels {
                 let qgn = &qg.relations[*rel];
-                // we'll handle computed columns later
+                // we've already handled computed columns
                 if *rel != "computed_columns" {
                     // the following conditional is required to avoid "empty" nodes (without any
                     // projected columns) that are required as inputs to joins
                     if !qgn.predicates.is_empty() {
-                        // add a basic filter/permute node for each query graph node if it either
-                        // has: 1) projected columns; or 2) a filter condition
-                        let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
-                                                                              qg.signature().hash,
-                                                                              new_node_count),
-                                                                     qgn,
-                                                                     mig);
-                        filter_nodes.insert((*rel).clone(), fns.clone());
+                        // add a filter chain for each query graph node's predicates
+                        let parent = match prev_node {
+                            None => base_nodes[rel.as_str()].clone(),
+                            Some(pn) => pn,
+                        };
+                        let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
+                                                                  qg.signature().hash,
+                                                                  new_node_count),
+                                                         parent,
+                                                         &qgn.predicates);
+                        assert!(fns.len() > 0);
                         new_node_count += fns.len();
-                        new_filter_nodes.extend(fns);
-                    } else {
-                        // otherwise, just record the node index of the base node for the relation
-                        // that is being selected from
-                        // N.B.: no need to update `new_node_count` as no nodes are added
-                        filter_nodes.insert((*rel).clone(), vec![self.address_for(rel)]);
+                        prev_node = Some(fns.iter()
+                                             .last()
+                                             .unwrap()
+                                             .clone());
+                        filter_nodes.extend(fns);
                     }
                 }
-            }*/
+            }
 
             // 4. Get the final node
-            let mut final_node: MirNodeRef = if !func_nodes.is_empty() {
-                // XXX(malte): This won't work if (a) there are multiple function nodes in the
-                // query, or (b) computed columns are used within JOIN clauses
-                assert!(func_nodes.len() <= 2);
+            let mut final_node: MirNodeRef = if !filter_nodes.is_empty() {
+                filter_nodes.last().unwrap().clone()
+            } else if !func_nodes.is_empty() {
+                // TODO(malte): This won't work if computed columns are used within JOIN clauses
                 func_nodes.last().unwrap().clone()
             } else if !join_nodes.is_empty() {
                 join_nodes.last().unwrap().clone()
-            } else if !filter_nodes.is_empty() {
-                assert_eq!(filter_nodes.len(), 1);
-                let filter = filter_nodes.iter()
-                    .next()
-                    .as_ref()
-                    .unwrap()
-                    .1
-                    .clone();
-                assert_ne!(filter.len(), 0);
-                filter.last().unwrap().clone()
             } else {
                 // no join, filter, or function node --> base node is parent
                 assert_eq!(sorted_rels.len(), 1);
-                base_nodes[sorted_rels.last().unwrap()].clone()
+                base_nodes[sorted_rels.last().unwrap().as_str()].clone()
             };
-
 
             // 4. Potentially insert TopK node below the final node
             /*if let Some(ref limit) = st.limit {
@@ -848,7 +877,7 @@ impl SqlToMirConverter {
                 .map(|(_, n)| n)
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
-                .chain(new_filter_nodes.into_iter())
+                .chain(filter_nodes.into_iter())
                 .collect();
             nodes_added.push(leaf_node);
         }

@@ -257,7 +257,7 @@ pub enum MirNodeType {
         kind: ExtremumKind,
     },
     /// filter conditions (one for each parent column)
-    Filter { conditions: Vec<(Operator, DataType)>, },
+    Filter { conditions: Vec<Option<(Operator, DataType)>>, },
     /// over column, separator
     GroupConcat { on: Column, separator: String },
     /// no extra info required
@@ -335,14 +335,40 @@ impl Debug for MirNodeType {
             }
             MirNodeType::Project { ref emit, ref literals } => {
                 write!(f,
-                       "π [{}, lit: {}]",
+                       "π [{}{}]",
                        emit.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
                            .join(", "),
-                       literals.iter()
-                           .map(|&(ref n, ref v)| format!("{}: {}", n, v))
+                       if literals.len() > 0 {
+                           format!(", lit: {}",
+                                   literals.iter()
+                                       .map(|&(ref n, ref v)| format!("{}: {}", n, v))
+                                       .collect::<Vec<_>>()
+                                       .join(", "))
+                       } else {
+                           format!("")
+                       })
+            }
+            MirNodeType::Filter { ref conditions } => {
+                use regex::Regex;
+
+                let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
+                write!(f,
+                       "σ[{}]",
+                       conditions.iter()
+                           .enumerate()
+                           .filter_map(|(i, ref e)| match e.as_ref() {
+                                           Some(&(ref op, ref x)) => {
+                                               Some(format!("f{} {} {}",
+                                                            i,
+                                                            escape(&format!("{}", op)),
+                                                            x))
+                                           }
+                                           None => None,
+                                       })
                            .collect::<Vec<_>>()
+                           .as_slice()
                            .join(", "))
             }
             _ => unimplemented!(),
