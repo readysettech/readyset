@@ -254,7 +254,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         !self.state.is_empty()
     }
 
-    pub fn insert(&mut self, r: Arc<Vec<T>>) -> bool {
+    pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
@@ -271,10 +271,10 @@ impl<T: Hash + Eq + Clone> State<T> {
                     // in the common case of an entry already existing for the given key...
                     if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
                         rs.push(r);
-                        return true;
+                        return;
                     } else if s.2 {
                         // trying to insert a record into partial materialization hole!
-                        return false;
+                        unimplemented!();
                     }
                     map.insert(r[s.0[0]].clone(), vec![r]);
                 }
@@ -284,7 +284,7 @@ impl<T: Hash + Eq + Clone> State<T> {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
                             match map.entry(key) {
                                 Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => return false,
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
                                 rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
                             }
                         }
@@ -292,7 +292,7 @@ impl<T: Hash + Eq + Clone> State<T> {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
                             match map.entry(key) {
                                 Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => return false,
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
                                 rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
                             }
                         }
@@ -303,7 +303,7 @@ impl<T: Hash + Eq + Clone> State<T> {
                                        r[s.0[3]].clone());
                             match map.entry(key) {
                                 Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => return false,
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
                                 rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
                             }
                         }
@@ -312,8 +312,6 @@ impl<T: Hash + Eq + Clone> State<T> {
                 }
             }
         }
-
-        true
     }
 
     pub fn remove(&mut self, r: &[T]) {

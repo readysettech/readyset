@@ -213,13 +213,7 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) {
     let mut state = state.unwrap();
     for r in rs.iter() {
         match *r {
-            Record::Positive(ref r) => {
-                if !state.insert(r.clone()) {
-                    // tried to insert into partial materialization hole
-                    // need replay!
-                    unimplemented!();
-                }
-            }
+            Record::Positive(ref r) => state.insert(r.clone()),
             Record::Negative(ref r) => state.remove(r),
             Record::DeleteRequest(..) => unreachable!(),
         }
