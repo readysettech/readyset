@@ -6,10 +6,19 @@ use std::sync::Arc;
 
 /// Allocate a new buffered `Store`.
 pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
+    new_partial(cols, key, None)
+}
+
+/// Allocate a new buffered `Store`.
+pub fn new_partial(cols: usize,
+                   key: usize,
+                   trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
+                   -> (ReadHandle, WriteHandle) {
     let (r, w) =
         evmap::Options::default().with_meta(-1).with_hasher(FnvBuildHasher::default()).construct();
     let r = ReadHandle {
         handle: r,
+        trigger: trigger,
         key: key,
     };
     let w = WriteHandle {
@@ -60,6 +69,7 @@ impl WriteHandle {
 #[derive(Clone)]
 pub struct ReadHandle {
     handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
     key: usize,
 }
 
@@ -70,10 +80,20 @@ impl ReadHandle {
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
-    pub fn find_and<F, T>(&self, key: &DataType, then: F) -> Result<(T, i64), ()>
-        where F: FnOnce(&[Arc<Vec<DataType>>]) -> T
+    pub fn find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(T, i64), ()>
+        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
-        self.handle.meta_get_and(key, then).ok_or(())
+        loop {
+            match self.handle.meta_get_and(key, &mut then) {
+                Some(val) => return Ok(val),
+                None if self.trigger.is_some() => {
+                    if let Some(ref trigger) = self.trigger {
+                        (*trigger)(key);
+                    }
+                }
+                None => return Err(()),
+            }
+        }
     }
 
     pub fn key(&self) -> usize {
