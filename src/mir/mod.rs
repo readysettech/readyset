@@ -92,7 +92,7 @@ impl MirNode {
                -> Self {
         MirNode {
             name: String::from(name),
-            from_version: 0,
+            from_version: v,
             columns: columns,
             inner: inner,
             ancestors: ancestors.clone(),
