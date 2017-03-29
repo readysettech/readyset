@@ -615,10 +615,19 @@ impl SqlToMirConverter {
                             QueryGraphEdge::GroupBy(ref gb_cols) => {
                                 // Generate the right function nodes for all relevant columns in
                                 // the "computed_columns" node
+
                                 // TODO(malte): there can only be one GROUP BY in each query, but
                                 // the columns can come from different tables. In that case, we
                                 // would need to generate an Agg-Join-Agg sequence for each pair of
                                 // tables involved.
+                                let table = gb_cols.iter()
+                                    .next()
+                                    .unwrap()
+                                    .table
+                                    .as_ref()
+                                    .unwrap();
+                                assert!(gb_cols.iter().all(|c| c.table.as_ref().unwrap() == table));
+
                                 for fn_col in &computed_cols_cgn.columns {
                                     // we must also push parameter columns through the group by
                                     let over_cols = target_columns_from_computed_column(fn_col);
