@@ -37,17 +37,26 @@ impl MirQuery {
     }
 
     pub fn into_flow_parts(&mut self, mut mig: &mut Migration) -> QueryFlowParts {
+        use std::collections::VecDeque;
+
         let mut new_nodes = Vec::new();
         let mut reused_nodes = Vec::new();
 
         // starting at the roots, add nodes in topological order
         // XXX(malte): topo sort
-        for n in self.roots.iter_mut() {
+        let mut node_queue = VecDeque::new();
+        node_queue.extend(self.roots.iter().cloned());
+        while !node_queue.is_empty() {
+            let n = node_queue.pop_front().unwrap();
             let flow_node = n.borrow_mut().into_flow_parts(mig);
             match flow_node {
                 FlowNode::New(na) => new_nodes.push(na),
                 FlowNode::Existing(na) => reused_nodes.push(na),
             }
+            node_queue.extend(n.borrow()
+                                  .children
+                                  .iter()
+                                  .cloned());
         }
 
         let leaf_na = match *self.leaf
