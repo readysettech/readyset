@@ -385,6 +385,10 @@ impl SqlIncorporator {
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
     pub fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
+        info!(self.log,
+              "Schema version advanced from {} to {}",
+              self.schema_version,
+              new_version);
         self.schema_version = new_version;
         self.mir_converter.upgrade_schema(new_version);
     }
