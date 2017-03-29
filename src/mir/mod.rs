@@ -8,6 +8,7 @@ use flow::Migration;
 use flow::core::{NodeAddress, DataType};
 use ops;
 use ops::join::Builder as JoinBuilder;
+use ops::permute::Permute;
 use ops::topk::OrderedRecordComparator;
 use sql::QueryFlowParts;
 
@@ -432,5 +433,25 @@ fn make_permute_node(name: &str,
                      emit: &Vec<Column>,
                      mut mig: &mut Migration)
                      -> FlowNode {
-    unimplemented!()
+    let fields = emit.iter().map(|c| c.name.clone()).collect::<Vec<String>>();
+    let projected_column_ids = emit.iter()
+        .map(|c| {
+            parent.borrow()
+                .columns
+                .iter()
+                .position(|ref nc| *nc == c)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let parent_na = match *parent.borrow()
+               .flow_node
+               .as_ref()
+               .expect("parent must have flow node") {
+        FlowNode::New(na) |
+        FlowNode::Existing(na) => na,
+    };
+    let n = mig.add_ingredient(String::from(name),
+                               fields.as_slice(),
+                               Permute::new(parent_na, projected_column_ids.as_slice()));
+    FlowNode::New(n)
 }
