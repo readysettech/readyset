@@ -394,10 +394,11 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
-    pub fn mark_filled(&mut self, columns: &[usize], key: Vec<T>) {
+    pub fn mark_filled(&mut self, key: Vec<T>) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        let state = self.state_for(columns).expect("filling non-indexed column set");
-        let state = &mut self.state[state];
+        assert!(self.state.len() == 1,
+                "partially materializing to multi-index materialization");
+        let state = &mut self.state[0];
         let mut key = key.into_iter();
         match state.1 {
             KeyedState::Single(ref mut map) => {

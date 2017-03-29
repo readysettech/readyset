@@ -262,7 +262,6 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         assert!(missing.is_some());
         ProcessingResult::NeedReplay {
             node: self.src,
-            columns: self.out_key.clone(),
             key: missing.unwrap(),
             was: rs,
         }

@@ -7,7 +7,6 @@ pub enum ProcessingResult {
     Done(prelude::Records),
     NeedReplay {
         node: prelude::NodeAddress,
-        columns: Vec<usize>,
         key: Vec<prelude::DataType>,
         was: prelude::Records,
     },

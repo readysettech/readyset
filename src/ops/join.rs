@@ -185,12 +185,11 @@ pub struct Joiner {
 }
 
 impl Joiner {
-    fn join<'a>
-        (&'a self,
-         left: (NodeAddress, sync::Arc<Vec<DataType>>),
-         domain: &DomainNodes,
-         states: &StateMap)
-         -> Result<Box<Iterator<Item = Vec<DataType>> + 'a>, (NodeAddress, usize, DataType)> {
+    fn join<'a>(&'a self,
+                left: (NodeAddress, sync::Arc<Vec<DataType>>),
+                domain: &DomainNodes,
+                states: &StateMap)
+                -> Result<Box<Iterator<Item = Vec<DataType>> + 'a>, (NodeAddress, DataType)> {
 
         // NOTE: this only works for two-way joins
         let other = *self.join
@@ -209,7 +208,7 @@ impl Joiner {
             None => unreachable!("joins must have inputs materialized"),
             Some(None) => {
                 // partial materialization miss
-                return Err((other, target.on.1, left.1[target.on.0].clone()));
+                return Err((other, left.1[target.on.0].clone()));
             }
             Some(Some(rs)) => rs.cloned().collect(),
         };
@@ -373,10 +372,9 @@ impl Ingredient for Joiner {
         while let Some(it) = rs.next() {
             match it {
                 Ok(rs) => results.extend(rs),
-                Err((node, col, key)) => {
+                Err((node, key)) => {
                     return ProcessingResult::NeedReplay {
                                node: node,
-                               columns: vec![col],
                                key: vec![key],
                                was: rs2,
                            };

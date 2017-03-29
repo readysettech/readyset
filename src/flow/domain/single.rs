@@ -30,7 +30,6 @@ pub enum FinalProcessingResult {
     Done(Packet),
     NeedReplay {
         node: NodeAddress,
-        columns: Vec<usize>,
         key: Vec<DataType>,
         was: Packet,
     },
@@ -177,13 +176,8 @@ impl NodeDescriptor {
                     let _ = (); // force rustfmt to not eliminate closure {}
                     match i.on_input(from, data, nodes, state) {
                         ProcessingResult::Done(rs) => rs,
-                        ProcessingResult::NeedReplay {
-                            node,
-                            columns,
-                            key,
-                            was,
-                        } => {
-                            need_replay = Some((node, columns, key));
+                        ProcessingResult::NeedReplay { node, key, was } => {
+                            need_replay = Some((node, key));
                             was
                         }
                     }
@@ -194,10 +188,9 @@ impl NodeDescriptor {
                         materialize(m.data(), state.get_mut(&addr));
                         FinalProcessingResult::Done(m)
                     }
-                    Some((node, columns, key)) => {
+                    Some((node, key)) => {
                         FinalProcessingResult::NeedReplay {
                             node: node,
-                            columns: columns,
                             key: key,
                             was: m,
                         }

@@ -85,7 +85,7 @@ enum Waiting {
     /// the last node in the path, because the last node in the path must then be an Egress node.
     Target {
         buffer: VecDeque<Packet>,
-        prune: (Vec<usize>, Vec<DataType>),
+        prune: Vec<DataType>,
         releases: Option<LocalNodeIndex>,
     },
 }
@@ -195,13 +195,7 @@ impl Domain {
 
         let m = match m {
             single::FinalProcessingResult::Done(m) => m,
-            single::FinalProcessingResult::NeedReplay {
-                node,
-                was,
-                columns,
-                key,
-                ..
-            } => {
+            single::FinalProcessingResult::NeedReplay { node, was, key, .. } => {
                 // find tag we should use for replay
                 let tag = {
                     let mut tags = paths.iter()
@@ -264,7 +258,7 @@ impl Domain {
                         }
                         Waiting::Target {
                             buffer: buffered,
-                            prune: (columns.clone(), key.clone()),
+                            prune: key.clone(),
                             releases: release,
                         }
                     }
@@ -855,7 +849,7 @@ impl Domain {
                         self.state
                             .get_mut(&dst)
                             .unwrap()
-                            .mark_filled(&prune.0[..], prune.1.clone());
+                            .mark_filled(prune.clone());
                     }
 
                     // forward the current message through all local nodes.
@@ -945,6 +939,8 @@ impl Domain {
                 // we got a partial replay result that we were waiting for.
                 // we now need to process any messages that got held up waiting for it.
 
+                let columns = self.state[&ni].keys().swap_remove(0);
+
                 // NOTE: some of the data in the buffered messages may already be contained within
                 // the data we just replayed. we need to prune those out so we don't end up
                 // double-applying them!
@@ -954,12 +950,7 @@ impl Domain {
                     }
 
                     m.map_data(|mut rs| {
-                        rs.retain(|r| {
-                                      !prune.0
-                                           .iter()
-                                           .enumerate()
-                                           .all(|(i, &c)| r[c] == prune.1[i])
-                                  });
+                        rs.retain(|r| !columns.iter().enumerate().all(|(i, &c)| r[c] == prune[i]));
                         rs
                     });
                 }

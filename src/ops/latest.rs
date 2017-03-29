@@ -92,17 +92,16 @@ impl Ingredient for Latest {
                         debug_assert!(rs.len() <= 1, "a group had more than 1 result");
                         Some(Ok(rs.get(0)))
                     }
-                    LookupResult::Missing => Some(Err((self.key[0], r[self.key[0]].clone()))),
+                    LookupResult::Missing => Some(Err(r[self.key[0]].clone())),
                 }
             })
             .collect();
 
         let currents = match currents {
             Ok(c) => c,
-            Err((col, key)) => {
+            Err(key) => {
                 return ProcessingResult::NeedReplay {
                            node: from,
-                           columns: vec![col],
                            key: vec![key],
                            was: rs,
                        };

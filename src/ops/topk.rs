@@ -172,7 +172,6 @@ impl TopK {
         assert!(missing.is_some());
         ProcessingResult::NeedReplay {
             node: self.src,
-            columns: self.group_by.clone(),
             key: missing.unwrap(),
             was: new,
         }
@@ -261,16 +260,15 @@ impl Ingredient for TopK {
         let current: Result<Vec<_>, _> = consolidate.iter()
             .map(|(group, _)| match db.lookup(&self.group_by[..], &KeyType::from(&group[..])) {
                      LookupResult::Some(rs) => Ok(rs),
-                     LookupResult::Missing => Err((self.group_by.clone(), group.clone())),
+                     LookupResult::Missing => Err(group.clone()),
                  })
             .collect();
 
         let mut current = match current {
             Ok(current) => current.into_iter(),
-            Err((columns, key)) => {
+            Err(key) => {
                 return ProcessingResult::NeedReplay {
                            node: from,
-                           columns: columns,
                            key: key,
                            was: rs,
                        };
