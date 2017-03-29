@@ -193,7 +193,11 @@ impl MirNode {
                         make_join_node(&name, left, right, on_left, on_right, project, mig)
                     }
                     MirNodeType::Permute { ref emit } |
-                    MirNodeType::Project { ref emit } => make_permute_node(&name, emit, mig),
+                    MirNodeType::Project { ref emit } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_permute_node(&name, parent, emit, mig)
+                    }
                     MirNodeType::Reuse { ref node } => {
                         match *node.borrow()
                            .flow_node
@@ -336,14 +340,97 @@ fn make_base_node(name: &str,
 }
 
 fn make_join_node(name: &str,
-                  left_cols: &Vec<Column>,
-                  right_cols: &Vec<Column>,
+                  left: MirNodeRef,
+                  right: MirNodeRef,
+                  on_left: &Vec<Column>,
+                  on_right: &Vec<Column>,
                   proj_cols: &Vec<Column>,
                   mut mig: &mut Migration)
                   -> FlowNode {
-    unimplemented!();
+    let projected_cols_left: Vec<Column> = left.borrow()
+        .columns
+        .iter()
+        .filter(|c| proj_cols.contains(c))
+        .cloned()
+        .collect();
+    let projected_cols_right: Vec<Column> = right.borrow()
+        .columns
+        .iter()
+        .filter(|c| proj_cols.contains(c))
+        .cloned()
+        .collect();
+
+    let tuples_for_cols = |n: MirNodeRef, cols: &Vec<Column>| -> Vec<(NodeAddress, usize)> {
+        cols.iter()
+            .map(|c| {
+                let na = match *n.borrow()
+                           .flow_node
+                           .as_ref()
+                           .expect("must have flow node") {
+                    FlowNode::New(na) => na,
+                    FlowNode::Existing(na) => na,
+                };
+                (na,
+                 n.borrow()
+                     .columns
+                     .iter()
+                     .position(|ref nc| *nc == c)
+                     .unwrap())
+            })
+            .collect()
+    };
+
+    // non-join columns projected are the union of the ancestors' projected columns
+    // TODO(malte): this will need revisiting when we do smart reuse
+    let mut join_proj_config = tuples_for_cols(left.clone(), &projected_cols_left);
+    join_proj_config.extend(tuples_for_cols(right.clone(), &projected_cols_right));
+
+    // join columns need us to generate join group configs for the operator
+    let mut left_join_group = vec![0; projected_cols_left.len()];
+    let mut right_join_group = vec![0; projected_cols_right.len()];
+
+    let join_column_pairs = on_left.into_iter().zip(on_right.into_iter());
+    for (i, (l, r)) in join_column_pairs.enumerate() {
+        // equi-join only
+        left_join_group[left.borrow()
+            .columns
+            .iter()
+            .position(|ref nc| *nc == l)
+            .unwrap()] = i + 1;
+        right_join_group[right.borrow()
+            .columns
+            .iter()
+            .position(|ref nc| *nc == r)
+            .unwrap()] = i + 1;
+    }
+
+    let left_na = match left.borrow().flow_node {
+        Some(FlowNode::New(na)) => na,
+        Some(FlowNode::Existing(na)) => na,
+        None => panic!("Join parents must have FlowNodes by now!"),
+    };
+    let right_na = match right.borrow().flow_node {
+        Some(FlowNode::New(na)) => na,
+        Some(FlowNode::Existing(na)) => na,
+        None => panic!("Join parents must have FlowNodes by now!"),
+    };
+
+    let j = JoinBuilder::new(join_proj_config)
+        .from(left_na, left_join_group)
+        .join(right_na, right_join_group);
+    let fields = projected_cols_left.into_iter()
+        .chain(projected_cols_right.into_iter())
+        .map(|c| c.name.clone())
+        .collect::<Vec<String>>();
+    let n = mig.add_ingredient(String::from(name), fields.as_slice(), j);
+
+    FlowNode::New(n)
 }
 
-fn make_permute_node(name: &str, cols: &Vec<Column>, mut mig: &mut Migration) -> FlowNode {
+fn make_permute_node(name: &str,
+                     parent: MirNodeRef,
+                     emit: &Vec<Column>,
+                     mut mig: &mut Migration)
+                     -> FlowNode {
     unimplemented!()
 }
