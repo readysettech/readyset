@@ -20,7 +20,6 @@ use sql::query_signature::QuerySignature;
 
 use slog;
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
 use std::rc::Rc;
 use std::str;
 use std::vec::Vec;

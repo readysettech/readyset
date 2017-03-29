@@ -11,6 +11,7 @@ use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode};
 use slog;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::iter::FromIterator;
 use std::rc::Rc;
 use std::vec::Vec;
 
@@ -260,6 +261,141 @@ impl SqlToMirConverter {
         }
     }
 
+    fn make_function_node(&mut self,
+                          name: &str,
+                          func_col: &Column,
+                          group_cols: Vec<&Column>,
+                          parent: Option<MirNodeRef>)
+                          -> MirNodeRef {
+        use ops::grouped::aggregate::Aggregation;
+        use ops::grouped::extremum::Extremum;
+        use nom_sql::FunctionExpression::*;
+        use nom_sql::FieldExpression::*;
+
+        let mut mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
+            // No support for multi-columns functions at this point
+            assert_eq!(cols.len(), 1);
+
+            let over = cols.iter().next().unwrap();
+            let parent_node = match parent {
+                // If no explicit parent node is specified, we extract the base node from the
+                // "over" column's specification
+                None => {
+                    self.nodes[&(over.table
+                          .as_ref()
+                          .unwrap()
+                          .clone(),
+                      self.schema_version)]
+                            .clone()
+                }
+                // We have an explicit parent node (likely a projection helper), so use that
+                Some(ref node) => node.clone(),
+            };
+
+            self.make_grouped_node(name, &func_col, (parent_node, &over), group_cols, t)
+        };
+
+        let func = func_col.function.as_ref().unwrap();
+        match *func {
+            Sum(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::SUM)),
+            Count(Seq(ref cols)) => mknode(cols, GroupedNodeType::Aggregation(Aggregation::COUNT)),
+            Count(All) => {
+                // XXX(malte): there is no "over" column, but our aggregation operators' API
+                // requires one to be specified, so we earlier rewrote it to use the last parent
+                // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
+                // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
+                // rows including those with NULL values, and we don't have a mechanism to do that
+                // (but we also don't have a NULL value, so maybe we're okay).
+                panic!("COUNT(*) should have been rewritten earlier!")
+            }
+            Max(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MAX)),
+            Min(Seq(ref cols)) => mknode(cols, GroupedNodeType::Extremum(Extremum::MIN)),
+            GroupConcat(Seq(ref cols), ref separator) => {
+                mknode(cols, GroupedNodeType::GroupConcat(separator.clone()))
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    fn make_grouped_node(&mut self,
+                         name: &str,
+                         computed_col: &Column,
+                         over: (MirNodeRef, &Column),
+                         group_by: Vec<&Column>,
+                         node_type: GroupedNodeType)
+                         -> MirNodeRef {
+        let parent_node = over.0;
+
+        // Resolve column IDs in parent
+        let over_col = over.1;
+        /*let group_col = group_by.iter()
+            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
+            .collect::<Vec<_>>();*/
+
+        // The function node's set of output columns is the group columns plus the function
+        // column
+        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
+                                                                          Some(ref a) => {
+                                                       Column {
+                                                           name: a.clone(),
+                                                           alias: None,
+                                                           table: c.table.clone(),
+                                                           function: c.function.clone(),
+                                                       }
+                                                   }
+                                                                          None => (*c).clone(),
+                                                                      }));
+        combined_columns.push(computed_col.clone());
+
+        // make the new operator
+        match node_type {
+            GroupedNodeType::Aggregation(agg) => {
+                let n = MirNode::new(name,
+                                     self.schema_version,
+                                     combined_columns,
+                                     MirNodeType::Aggregation {
+                                         on: over_col.clone(),
+                                         group_by: group_by.into_iter().cloned().collect(),
+                                         kind: agg,
+                                     },
+                                     vec![parent_node.clone()],
+                                     vec![]);
+                let rcn = Rc::new(RefCell::new(n));
+                parent_node.borrow_mut().add_child(rcn.clone());
+                rcn
+            }
+            GroupedNodeType::Extremum(extr) => {
+                let n = MirNode::new(name,
+                                     self.schema_version,
+                                     combined_columns,
+                                     MirNodeType::Extremum {
+                                         on: over_col.clone(),
+                                         group_by: group_by.into_iter().cloned().collect(),
+                                         kind: extr,
+                                     },
+                                     vec![parent_node.clone()],
+                                     vec![]);
+                let rcn = Rc::new(RefCell::new(n));
+                parent_node.borrow_mut().add_child(rcn.clone());
+                rcn
+            }
+            GroupedNodeType::GroupConcat(sep) => {
+                let n = MirNode::new(name,
+                                     self.schema_version,
+                                     combined_columns,
+                                     MirNodeType::GroupConcat {
+                                         on: over_col.clone(),
+                                         separator: sep,
+                                     },
+                                     vec![parent_node.clone()],
+                                     vec![]);
+                let rcn = Rc::new(RefCell::new(n));
+                parent_node.borrow_mut().add_child(rcn.clone());
+                rcn
+            }
+        }
+    }
+
     fn make_join_node(&mut self,
                       name: &str,
                       jps: &[ConditionTree],
@@ -314,6 +450,62 @@ impl SqlToMirConverter {
         left_node.borrow_mut().add_child(rcn.clone());
         right_node.borrow_mut().add_child(rcn.clone());
 
+        rcn
+    }
+
+    fn make_projection_helper(&mut self, name: &str, computed_col: &Column) -> MirNodeRef {
+        let target_cols = target_columns_from_computed_column(computed_col);
+        // TODO(malte): we only support a single column argument at this point
+        assert_eq!(target_cols.len(), 1);
+        let fn_col = target_cols.last().unwrap();
+        let parent_node = self.nodes[&(fn_col.table
+              .as_ref()
+              .unwrap()
+              .clone(),
+          self.schema_version)]
+                .clone();
+
+        self.make_project_node(name,
+                               parent_node,
+                               vec![fn_col],
+                               vec![(String::from("grp"), DataType::from(0 as i32))])
+    }
+
+    fn make_project_node(&mut self,
+                         name: &str,
+                         parent_node: MirNodeRef,
+                         proj_cols: Vec<&Column>,
+                         literals: Vec<(String, DataType)>)
+                         -> MirNodeRef {
+        use ops::project::Project;
+
+        //assert!(proj_cols.iter().all(|c| c.table == parent_name));
+
+        let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
+        let fields = proj_cols.clone()
+            .into_iter()
+            .cloned()
+            .chain(literal_names.into_iter().map(|n| {
+                Column {
+                    name: n,
+                    alias: None,
+                    table: Some(String::from(name)),
+                    function: None,
+                }
+            }))
+            .collect();
+
+        let n = MirNode::new(name,
+                             self.schema_version,
+                             fields,
+                             MirNodeType::Project {
+                                 emit: proj_cols.into_iter().cloned().collect(),
+                                 literals: literals,
+                             },
+                             vec![parent_node.clone()],
+                             vec![]);
+        let rcn = Rc::new(RefCell::new(n));
+        parent_node.borrow_mut().add_child(rcn.clone());
         rcn
     }
 
@@ -411,7 +603,7 @@ impl SqlToMirConverter {
 
             // 3. Grouped and function nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
-            /*match qg.relations.get("computed_columns") {
+            match qg.relations.get("computed_columns") {
                 None => (),
                 Some(computed_cols_cgn) => {
                     // Function columns with GROUP BY clause
@@ -450,18 +642,15 @@ impl SqlToMirConverter {
                                         .filter(|ref c| !gb_cols.contains(c))
                                         .collect();
                                     // combine
-                                    let gb_and_param_cols: Vec<_> = gb_cols.iter()
-                                        .chain(param_cols.into_iter())
-                                        .cloned()
-                                        .collect();
-                                    let ni = self.make_function_node(&format!("q_{:x}_n{}",
-                                                                              qg.signature().hash,
-                                                                              new_node_count),
-                                                                     fn_col,
-                                                                     gb_and_param_cols.as_slice(),
-                                                                     prev_ni,
-                                                                     mig);
-                                    func_nodes.push(ni);
+                                    let gb_and_param_cols: Vec<_> =
+                                        gb_cols.iter().chain(param_cols.into_iter()).collect();
+                                    let n = self.make_function_node(&format!("q_{:x}_n{}",
+                                                                             qg.signature().hash,
+                                                                             new_node_count),
+                                                                    fn_col,
+                                                                    gb_and_param_cols,
+                                                                    prev_node.clone());
+                                    func_nodes.push(n);
                                     grouped_fn_columns.insert(fn_col);
                                     new_node_count += 1;
                                 }
@@ -489,13 +678,13 @@ impl SqlToMirConverter {
                             .as_ref()
                             .unwrap()
                             .columns;
-                        let (group_cols, parent_ni) = if proj_cols_from_target_table.is_empty() {
+                        let (group_cols, parent_node) = if proj_cols_from_target_table.is_empty() {
                             // slightly messy hack: if there are no group columns and the table on
                             // which we compute has no projected columns in the output, we make one
                             // up a group column by adding an extra projection node
                             let proj_name = format!("{}_prj_hlpr", agg_node_name);
-                            let proj = self.make_projection_helper(&proj_name, computed_col, mig);
-                            func_nodes.push(proj);
+                            let proj = self.make_projection_helper(&proj_name, computed_col);
+                            func_nodes.push(proj.clone());
                             new_node_count += 1;
 
                             let bogo_group_col = Column::from(format!("{}.grp", proj_name)
@@ -504,16 +693,15 @@ impl SqlToMirConverter {
                         } else {
                             (proj_cols_from_target_table.clone(), None)
                         };
-                        let ni = self.make_function_node(agg_node_name,
-                                                         computed_col,
-                                                         group_cols.as_slice(),
-                                                         parent_ni,
-                                                         mig);
-                        func_nodes.push(ni);
+                        let n = self.make_function_node(agg_node_name,
+                                                        computed_col,
+                                                        group_cols.iter().collect(),
+                                                        parent_node);
+                        func_nodes.push(n);
                         new_node_count += 1;
                     }
                 }
-            }*/
+            }
 
             // 1. Generate the necessary filter node for each relation node in the query graph.
             let mut filter_nodes = HashMap::<String, Vec<MirNodeRef>>::new();

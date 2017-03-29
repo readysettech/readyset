@@ -7,6 +7,8 @@ use std::rc::Rc;
 use flow::Migration;
 use flow::core::{NodeAddress, DataType};
 use ops;
+use ops::grouped::aggregate::Aggregation as AggregationKind;
+use ops::grouped::extremum::Extremum as ExtremumKind;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
 use ops::topk::OrderedRecordComparator;
@@ -202,8 +204,13 @@ impl MirNode {
                         let right = self.ancestors[1].clone();
                         make_join_node(&name, left, right, on_left, on_right, project, mig)
                     }
-                    MirNodeType::Permute { ref emit } |
-                    MirNodeType::Project { ref emit } => {
+                    MirNodeType::Project { ref emit, ref literals } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        // XXX(malte): fix
+                        make_permute_node(&name, parent, emit, mig)
+                    }
+                    MirNodeType::Permute { ref emit } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
                         make_permute_node(&name, parent, emit, mig)
@@ -233,14 +240,22 @@ impl MirNode {
 
 pub enum MirNodeType {
     /// over column, group_by columns
-    Aggregation { on: Column, group_by: Vec<Column> },
+    Aggregation {
+        on: Column,
+        group_by: Vec<Column>,
+        kind: AggregationKind,
+    },
     /// columns, keys (non-compound)
     Base {
         columns: Vec<Column>,
         keys: Vec<Column>,
     },
     /// over column, group_by columns
-    Extremum { on: Column, group_by: Vec<Column> },
+    Extremum {
+        on: Column,
+        group_by: Vec<Column>,
+        kind: ExtremumKind,
+    },
     /// filter conditions (one for each parent column)
     Filter { conditions: Vec<(Operator, DataType)>, },
     /// over column, separator
@@ -262,7 +277,10 @@ pub enum MirNodeType {
     /// group columns
     Latest { group_by: Vec<Column> },
     /// emit columns
-    Project { emit: Vec<Column> },
+    Project {
+        emit: Vec<Column>,
+        literals: Vec<(String, DataType)>,
+    },
     /// emit columns
     Permute { emit: Vec<Column> },
     /// emit columns left, emit columns right
@@ -312,6 +330,18 @@ impl Debug for MirNodeType {
                        "π [{}]",
                        emit.iter()
                            .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "))
+            }
+            MirNodeType::Project { ref emit, ref literals } => {
+                write!(f,
+                       "π [{}, lit: {}]",
+                       emit.iter()
+                           .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "),
+                       literals.iter()
+                           .map(|&(ref n, ref v)| format!("{}: {}", n, v))
                            .collect::<Vec<_>>()
                            .join(", "))
             }
