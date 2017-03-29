@@ -51,7 +51,13 @@ impl Hook {
         // Update materialized state
         for rec in records.iter() {
             match rec {
-                &Record::Positive(ref r) => self.state.insert(r.clone()),
+                &Record::Positive(ref r) => {
+                    if !self.state.insert(r.clone()) {
+                        // tried to insert into partial materialization hole
+                        // need replay!
+                        unimplemented!();
+                    }
+                }
                 &Record::Negative(ref r) => self.state.remove(r),
                 &Record::DeleteRequest(..) => unreachable!(),
             }

@@ -1,6 +1,7 @@
 use flow::prelude::*;
 use std::ops::Index;
 use std::iter::FromIterator;
+use std::collections::hash_map::Entry;
 
 pub struct Map<T> {
     things: Vec<Option<T>>,
@@ -253,7 +254,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         !self.state.is_empty()
     }
 
-    pub fn insert(&mut self, r: Arc<Vec<T>>) {
+    pub fn insert(&mut self, r: Arc<Vec<T>>) -> bool {
         let mut rclones = Vec::with_capacity(self.state.len());
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
@@ -261,14 +262,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.rows = self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
-            // TODO
-            // if s.2 && !s.1.contains_key(r[s.0]..)
-            // this state is partially materialized, and the insert is trying to fill a hole.
-            // this should *never* happen. holes should *always* first be filled through
-            // mark_filled. this indicates that a replay was needed, but not detected, which can
-            // happen if there is an operator whose output is materialized, but that does not also
-            // do lookups into that state before writing to it.
-            // FIXME FIXME FIXME FIXME XXX XXX XXX TODO TODO TODO
+
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     // treat this specially to avoid the extra Vec
@@ -277,7 +271,10 @@ impl<T: Hash + Eq + Clone> State<T> {
                     // in the common case of an entry already existing for the given key...
                     if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
                         rs.push(r);
-                        return;
+                        return true;
+                    } else if s.2 {
+                        // trying to insert a record into partial materialization hole!
+                        return false;
                     }
                     map.insert(r[s.0[0]].clone(), vec![r]);
                 }
@@ -285,24 +282,38 @@ impl<T: Hash + Eq + Clone> State<T> {
                     match s.1 {
                         KeyedState::Double(ref mut map) => {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => return false,
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Tri(ref mut map) => {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => return false,
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Quad(ref mut map) => {
                             let key = (r[s.0[0]].clone(),
                                        r[s.0[1]].clone(),
                                        r[s.0[2]].clone(),
                                        r[s.0[3]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => return false,
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Single(..) => unreachable!(),
                     }
                 }
             }
         }
+
+        true
     }
 
     pub fn remove(&mut self, r: &[T]) {
