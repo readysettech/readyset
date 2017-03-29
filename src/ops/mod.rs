@@ -211,11 +211,12 @@ pub mod test {
                 return u;
             }
 
-            single::materialize(&u,
-                                self.states.get_mut(self.nut
-                                                        .unwrap()
-                                                        .1
-                                                        .as_local()));
+            let ok = single::materialize(&u,
+                                         self.states.get_mut(self.nut
+                                                                 .unwrap()
+                                                                 .1
+                                                                 .as_local()));
+            assert!(ok.is_ok());
             u
         }
 

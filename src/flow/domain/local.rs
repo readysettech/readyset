@@ -254,6 +254,10 @@ impl<T: Hash + Eq + Clone> State<T> {
         !self.state.is_empty()
     }
 
+    pub fn is_partial(&self) -> bool {
+        self.state.iter().any(|s| s.2)
+    }
+
     pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
@@ -423,6 +427,45 @@ impl<T: Hash + Eq + Clone> State<T> {
                 }
             }
         }
+    }
+
+    pub fn hits_hole(&self, r: &[T]) -> Option<(&[usize])> {
+        for s in &self.state {
+            if !s.2 {
+                continue;
+            }
+
+            match s.1 {
+                KeyedState::Single(ref map) => {
+                    if !map.contains_key(&r[s.0[0]]) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Double(ref map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Tri(ref map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Quad(ref map) => {
+                    let key = (r[s.0[0]].clone(),
+                               r[s.0[1]].clone(),
+                               r[s.0[2]].clone(),
+                               r[s.0[3]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> LookupResult<T> {

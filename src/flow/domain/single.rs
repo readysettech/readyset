@@ -60,10 +60,16 @@ impl NodeDescriptor {
                    -> FinalProcessingResult {
 
         use flow::payload::TransactionState;
-        let addr = *self.addr().as_local();
+        let addr = self.addr();
         match *self.inner {
             flow::node::Type::Ingress => {
-                materialize(m.data(), state.get_mut(&addr));
+                if let Err(key) = materialize(m.data(), state.get_mut(addr.as_local())) {
+                    return FinalProcessingResult::NeedReplay {
+                               node: addr,
+                               was: m,
+                               key: vec![key],
+                           };
+                }
                 FinalProcessingResult::Done(m)
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
@@ -172,8 +178,13 @@ impl NodeDescriptor {
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
                 let mut need_replay = None;
+
+                let mut data_clone = None;
                 m.map_data(|data| {
-                    let _ = (); // force rustfmt to not eliminate closure {}
+                    // clone if we're partially materialized; we may need to back out
+                    if state.get_mut(addr.as_local()).map(|s| s.is_partial()).unwrap_or(false) {
+                        data_clone = Some(data.clone());
+                    }
                     match i.on_input(from, data, nodes, state) {
                         ProcessingResult::Done(rs) => rs,
                         ProcessingResult::NeedReplay { node, key, was } => {
@@ -185,7 +196,14 @@ impl NodeDescriptor {
 
                 match need_replay {
                     None => {
-                        materialize(m.data(), state.get_mut(&addr));
+                        if let Err(key) = materialize(m.data(), state.get_mut(addr.as_local())) {
+                            m.map_data(|_| data_clone.take().unwrap());
+                            return FinalProcessingResult::NeedReplay {
+                                       node: addr,
+                                       was: m,
+                                       key: vec![key],
+                                   };
+                        }
                         FinalProcessingResult::Done(m)
                     }
                     Some((node, key)) => {
@@ -202,15 +220,30 @@ impl NodeDescriptor {
     }
 }
 
-pub fn materialize(rs: &Records, state: Option<&mut State>) {
+pub fn materialize(rs: &Records, state: Option<&mut State>) -> Result<(), DataType> {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
-        return;
+        return Ok(());
     }
 
     // yes!
     let mut state = state.unwrap();
+
+    // are we partially materialized?
+    if state.is_partial() {
+        // yes -- we need to check that we're not hitting any holes
+        for r in rs.iter() {
+            if let Some(cols) = state.hits_hole(r) {
+                // we need a replay of this update!
+                if cols.len() != 1 {
+                    unimplemented!();
+                }
+                return Err(r[cols[0]].clone());
+            }
+        }
+    }
+
     for r in rs.iter() {
         match *r {
             Record::Positive(ref r) => state.insert(r.clone()),
@@ -218,6 +251,8 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) {
             Record::DeleteRequest(..) => unreachable!(),
         }
     }
+
+    Ok(())
 }
 
 use std::ops::Deref;
