@@ -10,9 +10,11 @@ use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode};
 
 use slog;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::vec::Vec;
 
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
@@ -548,7 +550,43 @@ impl SqlToMirConverter {
         rcn
     }
 
-    /// Returns (nodes_added, leaf_node)
+    fn make_topk_node(&mut self,
+                      name: &str,
+                      parent: MirNodeRef,
+                      group_by: Vec<&Column>,
+                      order: &Option<OrderClause>,
+                      limit: &LimitClause)
+                      -> MirNodeRef {
+        let combined_columns = parent.borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
+
+        let order = match *order {
+            Some(ref o) => Some(o.columns.clone()),
+            None => None,
+        };
+
+        // make the new operator and record its metadata
+        let node = MirNode::new(name,
+                                self.schema_version,
+                                combined_columns,
+                                MirNodeType::TopK {
+                                    order: order,
+                                    group_by: group_by.into_iter().cloned().collect(),
+                                    k: limit.limit as usize,
+                                },
+                                vec![parent.clone()],
+                                vec![]);
+
+        let rcn = Rc::new(RefCell::new(node));
+        parent.borrow_mut().add_child(rcn.clone());
+
+        rcn
+    }
+
+    /// Returns list of nodes added
     fn make_nodes_for_selection(&mut self,
                                 name: &str,
                                 st: &SelectStatement,
@@ -801,29 +839,20 @@ impl SqlToMirConverter {
             };
 
             // 4. Potentially insert TopK node below the final node
-            /*if let Some(ref limit) = st.limit {
-                let mut group_by: Vec<_> = qg.parameters()
-                    .iter()
-                    .map(|col| self.field_to_columnid(final_na, &col.name).unwrap())
-                    .collect();
+            if let Some(ref limit) = st.limit {
+                let group_by = qg.parameters();
 
-                // no query parameters, so we index on the first column
-                if group_by.is_empty() {
-                    group_by.push(0);
-                }
-
-                let ni = self.make_topk_node(&format!("q_{:x}_n{}",
-                                                      qg.signature().hash,
-                                                      new_node_count),
-                                             final_na,
-                                             group_by,
-                                             &st.order,
-                                             limit,
-                                             mig);
-                func_nodes.push(ni);
-                final_na = ni;
+                let node = self.make_topk_node(&format!("q_{:x}_n{}",
+                                                        qg.signature().hash,
+                                                        new_node_count),
+                                               final_node,
+                                               group_by,
+                                               &st.order,
+                                               limit);
+                func_nodes.push(node.clone());
+                final_node = node;
                 new_node_count += 1;
-            }*/
+            }
 
             // 5. Generate leaf views that expose the query result
             {

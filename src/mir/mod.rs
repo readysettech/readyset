@@ -1,4 +1,4 @@
-use nom_sql::{Column, Operator};
+use nom_sql::{Column, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug};
@@ -291,7 +291,7 @@ pub enum MirNodeType {
     },
     /// order function, group columns, k
     TopK {
-        order: Box<OrderedRecordComparator>,
+        order: Option<Vec<(Column, OrderType)>>,
         group_by: Vec<Column>,
         k: usize,
     },
