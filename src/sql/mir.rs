@@ -579,7 +579,7 @@ impl SqlToMirConverter {
                 base_nodes.insert(*rel, Rc::new(RefCell::new(base_for_rel)));
             }
 
-            // 2. Generate join nodes for the query. This starts out by joining two of the base
+            // 1. Generate join nodes for the query. This starts out by joining two of the base
             //    nodes corresponding to relations in the first join predicate, and then continues
             //    to join the result against previously unseen tables from the remaining
             //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
