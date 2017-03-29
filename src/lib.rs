@@ -379,6 +379,7 @@ pub use ops::join::Builder as JoinBuilder;
 pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::{Operator, Filter};
+pub use ops::left_join::LeftJoin;
 pub use ops::topk::TopK;
 pub use recipe::Recipe;
 pub use sql::{SqlIncorporator, ToFlowParts};
