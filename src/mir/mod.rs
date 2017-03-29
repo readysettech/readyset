@@ -71,7 +71,6 @@ impl MirQuery {
     }
 }
 
-#[derive(Debug)]
 pub struct MirNode {
     name: String,
     from_version: usize,
@@ -95,8 +94,8 @@ impl MirNode {
             from_version: 0,
             columns: columns,
             inner: inner,
-            ancestors: ancestors,
-            children: children,
+            ancestors: ancestors.clone(),
+            children: children.clone(),
             flow_node: None,
         }
     }
@@ -113,6 +112,14 @@ impl MirNode {
             children: node.borrow().children.clone(),
             flow_node: None, // will be set in `into_flow_parts`
         }
+    }
+
+    pub fn add_ancestor(&mut self, a: MirNodeRef) {
+        self.ancestors.push(a)
+    }
+
+    pub fn add_child(&mut self, c: MirNodeRef) {
+        self.children.push(c)
     }
 
     pub fn ancestors(&self) -> &[MirNodeRef] {
@@ -150,14 +157,10 @@ impl MirNode {
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
     fn description(&self) -> String {
-        format!("{}: {} / {}",
+        format!("{}: {} / {} columns",
                 self.versioned_name(),
                 self.inner.description(),
-                self.columns
-                    .iter()
-                    .map(|ref c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "))
+                self.columns.len())
     }
 
     /// Translate a column in this ingredient into the corresponding column(s) in
@@ -203,7 +206,7 @@ pub enum MirNodeType {
     /// on left columns, on right columns, emit columns
     Join(Vec<Column>, Vec<Column>, Vec<Column>),
     /// on left column, on right column, emit columns
-    LeftJoin(Column, Column, Vec<Column>),
+    LeftJoin(Vec<Column>, Vec<Column>, Vec<Column>),
     /// group columns
     Latest(Vec<Column>),
     /// emit columns
@@ -216,6 +219,8 @@ pub enum MirNodeType {
     TopK(Box<OrderedRecordComparator>, Vec<Column>, usize),
     /// reuse another node
     Reuse(MirNodeRef),
+    /// leaf (reader) node, keys
+    Leaf(MirNodeRef, Vec<Column>),
 }
 
 impl MirNodeType {
@@ -223,32 +228,14 @@ impl MirNodeType {
         format!("{:?}", self)
     }
 
-    fn into_flow_parts(&mut self, name: &str, mut mig: &mut Migration) -> FlowNode {
+    fn into_flow_parts(&self, name: &str, mut mig: &mut Migration) -> FlowNode {
         match *self {
-            MirNodeType::Base(ref cols, ref keys) => {
-                let node = if keys.len() > 0 {
-                    let pkey_column_ids = keys.iter()
-                        .map(|pkc| {
-                                 //assert_eq!(pkc.table.as_ref().unwrap(), name);
-                                 cols.iter().position(|c| c == pkc).unwrap()
-                             })
-                        .collect();
-                    mig.add_ingredient(name,
-                                       cols.iter()
-                                           .map(|c| &c.name)
-                                           .collect::<Vec<_>>()
-                                           .as_slice(),
-                                       ops::base::Base::new(pkey_column_ids))
-                } else {
-                    mig.add_ingredient(name,
-                                       cols.iter()
-                                           .map(|c| &c.name)
-                                           .collect::<Vec<_>>()
-                                           .as_slice(),
-                                       ops::base::Base::default())
-                };
-                FlowNode::New(node)
+            MirNodeType::Base(ref cols, ref keys) => make_base_node(name, cols, keys, mig),
+            MirNodeType::Join(ref left_cols, ref right_cols, ref proj_cols) => {
+                make_join_node(name, left_cols, right_cols, proj_cols, mig)
             }
+            MirNodeType::Permute(ref cols) |
+            MirNodeType::Project(ref cols) => make_permute_node(name, cols, mig),
             MirNodeType::Reuse(ref node) => {
                 match *node.borrow()
                            .flow_node
@@ -266,6 +253,12 @@ impl MirNodeType {
     }
 }
 
+impl Debug for MirNode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "{}", self.description())
+    }
+}
+
 impl Debug for MirNodeType {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
@@ -278,8 +271,58 @@ impl Debug for MirNodeType {
                            .join(","))
             }
             MirNodeType::Join(ref l_cols, ref r_cols, ref proj_cols) => write!(f, "⋈ []"),
-            MirNodeType::Reuse(ref reused) => write!(f, "Reuse [{:?}]", reused),
+            MirNodeType::Reuse(ref reused) => write!(f, "Reuse [{:#?}]", reused),
+            MirNodeType::Permute(ref cols) => {
+                write!(f,
+                       "π [{}]",
+                       cols.iter()
+                           .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "))
+            }
             _ => unimplemented!(),
         }
     }
+}
+
+fn make_base_node(name: &str,
+                  cols: &Vec<Column>,
+                  keys: &Vec<Column>,
+                  mut mig: &mut Migration)
+                  -> FlowNode {
+    let node = if keys.len() > 0 {
+        let pkey_column_ids = keys.iter()
+            .map(|pkc| {
+                     //assert_eq!(pkc.table.as_ref().unwrap(), name);
+                     cols.iter().position(|c| c == pkc).unwrap()
+                 })
+            .collect();
+        mig.add_ingredient(name,
+                           cols.iter()
+                               .map(|c| &c.name)
+                               .collect::<Vec<_>>()
+                               .as_slice(),
+                           ops::base::Base::new(pkey_column_ids))
+    } else {
+        mig.add_ingredient(name,
+                           cols.iter()
+                               .map(|c| &c.name)
+                               .collect::<Vec<_>>()
+                               .as_slice(),
+                           ops::base::Base::default())
+    };
+    FlowNode::New(node)
+}
+
+fn make_join_node(name: &str,
+                  left_cols: &Vec<Column>,
+                  right_cols: &Vec<Column>,
+                  proj_cols: &Vec<Column>,
+                  mut mig: &mut Migration)
+                  -> FlowNode {
+    unimplemented!();
+}
+
+fn make_permute_node(name: &str, cols: &Vec<Column>, mut mig: &mut Migration) -> FlowNode {
+    unimplemented!()
 }

@@ -145,6 +145,7 @@ impl SqlToMirConverter {
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes {
+            trace!(self.log, "MN: {:?}", mn);
             self.nodes.insert((String::from(name), self.schema_version), mn.clone());
             if mn.borrow().ancestors().len() == 0 {
                 // root
@@ -297,15 +298,16 @@ impl SqlToMirConverter {
                              self.schema_version,
                              fields,
                              inner,
-                             vec![left_node, right_node],
+                             vec![left_node.clone(), right_node.clone()],
                              vec![]);
-        //mig.add_ingredient(String::from(name), fields.as_slice(), j);
-        // println!("added join on {:?} and {:?}: {}", left_ni, right_ni, name);
-        //self.node_addresses.insert(String::from(name), n);
-        //self.node_fields.insert(n, fields);
-        Rc::new(RefCell::new(n))
+        let rcn = Rc::new(RefCell::new(n));
+        left_node.borrow_mut().add_child(rcn.clone());
+        right_node.borrow_mut().add_child(rcn.clone());
+
+        rcn
     }
 
+    /// Returns (nodes_added, leaf_node)
     fn make_nodes_for_selection(&mut self,
                                 name: &str,
                                 st: &SelectStatement,
@@ -313,12 +315,14 @@ impl SqlToMirConverter {
                                 -> Vec<MirNodeRef> {
         use std::collections::HashMap;
 
-        let nodes_added: Vec<MirNodeRef>;
+        let leaf_node;
+        let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
 
-        // J-G-F-P
+        // Canonical operator order: B-J-G-F-P-R
+        // (Base, Join, GroupBy, Filter, Project, Reader)
         {
-            // 0. Roots
+            // 0. Base nodes (always reused)
             let mut base_nodes: HashMap<&str, MirNodeRef> = HashMap::default();
             let mut sorted_rels: Vec<&str> = qg.relations
                 .keys()
@@ -334,7 +338,7 @@ impl SqlToMirConverter {
                 base_nodes.insert(*rel, Rc::new(RefCell::new(base_for_rel)));
             }
 
-            // 2. Generate join nodes for the query. This starts out by joining two of the filter
+            // 2. Generate join nodes for the query. This starts out by joining two of the base
             //    nodes corresponding to relations in the first join predicate, and then continues
             //    to join the result against previously unseen tables from the remaining
             //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
@@ -397,12 +401,146 @@ impl SqlToMirConverter {
 
             // 3. Grouped and function nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
+            /*match qg.relations.get("computed_columns") {
+                None => (),
+                Some(computed_cols_cgn) => {
+                    // Function columns with GROUP BY clause
+                    let mut grouped_fn_columns = HashSet::new();
+                    for e in qg.edges.values() {
+                        match *e {
+                            QueryGraphEdge::Join(_) |
+                            QueryGraphEdge::LeftJoin(_) => (),
+                            QueryGraphEdge::GroupBy(ref gb_cols) => {
+                                // Generate the right function nodes for all relevant columns in
+                                // the "computed_columns" node
+                                // TODO(malte): there can only be one GROUP BY in each query, but
+                                // the columns can come from different tables. In that case, we
+                                // would need to generate an Agg-Join-Agg sequence for each pair of
+                                // tables involved.
+                                for fn_col in &computed_cols_cgn.columns {
+                                    // we must also push parameter columns through the group by
+                                    let over_cols = target_columns_from_computed_column(fn_col);
+                                    // TODO(malte): we only support a single `over` column here
+                                    assert_eq!(over_cols.len(), 1);
+                                    let over_table = over_cols.iter()
+                                        .next()
+                                        .unwrap()
+                                        .table
+                                        .as_ref()
+                                        .unwrap()
+                                        .as_str();
+                                    // get any parameter columns that aren't also in the group-by
+                                    // column set
+                                    let param_cols: Vec<_> = qg.relations
+                                        .get(over_table)
+                                        .as_ref()
+                                        .unwrap()
+                                        .parameters
+                                        .iter()
+                                        .filter(|ref c| !gb_cols.contains(c))
+                                        .collect();
+                                    // combine
+                                    let gb_and_param_cols: Vec<_> = gb_cols.iter()
+                                        .chain(param_cols.into_iter())
+                                        .cloned()
+                                        .collect();
+                                    let ni = self.make_function_node(&format!("q_{:x}_n{}",
+                                                                              qg.signature().hash,
+                                                                              new_node_count),
+                                                                     fn_col,
+                                                                     gb_and_param_cols.as_slice(),
+                                                                     prev_ni,
+                                                                     mig);
+                                    func_nodes.push(ni);
+                                    grouped_fn_columns.insert(fn_col);
+                                    new_node_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    // Function columns without GROUP BY
+                    for computed_col in computed_cols_cgn.columns
+                            .iter()
+                            .filter(|c| !grouped_fn_columns.contains(c))
+                            .collect::<Vec<_>>() {
 
-            // 4. Filters
+                        let agg_node_name =
+                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
+
+                        let over_cols = target_columns_from_computed_column(computed_col);
+                        let ref proj_cols_from_target_table = qg.relations
+                            .get(over_cols.iter()
+                                     .next()
+                                     .as_ref()
+                                     .unwrap()
+                                     .table
+                                     .as_ref()
+                                     .unwrap())
+                            .as_ref()
+                            .unwrap()
+                            .columns;
+                        let (group_cols, parent_ni) = if proj_cols_from_target_table.is_empty() {
+                            // slightly messy hack: if there are no group columns and the table on
+                            // which we compute has no projected columns in the output, we make one
+                            // up a group column by adding an extra projection node
+                            let proj_name = format!("{}_prj_hlpr", agg_node_name);
+                            let proj = self.make_projection_helper(&proj_name, computed_col, mig);
+                            func_nodes.push(proj);
+                            new_node_count += 1;
+
+                            let bogo_group_col = Column::from(format!("{}.grp", proj_name)
+                                                                  .as_str());
+                            (vec![bogo_group_col], Some(proj))
+                        } else {
+                            (proj_cols_from_target_table.clone(), None)
+                        };
+                        let ni = self.make_function_node(agg_node_name,
+                                                         computed_col,
+                                                         group_cols.as_slice(),
+                                                         parent_ni,
+                                                         mig);
+                        func_nodes.push(ni);
+                        new_node_count += 1;
+                    }
+                }
+            }*/
+
+            // 1. Generate the necessary filter node for each relation node in the query graph.
             let mut filter_nodes = HashMap::<String, Vec<MirNodeRef>>::new();
+            let mut new_filter_nodes = Vec::new();
+            // Need to iterate over relations in a deterministic order, as otherwise nodes will be
+            // added in a different order every time, which will yield different node identifiers
+            // and make it difficult for applications to check what's going on.
+            /*let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
+            sorted_rels.sort();
+            for rel in &sorted_rels {
+                let qgn = &qg.relations[*rel];
+                // we'll handle computed columns later
+                if *rel != "computed_columns" {
+                    // the following conditional is required to avoid "empty" nodes (without any
+                    // projected columns) that are required as inputs to joins
+                    if !qgn.predicates.is_empty() {
+                        // add a basic filter/permute node for each query graph node if it either
+                        // has: 1) projected columns; or 2) a filter condition
+                        let fns = self.make_filter_and_project_nodes(&format!("q_{:x}_n{}",
+                                                                              qg.signature().hash,
+                                                                              new_node_count),
+                                                                     qgn,
+                                                                     mig);
+                        filter_nodes.insert((*rel).clone(), fns.clone());
+                        new_node_count += fns.len();
+                        new_filter_nodes.extend(fns);
+                    } else {
+                        // otherwise, just record the node index of the base node for the relation
+                        // that is being selected from
+                        // N.B.: no need to update `new_node_count` as no nodes are added
+                        filter_nodes.insert((*rel).clone(), vec![self.address_for(rel)]);
+                    }
+                }
+            }*/
 
-            // 5. Get the final node
-            let mut final_na: MirNodeRef = if !func_nodes.is_empty() {
+            // 4. Get the final node
+            let mut final_node: MirNodeRef = if !func_nodes.is_empty() {
                 // XXX(malte): This won't work if (a) there are multiple function nodes in the
                 // query, or (b) computed columns are used within JOIN clauses
                 assert!(func_nodes.len() <= 2);
@@ -426,12 +564,97 @@ impl SqlToMirConverter {
             };
 
 
-            // 6. Potentially insert TopK node below the final node
+            // 4. Potentially insert TopK node below the final node
+            /*if let Some(ref limit) = st.limit {
+                let mut group_by: Vec<_> = qg.parameters()
+                    .iter()
+                    .map(|col| self.field_to_columnid(final_na, &col.name).unwrap())
+                    .collect();
 
-            // 7. Generate leaf views that expose the query result
+                // no query parameters, so we index on the first column
+                if group_by.is_empty() {
+                    group_by.push(0);
+                }
 
-            // XXX(malte): hack
-            join_nodes
+                let ni = self.make_topk_node(&format!("q_{:x}_n{}",
+                                                      qg.signature().hash,
+                                                      new_node_count),
+                                             final_na,
+                                             group_by,
+                                             &st.order,
+                                             limit,
+                                             mig);
+                func_nodes.push(ni);
+                final_na = ni;
+                new_node_count += 1;
+            }*/
+
+            // 5. Generate leaf views that expose the query result
+            {
+                let projected_columns: Vec<Column> =
+                    sorted_rels.iter().fold(Vec::new(), |mut v, s| {
+                        v.extend(qg.relations[*s].columns.clone().into_iter());
+                        v
+                    });
+
+                // translate aliases on leaf columns only
+                let fields = projected_columns.iter()
+                    .map(|c| match c.alias {
+                             Some(ref a) => {
+                                 Column {
+                                     name: a.clone(),
+                                     table: c.table.clone(),
+                                     alias: None,
+                                     function: c.function.clone(),
+                                 }
+                             }
+                             None => c.clone(),
+                         })
+                    .collect::<Vec<Column>>();
+                let leaf_proj_node = MirNode::new(name,
+                                                  self.schema_version,
+                                                  fields,
+                                                  MirNodeType::Permute(projected_columns),
+                                                  vec![final_node.clone()],
+                                                  vec![]);
+                leaf_node = Rc::new(RefCell::new(leaf_proj_node));
+                final_node.borrow_mut().add_child(leaf_node.clone());
+                new_node_count += 1;
+
+                //self.node_addresses.insert(String::from(name), leaf_node);
+                //self.node_fields.insert(leaf_node, fields);
+
+                // We always materialize leaves of queries (at least currently)
+                let query_params = qg.parameters();
+                // TODO(malte): this does not yet cover the case when there are multiple query
+                // parameters, which compound key support on Reader nodes.
+                /*if !query_params.is_empty() {
+                    //assert_eq!(query_params.len(), 1);
+                    let key_column = query_params.iter().next().unwrap();
+                    mig.maintain(leaf_node,
+                                 self.field_to_columnid(leaf_node, &key_column.name).unwrap());
+                } else {
+                    // no query parameters, so we index on the first (and often only) column
+                    mig.maintain(leaf_node, 0);
+                }*/
+            }
+            debug!(self.log,
+                   format!("Added final node for query named \"{}\"", name));
+
+            // should have counted all nodes added, except for the base nodes (which reuse)
+            debug_assert_eq!(new_node_count,
+                             join_nodes.len() + func_nodes.len() + filter_nodes.len() + 1);
+
+            // finally, we output all the nodes we generated
+            nodes_added = base_nodes.into_iter()
+                .map(|(_, n)| n)
+                .chain(join_nodes.into_iter())
+                .chain(func_nodes.into_iter())
+                .chain(new_filter_nodes.into_iter())
+                .collect();
+            nodes_added.push(leaf_node);
         }
+
+        nodes_added
     }
 }
