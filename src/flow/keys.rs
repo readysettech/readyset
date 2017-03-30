@@ -140,15 +140,18 @@ fn trace<F>(graph: &Graph,
         return paths;
     }
 
-    let (specific_parent, column) = resolved.into_iter().next().unwrap();
-    // we know join parents are all in the same domain as the join.
-    let specific_parent = if specific_parent.is_global() {
-        *specific_parent.as_global()
-    } else {
-        local_to_global[&specific_parent]
-    };
-    // we know joins don't generate values.
-    let column = column.unwrap();
+    let mut resolved: HashMap<_, _> = resolved.into_iter()
+        .map(|(p, col)| {
+            // we know joins don't generate values.
+            let col = col.unwrap();
+            if p.is_global() {
+                (*p.as_global(), col)
+            } else {
+                // we know join parents are all in the same domain as the join.
+                (local_to_global[&p], col)
+            }
+        })
+        .collect();
 
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
@@ -162,28 +165,16 @@ fn trace<F>(graph: &Graph,
             let mut paths = Vec::with_capacity(parents.len());
             for parent in parents {
                 let mut path = path.clone();
-                if parent == specific_parent {
-                    path.push((parent, Some(column)));
-                    paths.extend(trace(graph, on_join, path));
-                } else {
-                    path.push((parent, None));
-                    paths.extend(trace(graph, on_join, path));
-                }
+                path.push((parent, resolved.get(&parent).cloned()));
+                paths.extend(trace(graph, on_join, path));
             }
             paths
         }
         Some(parent) => {
             // our caller only cares about *one* parent.
             // hopefully we can give key information about that parent
-            if parent == specific_parent {
-                // \o/
-                path.push((parent, Some(column)));
-                trace(graph, on_join, path)
-            } else {
-                // nope. we can't resolve any more for this column.
-                path.push((parent, None));
-                trace(graph, on_join, path)
-            }
+            path.push((parent, resolved.remove(&parent)));
+            trace(graph, on_join, path)
         }
     }
 }
