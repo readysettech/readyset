@@ -10,11 +10,10 @@ use flow::core::{NodeAddress, DataType};
 use ops;
 use ops::grouped::aggregate::Aggregation as AggregationKind;
 use ops::grouped::extremum::Extremum as ExtremumKind;
-use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::latest::Latest;
+use ops::project::Project;
 use ops::permute::Permute;
-use ops::topk::OrderedRecordComparator;
 use sql::QueryFlowParts;
 
 #[derive(Clone, Debug)]
@@ -289,8 +288,7 @@ impl MirNode {
                     MirNodeType::Project { ref emit, ref literals } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
-                        // XXX(malte): fix
-                        make_permute_node(&name, parent, emit, mig)
+                        make_project_node(&name, parent, emit, literals, mig)
                     }
                     MirNodeType::Permute { ref emit } => {
                         assert_eq!(self.ancestors.len(), 1);
@@ -762,6 +760,34 @@ fn make_permute_node(name: &str,
     FlowNode::New(n)
 }
 
+fn make_project_node(name: &str,
+                     parent: MirNodeRef,
+                     emit: &Vec<Column>,
+                     literals: &Vec<(String, DataType)>,
+                     mut mig: &mut Migration)
+                     -> FlowNode {
+    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let mut fields = emit.iter().map(|c| c.name.clone()).collect::<Vec<String>>();
+
+    let projected_column_ids = emit.iter()
+        .map(|c| {
+            parent.borrow()
+                .columns
+                .iter()
+                .position(|ref nc| *nc == c)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let (literal_names, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
+    fields.extend(literal_names.into_iter().map(String::from));
+
+    let n = mig.add_ingredient(String::from(name),
+                               fields.as_slice(),
+                               Project::new(parent_na,
+                                            projected_column_ids.as_slice(),
+                                            Some(literal_values)));
+    FlowNode::New(n)
+}
 
 fn make_topk_node(name: &str,
                   parent: MirNodeRef,

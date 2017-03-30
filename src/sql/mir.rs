@@ -749,7 +749,6 @@ impl SqlToMirConverter {
                             &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
                         let over_cols = target_columns_from_computed_column(computed_col);
-                        // XXX(malte): fn col?
                         let over_table = over_cols.iter()
                             .next()
                             .unwrap()
