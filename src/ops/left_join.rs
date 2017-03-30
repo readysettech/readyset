@@ -5,6 +5,12 @@ use std::sync::Arc;
 
 use flow::prelude::*;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum JoinType {
+    Left,
+    Inner,
+}
+
 /// LeftJoin provides a left outer join between two views.
 #[derive(Debug, Clone)]
 pub struct LeftJoin {
@@ -21,6 +27,8 @@ pub struct LeftJoin {
     // Stores number of records on the right with each key. Used to avoid creating a new HashMap for
     // every call to `on_input()`, but is empty except for in that function.
     right_counts: HashMap<DataType, usize>,
+
+    kind: JoinType,
 }
 
 impl LeftJoin {
@@ -33,7 +41,8 @@ impl LeftJoin {
     pub fn new(left: NodeAddress,
                right: NodeAddress,
                on: (usize, usize),
-               emit: Vec<(bool, usize)>)
+               emit: Vec<(bool, usize)>,
+               kind: JoinType)
                -> Self {
         Self {
             left: left,
@@ -41,6 +50,7 @@ impl LeftJoin {
             on: on,
             emit: emit,
             right_counts: HashMap::new(),
+            kind: kind,
         }
     }
     fn generate_row(&self, left: &Arc<Vec<DataType>>, right: &Arc<Vec<DataType>>) -> Vec<DataType> {
@@ -83,8 +93,19 @@ impl Ingredient for LeftJoin {
         true
     }
 
-    fn must_replay_among(&self, _empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
-        Some(Some(self.left).into_iter().collect())
+    fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
+        match self.kind {
+            JoinType::Left => Some(Some(self.left).into_iter().collect()),
+            JoinType::Inner => {
+                if empty.contains(&self.left) {
+                    Some(Some(self.left).into_iter().collect())
+                } else if empty.contains(&self.right) {
+                    Some(Some(self.right).into_iter().collect())
+                } else {
+                    Some(vec![self.left, self.right].into_iter().collect())
+                }
+            }
+        }
     }
 
     fn will_query(&self, _: bool) -> bool {
@@ -109,7 +130,7 @@ impl Ingredient for LeftJoin {
                 nodes: &DomainNodes,
                 state: &StateMap)
                 -> Records {
-        if from == self.right {
+        if from == self.right && self.kind == JoinType::Left {
             // If records are being received from the right, then populate self.right_counts with
             // the number of records that existed for each key *before* this batch of records was
             // processed.
@@ -155,11 +176,13 @@ impl Ingredient for LeftJoin {
                     .peekable();
 
                 if from == self.left {
-                    if other_rows.peek().is_none() {
+                    if other_rows.peek().is_none() && self.kind == JoinType::Left {
                         vec![(self.generate_null(&row), positive).into()]
                     } else {
                         other_rows.map(|r| (self.generate_row(&row, r), positive).into()).collect()
                     }
+                } else if from == self.right && self.kind == JoinType::Inner {
+                    other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
                 } else if from == self.right {
                     let rc = {
                         let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
@@ -186,7 +209,9 @@ impl Ingredient for LeftJoin {
             })
             .collect();
 
-        self.right_counts.clear();
+        if from == self.right && self.kind == JoinType::Left {
+            self.right_counts.clear();
+        }
         ret
     }
 
@@ -212,10 +237,17 @@ impl Ingredient for LeftJoin {
                  })
             .collect::<Vec<_>>()
             .join(", ");
-        format!("[{}] {}:{} ⋉ {}:{}",
+
+        let op = match self.kind {
+            JoinType::Left => "⋉",
+            JoinType::Inner => "⋈",
+        };
+
+        format!("[{}] {}:{} {} {}:{}",
                 emit,
                 self.left,
                 self.on.0,
+                op,
                 self.right,
                 self.on.1)
     }
@@ -242,7 +274,11 @@ mod tests {
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
-        let j = LeftJoin::new(l, r, (0, 0), vec![(true, 0), (true, 1), (false, 1)]);
+        let j = LeftJoin::new(l,
+                              r,
+                              (0, 0),
+                              vec![(true, 0), (true, 1), (false, 1)],
+                              JoinType::Left);
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
         let (l, r) = (g.to_local(l), g.to_local(r));
