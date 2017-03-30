@@ -155,11 +155,14 @@ impl Recipe {
         };
 
         // upgrade schema version *before* applying changes, so that new queries are correctly
-        // tagged with the new version
-        self.inc
-            .as_mut()
-            .unwrap()
-            .upgrade_schema(self.version);
+        // tagged with the new version. If this recipe was just created, there is no need to
+        // upgrade the schema version, as the SqlIncorporator's version will still be at zero.
+        if self.version > 0 {
+            self.inc
+                .as_mut()
+                .unwrap()
+                .upgrade_schema(self.version);
+        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
