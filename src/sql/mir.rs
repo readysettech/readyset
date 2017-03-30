@@ -605,6 +605,11 @@ impl SqlToMirConverter {
                 .collect();
             sorted_rels.sort();
             for rel in &sorted_rels {
+                // the node holding computed columns doesn't have a base
+                if *rel == "computed_columns" {
+                    continue;
+                }
+
                 let mut base_for_rel = match self.nodes.get(&(String::from(*rel),
                                        self.schema_version)) {
                     None => panic!("Query \"{}\" refers to unknown base \"{}\" node", name, rel),
