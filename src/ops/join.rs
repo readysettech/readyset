@@ -1,261 +1,88 @@
-use std::sync;
-use std::iter;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use std::sync::Arc;
+
 use flow::prelude::*;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum JoinType {
+    Left,
+    Inner,
+}
+
+/// LeftJoin provides a left outer join between two views.
 #[derive(Debug, Clone)]
-struct JoinTarget {
+pub struct LeftJoin {
+    left: NodeAddress,
+    right: NodeAddress,
+
+    // Key column in the left and right parents respectively
     on: (usize, usize),
-    select: Vec<bool>,
-    outer: bool,
+
+    // Which columns to emit. True means the column is from the left parent, false means from the
+    // right
+    emit: Vec<(bool, usize)>,
+
+    // Stores number of records on the right with each key. Used to avoid creating a new HashMap for
+    // every call to `on_input()`, but is empty except for in that function.
+    right_counts: HashMap<DataType, usize>,
+
+    kind: JoinType,
 }
 
-#[derive(Debug, Clone)]
-struct Join {
-    against: HashMap<NodeAddress, JoinTarget>,
-    node: NodeAddress,
-}
-
-/// Convenience struct for building join nodes.
-pub struct Builder {
-    emit: Vec<(NodeAddress, usize)>,
-    join: HashMap<NodeAddress, (bool, Vec<usize>)>,
-}
-
-impl Builder {
-    /// Build a new join operator.
+impl LeftJoin {
+    /// Create a new instance of LeftJoin
     ///
-    /// `emit` dictates, for each output column, which source and column should be used.
-    pub fn new(emit: Vec<(NodeAddress, usize)>) -> Self {
-        Builder {
+    /// `left` and `right` are the left and right parents respectively. `on` is a tuple specifying
+    /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each
+    /// output colunm, which source and column should be used (true means left parent, and false
+    /// means right parent).
+    pub fn new(left: NodeAddress,
+               right: NodeAddress,
+               on: (usize, usize),
+               emit: Vec<(bool, usize)>,
+               kind: JoinType)
+               -> Self {
+        Self {
+            left: left,
+            right: right,
+            on: on,
             emit: emit,
-            join: HashMap::new(),
+            right_counts: HashMap::new(),
+            kind: kind,
         }
     }
-
-    /// Set the source view for this join.
-    ///
-    /// This is semantically identical to `join`, except that it also asserts that this is the
-    /// first view being added. The first view is of particular importance as it dictates the
-    /// behavior of later *left* joins (when they are added).
-    pub fn from(self, node: NodeAddress, groups: Vec<usize>) -> Self {
-        assert!(self.join.is_empty());
-        self.join(node, groups)
-    }
-
-    /// Also join with the given `node`.
-    ///
-    /// `groups` gives the group assignments for each output column of `node`. Columns across join
-    /// sources that share a group are used to join rows from those sources by equality. Thus, each
-    /// group number can appear at most once for each view.
-    ///
-    /// Let us look at a SQL join such as
-    ///
-    /// ```sql
-    /// SELECT a.0, b.0
-    /// FROM a JOIN b USING (a.0 == b.1)
-    /// ```
-    ///
-    /// Assuming `a` has two columns and `b` has three, the map would look like this:
-    ///
-    /// ```rust,ignore
-    /// Builder::new(vec![(a, 0), (b, 0)]).from(a, vec![1, 0]).join(b, vec![0, 1, 0]);
-    /// ```
-    pub fn join(mut self, node: NodeAddress, groups: Vec<usize>) -> Self {
-        assert!(self.join.insert(node, (false, groups)).is_none());
-        self
-    }
-
-    /// Also perform a left join against the given `node`.
-    ///
-    /// The semantics of this is similar to the SQL notion of a `LEFT JOIN`, namely that records
-    /// from other tables that join against this table will always be present in the output,
-    /// regardless of whether matching records exist in `node`. For such *zero rows*, all columns
-    /// emitted from this node will be set to `DataType::None`.
-    pub fn left_join(mut self, node: NodeAddress, groups: Vec<usize>) -> Self {
-        assert!(self.join.insert(node, (true, groups)).is_none());
-        self
-    }
-}
-
-impl From<Builder> for Joiner {
-    fn from(b: Builder) -> Joiner {
-        if b.join.len() != 2 {
-            // only two-way joins are currently supported
-            unimplemented!();
-        }
-
-        // we technically want this assert, but we don't have self.nodes until .prime() has been
-        // called. unfortunately, at that time, we don't have .join in the original format, and so
-        // the debug doesn't makes sense. it's probably not worth carrying along the original join
-        // map just to verify this, but maybe...
-        // assert!(self.nodes.iter().all(|(ni, n)| self.join[ni].len() == n.args().len()));
-
-        // the format of `join` is convenient for users, but not particulary convenient for lookups
-        // the particular use-case we want to be efficient is:
-        //
-        //  - we are given a record from `src`
-        //  - for each other parent `p`, we want to know which columns of `p` to constrain, and
-        //    which values in the `src` record those correspond to
-        //
-        // so, we construct a map of the form
-        //
-        //   src: NodeAddress => {
-        //     p: NodeAddress => [(srci, pi), ...]
-        //   }
-        //
-        let join = b.join
+    fn generate_row(&self, left: &Arc<Vec<DataType>>, right: &Arc<Vec<DataType>>) -> Vec<DataType> {
+        self.emit
             .iter()
-            .map(|(&src, &(_, ref srcg))| {
-                // which groups are bound to which columns?
-                let g2c = srcg.iter()
-                    .enumerate()
-                    .filter_map(|(c, &g)| if g == 0 { None } else { Some((g, c)) })
-                    .collect::<HashMap<_, _>>();
-
-                // for every other view
-                let other = b.join
-                    .iter()
-                    .filter_map(|(&p, &(outer, ref pg))| {
-                        // *other* view
-                        if p == src {
-                            return None;
-                        }
-                        // look through the group assignments for that other view
-                        let pg: Vec<_> = pg.iter()
-                            .enumerate()
-                            .filter_map(|(pi, g)| {
-                                // look for ones that share a group with us
-                                g2c.get(g).map(|srci| {
-                                                   // and emit that mapping
-                                                   (*srci, pi)
-                                               })
-                            })
-                            .collect();
-
-                        // if there are no shared columns, don't join against this view
-                        if pg.is_empty() {
-                            return None;
-                        }
-                        // but if there are, emit the mapping we found
-                        assert_eq!(pg.len(), 1, "can only join on one key for now");
-                        Some((p,
-                              JoinTarget {
-                                  on: pg.into_iter().next().unwrap(),
-                                  outer: outer,
-                                  select: Vec::new(),
-                              }))
-                    })
-                    .collect();
-
-                (src,
-                 Join {
-                     against: other,
-                     node: src,
+            .map(|&(from_left, col)| if from_left {
+                     left[col].clone()
+                 } else {
+                     right[col].clone()
                  })
-            })
-            .collect();
+            .collect()
+    }
 
-        Joiner {
-            emit: b.emit,
-            join: join,
-        }
+    fn generate_null(&self, left: &Arc<Vec<DataType>>) -> Vec<DataType> {
+        self.emit
+            .iter()
+            .map(|&(from_left, col)| if from_left {
+                     left[col].clone()
+                 } else {
+                     DataType::None
+                 })
+            .collect()
     }
 }
 
-use flow::node;
-impl Into<node::Type> for Builder {
-    fn into(self) -> node::Type {
-        let j: Joiner = self.into();
-        node::Type::Internal(Box::new(j) as Box<Ingredient>)
-    }
-}
-
-/// Joiner provides a 2-way join between two views.
-///
-/// It shouldn't be *too* hard to extend this to `n`-way joins, but it would require restructuring
-/// `.join` such that it can express "query this view first, then use one of its columns to query
-/// this other view".
-#[derive(Debug, Clone)]
-pub struct Joiner {
-    emit: Vec<(NodeAddress, usize)>,
-    join: HashMap<NodeAddress, Join>,
-}
-
-impl Joiner {
-    fn join<'a>(&'a self,
-                left: (NodeAddress, sync::Arc<Vec<DataType>>),
-                domain: &DomainNodes,
-                states: &StateMap)
-                -> Box<Iterator<Item = Vec<DataType>> + 'a> {
-
-        // NOTE: this only works for two-way joins
-        let other = *self.join
-                         .keys()
-                         .find(|&other| other != &left.0)
-                         .unwrap();
-        let this = &self.join[&left.0];
-        let target = &this.against[&other];
-
-        // send the parameters to start the query.
-        let rx: Vec<_> = self.lookup(other,
-                                     &[target.on.1],
-                                     &KeyType::Single(&left.1[target.on.0]),
-                                     domain,
-                                     states)
-            .expect("joins must have inputs materialized")
-            .cloned()
-            .collect();
-
-        if rx.is_empty() && target.outer {
-            return Box::new(Some(self.emit
-                                     .iter()
-                                     .map(|&(source, column)| {
-                if source == other {
-                    DataType::None
-                } else {
-                    // this clone is unnecessary
-                    left.1[column].clone()
-                }
-            })
-                                     .collect::<Vec<_>>())
-                                    .into_iter());
-        }
-
-        Box::new(rx.into_iter().map(move |right| {
-            // weave together r and j according to join rules
-            self.emit
-                .iter()
-                .map(|&(source, column)| {
-                    if source == other {
-                        // FIXME: this clone is unnecessary.
-                        // it's tricky to remove though, because it means we'd need to
-                        // be removing things from right. what if a later column also needs
-                        // to select from right? we'd need to keep track of which things we
-                        // have removed, and subtract that many from the index of the
-                        // later column. ugh.
-                        right[column].clone()
-                    } else {
-                        left.1[column].clone()
-                    }
-                })
-                .collect()
-        }))
-    }
-}
-
-impl Ingredient for Joiner {
+impl Ingredient for LeftJoin {
     fn take(&mut self) -> Box<Ingredient> {
         Box::new(Clone::clone(self))
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
-        self.join
-            .keys()
-            .cloned()
-            .collect()
+        vec![self.left, self.right]
     }
 
     fn should_materialize(&self) -> bool {
@@ -267,70 +94,33 @@ impl Ingredient for Joiner {
     }
 
     fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
-        // we want to replay an ancestor that we are *not* doing an outer join against
-        // it's not *entirely* clear how to extract that from self.join, but we'll use the
-        // following heuristic: find an ancestor that is never performed an outer join against.
-        let mut options: HashSet<_> = self.join.keys().collect();
-        for left in self.join.values() {
-            for right in left.against.keys() {
-                if left.against[right].outer {
-                    options.remove(right);
+        match self.kind {
+            JoinType::Left => Some(Some(self.left).into_iter().collect()),
+            JoinType::Inner => {
+                if empty.contains(&self.left) {
+                    Some(Some(self.left).into_iter().collect())
+                } else if empty.contains(&self.right) {
+                    Some(Some(self.right).into_iter().collect())
+                } else {
+                    Some(vec![self.left, self.right].into_iter().collect())
                 }
             }
         }
-        assert!(!options.is_empty());
-
-        // we may have multiple options in the case of an inner join
-        // if any of them are empty, choose that one, since our output is also empty!
-        for &option in &options {
-            if empty.contains(option) {
-                // no need to look any further, just replay this
-                let mut options = HashSet::new();
-                options.insert(*option);
-                return Some(options);
-            }
-        }
-
-        // we don't know which of these we prefer, so we leave it up to the materialization code to
-        // pick among them for us.
-        Some(options.into_iter().map(|&ni| ni).collect())
     }
 
     fn will_query(&self, _: bool) -> bool {
         true
     }
 
-    fn on_connected(&mut self, g: &Graph) {
-        for j in self.join.values_mut() {
-            for (t, jt) in &mut j.against {
-                jt.select =
-                    iter::repeat(true).take(g[*t.as_global()].fields().len()).collect::<Vec<_>>();
-            }
-        }
-    }
+    fn on_connected(&mut self, _g: &Graph) {}
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        // our ancestors may have been remapped
-        // we thus need to fix up any node indices that could have changed
-        for (from, to) in remap {
-            if from == to {
-                continue;
-            }
-
-            if let Some(mut j) = self.join.remove(from) {
-                j.node = *to;
-                assert!(self.join.insert(*to, j).is_none());
-            }
-
-            for j in self.join.values_mut() {
-                if let Some(t) = j.against.remove(from) {
-                    assert!(j.against.insert(*to, t).is_none());
-                }
-            }
+        if let Some(left) = remap.get(&self.left) {
+            self.left = left.clone();
         }
 
-        for &mut (ref mut ni, _) in &mut self.emit {
-            *ni = remap[&*ni];
+        if let Some(right) = remap.get(&self.right) {
+            self.right = right.clone();
         }
     }
 
@@ -340,97 +130,136 @@ impl Ingredient for Joiner {
                 nodes: &DomainNodes,
                 state: &StateMap)
                 -> Records {
+        if from == self.right && self.kind == JoinType::Left {
+            // If records are being received from the right, then populate self.right_counts with
+            // the number of records that existed for each key *before* this batch of records was
+            // processed.
+            for r in rs.iter() {
+                let ref key = r.rec()[self.on.1];
+                let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
+
+                if let Some(rc) = self.right_counts.get_mut(&key) {
+                    *rc = adjust(*rc);
+                    continue;
+                }
+
+                let rc = adjust(self.lookup(self.right,
+                                            &[self.on.0],
+                                            &KeyType::Single(&key),
+                                            nodes,
+                                            state)
+                                    .unwrap()
+                                    .count());
+                self.right_counts.insert(key.clone(), rc);
+            }
+        }
+
+        let (other, from_key, other_key) = if from == self.left {
+            (self.right, self.on.0, self.on.1)
+        } else {
+            (self.left, self.on.1, self.on.0)
+        };
+
         // okay, so here's what's going on:
         // the record(s) we receive are all from one side of the join. we need to query the
         // other side(s) for records matching the incoming records on that side's join
         // fields.
+        let ret = rs.into_iter()
+            .flat_map(|rec| -> Vec<Record> {
+                let (row, positive) = rec.extract();
+                let mut other_rows = self.lookup(other,
+                                                 &[other_key],
+                                                 &KeyType::Single(&row[from_key]),
+                                                 nodes,
+                                                 state)
+                    .unwrap()
+                    .peekable();
 
-        // TODO: we should be clever here, and only query once per *distinct join value*,
-        // instead of once per received record.
-        rs.into_iter()
-            .flat_map(|rec| {
-                let (r, pos) = rec.extract();
-
-                self.join((from, r), nodes, state).map(move |res| {
-                    // return new row with appropriate sign
-                    if pos {
-                        Record::Positive(sync::Arc::new(res))
+                if from == self.left {
+                    if other_rows.peek().is_none() && self.kind == JoinType::Left {
+                        vec![(self.generate_null(&row), positive).into()]
                     } else {
-                        Record::Negative(sync::Arc::new(res))
+                        other_rows.map(|r| (self.generate_row(&row, r), positive).into()).collect()
                     }
-                })
+                } else if from == self.right && self.kind == JoinType::Inner {
+                    other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
+                } else if from == self.right {
+                    let rc = {
+                        let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
+                        if positive {
+                            *rc += 1;
+                        } else {
+                            *rc -= 1;
+                        }
+                        *rc
+                    };
+
+                    if (positive && rc == 1) || (!positive && rc == 0) {
+                        other_rows.flat_map(|r| {
+                                                vec![(self.generate_null(r), !positive).into(),
+                                                     (self.generate_row(r, &row), positive).into()]
+                                            })
+                            .collect()
+                    } else {
+                        other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
+                    }
+                } else {
+                    unreachable!()
+                }
             })
-            .collect()
+            .collect();
+
+        if from == self.right && self.kind == JoinType::Left {
+            self.right_counts.clear();
+        }
+        ret
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        // index all join fields
-        self.join
-            .iter()
-            // for every left
-            .flat_map(|(left, rs)| {
-                // for every right
-                rs.against.iter().flat_map(move |(right, rs)| {
-                    // emit both the left binding
-                    vec![(left, rs.on.0), (right, rs.on.1)]
-                })
-            })
-            // we now have (NodeAddress, usize) for every join column.
-            .fold(HashMap::new(), |mut hm, (node, col)| {
-                hm.entry(*node).or_insert(vec![col]);
-                hm
-            })
+        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])].into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![self.emit[col].clone()])
+        let e = self.emit[col];
+        if e.0 {
+            Some(vec![(self.left, e.1)])
+        } else {
+            Some(vec![(self.right, e.1)])
+        }
     }
 
     fn description(&self) -> String {
         let emit = self.emit
             .iter()
-            .map(|&(src, col)| format!("{}:{}", src, col))
+            .map(|&(from_left, col)| {
+                     let src = if from_left { self.left } else { self.right };
+                     format!("{}:{}", src, col)
+                 })
             .collect::<Vec<_>>()
             .join(", ");
-        let joins = self.join
-            .iter()
-            .flat_map(|(left, rs)| {
-                rs.against
-                    .iter()
-                    .filter(move |&(right, _)| left < right)
-                    .map(move |(right, rs)| {
-                             let op = if rs.outer { "⋉" } else { "⋈" };
-                             format!("{}:{} {} {}:{}", left, rs.on.0, op, right, rs.on.1)
-                         })
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("[{}] {}", emit, joins)
+
+        let op = match self.kind {
+            JoinType::Left => "⋉",
+            JoinType::Inner => "⋈",
+        };
+
+        format!("[{}] {}:{} {} {}:{}",
+                emit,
+                self.left,
+                self.on.0,
+                op,
+                self.right,
+                self.on.1)
     }
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        // we know where this column comes from through self.emit.
-        let (origin, ocol) = self.emit[col];
-        let mut source = vec![(origin, Some(ocol))];
-
-        // however, we *also* want to check if this column compares equal to a column in another
-        // ancestor, so that we can detect key provenance through both sides of the join.
-        let j = &self.join[&origin];
-        assert!(j.against.len() == 1); // only two-way joins for now
-
-        // figure out how we join with the other view
-        let (&other, &JoinTarget { on: (lcol, rcol), .. }) = j.against
-            .iter()
-            .next()
-            .unwrap();
-
-        // if we join on the same column that col resolves to,
-        // then we know that self[col] also comes from other[rcol].
-        if lcol == ocol {
-            source.push((other, Some(rcol)));
+        let pcol = self.emit[col];
+        if (pcol.0 && pcol.1 == self.on.0) || (pcol.0 && pcol.1 == self.on.1) {
+            // Join column comes from both parents
+            vec![(self.left, Some(self.on.0)), (self.right, Some(self.on.1))]
+        } else {
+            vec![(if pcol.0 { self.left } else { self.right }, Some(pcol.1))]
         }
-
-        source
     }
 }
 
@@ -440,149 +269,116 @@ mod tests {
 
     use ops;
 
-    fn setup(left: bool) -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
+    fn setup() -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
-        // join on first field
-        let b = Builder::new(vec![(l, 0), (l, 1), (r, 1)]).from(l, vec![1, 0]);
-        let b = if left {
-            b.left_join(r, vec![1, 0])
-        } else {
-            b.join(r, vec![1, 0])
-        };
+        let j = LeftJoin::new(l,
+                              r,
+                              (0, 0),
+                              vec![(true, 0), (true, 1), (false, 1)],
+                              JoinType::Left);
 
-        let j: Joiner = b.into();
         g.set_op("join", &["j0", "j1", "j2"], j, false);
-        g.seed(l, vec![1.into(), "a".into()]);
-        g.seed(l, vec![2.into(), "b".into()]);
-        g.seed(l, vec![3.into(), "c".into()]);
-        g.seed(r, vec![1.into(), "x".into()]);
-        g.seed(r, vec![1.into(), "y".into()]);
-        g.seed(r, vec![2.into(), "z".into()]);
-
         let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
 
     #[test]
     fn it_describes() {
-        let (j, l, r) = setup(false);
-        assert_eq!(j.node().description(),
-                   format!("[{}:0, {}:1, {}:1] {}:0 ⋈ {}:0", l, l, r, l, r));
-    }
-
-    #[test]
-    fn it_describes_left() {
-        let (j, l, r) = setup(true);
+        let (j, l, r) = setup();
         assert_eq!(j.node().description(),
                    format!("[{}:0, {}:1, {}:1] {}:0 ⋉ {}:0", l, l, r, l, r));
     }
 
-    fn forward_non_weird(mut j: ops::test::MockGraph, l: NodeAddress, r: NodeAddress) {
-        // these are the data items we have to work with
-        // these are in left
+    #[test]
+    fn it_works() {
+        let (mut j, l, r) = setup();
         let l_a1 = vec![1.into(), "a".into()];
         let l_b2 = vec![2.into(), "b".into()];
-        // let l_c3 = vec![3.into(), "c".into()]; // considered weird
-        // these are in right
+        let l_c3 = vec![3.into(), "c".into()];
+
         let r_x1 = vec![1.into(), "x".into()];
         let r_y1 = vec![1.into(), "y".into()];
         let r_z2 = vec![2.into(), "z".into()];
+        let r_w3 = vec![3.into(), "w".into()];
+        let r_v4 = vec![4.into(), "w".into()];
 
-        // *************************************
-        // forward from the left
-        // *************************************
+        j.seed(r, r_x1.clone());
+        j.seed(r, r_y1.clone());
+        j.seed(r, r_z2.clone());
 
-        // forward b2 from left; should produce [b2*z2]
-        // we're expecting to only match z2
-        assert_eq!(j.one_row(l, l_b2.clone(), false),
-                   vec![vec![2.into(), "b".into(), "z".into()]].into());
-
-        // forward a1 from left; should produce [a1*x1, a1*y1]
-        let rs = j.one_row(l, l_a1.clone(), false);
-        // we're expecting two results: x1 and y1
-        assert_eq!(rs.len(), 2);
-        // they should all be positive since input was positive
-        assert!(rs.iter().all(|r| r.is_positive()));
-        // they should all have the correct values from the provided left
-        assert!(rs.iter().all(|r| r.rec()[0] == 1.into() && r.rec()[1] == "a".into()));
-        // and both join results should be present
-        assert!(rs.iter().any(|r| r.rec()[2] == "x".into()));
-        assert!(rs.iter().any(|r| r.rec()[2] == "y".into()));
-
-        // *************************************
-        // forward from the right
-        // *************************************
-
-        // forward x1 from right; should produce [a1*x1]
-        assert_eq!(j.one_row(r, r_x1.clone(), false),
-                   vec![vec![1.into(), "a".into(), "x".into()]].into());
-
-        // forward y1 from right; should produce [a1*y1]
-        // NOTE: because we use r_y1.into(), left's timestamp will be set to 0
-        assert_eq!(j.one_row(r, r_y1.clone(), false),
-                   vec![vec![1.into(), "a".into(), "y".into()]].into());
-
-        // forward z2 from right; should produce [b2*z2]
-        // NOTE: because we use r_z2.into(), left's timestamp will be set to 0, and thus
-        // right's (b2's) timestamp will be used.
-        assert_eq!(j.one_row(r, r_z2.clone(), false),
-                   vec![vec![2.into(), "b".into(), "z".into()]].into());
-    }
-
-    #[test]
-    fn it_works() {
-        let (mut j, l, r) = setup(false);
-        let l_c3 = vec![3.into(), "c".into()];
-
-        // forward c3 from left; should produce [] since no records in right are 3
-        let rs = j.one_row(l, l_c3.clone(), false);
-        // right has no records with value 3
-        assert_eq!(rs.len(), 0);
-
-        forward_non_weird(j, l, r);
-    }
-
-    #[test]
-    fn it_works_left() {
-        let (mut j, l, r) = setup(true);
-
-        let l_c3 = vec![3.into(), "c".into()];
+        j.one_row(r, r_x1.clone(), false);
+        j.one_row(r, r_y1.clone(), false);
+        j.one_row(r, r_z2.clone(), false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
+        let null = vec![((vec![3.into(), "c".into(), DataType::None], true))].into();
+        j.seed(l, l_c3.clone());
         let rs = j.one_row(l, l_c3.clone(), false);
-        // right has no records with value 3, so we're expecting a single record with None
-        // for all columns output from the (non-existing) right record
-        assert_eq!(rs.len(), 1);
-        // that row should be positive
-        assert!(rs.iter().all(|r| r.is_positive()));
-        // and should have the correct values from the provided left
-        assert!(rs.iter().all(|r| r.rec()[0] == 3.into() && r.rec()[1] == "c".into()));
-        // and None for the remaining column
-        assert!(rs.iter().any(|r| r.rec()[2] == DataType::None));
+        assert_eq!(rs, null);
 
-        forward_non_weird(j, l, r);
+        // doing it again should produce the same result
+        j.seed(l, l_c3.clone());
+        let rs = j.one_row(l, l_c3.clone(), false);
+        assert_eq!(rs, null);
+
+        // record from the right should revoke the nulls and replace them with full rows
+        j.seed(r, r_w3.clone());
+        let rs = j.one_row(r, r_w3.clone(), false);
+        assert_eq!(rs,
+                   vec![((vec![3.into(), "c".into(), DataType::None], false)),
+                        ((vec![3.into(), "c".into(), "w".into()], true)),
+                        ((vec![3.into(), "c".into(), DataType::None], false)),
+                        ((vec![3.into(), "c".into(), "w".into()], true))]
+                           .into());
+
+        // forward from left with single matching record on right
+        j.seed(l, l_b2.clone());
+        let rs = j.one_row(l, l_b2.clone(), false);
+        assert_eq!(rs,
+                   vec![((vec![2.into(), "b".into(), "z".into()], true))].into());
+
+        // forward from left with two matching records on right
+        j.seed(l, l_a1.clone());
+        let rs = j.one_row(l, l_a1.clone(), false);
+        assert_eq!(rs,
+                   vec![((vec![1.into(), "a".into(), "x".into()], true)),
+                        ((vec![1.into(), "a".into(), "y".into()], true))]
+                           .into());
+
+        // forward from right with two matching records on left (and one more on right)
+        j.seed(r, r_w3.clone());
+        let rs = j.one_row(r, r_w3.clone(), false);
+        assert_eq!(rs,
+                   vec![((vec![3.into(), "c".into(), "w".into()], true)),
+                        ((vec![3.into(), "c".into(), "w".into()], true))]
+                           .into());
+
+        // unmatched forward from right should have no effect
+        j.seed(r, r_v4.clone());
+        let rs = j.one_row(r, r_v4.clone(), false);
+        assert_eq!(rs.len(), 0);
     }
 
     #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let me = NodeAddress::mock_global(2.into());
-        let (j, l, r) = setup(false);
+        let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
                                      (r, vec![0]) /* join column for right */]
                 .into_iter()
                 .collect();
-        assert_eq!(j.node().suggest_indexes(me), hm);
+        assert_eq!(g.node().suggest_indexes(me), hm);
     }
 
     #[test]
     fn it_resolves() {
-        let (j, l, r) = setup(false);
-        assert_eq!(j.node().resolve(0), Some(vec![(l, 0)]));
-        assert_eq!(j.node().resolve(1), Some(vec![(l, 1)]));
-        assert_eq!(j.node().resolve(2), Some(vec![(r, 1)]));
+        let (g, l, r) = setup();
+        assert_eq!(g.node().resolve(0), Some(vec![(l, 0)]));
+        assert_eq!(g.node().resolve(1), Some(vec![(l, 1)]));
+        assert_eq!(g.node().resolve(2), Some(vec![(r, 1)]));
     }
 }
