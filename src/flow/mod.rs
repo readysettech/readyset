@@ -296,6 +296,40 @@ impl Blender {
         reader.and_then(|r| r.get_reader())
     }
 
+    /// Obtain a new function for querying a given (already maintained) transactional reader node.
+    pub fn get_transactional_getter
+        (&self,
+         node: core::NodeAddress)
+-> Option<Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send + Sync>>{
+
+        // reader should be a child of the given node
+        trace!(self.log, "creating transactional reader"; "for" => node.as_global().index());
+        let reader = self.ingredients
+            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
+            .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
+                            Some(inner)
+                        } else {
+                            None
+                        })
+            .next(); // there should be at most one
+
+        reader.map(|inner| {
+            let arc = inner.state
+                .as_ref()
+                .unwrap()
+                .clone();
+            let generator = inner.token_generator.clone().unwrap();
+            Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
+                arc.find_and(q,
+                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
+                    .map(|(res, ts)| {
+                        let token = generator.generate(ts, q.clone());
+                        (res, token)
+                    })
+            }) as Box<_>
+        })
+    }
+
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: core::NodeAddress) -> Mutator {
         let n = self.ingredients
@@ -541,12 +575,8 @@ impl<'a> Migration<'a> {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// The returned function can be called with a `Query`, and any matching results will be
-    /// returned.
-    pub fn maintain(&mut self,
-                    n: core::NodeAddress,
-                    key: usize)
-                    -> Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync> {
+    /// To query into the maintained state, use `Blender::get_getter`.
+    pub fn maintain(&mut self, n: core::NodeAddress, key: usize) {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -562,9 +592,6 @@ impl<'a> Migration<'a> {
                 inner.state = Some(r);
                 *wh = Some(w);
             }
-
-            // cook up a function to query this materialized state
-            inner.get_reader().unwrap()
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -573,13 +600,9 @@ impl<'a> Migration<'a> {
     /// Set up the given node such that its output can be efficiently queried, and the results can
     /// be used in transactions.
     ///
-    /// The returned function can be called with a `Query`, and any matching results will be
-    /// returned, along with a token.
-    pub fn transactional_maintain
-        (&mut self,
-         n: core::NodeAddress,
-         key: usize)
--> Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send + Sync>{
+    ///
+    /// To query into the maintained state, use `Blender::get_transactional_getter`.
+    pub fn transactional_maintain(&mut self, n: core::NodeAddress, key: usize) {
         self.ensure_reader_for(n);
         self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];
@@ -596,21 +619,6 @@ impl<'a> Migration<'a> {
                 inner.state = Some(r);
                 *wh = Some(w);
             }
-
-            // cook up a function to query this materialized state
-            let arc = inner.state
-                .as_ref()
-                .unwrap()
-                .clone();
-            let generator = inner.token_generator.clone().unwrap();
-            Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
-                arc.find_and(q,
-                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
-                    .map(|(res, ts)| {
-                        let token = generator.generate(ts, q.clone());
-                        (res, token)
-                    })
-            })
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
