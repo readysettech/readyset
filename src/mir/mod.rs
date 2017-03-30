@@ -430,6 +430,18 @@ impl Debug for MirNodeType {
                            .collect::<Vec<_>>()
                            .join(","))
             }
+            MirNodeType::Extremum { ref on, ref group_by, ref kind } => {
+                let op_string = match *kind {
+                    ExtremumKind::MIN => format!("min({})", on.name.as_str()),
+                    ExtremumKind::MAX => format!("max({})", on.name.as_str()),
+                };
+                let group_cols = group_by.iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{} γ[{}]", op_string, group_cols)
+
+            }
             MirNodeType::Filter { ref conditions } => {
                 use regex::Regex;
 
@@ -451,9 +463,18 @@ impl Debug for MirNodeType {
                            .as_slice()
                            .join(", "))
             }
+            MirNodeType::GroupConcat { ref on, ref separator } => unimplemented!(),
             MirNodeType::Identity => write!(f, "≡"),
             MirNodeType::Join { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
-            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::Leaf { ref node, ref keys } => unimplemented!(),
+            MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
+            MirNodeType::Latest { ref group_by } => {
+                let key_cols = group_by.iter()
+                    .map(|k| k.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "⧖ γ[{}]", key_cols)
+            }
             MirNodeType::Permute { ref emit } => {
                 write!(f,
                        "π [{}]",
@@ -479,7 +500,21 @@ impl Debug for MirNodeType {
                            format!("")
                        })
             }
-            _ => unimplemented!(),
+            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::TopK { ref order, ref group_by, ref k, ref offset } => {
+                write!(f, "TopK [k: {}, {:?}]", k, order)
+            }
+            MirNodeType::Union { ref emit_left, ref emit_right } => {
+                let cols_left = emit_left.iter()
+                    .map(|e| e.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let cols_right = emit_right.iter()
+                    .map(|e| e.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{} ⋃ {}", cols_left, cols_right)
+            }
         }
     }
 }
