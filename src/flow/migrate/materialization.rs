@@ -510,24 +510,19 @@ pub fn reconstruct(log: &Logger,
         warn!(log, "using partial materialization");
     }
 
-    // tell the domain in question to create an empty state for the node in question
-    if let flow::node::Type::Reader(..) = *graph[node] {
-        // readers have their own internal state
-        if partial_ok {
-            unimplemented!();
-        }
-    } else {
-        assert!(!index_on.is_empty(),
-                "all non-reader nodes must have a state key");
+    let domain = graph[node].domain();
+    let addr = graph[node].addr();
 
-        txs[&graph[node].domain()]
-            .send(Packet::PrepareState {
-                      node: *graph[node].addr().as_local(),
-                      index: index_on,
-                      partial: partial_ok,
-                  })
-            .unwrap();
-    }
+    // tell the domain in question to create an empty state for the node in question
+    assert!(!index_on.is_empty(),
+            "all materialized nodes must have a state key");
+    txs[&domain]
+        .send(Packet::PrepareState {
+                  node: *addr.as_local(),
+                  index: index_on,
+                  partial: partial_ok,
+              })
+        .unwrap();
 
     // NOTE:
     // there could be no paths left here. for example, if a symmetric join is joining an existing

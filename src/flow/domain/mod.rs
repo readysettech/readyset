@@ -477,12 +477,38 @@ impl Domain {
                 index,
                 partial,
             } => {
-                assert!(!partial || index.len() == 1);
-                let mut state = State::default();
-                for idx in index {
-                    state.add_key(&idx[..], partial);
+                use flow::node::{Type, Reader};
+                let mut n = self.nodes[&node].borrow_mut();
+                let cols = n.fields().len();
+                match *n.inner {
+                    Type::Reader(ref mut wh, Reader { ref mut state, .. }) => {
+                        // make sure Reader is actually prepared to receive state
+                        assert!(wh.is_some());
+                        let wh = wh.as_mut().unwrap();
+                        assert!(state.is_some());
+                        let state = state.as_mut().unwrap();
+                        assert_eq!(state.len(), 0);
+
+                        // if we're partially materializing a reader node,
+                        // we need to give it a way to trigger replays.
+                        if partial {
+                            use backlog;
+                            let (r_part, w_part) = backlog::new_partial(cols, state.key(), |key| {
+                                unimplemented!();
+                            });
+                            *wh = w_part;
+                            *state = r_part;
+                        }
+                    }
+                    _ => {
+                        assert!(!partial || index.len() == 1);
+                        let mut state = State::default();
+                        for idx in index {
+                            state.add_key(&idx[..], partial);
+                        }
+                        self.state.insert(node, state);
+                    }
                 }
-                self.state.insert(node, state);
             }
             Packet::SetupReplayPath {
                 tag,

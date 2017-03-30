@@ -4,16 +4,24 @@ use evmap;
 
 use std::sync::Arc;
 
-/// Allocate a new buffered `Store`.
+/// Allocate a new end-user facing result table.
 pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
-    new_partial(cols, key, None)
+    new_inner(cols, key, None)
 }
 
-/// Allocate a new buffered `Store`.
-pub fn new_partial(cols: usize,
-                   key: usize,
-                   trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
-                   -> (ReadHandle, WriteHandle) {
+/// Allocate a new partially materialized end-user facing result table.
+///
+/// Misses in this table will call `trigger` to populate the entry, and retry until successful.
+pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (ReadHandle, WriteHandle)
+    where F: Fn(&DataType) + 'static + Send + Sync
+{
+    new_inner(cols, key, Some(Arc::new(trigger)))
+}
+
+fn new_inner(cols: usize,
+             key: usize,
+             trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
+             -> (ReadHandle, WriteHandle) {
     let (r, w) =
         evmap::Options::default().with_meta(-1).with_hasher(FnvBuildHasher::default()).construct();
     let r = ReadHandle {
@@ -83,16 +91,28 @@ impl ReadHandle {
     pub fn find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(T, i64), ()>
         where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
-        loop {
-            match self.handle.meta_get_and(key, &mut then) {
-                Some(val) => return Ok(val),
-                None if self.trigger.is_some() => {
-                    if let Some(ref trigger) = self.trigger {
-                        (*trigger)(key);
+        match self.handle.meta_get_and(key, &mut then) {
+            Some(val) => return Ok(val),
+            None if self.trigger.is_some() => {
+                if let Some(ref trigger) = self.trigger {
+                    use std::thread;
+
+                    // trigger a replay to populate
+                    (*trigger)(key);
+
+                    // wait for result to come through
+                    loop {
+                        thread::yield_now();
+                        match self.handle.meta_get_and(key, &mut then) {
+                            Some(val) => return Ok(val),
+                            None => {}
+                        }
                     }
+                } else {
+                    unreachable!()
                 }
-                None => return Err(()),
             }
+            None => return Err(()),
         }
     }
 
