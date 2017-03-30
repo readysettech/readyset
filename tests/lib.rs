@@ -246,7 +246,7 @@ fn it_works_deletion() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Aggregation, JoinBuilder};
+    use distributary::{Base, Union, Aggregation, Join, JoinType};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -275,9 +275,8 @@ fn votes() {
         let vcq = mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-            .from(article, vec![1, 0])
-            .join(vc, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let endq = mig.maintain(end, 0);
 
@@ -338,7 +337,7 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Base, Union, Aggregation, JoinBuilder, Identity};
+    use distributary::{Base, Union, Aggregation, Join, JoinType, Identity};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -369,9 +368,8 @@ fn transactional_vote() {
         let vcq = mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-            .from(article, vec![1, 0])
-            .join(vc, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
@@ -779,9 +777,11 @@ fn state_replay_migration_stream() {
         // add a new base and a join
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
-        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
-            .from(a, vec![1, 0])
-            .join(b, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = distributary::Join::new(a,
+                                        b,
+                                        distributary::JoinType::Inner,
+                                        vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // for predictability, ensure the new nodes are in the same domain
@@ -849,9 +849,11 @@ fn migration_depends_on_unchanged_domain() {
     // joins require their inputs to be materialized
     // we need a new base as well so we can actually make a join
     let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base::default());
-    let j = distributary::JoinBuilder::new(vec![(left, 0), (tmp, 1)])
-        .from(left, vec![1, 0])
-        .join(tmp, vec![1, 0]);
+    let j = distributary::Join::new(left,
+                                    tmp,
+                                    distributary::JoinType::Inner,
+                                    vec![distributary::JoinSource::B(0, 0),
+                                         distributary::JoinSource::R(1)]);
     let j = mig.add_ingredient("join", &["a", "b"], j);
 
     // we assign tmp and j to the same domain just to make the graph less complex
@@ -871,7 +873,7 @@ fn full_vote_migration() {
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
     // that, so we run the test a couple of times.
     for _ in 0..5 {
-        use distributary::{Blender, Base, JoinBuilder, Aggregation, DataType};
+        use distributary::{Blender, Base, Join, JoinType, Aggregation, DataType};
         let mut g = Blender::new();
         let article;
         let vote;
@@ -893,9 +895,8 @@ fn full_vote_migration() {
                                     Aggregation::COUNT.over(vote, 0, &[1]));
 
             // add final join using first field from article and first from vc
-            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-                .from(article, vec![1, 0])
-                .join(vc, vec![1, 0]);
+            use distributary::JoinSource::*;
+            let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
             end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
             mig.maintain(end, 0);
@@ -935,9 +936,8 @@ fn full_vote_migration() {
                                         Aggregation::SUM.over(rating, 2, &[1]));
 
             // join vote count and rsum (and in theory, sum them)
-            let j = JoinBuilder::new(vec![(rs, 0), (rs, 1), (vc, 1)])
-                .from(rs, vec![1, 0])
-                .join(vc, vec![1, 0]);
+            use distributary::JoinSource::*;
+            let j = Join::new(rs, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
             let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
             mig.assign_domain(rating, domain);
@@ -945,9 +945,10 @@ fn full_vote_migration() {
             mig.assign_domain(total, domain);
 
             // finally, produce end result
-            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (total, 1), (total, 2)])
-                .from(article, vec![1, 0])
-                .join(total, vec![1, 0, 0]);
+            let j = Join::new(article,
+                              total,
+                              JoinType::Inner,
+                              vec![B(0, 0), L(1), R(1), R(2)]);
             let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
             let last = mig.maintain(newend, 0);
 
@@ -1081,9 +1082,11 @@ fn state_replay_migration_query() {
     let out = {
         // add join and a reader node
         let mut mig = g.start_migration();
-        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
-            .from(a, vec![1, 0])
-            .join(b, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = distributary::Join::new(a,
+                                        b,
+                                        distributary::JoinType::Inner,
+                                        vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
