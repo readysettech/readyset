@@ -2,7 +2,6 @@ pub mod base;
 pub mod grouped;
 pub mod join;
 pub mod latest;
-pub mod left_join;
 pub mod permute;
 pub mod project;
 pub mod union;

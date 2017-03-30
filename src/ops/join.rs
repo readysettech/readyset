@@ -5,15 +5,29 @@ use std::sync::Arc;
 
 use flow::prelude::*;
 
+/// Kind of join
 #[derive(Debug, Clone, PartialEq)]
 pub enum JoinType {
+    /// Left join between two views
     Left,
+    /// Inner join between two views
     Inner,
 }
 
-/// LeftJoin provides a left outer join between two views.
+/// Where to source a join column
 #[derive(Debug, Clone)]
-pub struct LeftJoin {
+pub enum JoinSource {
+    /// Column in left parent
+    L(usize),
+    /// Column in right parent
+    R(usize),
+    /// Join column that occurs in both parents
+    B(usize, usize),
+}
+
+/// Join provides a left outer join between two views.
+#[derive(Debug, Clone)]
+pub struct Join {
     left: NodeAddress,
     right: NodeAddress,
 
@@ -31,8 +45,8 @@ pub struct LeftJoin {
     kind: JoinType,
 }
 
-impl LeftJoin {
-    /// Create a new instance of LeftJoin
+impl Join {
+    /// Create a new instance of Join
     ///
     /// `left` and `right` are the left and right parents respectively. `on` is a tuple specifying
     /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each
@@ -40,10 +54,24 @@ impl LeftJoin {
     /// means right parent).
     pub fn new(left: NodeAddress,
                right: NodeAddress,
-               on: (usize, usize),
-               emit: Vec<(bool, usize)>,
-               kind: JoinType)
+               kind: JoinType,
+               emit: Vec<JoinSource>)
                -> Self {
+        let mut join_columns = Vec::new();
+        let emit = emit.into_iter()
+            .map(|join_source| match join_source {
+                     JoinSource::L(c) => (true, c),
+                     JoinSource::R(c) => (false, c),
+                     JoinSource::B(lc, rc) => {
+                         join_columns.push((lc, rc));
+                         (true, lc)
+                     }
+                 })
+            .collect();
+
+        assert_eq!(join_columns.len(), 1);
+        let on = *join_columns.iter().next().unwrap();
+
         Self {
             left: left,
             right: right,
@@ -76,7 +104,7 @@ impl LeftJoin {
     }
 }
 
-impl Ingredient for LeftJoin {
+impl Ingredient for Join {
     fn take(&mut self) -> Box<Ingredient> {
         Box::new(Clone::clone(self))
     }
@@ -274,11 +302,8 @@ mod tests {
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
-        let j = LeftJoin::new(l,
-                              r,
-                              (0, 0),
-                              vec![(true, 0), (true, 1), (false, 1)],
-                              JoinType::Left);
+        use JoinSource::*;
+        let j = Join::new(l, r, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
         let (l, r) = (g.to_local(l), g.to_local(r));

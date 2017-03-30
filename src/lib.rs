@@ -126,7 +126,7 @@
 //! for clarity)
 //!
 //! ```rust
-//! # use distributary::{Blender, Base, Aggregation, JoinBuilder};
+//! # use distributary::{Blender, Base, Aggregation, Join, JoinType};
 //! // set up graph
 //! let mut g = Blender::new();
 //! let mut mig = g.start_migration();
@@ -142,9 +142,8 @@
 //! // joins are trickier because you need to specify what to join on. the vec![1, 0] here
 //! // signifies that the first field of article and vc should be equal, and the second field can
 //! // be whatever.
-//! let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-//!     .from(article, vec![1, 0])
-//!     .join(vc, vec![1, 0]);
+//! use distributary::JoinSource::*;
+//! let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
 //! let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //!
 //! // we want to be able to query awvc_q using "id"
@@ -375,11 +374,10 @@ pub use ops::grouped::concat::{GroupConcat, TextComponent};
 pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
 pub use ops::identity::Identity;
 pub use ops::permute::Permute;
-pub use ops::join::Builder as JoinBuilder;
+pub use ops::join::{Join, JoinType, JoinSource};
 pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::{Operator, Filter};
-pub use ops::left_join::LeftJoin;
 pub use ops::topk::TopK;
 pub use recipe::Recipe;
 pub use sql::{SqlIncorporator, ToFlowParts};

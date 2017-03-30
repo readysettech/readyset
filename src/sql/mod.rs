@@ -7,7 +7,7 @@ use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
 use ops;
 use ops::base::Base;
 use ops::identity::Identity;
-use ops::join::Builder as JoinBuilder;
+use ops::join::{Join, JoinType, JoinSource};
 use ops::permute::Permute;
 use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
 
@@ -546,43 +546,55 @@ impl SqlIncorporator {
                       jps: &[ConditionTree],
                       left_ni: NodeAddress,
                       right_ni: NodeAddress,
+                      kind: JoinType,
                       mig: &mut Migration)
                       -> NodeAddress {
         let j;
         let fields;
         {
+            let join_columns: HashMap<_, _> = jps.iter().map(|p| {
+                assert_eq!(p.operator, Operator::Equal);
+                let l_col = match *p.left.as_ref() {
+                    ConditionExpression::Base(ConditionBase::Field(ref f)) => {
+                        self.field_to_columnid(left_ni, &f.name).unwrap()
+                    }
+                    _ => unimplemented!(),
+                };
+                let r_col = match *p.right.as_ref() {
+                    ConditionExpression::Base(ConditionBase::Field(ref f)) => {
+                        self.field_to_columnid(right_ni, &f.name).unwrap()
+                    }
+                    _ => unimplemented!(),
+                };
+
+                (l_col, r_col)
+            }).collect();
+
             let projected_cols_left = self.fields_for(left_ni);
             let projected_cols_right = self.fields_for(right_ni);
 
             let tuples_for_cols =
-                |ni: NodeAddress, cols: &[String]| -> Vec<(NodeAddress, usize)> {
-                    cols.iter().map(|c| (ni, self.field_to_columnid(ni, c).unwrap())).collect()
+                |ni: NodeAddress, cols: &[String]| -> Vec<JoinSource> {
+                    if ni == left_ni {
+                        cols.iter().map(|c| {
+                            let column_id = self.field_to_columnid(ni, c).unwrap();
+                            match join_columns.get(&column_id) {
+                                Some(other_id) => JoinSource::B(column_id, other_id.clone()),
+                                None => JoinSource::L(column_id),
+                            }
+                        }).collect()
+                    } else {
+                        cols.iter().map(|c| JoinSource::R(self.field_to_columnid(ni, c).unwrap())).collect()
+                    }
                 };
 
             // non-join columns projected are the union of the ancestors' projected columns
             // TODO(malte): this will need revisiting when we do smart reuse
-            let mut join_proj_config = tuples_for_cols(left_ni, projected_cols_left);
-            join_proj_config.extend(tuples_for_cols(right_ni, projected_cols_right));
-            // join columns need us to generate join group configs for the operator
-            let mut left_join_group = vec![0; projected_cols_left.len()];
-            let mut right_join_group = vec![0; projected_cols_right.len()];
-            for (i, p) in jps.iter().enumerate() {
-                // equi-join only
-                assert_eq!(p.operator, Operator::Equal);
-                let l_col = match *p.left.as_ref() {
-                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                    _ => unimplemented!(),
-                };
-                let r_col = match *p.right.as_ref() {
-                    ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                    _ => unimplemented!(),
-                };
-                left_join_group[self.field_to_columnid(left_ni, &l_col.name).unwrap()] = i + 1;
-                right_join_group[self.field_to_columnid(right_ni, &r_col.name).unwrap()] = i + 1;
-            }
-            j = JoinBuilder::new(join_proj_config)
-                .from(left_ni, left_join_group)
-                .join(right_ni, right_join_group);
+            let mut emit = tuples_for_cols(left_ni, self.fields_for(left_ni));
+            emit.extend(tuples_for_cols(right_ni, self.fields_for(right_ni)));
+
+            j = Join::new(left_ni, right_ni, kind, emit);
+
             fields = projected_cols_left.into_iter()
                 .chain(projected_cols_right.into_iter())
                 .cloned()
@@ -757,6 +769,7 @@ impl SqlIncorporator {
                                                      jps,
                                                      left_ni,
                                                      right_ni,
+                                                     JoinType::Inner,
                                                      mig);
                         join_nodes.push(ni);
                         new_node_count += 1;
