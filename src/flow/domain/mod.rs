@@ -472,44 +472,38 @@ impl Domain {
                     drop(ack);
                 }
             }
-            Packet::PrepareState {
-                node,
-                index,
-                partial,
-            } => {
-                use flow::node::{Type, Reader};
-                let mut n = self.nodes[&node].borrow_mut();
-                let cols = n.fields().len();
-                match *n.inner {
-                    Type::Reader(ref mut wh, Reader { ref mut state, .. }) => {
-                        // make sure Reader is actually prepared to receive state
-                        assert!(wh.is_some());
-                        let wh = wh.as_mut().unwrap();
-                        assert!(state.is_some());
-                        let state = state.as_mut().unwrap();
-                        assert_eq!(state.len(), 0);
-
-                        // if we're partially materializing a reader node,
-                        // we need to give it a way to trigger replays.
-                        if partial {
-                            use backlog;
-                            // TODO
-                            // how do we also modify the ReadHandles returned by Blender::get_getter()?
-                            let (r_part, w_part) = backlog::new_partial(cols, state.key(), |key| {
-                                unimplemented!();
-                            });
-                            *wh = w_part;
-                            *state = r_part;
-                        }
+            Packet::PrepareState { node, state } => {
+                use flow::payload::InitialState;
+                match state {
+                    InitialState::PartialLocal(key) => {
+                        let mut state = State::default();
+                        state.add_key(&[key], true);
+                        self.state.insert(node, state);
                     }
-                    _ => {
-                        assert!(!partial || index.len() == 1);
+                    InitialState::IndexedLocal(index) => {
                         let mut state = State::default();
                         for idx in index {
-                            state.add_key(&idx[..], partial);
+                            state.add_key(&idx[..], false);
                         }
                         self.state.insert(node, state);
                     }
+                    InitialState::PartialGlobal(new_wh, new_rh) => {
+                        use flow::node::{Type, Reader};
+                        let mut n = self.nodes[&node].borrow_mut();
+                        if let Type::Reader(ref mut wh, Reader { ref mut state, .. }) = *n.inner {
+                            // make sure Reader is actually prepared to receive state
+                            assert!(wh.is_some());
+                            let wh = wh.as_mut().unwrap();
+                            assert!(state.is_some());
+                            let rh = state.as_mut().unwrap();
+                            assert_eq!(rh.len(), 0);
+                            *wh = new_wh;
+                            *rh = new_rh;
+                        } else {
+                            unreachable!();
+                        }
+                    }
+                    InitialState::Global => {}
                 }
             }
             Packet::SetupReplayPath {

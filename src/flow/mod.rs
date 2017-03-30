@@ -849,7 +849,7 @@ impl<'a> Migration<'a> {
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
         migrate::materialization::initialize(&log,
-                                             &mainline.ingredients,
+                                             &mut mainline.ingredients,
                                              mainline.source,
                                              &new,
                                              index,

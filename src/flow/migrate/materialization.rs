@@ -305,7 +305,7 @@ pub fn index(log: &Logger,
 }
 
 pub fn initialize(log: &Logger,
-                  graph: &Graph,
+                  graph: &mut Graph,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
                   mut materialize: HashMap<domain::Index,
@@ -327,11 +327,11 @@ pub fn initialize(log: &Logger,
 
     let mut empty = HashSet::new();
     for node in topo_list {
-        let n = &graph[node];
-        let d = n.domain();
+        let addr = graph[node].addr();
+        let d = graph[node].domain();
 
         let index_on = materialize.get_mut(&d)
-            .and_then(|ss| ss.get(n.addr().as_local()))
+            .and_then(|ss| ss.get(addr.as_local()))
             .cloned()
             .map(|idxs| {
                      // we've been told to materialize a node using 0 indices
@@ -341,7 +341,7 @@ pub fn initialize(log: &Logger,
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
-        if let flow::node::Type::Reader(_, ref r) = **n {
+        if let flow::node::Type::Reader(_, ref r) = *graph[node] {
             if r.state.is_some() {
                 has_state = true;
             }
@@ -357,7 +357,7 @@ pub fn initialize(log: &Logger,
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
                 .send(Packet::Ready {
-                          node: *n.addr().as_local(),
+                          node: *addr.as_local(),
                           index: index_on,
                           ack: ack_tx,
                       })
@@ -400,7 +400,7 @@ pub fn initialize(log: &Logger,
 }
 
 pub fn reconstruct(log: &Logger,
-                   graph: &Graph,
+                   graph: &mut Graph,
                    empty: &HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
@@ -450,7 +450,7 @@ pub fn reconstruct(log: &Logger,
     paths.retain(|path| !empty.contains(&path.last().unwrap().0));
 
     // cut paths so they only reach to the the closest materialized node
-    let mut paths = paths.into_iter()
+    let paths: Vec<_> = paths.into_iter()
         .map(|path| -> Vec<_> {
             let mut found = false;
             path.into_iter()
@@ -481,7 +481,7 @@ pub fn reconstruct(log: &Logger,
                 .map(|(_, segment)| segment)
                 .collect()
         })
-        .peekable();
+        .collect();
 
     // can we do partial materialization?
     //
@@ -500,8 +500,7 @@ pub fn reconstruct(log: &Logger,
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
     let partial_ok = index_on.len() == 1 && index_on[0].len() == 1 && paths.len() == 1 &&
-                     paths.peek()
-                         .unwrap()
+                     paths[0]
                          .last()
                          .unwrap()
                          .1
@@ -512,15 +511,47 @@ pub fn reconstruct(log: &Logger,
 
     let domain = graph[node].domain();
     let addr = graph[node].addr();
-
-    // tell the domain in question to create an empty state for the node in question
+    let cols = graph[node].fields().len();
     assert!(!index_on.is_empty(),
             "all materialized nodes must have a state key");
+
+    // tell the domain in question to create an empty state for the node in question
+    use flow::payload::InitialState;
+    use flow::node::{Type, Reader, NodeHandle};
+
+    // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
+    // mutable references to taken state.
+    let s = match *graph.node_weight_mut(node).unwrap().inner_mut() {
+        NodeHandle::Taken(Type::Reader(ref mut wh, Reader { ref mut state, .. })) if partial_ok => {
+            // make sure Reader is actually prepared to receive state
+            assert!(wh.is_none());
+            assert!(state.is_some());
+            let state = state.as_mut().unwrap();
+            assert_eq!(state.len(), 0);
+
+            // since we're partially materializing a reader node,
+            // we need to give it a way to trigger replays.
+            use backlog;
+            let (r_part, w_part) = backlog::new_partial(cols, state.key(), |key| {
+                unimplemented!();
+            });
+            *state = r_part.clone();
+            InitialState::PartialGlobal(w_part, r_part)
+        }
+        NodeHandle::Taken(Type::Reader(..)) => InitialState::Global,
+        NodeHandle::Owned(..) => unreachable!(),
+        _ if partial_ok => {
+            assert_eq!(index_on.len(), 1);
+            assert_eq!(index_on[0].len(), 1);
+            InitialState::PartialLocal(index_on[0][0])
+        }
+        _ => InitialState::IndexedLocal(index_on),
+    };
+
     txs[&domain]
         .send(Packet::PrepareState {
                   node: *addr.as_local(),
-                  index: index_on,
-                  partial: partial_ok,
+                  state: s,
               })
         .unwrap();
 

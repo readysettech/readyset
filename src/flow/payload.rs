@@ -1,5 +1,6 @@
 use petgraph;
 
+use backlog;
 use checktable;
 use flow::domain;
 use flow::statistics;
@@ -36,6 +37,13 @@ pub enum TriggerEndpoint {
     Start(Vec<usize>),
     End(mpsc::SyncSender<Packet>),
     Local(Vec<usize>),
+}
+
+pub enum InitialState {
+    PartialLocal(usize),
+    IndexedLocal(Vec<Vec<usize>>),
+    PartialGlobal(backlog::WriteHandle, backlog::ReadHandle),
+    Global,
 }
 
 #[derive(Clone)]
@@ -83,8 +91,7 @@ pub enum Packet {
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
         node: LocalNodeIndex,
-        index: Vec<Vec<usize>>,
-        partial: bool,
+        state: InitialState,
     },
 
     /// Probe for the number of records in the given node's state

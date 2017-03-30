@@ -90,7 +90,7 @@ impl Default for Reader {
     }
 }
 
-enum NodeHandle {
+pub(crate) enum NodeHandle {
     Owned(Type),
     Taken(Type),
 }
@@ -229,6 +229,10 @@ impl Node {
         let mut n = Self::new(&*self.name, &self.fields, n);
         n.domain = self.domain;
         n
+    }
+
+    pub(crate) fn inner_mut(&mut self) -> &mut NodeHandle {
+        &mut self.inner
     }
 
     pub fn name(&self) -> &str {
