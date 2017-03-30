@@ -127,17 +127,11 @@ impl SqlIncorporator {
                      na: &NodeAddress)
                      -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): we only support one level of condition nesting at this point :(
-        let l = match *ct.left
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
+        let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
-        let r = match *ct.right
-                   .as_ref()
-                   .unwrap()
-                   .as_ref() {
+        let r = match *ct.right.as_ref() {
             ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
             _ => unimplemented!(),
         };
@@ -202,12 +196,14 @@ impl SqlIncorporator {
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
+        use sql::passes::negation_removal::NegationRemoval;
 
         info!(self.log, "Computing nodes for query \"{}\"", query_name);
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
         let q = q.expand_table_aliases()
+            .remove_negation()
             .expand_stars(&self.write_schemas)
             .expand_implied_tables(&self.write_schemas)
             .rewrite_count_star(&self.write_schemas);
@@ -573,11 +569,11 @@ impl SqlIncorporator {
             for (i, p) in jps.iter().enumerate() {
                 // equi-join only
                 assert_eq!(p.operator, Operator::Equal);
-                let l_col = match **p.left.as_ref().unwrap() {
+                let l_col = match *p.left.as_ref() {
                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                     _ => unimplemented!(),
                 };
-                let r_col = match **p.right.as_ref().unwrap() {
+                let r_col = match *p.right.as_ref() {
                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                     _ => unimplemented!(),
                 };

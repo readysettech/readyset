@@ -2,6 +2,7 @@ pub mod base;
 pub mod grouped;
 pub mod join;
 pub mod latest;
+pub mod left_join;
 pub mod permute;
 pub mod project;
 pub mod union;
@@ -158,7 +159,11 @@ pub mod test {
             // since we set up the graph, we actually know that the NodeIndex is simply one greater
             // than the local index (since bases are added first, and assigned local + global
             // indices in order, but global ids are prefixed by the id of the source node).
-            let local = self.to_local(base);
+            let local = if NodeAddress::is_global(&base) {
+                self.to_local(base)
+            } else {
+                base
+            };
 
             // no need to call on_input since base tables just forward anyway
 

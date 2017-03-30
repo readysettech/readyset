@@ -17,18 +17,13 @@ fn rewrite_conditional<F>(expand_columns: &F,
     use nom_sql::ConditionBase::*;
 
     let translate_ct_arm =
-        |i: Option<Box<ConditionExpression>>| -> Option<Box<ConditionExpression>> {
-            match i {
-                Some(bce) => {
-                    let new_ce = match *bce {
-                        Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
-                        Base(b) => Base(b),
-                        x => rewrite_conditional(expand_columns, x, avail_tables),
-                    };
-                    Some(Box::new(new_ce))
-                }
-                x => x,
-            }
+        |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
+            let new_ce = match *bce {
+                Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
+                Base(b) => Base(b),
+                x => rewrite_conditional(expand_columns, x, avail_tables),
+            };
+            Box::new(new_ce)
         };
 
     match ce {
@@ -42,23 +37,12 @@ fn rewrite_conditional<F>(expand_columns: &F,
             };
             ComparisonOp(rewritten_ct)
         }
-        LogicalOp(ct) => {
-            let rewritten_ct = ConditionTree {
-                operator: ct.operator,
-                left: match ct.left {
-                    Some(lct) => {
-                        Some(Box::new(rewrite_conditional(expand_columns, *lct, avail_tables)))
-                    }
-                    x => x,
-                },
-                right: match ct.right {
-                    Some(rct) => {
-                        Some(Box::new(rewrite_conditional(expand_columns, *rct, avail_tables)))
-                    }
-                    x => x,
-                },
-            };
-            LogicalOp(rewritten_ct)
+        LogicalOp(ConditionTree{operator, box left, box right}) => {
+            LogicalOp(ConditionTree {
+                operator: operator,
+                left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
+                right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+            })
         }
         x => x,
     }
@@ -302,7 +286,7 @@ mod tests {
     fn it_expands_implied_tables_for_select() {
         use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, SelectStatement};
 
-        let wrap = |cb| Some(Box::new(ConditionExpression::Base(cb)));
+        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
 
         // SELECT name, title FROM users, articles WHERE users.id = author;
         // -->
