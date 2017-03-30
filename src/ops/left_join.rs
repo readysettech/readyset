@@ -18,7 +18,8 @@ pub struct LeftJoin {
     // right
     emit: Vec<(bool, usize)>,
 
-    // Number of records on the right with each key
+    // Stores number of records on the right with each key. Used to avoid creating a new HashMap for
+    // every call to `on_input()`, but is empty except for in that function.
     right_counts: HashMap<DataType, usize>,
 }
 
@@ -26,8 +27,8 @@ impl LeftJoin {
     /// Create a new instance of LeftJoin
     ///
     /// `left` and `right` are the left and right parents respectively. `on` is a tuple specifying
-    /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each output
-    /// colunm, which source and column should be used (true means left parent, and false
+    /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each
+    /// output colunm, which source and column should be used (true means left parent, and false
     /// means right parent).
     pub fn new(left: NodeAddress,
                right: NodeAddress,
@@ -83,7 +84,7 @@ impl Ingredient for LeftJoin {
     }
 
     fn must_replay_among(&self, _empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
-        unimplemented!()
+        Some(Some(self.left).into_iter().collect())
     }
 
     fn will_query(&self, _: bool) -> bool {
@@ -108,13 +109,29 @@ impl Ingredient for LeftJoin {
                 nodes: &DomainNodes,
                 state: &StateMap)
                 -> Records {
-        // okay, so here's what's going on:
-        // the record(s) we receive are all from one side of the join. we need to query the
-        // other side(s) for records matching the incoming records on that side's join
-        // fields.
+        if from == self.right {
+            // If records are being received from the right, then populate self.right_counts with
+            // the number of records that existed for each key *before* this batch of records was
+            // processed.
+            for r in rs.iter() {
+                let ref key = r.rec()[self.on.1];
+                let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
 
-        // TODO: we should be clever here, and only query once per *distinct join value*,
-        // instead of once per received record.
+                if let Some(rc) = self.right_counts.get_mut(&key) {
+                    *rc = adjust(*rc);
+                    continue;
+                }
+
+                let rc = adjust(self.lookup(self.right,
+                                            &[self.on.0],
+                                            &KeyType::Single(&key),
+                                            nodes,
+                                            state)
+                                    .unwrap()
+                                    .count());
+                self.right_counts.insert(key.clone(), rc);
+            }
+        }
 
         let (other, from_key, other_key) = if from == self.left {
             (self.right, self.on.0, self.on.1)
@@ -122,28 +139,30 @@ impl Ingredient for LeftJoin {
             (self.left, self.on.1, self.on.0)
         };
 
-        rs.into_iter()
+        // okay, so here's what's going on:
+        // the record(s) we receive are all from one side of the join. we need to query the
+        // other side(s) for records matching the incoming records on that side's join
+        // fields.
+        let ret = rs.into_iter()
             .flat_map(|rec| -> Vec<Record> {
                 let (row, positive) = rec.extract();
-                let other_rows: Vec<_> = self.lookup(other,
-                                                     &[other_key],
-                                                     &KeyType::Single(&row[from_key]),
-                                                     nodes,
-                                                     state)
+                let mut other_rows = self.lookup(other,
+                                                 &[other_key],
+                                                 &KeyType::Single(&row[from_key]),
+                                                 nodes,
+                                                 state)
                     .unwrap()
-                    .collect();
+                    .peekable();
 
                 if from == self.left {
-                    if other_rows.is_empty() {
+                    if other_rows.peek().is_none() {
                         vec![(self.generate_null(&row), positive).into()]
                     } else {
-                        other_rows.into_iter()
-                            .map(|r| (self.generate_row(&row, r), positive).into())
-                            .collect()
+                        other_rows.map(|r| (self.generate_row(&row, r), positive).into()).collect()
                     }
                 } else if from == self.right {
                     let rc = {
-                        let rc = self.right_counts.entry(row[self.on.0].clone()).or_insert(0);
+                        let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
                         if positive {
                             *rc += 1;
                         } else {
@@ -153,22 +172,22 @@ impl Ingredient for LeftJoin {
                     };
 
                     if (positive && rc == 1) || (!positive && rc == 0) {
-                        other_rows.into_iter()
-                            .flat_map(|r| {
-                                          vec![(self.generate_null(r), !positive).into(),
-                                               (self.generate_row(r, &row), positive).into()]
-                                      })
+                        other_rows.flat_map(|r| {
+                                                vec![(self.generate_null(r), !positive).into(),
+                                                     (self.generate_row(r, &row), positive).into()]
+                                            })
                             .collect()
                     } else {
-                        other_rows.into_iter()
-                            .map(|r| (self.generate_row(r, &row), positive).into())
-                            .collect()
+                        other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
                     }
                 } else {
                     unreachable!()
                 }
             })
-            .collect()
+            .collect();
+
+        self.right_counts.clear();
+        ret
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
