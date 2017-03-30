@@ -299,7 +299,7 @@ impl SqlToMirConverter {
                           name: &str,
                           func_col: &Column,
                           group_cols: Vec<&Column>,
-                          parent: Option<MirNodeRef>)
+                          parent: MirNodeRef)
                           -> MirNodeRef {
         use ops::grouped::aggregate::Aggregation;
         use ops::grouped::extremum::Extremum;
@@ -311,22 +311,8 @@ impl SqlToMirConverter {
             assert_eq!(cols.len(), 1);
 
             let over = cols.iter().next().unwrap();
-            let parent_node = match parent {
-                // If no explicit parent node is specified, we extract the base node from the
-                // "over" column's specification
-                None => {
-                    self.nodes[&(over.table
-                          .as_ref()
-                          .unwrap()
-                          .clone(),
-                      self.schema_version)]
-                            .clone()
-                }
-                // We have an explicit parent node (likely a projection helper), so use that
-                Some(ref node) => node.clone(),
-            };
 
-            self.make_grouped_node(name, &func_col, (parent_node, &over), group_cols, t)
+            self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t)
         };
 
         let func = func_col.function.as_ref().unwrap();
@@ -487,20 +473,18 @@ impl SqlToMirConverter {
         rcn
     }
 
-    fn make_projection_helper(&mut self, name: &str, computed_col: &Column) -> MirNodeRef {
+    fn make_projection_helper(&mut self,
+                              name: &str,
+                              parent: MirNodeRef,
+                              computed_col: &Column)
+                              -> MirNodeRef {
         let target_cols = target_columns_from_computed_column(computed_col);
         // TODO(malte): we only support a single column argument at this point
         assert_eq!(target_cols.len(), 1);
         let fn_col = target_cols.last().unwrap();
-        let parent_node = self.nodes[&(fn_col.table
-              .as_ref()
-              .unwrap()
-              .clone(),
-          self.schema_version)]
-                .clone();
 
         self.make_project_node(name,
-                               parent_node,
+                               parent,
                                vec![fn_col],
                                vec![(String::from("grp"), DataType::from(0 as i32))])
     }
@@ -731,12 +715,23 @@ impl SqlToMirConverter {
                                     // combine
                                     let gb_and_param_cols: Vec<_> =
                                         gb_cols.iter().chain(param_cols.into_iter()).collect();
+
+
+                                    let parent_node = match prev_node {
+                                        // If no explicit parent node is specified, we extract
+                                        // the base node from the "over" column's specification
+                                        None => base_nodes[over_table].clone(),
+                                        // We have an explicit parent node (likely a projection helper), so use that
+                                        Some(node) => node,
+                                    };
+
                                     let n = self.make_function_node(&format!("q_{:x}_n{}",
                                                                              qg.signature().hash,
                                                                              new_node_count),
                                                                     fn_col,
                                                                     gb_and_param_cols,
-                                                                    prev_node.clone());
+                                                                    parent_node);
+                                    prev_node = Some(n.clone());
                                     func_nodes.push(n);
                                     grouped_fn_columns.insert(fn_col);
                                     new_node_count += 1;
@@ -754,31 +749,42 @@ impl SqlToMirConverter {
                             &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
                         let over_cols = target_columns_from_computed_column(computed_col);
+                        // XXX(malte): fn col?
+                        let over_table = over_cols.iter()
+                            .next()
+                            .unwrap()
+                            .table
+                            .as_ref()
+                            .unwrap()
+                            .as_str();
+
                         let ref proj_cols_from_target_table = qg.relations
-                            .get(over_cols.iter()
-                                     .next()
-                                     .as_ref()
-                                     .unwrap()
-                                     .table
-                                     .as_ref()
-                                     .unwrap())
+                            .get(over_table)
                             .as_ref()
                             .unwrap()
                             .columns;
+
+                        let parent_node = match prev_node {
+                            Some(ref node) => node.clone(),
+                            None => base_nodes[over_table].clone(),
+                        };
+
                         let (group_cols, parent_node) = if proj_cols_from_target_table.is_empty() {
                             // slightly messy hack: if there are no group columns and the table on
                             // which we compute has no projected columns in the output, we make one
                             // up a group column by adding an extra projection node
                             let proj_name = format!("{}_prj_hlpr", agg_node_name);
-                            let proj = self.make_projection_helper(&proj_name, computed_col);
+                            let proj =
+                                self.make_projection_helper(&proj_name, parent_node, computed_col);
+
                             func_nodes.push(proj.clone());
                             new_node_count += 1;
 
                             let bogo_group_col = Column::from(format!("{}.grp", proj_name)
                                                                   .as_str());
-                            (vec![bogo_group_col], Some(proj))
+                            (vec![bogo_group_col], proj)
                         } else {
-                            (proj_cols_from_target_table.clone(), None)
+                            (proj_cols_from_target_table.clone(), parent_node)
                         };
                         let n = self.make_function_node(agg_node_name,
                                                         computed_col,
