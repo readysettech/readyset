@@ -55,20 +55,36 @@ impl MirQuery {
         let mut reused_nodes = Vec::new();
 
         // starting at the roots, add nodes in topological order
-        // XXX(malte): topo sort
         let mut node_queue = VecDeque::new();
         node_queue.extend(self.roots.iter().cloned());
+        let mut in_edge_counts = HashMap::new();
+        for n in &node_queue {
+            in_edge_counts.insert(n.borrow().versioned_name(), 0);
+        }
         while !node_queue.is_empty() {
             let n = node_queue.pop_front().unwrap();
+            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
             let flow_node = n.borrow_mut().into_flow_parts(mig);
             match flow_node {
                 FlowNode::New(na) => new_nodes.push(na),
                 FlowNode::Existing(na) => reused_nodes.push(na),
             }
-            node_queue.extend(n.borrow()
-                                  .children
-                                  .iter()
-                                  .cloned());
+
+            for child in n.borrow().children.iter() {
+                let nd = child.borrow().versioned_name();
+                let in_edges = if in_edge_counts.contains_key(&nd) {
+                    in_edge_counts[&nd]
+                } else {
+                    child.borrow().ancestors.len()
+                };
+                assert!(in_edges >= 1);
+                if in_edges == 1 {
+                    // last edge removed
+                    node_queue.push_back(child.clone());
+                }
+                in_edge_counts.insert(nd, in_edges - 1);
+            }
         }
 
         let leaf_na = match *self.leaf
