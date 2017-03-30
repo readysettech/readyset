@@ -63,9 +63,9 @@ impl Join {
                      JoinSource::L(c) => (true, c),
                      JoinSource::R(c) => (false, c),
                      JoinSource::B(lc, rc) => {
-                         join_columns.push((lc, rc));
-                         (true, lc)
-                     }
+                join_columns.push((lc, rc));
+                (true, lc)
+            }
                  })
             .collect();
 
@@ -192,26 +192,20 @@ impl Ingredient for Join {
         // the record(s) we receive are all from one side of the join. we need to query the
         // other side(s) for records matching the incoming records on that side's join
         // fields.
-        let ret = rs.into_iter()
-            .flat_map(|rec| -> Vec<Record> {
-                let (row, positive) = rec.extract();
-                let mut other_rows = self.lookup(other,
-                                                 &[other_key],
-                                                 &KeyType::Single(&row[from_key]),
-                                                 nodes,
-                                                 state)
-                    .unwrap()
-                    .peekable();
+        let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
+        for rec in rs {
+            let (row, positive) = rec.extract();
+            let mut other_rows = self.lookup(other,
+                                             &[other_key],
+                                             &KeyType::Single(&row[from_key]),
+                                             nodes,
+                                             state)
+                .unwrap()
+                .peekable();
 
-                if from == self.left {
-                    if other_rows.peek().is_none() && self.kind == JoinType::Left {
-                        vec![(self.generate_null(&row), positive).into()]
-                    } else {
-                        other_rows.map(|r| (self.generate_row(&row, r), positive).into()).collect()
-                    }
-                } else if from == self.right && self.kind == JoinType::Inner {
-                    other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
-                } else if from == self.right {
+            if self.kind == JoinType::Left {
+                // emit null rows if necessary for left join
+                if from == self.right {
                     let rc = {
                         let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
                         if positive {
@@ -223,24 +217,31 @@ impl Ingredient for Join {
                     };
 
                     if (positive && rc == 1) || (!positive && rc == 0) {
-                        other_rows.flat_map(|r| {
-                                                vec![(self.generate_null(r), !positive).into(),
-                                                     (self.generate_row(r, &row), positive).into()]
-                                            })
-                            .collect()
-                    } else {
-                        other_rows.map(|r| (self.generate_row(r, &row), positive).into()).collect()
+                        ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
+                                                           let foo: Records = vec![
+                            (self.generate_null(r), !positive),
+                            (self.generate_row(r, &row), positive)
+                        ].into();
+                                                           foo.into()
+                                                       }));
+                        continue;
                     }
-                } else {
-                    unreachable!()
+                } else if other_rows.peek().is_none() {
+                    ret.push((self.generate_null(&row), positive).into());
                 }
-            })
-            .collect();
+            }
+
+            if from == self.right {
+                ret.extend(other_rows.map(|r| (self.generate_row(r, &row), positive).into()));
+            } else {
+                ret.extend(other_rows.map(|r| (self.generate_row(&row, r), positive).into()));
+            }
+        }
 
         if from == self.right && self.kind == JoinType::Left {
             self.right_counts.clear();
         }
-        ret
+        ret.into()
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
