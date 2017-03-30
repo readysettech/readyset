@@ -493,6 +493,8 @@ impl Domain {
                         // we need to give it a way to trigger replays.
                         if partial {
                             use backlog;
+                            // TODO
+                            // how do we also modify the ReadHandles returned by Blender::get_getter()?
                             let (r_part, w_part) = backlog::new_partial(cols, state.key(), |key| {
                                 unimplemented!();
                             });
