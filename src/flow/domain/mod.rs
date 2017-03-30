@@ -76,7 +76,10 @@ struct ReplayPath {
 
 enum Waiting {
     /// A paused node is waiting for the state of *another* node to be filled.
-    Paused { buffer: VecDeque<Packet> },
+    Paused {
+        buffer: VecDeque<Packet>,
+        queued: VecDeque<LocalNodeIndex>,
+    },
 
     /// A target node is waiting for an incoming replay.
     ///
@@ -87,6 +90,7 @@ enum Waiting {
         buffer: VecDeque<Packet>,
         prune: Vec<DataType>,
         releases: Option<LocalNodeIndex>,
+        queued: VecDeque<LocalNodeIndex>,
     },
 }
 
@@ -170,7 +174,7 @@ impl Domain {
         }
 
         match waiting.get_mut(me.as_local()) {
-            Some(&mut Waiting::Paused { ref mut buffer }) => {
+            Some(&mut Waiting::Paused { ref mut buffer, .. }) => {
                 buffer.push_back(m);
                 return output_messages;
             }
@@ -230,7 +234,10 @@ impl Domain {
                         None => {
                             let mut buffered = VecDeque::new();
                             buffered.push_front(was.take().unwrap());
-                            Waiting::Paused { buffer: buffered }
+                            Waiting::Paused {
+                                buffer: buffered,
+                                queued: VecDeque::new(),
+                            }
                         }
                         Some(Waiting::Paused { .. }) => {
                             // the join was waiting for a replay into one of its ancestors when
@@ -260,17 +267,23 @@ impl Domain {
                             buffer: buffered,
                             prune: key.clone(),
                             releases: release,
+                            queued: VecDeque::new(),
                         }
                     }
-                    Some(Waiting::Paused { .. }) => {
+                    Some(Waiting::Paused { ref mut queued, .. }) |
+                    Some(Waiting::Target { ref mut queued, .. }) => {
                         // we did a lookup into a node that is already awaiting a replay from one
                         // of its children, and missed.
-                        unimplemented!();
-                    }
-                    Some(Waiting::Target { .. }) => {
+                        //
+                        // OR
+                        //
                         // we did a lookup into a node that is already being replayed into by some
                         // *other* node (note that it cannot be us, because then we'd be paused).
-                        unimplemented!();
+                        //
+                        // let's make sure that other node gets back to us when it eventually
+                        // finishes replaying.
+                        queued.push_back(*me.as_local());
+                        return output_messages;
                     }
                 };
                 waiting.insert(*node.as_local(), wait);
@@ -933,6 +946,7 @@ impl Domain {
                             mut buffer,
                             prune,
                             releases,
+                            mut queued,
                             ..
                         }) = self.waiting.remove(&ni) {
 
@@ -958,78 +972,51 @@ impl Domain {
                 // did we fill a hole that someone else was waiting on?
                 if let Some(node) = releases {
                     // yes, so we need to replay their buffer first.
-                    if let Some(Waiting::Paused { buffer: mut pbuffer }) =
-                        self.waiting.remove(&node) {
-                        while let Some(m) = pbuffer.pop_front() {
-                            self.handle(m, inject_tx);
-                            match self.waiting.remove(&node) {
-                                None => {}
-                                Some(Waiting::Paused { buffer: mut next_buffer }) => {
-                                    // seems we hit another missing entry while replaying. transfer
-                                    // over the remaining buffered things and leave it up to the
-                                    // next arrival of a replay for that to continue.
-                                    next_buffer.append(&mut pbuffer);
-
-                                    // we also need to ensure that the messages the ancestor we
-                                    // *were* waiting on are still eventually processed.
-                                    match self.waiting.get_mut(&ni) {
-                                        None => {
-                                            // okay, this is pretty bad...
-                                            // while processing a buffered update, we hit a hole in
-                                            // a *different* ancestor, who is now replaying. this
-                                            // means we don't have anywhere to put the buffered
-                                            // elements of the ancestor that we *previously* missed
-                                            // in. If we only ever have two-way joins, this
-                                            // shouldn't happen (if we miss in R, all buffered
-                                            // updates should be L, so all misses during buffer
-                                            // replay should remain in R), but with more elaborate
-                                            // joins (and possibly unions) this could happen.
-                                            unimplemented!();
-                                        }
-                                        Some(&mut Waiting::Target {
-                                                      buffer: ref mut next_buffer,
-                                                      releases,
-                                                      ..
-                                                  }) => {
-                                            assert_eq!(releases, Some(node));
-                                            next_buffer.append(&mut buffer);
-                                        }
-                                        Some(&mut Waiting::Paused { .. }) => unreachable!(),
-                                    }
-
-                                    self.waiting.insert(node,
-                                                        Waiting::Paused { buffer: next_buffer });
-
-                                    return;
-                                }
-                                Some(..) => unreachable!(),
-                            }
-                        }
-                    } else {
-                        unreachable!();
+                    if self.release_paused(node, Some((ni, &mut buffer, &mut queued)), inject_tx) {
+                        // releasing that buffer triggered another replay!
+                        return;
                     }
                 }
 
-                // finally, replay our (pruned) buffer
+                // replay our (pruned) buffer
                 while let Some(m) = buffer.pop_front() {
                     self.handle(m, inject_tx);
                     match self.waiting.get_mut(&ni) {
                         None => {}
-                        Some(&mut Waiting::Paused { buffer: ref mut next_buffer }) => {
+                        Some(&mut Waiting::Paused {
+                                      buffer: ref mut next_buffer,
+                                      queued: ref mut next_queued,
+                                  }) => {
                             // while processing this update, *we* missed in some other node.
                             // we need to make sure we keep working through our backlog when the
                             // hole is eventually filled.
                             next_buffer.append(&mut buffer);
+                            next_queued.append(&mut queued);
                             return;
                         }
-                        Some(&mut Waiting::Target { buffer: ref mut next_buffer, .. }) => {
+                        Some(&mut Waiting::Target {
+                                      buffer: ref mut next_buffer,
+                                      queued: ref mut next_queued,
+                                      ..
+                                  }) => {
                             // a downstream node missed on us while processing this update.
                             // make sure we keep our backlog so it eventually gets processed.
                             next_buffer.append(&mut buffer);
+                            next_queued.append(&mut queued);
                             return;
                         }
                     }
                 }
+
+                // did someone else try to do lookups into us while we were being filled?
+                for node in queued {
+                    // yes, so we need to replay their queues too. note that we don't care about
+                    // the return value here -- if any of the triggered nodes do another lookup
+                    // that misses into us, they'll either trigger a replay, or queue themselves
+                    // again.
+                    self.release_paused(node, None, inject_tx);
+                }
+
                 return;
             }
 
@@ -1097,6 +1084,102 @@ impl Domain {
                 }
             }
         }
+    }
+
+    /// Replay any buffered updates at the given node, since the hole that blocked it has been
+    /// filled.
+    ///
+    /// Returns true if another hole was encountered while processing the buffer.
+    fn release_paused(&mut self,
+                      paused: LocalNodeIndex,
+                      waited_for: Option<(LocalNodeIndex,
+                                          &mut VecDeque<Packet>,
+                                          &mut VecDeque<LocalNodeIndex>)>,
+                      inject_tx: &mut InjectCh)
+                      -> bool {
+        if let Some(Waiting::Paused {
+                        buffer: mut pbuffer,
+                        queued: mut pqueued,
+                    }) = self.waiting.remove(&paused) {
+            // keep processing the buffered entries for this paused node until we've either gone
+            // through all of them, or until we trigger another replay.
+            while let Some(m) = pbuffer.pop_front() {
+                self.handle(m, inject_tx);
+                // did we start waiting again?
+                // NOTE: we need to .remove() since the block beneath must have &mut self
+                match self.waiting.remove(&paused) {
+                    None => {}
+                    Some(Waiting::Paused {
+                             mut buffer,
+                             mut queued,
+                         }) => {
+                        // yup, seems we hit another missing entry while replaying.
+
+                        // transfer over the remaining buffered things and leave it up to the next
+                        // arrival of a replay for that to continue.
+                        buffer.append(&mut pbuffer);
+
+                        // make sure that any nodes that were queued on our state are eventually
+                        // unblocked.
+                        queued.append(&mut pqueued);
+
+                        if let Some((waited_for, target_buffered, target_queued)) = waited_for {
+                            // since we process the paused node's buffer first, there might
+                            // messages waiting to be processed at the ancestor that we were waiting
+                            // for a replay into. we need to make sure that those buffered messages are
+                            // eventually delivered too.
+                            match self.waiting.get_mut(&waited_for) {
+                                None => {
+                                    // okay, this is pretty bad...
+                                    // while processing a buffered update, we hit a hole in a
+                                    // *different* ancestor, who is now replaying. this means we
+                                    // don't have anywhere to put the buffered elements of the
+                                    // ancestor that we *previously* missed in. If we only ever
+                                    // have two-way joins, this shouldn't happen (if we miss in R,
+                                    // all buffered updates should be L, so all misses during
+                                    // buffer replay should remain in R), but with more elaborate
+                                    // joins (and possibly unions) this could happen.
+                                    unimplemented!();
+                                }
+                                Some(&mut Waiting::Target {
+                                              ref mut buffer,
+                                              ref mut queued,
+                                              releases,
+                                              ..
+                                          }) => {
+                                    assert_eq!(releases, Some(paused));
+                                    buffer.append(target_buffered);
+                                    queued.append(target_queued);
+                                }
+                                Some(&mut Waiting::Paused { .. }) => unreachable!(),
+                            }
+                        }
+
+                        // put back what we stole
+                        self.waiting.insert(paused, Waiting::Paused { buffer, queued });
+                        return true;
+                    }
+                    Some(..) => {
+                        // processing a buffered update somehow caused a replay to *our* state.
+                        // this can only happen with an operator that looks at its ancestors'
+                        // state, and *then* at its own state, which we don't currently have.
+                        unreachable!()
+                    }
+                }
+            }
+
+            // did someone else try to do lookups into us while we were waiting?
+            for node in pqueued {
+                // yes, so we need to replay their queues too. note that here, like above, we don't
+                // care about triggering further replays, because the node will then automatically
+                // trigger a replay of queue itself again.
+                self.release_paused(node, None, inject_tx);
+            }
+        } else {
+            unreachable!();
+        }
+
+        false
     }
 
     fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject_tx: &mut InjectCh) {
