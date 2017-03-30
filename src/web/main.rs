@@ -33,10 +33,11 @@ fn main() {
                                     Aggregation::COUNT.over(vote, 0, &[1]));
 
         // add final join -- joins on first field of each input
-        let j =
-            JoinBuilder::new(vec![(article, 0), (article, 1), (article, 2), (article, 3), (vc, 1)])
-                .from(article, vec![1, 0])
-                .join(vc, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = Join::new(article,
+                          vc,
+                          JoinType::Inner,
+                          vec![B(0, 0), L(1), L(2), L(3), R(1)]);
         let awvc = mig.add_ingredient("awvc", &["id", "user", "title", "url", "votes"], j);
 
         let karma = mig.add_ingredient("karma",
