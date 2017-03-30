@@ -1,5 +1,5 @@
 use flow::core::{NodeAddress, DataType};
-use mir::{MirNode, MirNodeType};
+use mir::{GroupedNodeType, MirNode, MirNodeType};
 // TODO(malte): remove if possible
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
@@ -16,13 +16,6 @@ use std::iter::FromIterator;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::vec::Vec;
-
-/// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
-enum GroupedNodeType {
-    Aggregation(ops::grouped::aggregate::Aggregation),
-    Extremum(ops::grouped::extremum::Extremum),
-    GroupConcat(String),
-}
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
     use nom_sql::FunctionExpression::*;
@@ -568,6 +561,8 @@ impl SqlToMirConverter {
             None => None,
         };
 
+        assert_eq!(limit.offset, 0); // Non-zero offset not supported
+
         // make the new operator and record its metadata
         let node = MirNode::new(name,
                                 self.schema_version,
@@ -576,6 +571,7 @@ impl SqlToMirConverter {
                                     order: order,
                                     group_by: group_by.into_iter().cloned().collect(),
                                     k: limit.limit as usize,
+                                    offset: 0,
                                 },
                                 vec![parent.clone()],
                                 vec![]);
