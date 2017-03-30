@@ -2,6 +2,7 @@ use nom_sql::{Column, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug};
+use std::iter::FromIterator;
 use std::rc::Rc;
 
 use flow::Migration;
@@ -9,6 +10,7 @@ use flow::core::{NodeAddress, DataType};
 use ops;
 use ops::grouped::aggregate::Aggregation as AggregationKind;
 use ops::grouped::extremum::Extremum as ExtremumKind;
+use ops::identity::Identity;
 use ops::join::Builder as JoinBuilder;
 use ops::permute::Permute;
 use ops::topk::OrderedRecordComparator;
@@ -195,13 +197,40 @@ impl MirNode {
         match self.flow_node {
             None => {
                 let flow_node = match self.inner {
+                    MirNodeType::Aggregation { ref on, ref group_by, ref kind } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_aggregation_node(&name, parent, on, group_by, kind, mig)
+                    }
                     MirNodeType::Base { ref columns, ref keys } => {
                         make_base_node(&name, columns, keys, mig)
+                    }
+                    MirNodeType::Extremum { ref on, ref group_by, ref kind } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_extremum_node(&name, parent, on, group_by, kind, mig)
+                    }
+                    MirNodeType::Filter { ref conditions } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_filter_node(&name, parent, conditions, mig)
+                    }
+                    MirNodeType::GroupConcat { ref on, ref separator } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_group_concat_node(&name, parent, on, separator, mig)
                     }
                     MirNodeType::Join { ref on_left, ref on_right, ref project } => {
                         assert_eq!(self.ancestors.len(), 2);
                         let left = self.ancestors[0].clone();
                         let right = self.ancestors[1].clone();
+                        make_join_node(&name, left, right, on_left, on_right, project, mig)
+                    }
+                    MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => {
+                        assert_eq!(self.ancestors.len(), 2);
+                        let left = self.ancestors[0].clone();
+                        let right = self.ancestors[1].clone();
+                        // XXX(malte): fix
                         make_join_node(&name, left, right, on_left, on_right, project, mig)
                     }
                     MirNodeType::Project { ref emit, ref literals } => {
@@ -227,6 +256,11 @@ impl MirNode {
                                // MIR node
                                FlowNode::Existing(na) => FlowNode::Existing(na),
                         }
+                    }
+                    MirNodeType::TopK { ref order, ref group_by, ref k } => {
+                        assert_eq!(self.ancestors.len(), 1);
+                        let parent = self.ancestors[0].clone();
+                        make_topk_node(&name, parent, order, group_by, *k, mig)
                     }
                     _ => unimplemented!(),
                 };
@@ -316,6 +350,18 @@ impl Debug for MirNode {
 impl Debug for MirNodeType {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
+            MirNodeType::Aggregation { ref on, ref group_by, ref kind } => {
+                let op_string = match *kind {
+                    AggregationKind::COUNT => "|*|".into(),
+                    AggregationKind::SUM => format!("𝛴({})", on.name.as_str()),
+                };
+                let group_cols = group_by.iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{} γ[{}]", op_string, group_cols)
+
+            }
             MirNodeType::Base { ref columns, ref keys } => {
                 write!(f,
                        "B [⚷: {}]",
@@ -324,6 +370,28 @@ impl Debug for MirNodeType {
                            .collect::<Vec<_>>()
                            .join(","))
             }
+            MirNodeType::Filter { ref conditions } => {
+                use regex::Regex;
+
+                let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
+                write!(f,
+                       "σ[{}]",
+                       conditions.iter()
+                           .enumerate()
+                           .filter_map(|(i, ref e)| match e.as_ref() {
+                                           Some(&(ref op, ref x)) => {
+                                               Some(format!("f{} {} {}",
+                                                            i,
+                                                            escape(&format!("{}", op)),
+                                                            x))
+                                           }
+                                           None => None,
+                                       })
+                           .collect::<Vec<_>>()
+                           .as_slice()
+                           .join(", "))
+            }
+            MirNodeType::Identity => write!(f, "≡"),
             MirNodeType::Join { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
             MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
             MirNodeType::Permute { ref emit } => {
@@ -351,30 +419,49 @@ impl Debug for MirNodeType {
                            format!("")
                        })
             }
-            MirNodeType::Filter { ref conditions } => {
-                use regex::Regex;
-
-                let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
-                write!(f,
-                       "σ[{}]",
-                       conditions.iter()
-                           .enumerate()
-                           .filter_map(|(i, ref e)| match e.as_ref() {
-                                           Some(&(ref op, ref x)) => {
-                                               Some(format!("f{} {} {}",
-                                                            i,
-                                                            escape(&format!("{}", op)),
-                                                            x))
-                                           }
-                                           None => None,
-                                       })
-                           .collect::<Vec<_>>()
-                           .as_slice()
-                           .join(", "))
-            }
             _ => unimplemented!(),
         }
     }
+}
+
+fn make_aggregation_node(name: &str,
+                         parent: MirNodeRef,
+                         on: &Column,
+                         group_by: &Vec<Column>,
+                         kind: &AggregationKind,
+                         mut mig: &mut Migration)
+                         -> FlowNode {
+    let parent_na = match parent.borrow().flow_node {
+        Some(FlowNode::New(na)) |
+        Some(FlowNode::Existing(na)) => na,
+        None => panic!("Aggregation parent must have FlowNodes by now!"),
+    };
+    let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
+                                                                      Some(ref a) => a.clone(),
+                                                                      None => c.name.clone(),
+                                                                  }));
+    combined_columns.push(on.name.clone());
+
+    let over_col_indx = parent.borrow()
+        .columns()
+        .iter()
+        .position(|c| c == on)
+        .unwrap();
+    let group_col_indx = group_by.iter()
+        .map(|c| {
+            parent.borrow()
+                .columns()
+                .iter()
+                .position(|pc| pc == c)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    let node =
+        mig.add_ingredient(String::from(name),
+                           combined_columns.as_slice(),
+                           kind.clone().over(parent_na, over_col_indx, group_col_indx.as_slice()));
+    FlowNode::New(node)
 }
 
 fn make_base_node(name: &str,
@@ -403,6 +490,51 @@ fn make_base_node(name: &str,
                                .as_slice(),
                            ops::base::Base::default())
     };
+    FlowNode::New(node)
+}
+
+fn make_extremum_node(name: &str,
+                      parent: MirNodeRef,
+                      on: &Column,
+                      group_by: &Vec<Column>,
+                      kind: &ExtremumKind,
+                      mut mig: &mut Migration)
+                      -> FlowNode {
+    unimplemented!()
+}
+
+fn make_filter_node(name: &str,
+                    parent: MirNodeRef,
+                    conditions: &Vec<Option<(Operator, DataType)>>,
+                    mut mig: &mut Migration)
+                    -> FlowNode {
+    unimplemented!()
+}
+
+fn make_group_concat_node(name: &str,
+                          parent: MirNodeRef,
+                          on: &Column,
+                          separator: &str,
+                          mut mig: &mut Migration)
+                          -> FlowNode {
+    unimplemented!()
+}
+
+fn make_identity_node(name: &str, parent: MirNodeRef, mut mig: &mut Migration) -> FlowNode {
+    let parent_na = match parent.borrow().flow_node {
+        Some(FlowNode::New(na)) |
+        Some(FlowNode::Existing(na)) => na,
+        None => panic!("Aggregation parent must have FlowNodes by now!"),
+    };
+    let fields = parent.borrow()
+        .columns()
+        .iter()
+        .map(|c| c.name.clone())
+        .collect::<Vec<_>>();
+
+    let node = mig.add_ingredient(String::from(name),
+                                  fields.as_slice(),
+                                  ops::identity::Identity::new(parent_na));
     FlowNode::New(node)
 }
 
@@ -520,4 +652,16 @@ fn make_permute_node(name: &str,
                                fields.as_slice(),
                                Permute::new(parent_na, projected_column_ids.as_slice()));
     FlowNode::New(n)
+}
+
+
+fn make_topk_node(name: &str,
+                  parent: MirNodeRef,
+                  order: &Option<Vec<(Column, OrderType)>>,
+                  group_by: &Vec<Column>,
+                  k: usize,
+                  mut mig: &mut Migration)
+                  -> FlowNode {
+    // no query parameters, so we index on the first column
+    unimplemented!()
 }
