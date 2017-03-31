@@ -422,7 +422,7 @@ mod tests {
     fn it_activates_and_migrates() {
         use Blender;
 
-        let r_txt = "INSERT INTO b (a, c, x) VALUES (?, ?, ?);\n";
+        let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
         let mut r = Recipe::from_str(r_txt, None).unwrap();
         assert_eq!(r.version, 0);
         assert_eq!(r.expressions.len(), 1);
