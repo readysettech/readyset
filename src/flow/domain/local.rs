@@ -402,31 +402,43 @@ impl<T: Hash + Eq + Clone> State<T> {
                 "partially materializing to multi-index materialization");
         let state = &mut self.state[0];
         let mut key = key.into_iter();
-        match state.1 {
-            KeyedState::Single(ref mut map) => {
-                map.entry(key.next().unwrap()).or_insert_with(Vec::new);
+        let replaced = match state.1 {
+            KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Vec::new()),
+            KeyedState::Double(ref mut map) => {
+                map.insert((key.next().unwrap(), key.next().unwrap()), Vec::new())
             }
-            _ => {
-                match state.1 {
-                    KeyedState::Double(ref mut map) => {
-                        map.entry((key.next().unwrap(), key.next().unwrap()))
-                            .or_insert_with(Vec::new);
-                    }
-                    KeyedState::Tri(ref mut map) => {
-                        map.entry((key.next().unwrap(), key.next().unwrap(), key.next().unwrap()))
-                            .or_insert_with(Vec::new);
-                    }
-                    KeyedState::Quad(ref mut map) => {
-                        map.entry((key.next().unwrap(),
-                                    key.next().unwrap(),
-                                    key.next().unwrap(),
-                                    key.next().unwrap()))
-                            .or_insert_with(Vec::new);
-                    }
-                    KeyedState::Single(..) => unreachable!(),
-                }
+            KeyedState::Tri(ref mut map) => {
+                map.insert((key.next().unwrap(), key.next().unwrap(), key.next().unwrap()),
+                           Vec::new())
             }
-        }
+            KeyedState::Quad(ref mut map) => {
+                map.insert((key.next().unwrap(),
+                            key.next().unwrap(),
+                            key.next().unwrap(),
+                            key.next().unwrap()),
+                           Vec::new())
+            }
+        };
+        assert!(replaced.is_none());
+    }
+
+    pub fn mark_hole(&mut self, key: &[T]) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        assert!(self.state.len() == 1,
+                "partially materializing to multi-index materialization");
+        let state = &mut self.state[0];
+        let removed = match state.1 {
+            KeyedState::Single(ref mut map) => map.remove(&key[0]),
+            KeyedState::Double(ref mut map) => map.remove(&(key[0].clone(), key[1].clone())),
+            KeyedState::Tri(ref mut map) => {
+                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
+            }
+            KeyedState::Quad(ref mut map) => {
+                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone(), key[3].clone()))
+            }
+        };
+        assert!(removed.is_some());
+        assert!(removed.unwrap().is_empty());
     }
 
     pub fn hits_hole(&self, r: &[T]) -> Option<(&[usize])> {
