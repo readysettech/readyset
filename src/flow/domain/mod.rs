@@ -924,13 +924,14 @@ impl Domain {
                                 .get_mut(&dst)
                                 .unwrap()
                                 .mark_filled(for_key.clone());
-                        } else if let Type::Reader { .. } = *self.nodes[&dst].borrow().inner {
-                            // TODO: when a hole is being filled with [] in a Reader node, the
-                            // Reader doesn't actually fill the hole, since it gets no records (and
-                            // thus no key). How do we even fix this? Seems like evmap needs to
-                            // have a way to populate a key with an empty vec? Ugh... So much for
-                            // abstractions.
-                            unimplemented!();
+                        } else {
+                            let mut n = self.nodes[&dst].borrow_mut();
+                            if let Type::Reader(Some(ref mut wh), _) = *n.inner {
+                                // we're filling a hole in a Reader.
+                                // we need to ensure that the hole for the key we're replaying ends
+                                // up being filled, even if that hole is empty!
+                                wh.mark_filled(&for_key[0]);
+                            }
                         }
                     }
 
@@ -959,12 +960,21 @@ impl Domain {
                                 node, key, was, ..
                             } => {
                                 if let ReplayPieceContext::Partial { ref for_key } = context {
-                                    self.state
-                                        .get_mut(&dst)
-                                        .unwrap()
-                                        .mark_hole(&for_key[..]);
+                                    use flow::node::Type;
 
-                                    // TODO: Reader mark_hole
+                                    // make sure the hole isn't considered filled
+                                    if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
+                                        self.state
+                                            .get_mut(&dst)
+                                            .unwrap()
+                                            .mark_hole(&for_key[..]);
+                                    } else {
+                                        // even in Reader nodes
+                                        let mut n = self.nodes[&dst].borrow_mut();
+                                        if let Type::Reader(Some(ref mut wh), _) = *n.inner {
+                                            wh.mark_hole(&for_key[0]);
+                                        }
+                                    }
                                 }
 
                                 need_replay = Some((node, *ni.as_local(), key, was));

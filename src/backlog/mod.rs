@@ -75,6 +75,14 @@ impl WriteHandle {
     pub fn update_ts(&mut self, ts: i64) {
         self.handle.set_meta(ts);
     }
+
+    pub fn mark_filled(&mut self, key: &DataType) {
+        self.handle.clear(key.clone());
+    }
+
+    pub fn mark_hole(&mut self, key: &DataType) {
+        self.handle.empty(key.clone());
+    }
 }
 
 #[derive(Clone)]

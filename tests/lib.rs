@@ -1085,7 +1085,6 @@ fn live_writes() {
 }
 
 #[test]
-#[ignore]
 fn state_replay_migration_query() {
     // similar to test above, except we will have a materialized Reader node that we're going to
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
@@ -1136,8 +1135,6 @@ fn state_replay_migration_query() {
     let out = g.get_getter(out).unwrap();
 
     // if all went according to plan, the join should now be fully populated!
-    assert!(!out(&1.into()).is_err());
-
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
     let res = out(&1.into()).unwrap();
