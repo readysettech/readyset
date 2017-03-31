@@ -9,7 +9,7 @@ use flow::core::NodeAddress;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use ops::identity::Identity;
-use self::mir::{FlowNode, MirNodeRef, MirQuery, SqlToMirConverter};
+use self::mir::{FlowNode, MirNodeRef, SqlToMirConverter};
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -33,7 +33,6 @@ pub struct QueryFlowParts {
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
     ReaderOntoExisting(MirNodeRef, Vec<Column>),
-    ExtendExisting(MirQuery),
     None,
 }
 
@@ -356,7 +355,6 @@ impl SqlIncorporator {
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
                         self.add_reader_to_existing_query(&query_name, &params, mn, mig)
                     }
-                    QueryGraphReuse::ExtendExisting(_) => unimplemented!(),
                     QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
             }

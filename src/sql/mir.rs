@@ -4,17 +4,14 @@ use mir::{GroupedNodeType, MirNode, MirNodeType};
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
-use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
-use ops;
-use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode};
+use nom_sql::{SelectStatement, LimitClause, OrderClause};
+use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::vec::Vec;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
@@ -60,24 +57,6 @@ impl Default for SqlToMirConverter {
 impl SqlToMirConverter {
     pub fn with_logger(log: slog::Logger) -> Self {
         SqlToMirConverter { log: log, ..Default::default() }
-    }
-
-    /// TODO(malte): modify once `SqlToMirConverter` has a better intermediate graph representation.
-    fn fields_for(&self, na: NodeAddress) -> &[String] {
-        self.node_fields[&na].as_slice()
-    }
-
-    /// TODO(malte): modify once `SqlToMirConverter` has a better intermediate graph representation.
-    fn field_to_columnid(&self, na: NodeAddress, f: &str) -> Result<usize, String> {
-        match self.fields_for(na).iter().position(|s| *s == f) {
-            None => {
-                Err(format!("field {} not found in view {} (which has: {:?})",
-                            f,
-                            na,
-                            self.fields_for(na)))
-            }
-            Some(i) => Ok(i),
-        }
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
@@ -237,10 +216,7 @@ impl SqlToMirConverter {
                     MirNode::new(name,
                                  self.schema_version,
                                  cols.clone(),
-                                 MirNodeType::Base {
-                                     columns: cols.clone(),
-                                     keys: key_cols.clone(),
-                                 },
+                                 MirNodeType::Base { keys: key_cols.clone() },
                                  vec![],
                                  vec![])
                 }
@@ -250,10 +226,7 @@ impl SqlToMirConverter {
             MirNode::new(name,
                          self.schema_version,
                          cols.clone(),
-                         MirNodeType::Base {
-                             columns: cols.clone(),
-                             keys: vec![],
-                         },
+                         MirNodeType::Base { keys: vec![] },
                          vec![],
                          vec![])
         }
@@ -264,8 +237,6 @@ impl SqlToMirConverter {
                          parent: MirNodeRef,
                          predicates: &Vec<ConditionTree>)
                          -> Vec<MirNodeRef> {
-        use ops::filter::Filter;
-
         let mut new_nodes = vec![];
 
         let mut prev_node = parent;
@@ -306,7 +277,7 @@ impl SqlToMirConverter {
         use nom_sql::FunctionExpression::*;
         use nom_sql::FieldExpression::*;
 
-        let mut mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
+        let mknode = |cols: &Vec<Column>, t: GroupedNodeType| {
             // No support for multi-columns functions at this point
             assert_eq!(cols.len(), 1);
 
@@ -440,7 +411,7 @@ impl SqlToMirConverter {
         // TODO(malte): no multi-level joins yet
         let mut left_join_columns = Vec::new();
         let mut right_join_columns = Vec::new();
-        for (i, p) in jps.iter().enumerate() {
+        for p in jps.iter() {
             // equi-join only
             assert_eq!(p.operator, Operator::Equal);
             let l_col = match **p.left.as_ref().unwrap() {
@@ -495,8 +466,6 @@ impl SqlToMirConverter {
                          proj_cols: Vec<&Column>,
                          literals: Vec<(String, DataType)>)
                          -> MirNodeRef {
-        use ops::project::Project;
-
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
         let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
@@ -574,7 +543,6 @@ impl SqlToMirConverter {
                                 -> Vec<MirNodeRef> {
         use std::collections::HashMap;
 
-        let leaf_project_node: MirNodeRef;
         let leaf_node: MirNodeRef;
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
@@ -595,7 +563,7 @@ impl SqlToMirConverter {
                     continue;
                 }
 
-                let mut base_for_rel = match self.nodes.get(&(String::from(*rel),
+                let base_for_rel = match self.nodes.get(&(String::from(*rel),
                                        self.schema_version)) {
                     None => panic!("Query \"{}\" refers to unknown base \"{}\" node", name, rel),
                     Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
@@ -898,7 +866,6 @@ impl SqlToMirConverter {
                                        fields.iter().collect(),
                                        vec![]);
             nodes_added.push(leaf_project_node.clone());
-            new_node_count += 1;
 
             // We always materialize leaves of queries (at least currently), so add a
             // `MaterializedLeaf` node keyed on the query parameters.

@@ -215,8 +215,8 @@ impl MirNode {
                                           GroupedNodeType::Aggregation(kind.clone()),
                                           mig)
                     }
-                    MirNodeType::Base { ref columns, ref keys } => {
-                        make_base_node(&name, columns, keys, mig)
+                    MirNodeType::Base { ref keys } => {
+                        make_base_node(&name, &self.columns, keys, mig)
                     }
                     MirNodeType::Extremum { ref on, ref group_by, ref kind } => {
                         assert_eq!(self.ancestors.len(), 1);
@@ -262,7 +262,7 @@ impl MirNode {
                     MirNodeType::Leaf { ref keys, .. } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
-                        materialize_leaf_node(&name, &parent, keys, mig);
+                        materialize_leaf_node(&parent, keys, mig);
                         // TODO(malte): below is yucky, but required to satisfy the type system:
                         // each match arm must return a `FlowNode`, so we use the parent's one
                         // here.
@@ -305,10 +305,10 @@ impl MirNode {
                                FlowNode::Existing(na) => FlowNode::Existing(na),
                         }
                     }
-                    MirNodeType::Union { ref emit_left, ref emit_right } => {
+                    MirNodeType::Union { .. } => {
                         assert_eq!(self.ancestors.len(), 2);
-                        let left = self.ancestors[0].clone();
-                        let right = self.ancestors[1].clone();
+                        let _left = self.ancestors[0].clone();
+                        let _right = self.ancestors[1].clone();
                         // XXX(malte): fix
                         unimplemented!()
                     }
@@ -335,10 +335,7 @@ pub enum MirNodeType {
         kind: AggregationKind,
     },
     /// columns, keys (non-compound)
-    Base {
-        columns: Vec<Column>,
-        keys: Vec<Column>,
-    },
+    Base { keys: Vec<Column> },
     /// over column, group_by columns
     Extremum {
         on: Column,
@@ -421,7 +418,7 @@ impl Debug for MirNodeType {
                 write!(f, "{} γ[{}]", op_string, group_cols)
 
             }
-            MirNodeType::Base { ref columns, ref keys } => {
+            MirNodeType::Base { ref keys } => {
                 write!(f,
                        "B [⚷: {}]",
                        keys.iter()
@@ -462,17 +459,17 @@ impl Debug for MirNodeType {
                            .as_slice()
                            .join(", "))
             }
-            MirNodeType::GroupConcat { ref on, ref separator } => unimplemented!(),
+            MirNodeType::GroupConcat { .. } => unimplemented!(),
             MirNodeType::Identity => write!(f, "≡"),
-            MirNodeType::Join { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
-            MirNodeType::Leaf { ref node, ref keys } => {
+            MirNodeType::Join { .. } => write!(f, "⋈ []"),
+            MirNodeType::Leaf { ref keys, .. } => {
                 let key_cols = keys.iter()
                     .map(|k| k.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "Leaf [⚷: {}]", key_cols)
             }
-            MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
+            MirNodeType::LeftJoin { .. } => write!(f, "⋉ []"),
             MirNodeType::Latest { ref group_by } => {
                 let key_cols = group_by.iter()
                     .map(|k| k.name.clone())
@@ -506,9 +503,7 @@ impl Debug for MirNodeType {
                        })
             }
             MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
-            MirNodeType::TopK { ref order, ref group_by, ref k, ref offset } => {
-                write!(f, "TopK [k: {}, {:?}]", k, order)
-            }
+            MirNodeType::TopK { ref order, ref k, .. } => write!(f, "TopK [k: {}, {:?}]", k, order),
             MirNodeType::Union { ref emit_left, ref emit_right } => {
                 let cols_left = emit_left.iter()
                     .map(|e| e.name.clone())
@@ -872,23 +867,20 @@ fn make_topk_node(name: &str,
     FlowNode::New(na)
 }
 
-fn materialize_leaf_node(name: &str,
-                         parent: &MirNodeRef,
-                         key_cols: &Vec<Column>,
-                         mut mig: &mut Migration) {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mut Migration) {
+    let na = node.borrow().flow_node_addr().unwrap();
 
     if !key_cols.is_empty() {
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = parent.borrow()
+        let first_key_col_id = node.borrow()
             .columns()
             .iter()
             .position(|pc| pc == key_cols.iter().next().unwrap())
             .unwrap();
-        mig.maintain(parent_na, first_key_col_id);
+        mig.maintain(na, first_key_col_id);
     } else {
-        mig.maintain(parent_na, 0);
+        mig.maintain(na, 0);
     }
 }
