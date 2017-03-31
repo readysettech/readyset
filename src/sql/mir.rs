@@ -181,8 +181,10 @@ impl SqlToMirConverter {
                           "base table for {} already exists with identical schema in version {}; reusing it.",
                           name,
                           existing_sv);
-                    return MirNode::reuse(self.nodes[&(String::from(name), existing_sv)].clone(),
-                                          self.schema_version);
+                    let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
+                    self.nodes.insert((String::from(name), self.schema_version),
+                                      existing_node.clone());
+                    return MirNode::reuse(existing_node, self.schema_version);
                 } else {
                     // match, but schema is different, so we'll need to either:
                     //  1) reuse the existing node, but add an upgrader for any changes in the column
