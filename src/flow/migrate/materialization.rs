@@ -510,6 +510,7 @@ pub fn reconstruct(log: &Logger,
         warn!(log, "using partial materialization");
     }
 
+    let root_domain = graph[paths[0].last().unwrap().0].domain();
     let domain = graph[node].domain();
     let addr = graph[node].addr();
     let cols = graph[node].fields().len();
@@ -536,7 +537,7 @@ pub fn reconstruct(log: &Logger,
             // we need to give it a way to trigger replays.
             use backlog;
             let tag = first_tag.unwrap();
-            let tx = sync::Mutex::new(txs[&domain].clone());
+            let tx = sync::Mutex::new(txs[&root_domain].clone());
             let (r_part, w_part) = backlog::new_partial(cols, state.key(), move |key| {
                 tx.lock()
                     .unwrap()
