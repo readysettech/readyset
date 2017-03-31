@@ -412,7 +412,11 @@ impl MirNodeType {
 
 impl Debug for MirNode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "{}", self.description())
+        write!(f,
+               "{}, {} ancestors, {} children",
+               self.description(),
+               self.ancestors.len(),
+               self.children.len())
     }
 }
 
