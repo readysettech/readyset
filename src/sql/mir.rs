@@ -90,6 +90,18 @@ impl SqlToMirConverter {
         filter
     }
 
+    pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeAddress> {
+        match self.nodes.get(&(name.to_string(), version)) {
+            None => panic!(format!("node ({}, {}) not found!", name, version)),
+            Some(ref node) => {
+                match node.borrow().flow_node {
+                    None => panic!(format!("no flow node on ({}, {})", name, version)),
+                    Some(ref flow_node) => Some(flow_node.address()),
+                }
+            }
+        }
+    }
+
     pub fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {

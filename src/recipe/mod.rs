@@ -76,15 +76,22 @@ impl Recipe {
                 // `name` might be an alias for another identical query, so resolve via QID here
                 // TODO(malte): better error handling
                 let na = match self.aliases.get(name) {
-                    None => inc.address_for(name),
+                    None => inc.get_flow_node_address(name, self.version),
                     Some(ref qid) => {
                         let (ref internal_qn, _) = self.expressions[qid];
-                        inc.address_for(internal_qn.as_ref().unwrap())
+                        inc.get_flow_node_address(internal_qn.as_ref().unwrap(), self.version)
                     }
                 };
-                Ok(na)
+                match na {
+                    None => {
+                        Err(format!("No flow graph node for \"{}\" exists at v{}",
+                                    name,
+                                    self.version))
+                    }
+                    Some(na) => Ok(na),
+                }
             }
-            None => Err(String::from("Recipe not applied")),
+            None => Err(format!("Recipe not applied")),
         }
     }
 

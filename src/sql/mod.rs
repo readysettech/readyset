@@ -75,14 +75,6 @@ impl SqlIncorporator {
         }
     }
 
-    /// TODO(malte): modify once `SqlIncorporator` has a better intermediate graph representation.
-    pub fn address_for(&self, name: &str) -> NodeAddress {
-        match self.node_addresses.get(name) {
-            None => panic!("node {} unknown!", name),
-            Some(na) => *na,
-        }
-    }
-
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
     /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
     /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
@@ -119,13 +111,9 @@ impl SqlIncorporator {
         Ok(res)
     }
 
-    fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
-        let name = match q {
-            SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-            SqlQuery::Insert(ref iq) => iq.table.name.clone(),
-            SqlQuery::Select(_) => format!("q_{}", self.num_queries),
-        };
-        self.nodes_for_named_query(q, name, mig)
+    /// Retrieves the flow node associated with a given view name and schema version.
+    pub fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeAddress> {
+        self.mir_converter.get_flow_node_address(name, v)
     }
 
     fn consider_query_graph(&mut self,
@@ -312,6 +300,15 @@ impl SqlIncorporator {
         qfp
     }
 
+    fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
+        let name = match q {
+            SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
+            SqlQuery::Insert(ref iq) => iq.table.name.clone(),
+            SqlQuery::Select(_) => format!("q_{}", self.num_queries),
+        };
+        self.nodes_for_named_query(q, name, mig)
+    }
+
     fn nodes_for_named_query(&mut self,
                              q: SqlQuery,
                              query_name: String,
@@ -437,7 +434,8 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.address_for(name);
+        let na = inc.get_flow_node_address(name, 0).expect(&format!("No node named \"{}\" at v0",
+                                                                    name));
         mig.graph().node_weight(na.as_global().clone()).unwrap()
     }
 

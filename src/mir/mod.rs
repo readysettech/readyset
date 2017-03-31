@@ -22,6 +22,15 @@ pub enum FlowNode {
     Existing(NodeAddress),
 }
 
+impl FlowNode {
+    pub fn address(&self) -> NodeAddress {
+        match *self {
+            FlowNode::New(na) |
+            FlowNode::Existing(na) => na,
+        }
+    }
+}
+
 /// Helper enum to avoid having separate `make_aggregation_node` and `make_extremum_node` functions
 pub enum GroupedNodeType {
     Aggregation(ops::grouped::aggregate::Aggregation),
