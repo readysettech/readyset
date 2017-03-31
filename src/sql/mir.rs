@@ -329,7 +329,7 @@ impl SqlToMirConverter {
                                                                           Some(ref a) => {
                                                        Column {
                                                            name: a.clone(),
-                                                           alias: None,
+                                                           alias: Some(a.clone()),
                                                            table: c.table.clone(),
                                                            function: c.function.clone(),
                                                        }
@@ -853,7 +853,7 @@ impl SqlToMirConverter {
                              Column {
                                  name: a.clone(),
                                  table: c.table.clone(),
-                                 alias: None,
+                                 alias: Some(a.clone()),
                                  function: c.function.clone(),
                              }
                          }
