@@ -189,6 +189,8 @@ impl SqlIncorporator {
                                     leaf: MirNodeRef,
                                     mut mig: &mut Migration)
                                     -> QueryFlowParts {
+        // XXX(malte): rewrite to use MIR
+
         // we must add a new reader for this query. This also requires adding an
         // identity node (at least currently), since a node can only have a single
         // associated reader.
@@ -214,7 +216,7 @@ impl SqlIncorporator {
         self.leaf_addresses.insert(String::from(query_name), id_na);
 
         // TODO(malte): this does not yet cover the case when there are multiple query
-        // parameters, which compound key support on Reader nodes.
+        // parameters, which require compound key support on Reader nodes.
         if !params.is_empty() {
             //assert_eq!(params.len(), 1);
             let key_column = params.iter().next().unwrap();
