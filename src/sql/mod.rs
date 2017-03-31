@@ -43,7 +43,7 @@ enum QueryGraphReuse {
 pub struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
-    node_addresses: HashMap<String, NodeAddress>,
+    leaf_addresses: HashMap<String, NodeAddress>,
     num_queries: usize,
     query_graphs: HashMap<u64, (QueryGraph, MirNodeRef)>,
     schema_version: usize,
@@ -55,7 +55,7 @@ impl Default for SqlIncorporator {
         SqlIncorporator {
             log: slog::Logger::root(slog::Discard, None),
             mir_converter: SqlToMirConverter::default(),
-            node_addresses: HashMap::default(),
+            leaf_addresses: HashMap::default(),
             num_queries: 0,
             query_graphs: HashMap::default(),
             schema_version: 0,
@@ -211,7 +211,7 @@ impl SqlIncorporator {
                                            .collect::<Vec<_>>()
                                            .as_slice(),
                                        Identity::new(parent_na));
-        self.node_addresses.insert(String::from(query_name), id_na);
+        self.leaf_addresses.insert(String::from(query_name), id_na);
 
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which compound key support on Reader nodes.
@@ -361,7 +361,7 @@ impl SqlIncorporator {
 
         // record info about query
         self.num_queries += 1;
-        self.node_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
+        self.leaf_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
 
         qfp
     }
