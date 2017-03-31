@@ -133,8 +133,13 @@ impl SqlToMirConverter {
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes {
-            trace!(self.log, "MN: {:?}", mn);
-            self.nodes.insert((String::from(name), self.schema_version), mn.clone());
+            self.nodes.insert((String::from(mn.borrow().name()), self.schema_version),
+                              mn.clone());
+            trace!(self.log,
+                   "Added MIR node ({}, v{}): {:?}",
+                   mn.borrow().name(),
+                   self.schema_version,
+                   mn);
             if mn.borrow().ancestors().len() == 0 {
                 // root
                 roots.push(mn.clone());
