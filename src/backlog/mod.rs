@@ -62,6 +62,9 @@ impl WriteHandle {
                     self.handle.insert(key, r);
                 }
                 Record::Negative(r) => {
+                    // TODO: evmap will remove the empty vec for a key if we remove the last
+                    // record. this means that future lookups will fail, and cause a replay, which
+                    // will produce an empty result. this will work, but is somewhat inefficient.
                     self.handle.remove(key, r);
                 }
                 Record::DeleteRequest(..) => unreachable!(),
