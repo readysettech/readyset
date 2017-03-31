@@ -578,9 +578,14 @@ impl SqlToMirConverter {
                     continue;
                 }
 
-                let base_for_rel = match self.nodes.get(&(String::from(*rel),
-                                       self.schema_version)) {
-                    None => panic!("Query \"{}\" refers to unknown base \"{}\" node", name, rel),
+                let existing = self.nodes.get(&(String::from(*rel), self.schema_version));
+                let base_for_rel = match existing {
+                    None => {
+                        panic!("Query \"{}\" refers to unknown base \"{}\" node at v{}",
+                               name,
+                               rel,
+                               self.schema_version)
+                    }
                     Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
                 };
                 base_nodes.insert(*rel, Rc::new(RefCell::new(base_for_rel)));
