@@ -88,11 +88,13 @@ impl ReadHandle {
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
+    ///
+    /// This call will block if it encounters a hole in partially materialized state.
     pub fn find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
         where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
-        match self.handle.meta_get_and(key, &mut then) {
-            Some((None, _)) if self.trigger.is_some() => {
+        match self.try_find_and(key, &mut then) {
+            Ok((None, _)) if self.trigger.is_some() => {
                 if let Some(ref trigger) = self.trigger {
                     use std::thread;
 
@@ -102,16 +104,29 @@ impl ReadHandle {
                     // wait for result to come through
                     loop {
                         thread::yield_now();
-                        match self.handle.meta_get_and(key, &mut then) {
-                            Some((None, _)) => {}
-                            Some(val) => return Ok(val),
-                            None => unreachable!(),
+                        match self.try_find_and(key, &mut then) {
+                            Ok((None, _)) => {}
+                            r => return r,
                         }
                     }
                 } else {
                     unreachable!()
                 }
             }
+            r => r,
+        }
+    }
+
+    /// Find all entries that matched the given conditions.
+    ///
+    /// Returned records are passed to `then` before being returned.
+    ///
+    /// Note that not all writes will be included with this read -- only those that have been
+    /// swapped in by the writer.
+    pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    {
+        match self.handle.meta_get_and(key, &mut then) {
             Some(val) => {
                 return Ok(val);
             }

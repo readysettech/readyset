@@ -81,7 +81,7 @@ impl NodeDescriptor {
                         let key = r.key();
                         m.map_data(|mut data| {
                             data.retain(|row| {
-                                match r.find_and(&row[key], |_| ()) {
+                                match r.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
                                         // row would miss in partial state.
                                         // leave it blank so later lookup triggers replay.
@@ -106,7 +106,7 @@ impl NodeDescriptor {
                         let key = r.key();
                         m.map_data(|mut data| {
                             data.retain(|row| {
-                                match r.find_and(&row[key], |_| ()) {
+                                match r.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
                                         // filling a hole with replay -- ok
                                         true
