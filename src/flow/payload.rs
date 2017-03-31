@@ -27,11 +27,6 @@ impl fmt::Debug for Link {
         write!(f, "{:?} -> {:?}", self.src, self.dst)
     }
 }
-pub enum ReplayData {
-    Records(Records),
-    StateCopy(State),
-}
-
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
@@ -44,6 +39,12 @@ pub enum InitialState {
     IndexedLocal(Vec<Vec<usize>>),
     PartialGlobal(backlog::WriteHandle, backlog::ReadHandle),
     Global,
+}
+
+#[derive(Clone)]
+pub enum ReplayPieceContext {
+    Partial { for_key: Vec<DataType> },
+    Regular { last: bool },
 }
 
 #[derive(Clone)]
@@ -66,11 +67,14 @@ pub enum Packet {
     },
 
     /// Update that is part of a tagged data-flow replay path.
-    Replay {
+    FullReplay { link: Link, tag: Tag, state: State },
+
+    /// Update that is part of a tagged data-flow replay path.
+    ReplayPiece {
         link: Link,
         tag: Tag,
-        last: bool,
-        data: ReplayData,
+        data: Records,
+        context: ReplayPieceContext,
     },
 
     //
@@ -111,7 +115,7 @@ pub enum Packet {
     },
 
     /// Ask domain (nicely) to replay a particular key.
-    PartialReplay { tag: Tag, key: Vec<DataType> },
+    RequestPartialReplay { tag: Tag, key: Vec<DataType> },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
     StartReplay {
@@ -168,7 +172,8 @@ impl Packet {
         match *self {
             Packet::Message { ref link, .. } => link,
             Packet::Transaction { ref link, .. } => link,
-            Packet::Replay { ref link, .. } => link,
+            Packet::FullReplay { ref link, .. } => link,
+            Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -177,7 +182,8 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
-            Packet::Replay { ref mut link, .. } => link,
+            Packet::FullReplay { ref mut link, .. } => link,
+            Packet::ReplayPiece { ref mut link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -186,12 +192,8 @@ impl Packet {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
             Packet::Transaction { ref data, .. } => data.is_empty(),
-            Packet::Replay { ref data, .. } => {
-                match *data {
-                    ReplayData::StateCopy(..) => false,
-                    ReplayData::Records(ref data) => data.is_empty(),
-                }
-            }
+            Packet::FullReplay { .. } => false,
+            Packet::ReplayPiece { ref data, .. } => data.is_empty(),
             Packet::None => true,
             _ => unreachable!(),
         }
@@ -215,17 +217,17 @@ impl Packet {
                     state: state,
                 }
             }
-            Packet::Replay {
+            Packet::ReplayPiece {
                 link,
                 tag,
-                last,
-                data: ReplayData::Records(data),
+                context,
+                data,
             } => {
-                Packet::Replay {
-                    link: link,
-                    tag: tag,
-                    last: last,
-                    data: ReplayData::Records(map(data)),
+                Packet::ReplayPiece {
+                    link,
+                    tag,
+                    context,
+                    data: map(data),
                 }
             }
             _ => {
@@ -243,11 +245,19 @@ impl Packet {
         }
     }
 
+    pub fn tag(&self) -> Option<Tag> {
+        match *self {
+            Packet::FullReplay { tag, .. } => Some(tag),
+            Packet::ReplayPiece { tag, .. } => Some(tag),
+            _ => None,
+        }
+    }
+
     pub fn data(&self) -> &Records {
         match *self {
             Packet::Message { ref data, .. } => data,
             Packet::Transaction { ref data, .. } => data,
-            Packet::Replay { data: ReplayData::Records(ref data), .. } => data,
+            Packet::ReplayPiece { ref data, .. } => data,
             _ => unreachable!(),
         }
     }
@@ -256,7 +266,7 @@ impl Packet {
         match self {
             Packet::Message { data, .. } => data,
             Packet::Transaction { data, .. } => data,
-            Packet::Replay { data: ReplayData::Records(data), .. } => data,
+            Packet::ReplayPiece { data, .. } => data,
             _ => unreachable!(),
         }
     }
@@ -303,28 +313,28 @@ impl fmt::Debug for Packet {
                     }
                 }
             }
-            Packet::Replay {
+            Packet::ReplayPiece {
                 ref link,
                 ref tag,
                 ref data,
                 ..
             } => {
-                match *data {
-                    ReplayData::Records(ref data) => {
-                        write!(f,
-                               "Packet::Replay({:?}, {}, {} records)",
-                               link,
-                               tag.id(),
-                               data.len())
-                    }
-                    ReplayData::StateCopy(ref data) => {
-                        write!(f,
-                               "Packet::Replay({:?}, {}, {}r state)",
-                               link,
-                               tag.id(),
-                               data.len())
-                    }
-                }
+                write!(f,
+                       "Packet::ReplayPiece({:?}, {}, {} records)",
+                       link,
+                       tag.id(),
+                       data.len())
+            }
+            Packet::FullReplay {
+                ref link,
+                ref tag,
+                ref state,
+            } => {
+                write!(f,
+                       "Packet::FullReplay({:?}, {}, {} row state)",
+                       link,
+                       tag.id(),
+                       state.len())
             }
             Packet::None => write!(f, "Packet::Node"),
             _ => write!(f, "Packet::Control"),

@@ -541,7 +541,7 @@ pub fn reconstruct(log: &Logger,
             let (r_part, w_part) = backlog::new_partial(cols, state.key(), move |key| {
                 tx.lock()
                     .unwrap()
-                    .send(Packet::PartialReplay {
+                    .send(Packet::RequestPartialReplay {
                               key: vec![key.clone()],
                               tag: tag,
                           })
