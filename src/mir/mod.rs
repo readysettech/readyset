@@ -536,11 +536,11 @@ impl Debug for MirNodeType {
 
 fn make_base_node(name: &str,
                   cols: &Vec<Column>,
-                  keys: &Vec<Column>,
+                  pkey_columns: &Vec<Column>,
                   mut mig: &mut Migration)
                   -> FlowNode {
-    let node = if keys.len() > 0 {
-        let pkey_column_ids = keys.iter()
+    let node = if pkey_columns.len() > 0 {
+        let pkey_column_ids = pkey_columns.iter()
             .map(|pkc| {
                      //assert_eq!(pkc.table.as_ref().unwrap(), name);
                      cols.iter().position(|c| c == pkc).unwrap()
