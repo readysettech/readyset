@@ -234,7 +234,6 @@ impl SqlIncorporator {
                                            .as_slice(),
                                        Identity::new(parent_na));
         self.node_addresses.insert(String::from(query_name), id_na);
-        //self.node_fields.insert(id_na, id_fields);
 
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which compound key support on Reader nodes.

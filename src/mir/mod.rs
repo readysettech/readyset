@@ -437,7 +437,7 @@ impl Debug for MirNodeType {
                        keys.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
-                           .join(","))
+                           .join(", "))
             }
             MirNodeType::Extremum { ref on, ref group_by, ref kind } => {
                 let op_string = match *kind {
