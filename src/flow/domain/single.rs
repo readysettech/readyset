@@ -74,14 +74,29 @@ impl NodeDescriptor {
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
-                    if r.state
-                           .as_ref()
-                           .unwrap()
-                           .is_partial() {
-                        // TODO:
-                        // detect if we're filling a partial hole
-                        // if so, we need to replay instead!
-                        unimplemented!();
+                    let r = r.state.as_ref().unwrap();
+                    // make sure we don't fill a partial materialization
+                    // hole with incomplete (i.e., non-replay) state.
+                    if m.is_regular() && r.is_partial() {
+                        let key = r.key();
+                        m.map_data(|mut data| {
+                            data.retain(|row| {
+                                match r.find_and(&row[key], |_| ()) {
+                                    Ok((None, _)) => {
+                                        // row would miss in partial state.
+                                        // leave it blank so later lookup triggers replay.
+                                        false
+                                    }
+                                    Err(_) => unreachable!(),
+                                    _ => {
+                                        // state is already present,
+                                        // so we can safely keep it up to date.
+                                        true
+                                    }
+                                }
+                            });
+                            data
+                        });
                     }
 
                     state.add(m.data().iter().cloned());
