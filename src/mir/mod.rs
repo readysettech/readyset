@@ -200,20 +200,6 @@ impl MirNode {
                 self.columns.len())
     }
 
-    /// Translate a column in this ingredient into the corresponding column(s) in
-    /// parent ingredients. None for the column means that the parent doesn't
-    /// have an associated column. Similar to `resolve`, but does not depend on
-    /// materialization, and returns results even for computed columns.
-    fn parent_columns(&self, column: Column) -> Vec<(String, Option<Column>)> {
-        unimplemented!()
-    }
-
-    /// Resolve where the given column originates from. If the view is materialized, or the value is
-    /// otherwise created by this view, None should be returned.
-    fn resolve_column(&self, column: Column) -> Option<Vec<(String, Column)>> {
-        unimplemented!()
-    }
-
     fn into_flow_parts(&mut self, mig: &mut Migration) -> FlowNode {
         let name = self.name.clone();
         match self.flow_node {
