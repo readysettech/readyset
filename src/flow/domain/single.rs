@@ -99,6 +99,35 @@ impl NodeDescriptor {
                         });
                     }
 
+                    // it *can* happen that multiple readers miss (and thus request replay for) the
+                    // same hole at the same time. we need to make sure that we ignore any such
+                    // duplicated replay.
+                    if !m.is_regular() && r.is_partial() {
+                        let key = r.key();
+                        m.map_data(|mut data| {
+                            data.retain(|row| {
+                                match r.find_and(&row[key], |_| ()) {
+                                    Ok((None, _)) => {
+                                        // filling a hole with replay -- ok
+                                        true
+                                    }
+                                    Ok((Some(_), _)) => {
+                                        // a given key should only be replayed to once!
+                                        false
+                                    }
+                                    Err(_) => {
+                                        // state has not yet been swapped, which means it's new,
+                                        // which means there are no readers, which means no
+                                        // requests for replays have been issued by readers, which
+                                        // means no duplicates can be received.
+                                        true
+                                    }
+                                }
+                            });
+                            data
+                        });
+                    }
+
                     state.add(m.data().iter().cloned());
                     if let Packet::Transaction {
                                state: TransactionState::Committed(ts, ..), ..
@@ -106,10 +135,14 @@ impl NodeDescriptor {
                         state.update_ts(ts);
                     }
 
+                    // TODO: avoid swapping if writes are empty
+
                     if swap {
                         state.swap();
                     }
                 }
+
+                // TODO: don't send replays to streams?
 
                 let mut data = Some(m.take_data()); // so we can .take() for last tx
                 let mut txs = r.streamers.lock().unwrap();

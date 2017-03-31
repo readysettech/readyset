@@ -15,6 +15,7 @@ use petgraph::graph::NodeIndex;
 
 use std::collections::{HashSet, HashMap};
 use std::sync::mpsc;
+use std::sync;
 
 use slog::Logger;
 
@@ -519,6 +520,8 @@ pub fn reconstruct(log: &Logger,
     use flow::payload::InitialState;
     use flow::node::{Type, Reader, NodeHandle};
 
+    let mut first_tag = Some(Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
+
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
     // mutable references to taken state.
     let s = match *graph.node_weight_mut(node).unwrap().inner_mut() {
@@ -532,8 +535,16 @@ pub fn reconstruct(log: &Logger,
             // since we're partially materializing a reader node,
             // we need to give it a way to trigger replays.
             use backlog;
-            let (r_part, w_part) = backlog::new_partial(cols, state.key(), |key| {
-                unimplemented!();
+            let tag = first_tag.unwrap();
+            let tx = sync::Mutex::new(txs[&domain].clone());
+            let (r_part, w_part) = backlog::new_partial(cols, state.key(), move |key| {
+                tx.lock()
+                    .unwrap()
+                    .send(Packet::PartialReplay {
+                              key: vec![key.clone()],
+                              tag: tag,
+                          })
+                    .unwrap();
             });
             *state = r_part.clone();
             InitialState::PartialGlobal(w_part, r_part)
@@ -578,7 +589,11 @@ pub fn reconstruct(log: &Logger,
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        let tag = Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32);
+        let tag =
+            first_tag.take().unwrap_or_else(|| {
+                                                Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as
+                                                    u32)
+                                            });
         trace!(log, "tag" => tag.id(); "replaying along path {:?}", path);
 
         // partial materialization possible?

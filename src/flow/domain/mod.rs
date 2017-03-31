@@ -533,28 +533,34 @@ impl Domain {
             }
             Packet::PartialReplay { tag, key } => {
                 let (from, rs) = {
-                    if let ReplayPath {
-                               source: Some(source),
-                               trigger: TriggerEndpoint::Start(ref cols),
-                               ..
-                           } = self.replay_paths[&tag] {
-                        let rs = self.state
-                            .get(source.as_local())
-                            .expect("migration replay path started with non-materialized node")
-                            .lookup(&cols[..], &KeyType::Single(&key[0]));
+                    match self.replay_paths[&tag] {
+                        ReplayPath {
+                            source: Some(source),
+                            trigger: TriggerEndpoint::Start(ref cols),
+                            ..
+                        } |
+                        ReplayPath {
+                            source: Some(source),
+                            trigger: TriggerEndpoint::Local(ref cols),
+                            ..
+                        } => {
+                            let rs = self.state
+                                .get(source.as_local())
+                                .expect("migration replay path started with non-materialized node")
+                                .lookup(&cols[..], &KeyType::Single(&key[0]));
 
-                        let rs = match rs {
-                            LookupResult::Some(rs) => rs,
-                            LookupResult::Missing => {
-                                // partial replay through partial replay
-                                unimplemented!()
-                            }
-                        };
+                            let rs = match rs {
+                                LookupResult::Some(rs) => rs,
+                                LookupResult::Missing => {
+                                    // partial replay through partial replay
+                                    unimplemented!()
+                                }
+                            };
 
 
-                        (source, rs.iter().cloned().collect::<Vec<_>>())
-                    } else {
-                        unreachable!()
+                            (source, rs.iter().cloned().collect::<Vec<_>>())
+                        }
+                        _ => unreachable!(),
                     }
                 };
 
