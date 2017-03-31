@@ -574,7 +574,8 @@ impl SqlToMirConverter {
                                 -> Vec<MirNodeRef> {
         use std::collections::HashMap;
 
-        let leaf_node;
+        let leaf_project_node: MirNodeRef;
+        let leaf_node: MirNodeRef;
         let mut nodes_added: Vec<MirNodeRef>;
         let mut new_node_count = 0;
 
@@ -860,63 +861,70 @@ impl SqlToMirConverter {
                 new_node_count += 1;
             }
 
-            // 5. Generate leaf views that expose the query result
-            {
-                let projected_columns: Vec<Column> =
-                    sorted_rels.iter().fold(Vec::new(), |mut v, s| {
-                        v.extend(qg.relations[*s].columns.clone().into_iter());
-                        v
-                    });
-
-                // translate aliases on leaf columns only
-                let fields = projected_columns.iter()
-                    .map(|c| match c.alias {
-                             Some(ref a) => {
-                                 Column {
-                                     name: a.clone(),
-                                     table: c.table.clone(),
-                                     alias: None,
-                                     function: c.function.clone(),
-                                 }
-                             }
-                             None => c.clone(),
-                         })
-                    .collect::<Vec<Column>>();
-                leaf_node =
-                    self.make_project_node(name, final_node, fields.iter().collect(), vec![]);
-                new_node_count += 1;
-
-                // We always materialize leaves of queries (at least currently)
-                let query_params = qg.parameters();
-                // TODO(malte): this does not yet cover the case when there are multiple query
-                // parameters, which compound key support on Reader nodes.
-                /*if !query_params.is_empty() {
-                    //assert_eq!(query_params.len(), 1);
-                    let key_column = query_params.iter().next().unwrap();
-                    mig.maintain(leaf_node,
-                                 self.field_to_columnid(leaf_node, &key_column.name).unwrap());
-                } else {
-                    // no query parameters, so we index on the first (and often only) column
-                    mig.maintain(leaf_node, 0);
-                }*/
-            }
-            debug!(self.log,
-                   format!("Added final node for query named \"{}\"", name));
-
             // should have counted all nodes added, except for the base nodes (which reuse)
             debug_assert_eq!(new_node_count,
-                             join_nodes.len() + func_nodes.len() + filter_nodes.len() + 1);
-
-            // finally, we output all the nodes we generated
+                             join_nodes.len() + func_nodes.len() + filter_nodes.len());
+            // we're now done with the query, so remember all the nodes we've added so far
             nodes_added = base_nodes.into_iter()
                 .map(|(_, n)| n)
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
                 .chain(filter_nodes.into_iter())
                 .collect();
+
+            // 5. Generate leaf views that expose the query result
+            let projected_columns: Vec<Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
+                v.extend(qg.relations[*s].columns.clone().into_iter());
+                v
+            });
+
+            // translate aliases on leaf columns only
+            let fields = projected_columns.iter()
+                .map(|c| match c.alias {
+                         Some(ref a) => {
+                             Column {
+                                 name: a.clone(),
+                                 table: c.table.clone(),
+                                 alias: None,
+                                 function: c.function.clone(),
+                             }
+                         }
+                         None => c.clone(),
+                     })
+                .collect::<Vec<Column>>();
+            let leaf_project_node =
+                self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                                       final_node,
+                                       fields.iter().collect(),
+                                       vec![]);
+            nodes_added.push(leaf_project_node.clone());
+            new_node_count += 1;
+
+            // We always materialize leaves of queries (at least currently), so add a
+            // `MaterializedLeaf` node keyed on the query parameters.
+            let query_params = qg.parameters();
+            let ln = MirNode::new(name,
+                                  self.schema_version,
+                                  leaf_project_node.borrow()
+                                      .columns()
+                                      .iter()
+                                      .cloned()
+                                      .collect(),
+                                  MirNodeType::Leaf {
+                                      node: leaf_project_node.clone(),
+                                      keys: query_params.into_iter().cloned().collect(),
+                                  },
+                                  vec![leaf_project_node.clone()],
+                                  vec![]);
+            leaf_node = Rc::new(RefCell::new(ln));
+            leaf_project_node.borrow_mut().add_child(leaf_node.clone());
             nodes_added.push(leaf_node);
+
+            debug!(self.log,
+                   format!("Added final MIR node for query named \"{}\"", name));
         }
 
+        // finally, we output all the nodes we generated
         nodes_added
     }
 }

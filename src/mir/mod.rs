@@ -273,10 +273,21 @@ impl MirNode {
                         let parent = self.ancestors[0].clone();
                         make_latest_node(&name, parent, group_by, mig)
                     }
-                    MirNodeType::Leaf { ref node, ref keys } => {
+                    MirNodeType::Leaf { ref keys, .. } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
-                        unimplemented!()
+                        materialize_leaf_node(&name, &parent, keys, mig);
+                        // TODO(malte): below is yucky, but required to satisfy the type system:
+                        // each match arm must return a `FlowNode`, so we use the parent's one
+                        // here.
+                        let node = match *parent.borrow()
+                                   .flow_node
+                                   .as_ref()
+                                   .unwrap() {
+                            FlowNode::New(na) => FlowNode::Existing(na),
+                            ref n @ FlowNode::Existing(..) => n.clone(),
+                        };
+                        node
                     }
                     MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => {
                         assert_eq!(self.ancestors.len(), 2);
@@ -464,7 +475,13 @@ impl Debug for MirNodeType {
             MirNodeType::GroupConcat { ref on, ref separator } => unimplemented!(),
             MirNodeType::Identity => write!(f, "≡"),
             MirNodeType::Join { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
-            MirNodeType::Leaf { ref node, ref keys } => unimplemented!(),
+            MirNodeType::Leaf { ref node, ref keys } => {
+                let key_cols = keys.iter()
+                    .map(|k| k.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Leaf [⚷: {}]", key_cols)
+            }
             MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => write!(f, "⋈ []"),
             MirNodeType::Latest { ref group_by } => {
                 let key_cols = group_by.iter()
@@ -863,4 +880,25 @@ fn make_topk_node(name: &str,
                            fields.as_slice(),
                            ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, k));
     FlowNode::New(na)
+}
+
+fn materialize_leaf_node(name: &str,
+                         parent: &MirNodeRef,
+                         key_cols: &Vec<Column>,
+                         mut mig: &mut Migration) {
+    let parent_na = parent.borrow().flow_node_addr().unwrap();
+
+    if !key_cols.is_empty() {
+        // TODO(malte): this does not yet cover the case when there are multiple query
+        // parameters, which requires compound key support on Reader nodes.
+        //assert_eq!(key_cols.len(), 1);
+        let first_key_col_id = parent.borrow()
+            .columns()
+            .iter()
+            .position(|pc| pc == key_cols.iter().next().unwrap())
+            .unwrap();
+        mig.maintain(parent_na, first_key_col_id);
+    } else {
+        mig.maintain(parent_na, 0);
+    }
 }
