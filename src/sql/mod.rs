@@ -5,26 +5,17 @@ mod query_signature;
 
 use nom_sql::parser as sql_parser;
 use flow::Migration;
-use flow::core::{NodeAddress, DataType};
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
-              SqlQuery};
-use nom_sql::{SelectStatement, LimitClause, OrderType, OrderClause};
-use ops;
-use ops::base::Base;
+use flow::core::NodeAddress;
+use nom_sql::{Column, SqlQuery};
+use nom_sql::SelectStatement;
 use ops::identity::Identity;
-use ops::join::Builder as JoinBuilder;
-use ops::permute::Permute;
 use self::mir::{FlowNode, MirNodeRef, MirQuery, SqlToMirConverter};
-use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode, to_query_graph};
-use sql::query_signature::QuerySignature;
+use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
-use std::cmp::Ordering;
-use std::sync::Arc;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -343,7 +334,7 @@ impl SqlIncorporator {
 
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension
-        let mut qfp = match q {
+        let qfp = match q {
             SqlQuery::Select(ref sq) => {
                 let (qg, reuse) = self.consider_query_graph(&query_name, sq);
                 match reuse {
