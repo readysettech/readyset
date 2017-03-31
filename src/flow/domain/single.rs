@@ -137,7 +137,7 @@ impl NodeDescriptor {
 
                     // TODO: avoid swapping if writes are empty
 
-                    if swap {
+                    if swap || (!m.is_regular() && r.is_partial()) {
                         state.swap();
                     }
                 }
