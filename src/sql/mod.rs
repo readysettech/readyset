@@ -539,7 +539,7 @@ mod tests {
         let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
         // XXX(malte): leaf overprojection needs fixing
         assert_eq!(new_leaf_view.fields(), &["title", "author", "name", "id"]);
-        assert_eq!(new_leaf_view.description(), format!("π[2, 1, 4, 0]"));
+        assert_eq!(new_leaf_view.description(), format!("π[2, 1, 4, 3]"));
     }
 
     #[test]
