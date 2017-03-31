@@ -153,13 +153,15 @@ impl Domain {
         // find tag we should use for replay
         let tag = {
             let mut tags = paths.iter()
-                .filter(|&(_, ref info)| if let TriggerEndpoint::End(..) = info.trigger {
-                            info.path
-                                .last()
-                                .unwrap()
-                                .as_local() == &node
-                        } else {
-                            false
+                .filter(|&(_, ref info)| match info.trigger {
+                            TriggerEndpoint::End(..) |
+                            TriggerEndpoint::Local(..) => {
+                                info.path
+                                    .last()
+                                    .unwrap()
+                                    .as_local() == &node
+                            }
+                            _ => false,
                         })
                 .map(|(tag, _)| *tag);
 
