@@ -37,7 +37,6 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<Column>)>>,
     nodes: HashMap<(String, usize), MirNodeRef>,
-    node_fields: HashMap<NodeAddress, Vec<String>>,
     log: slog::Logger,
     schema_version: usize,
 }
@@ -47,7 +46,6 @@ impl Default for SqlToMirConverter {
         SqlToMirConverter {
             base_schemas: HashMap::default(),
             nodes: HashMap::default(),
-            node_fields: HashMap::default(),
             log: slog::Logger::root(slog::Discard, None),
             schema_version: 0,
         }
