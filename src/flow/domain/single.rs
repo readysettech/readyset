@@ -74,7 +74,15 @@ impl NodeDescriptor {
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
-                    // TODO: detect if we're filling a partial hole -- we need to replay instead!
+                    if r.state
+                           .as_ref()
+                           .unwrap()
+                           .is_partial() {
+                        // TODO:
+                        // detect if we're filling a partial hole
+                        // if so, we need to replay instead!
+                        unimplemented!();
+                    }
 
                     state.add(m.data().iter().cloned());
                     if let Packet::Transaction {

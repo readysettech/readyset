@@ -324,7 +324,7 @@ impl Blender {
                               |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
                     .map(|(res, ts)| {
                         let token = generator.generate(ts, q.clone());
-                        (res, token)
+                        (res.unwrap_or_else(Vec::new), token)
                     })
             }) as Box<_>
         })

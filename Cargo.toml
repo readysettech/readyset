@@ -25,7 +25,7 @@ slog = "1.5.2"
 #slog = { version = "1.5.2", features = ["max_level_trace", "release_max_level_debug"] }
 slog-term = "1.5.0"
 
-evmap = "0.2.0"
+evmap = "0.3.1"
 arccstr = "0.3.2"
 
 spmc = "0.2.1"
