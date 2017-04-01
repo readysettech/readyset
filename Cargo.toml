@@ -70,6 +70,12 @@ default-features = false
 # for Mac OS X build
 # git = "https://github.com/ms705/timekeeper"
 
+[profile.dev]
+codegen-units = 1
+
+[profile.test]
+codegen-units = 1
+
 [profile.release]
 debug=true
 
