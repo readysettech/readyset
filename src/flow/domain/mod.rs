@@ -209,7 +209,7 @@ impl Domain {
         }
 
         // make sure we buffer until the replay comes in
-        let wait = match waiting.remove(&node) {
+        let wait = match waiting.get_mut(&node) {
             None => {
                 // the easy case -- we're not currently up to anything funky, just buffer
                 // until the replay finishes.
@@ -224,8 +224,8 @@ impl Domain {
                     queued: VecDeque::new(),
                 }
             }
-            Some(Waiting::Paused { ref mut queued, .. }) |
-            Some(Waiting::Target { ref mut queued, .. }) => {
+            Some(&mut Waiting::Paused { ref mut queued, .. }) |
+            Some(&mut Waiting::Target { ref mut queued, .. }) => {
                 // we did a lookup into a node that is already awaiting a replay from one
                 // of its children, and missed.
                 //
