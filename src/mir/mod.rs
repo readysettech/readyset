@@ -355,7 +355,13 @@ impl MirNode {
                     }
                 };
 
-                self.flow_node = Some(flow_node.clone());
+                // any new flow nodes have been instantiated by now, so we replace them with
+                // existing ones, but still return `FlowNode::New` below in order to notify higher
+                // layers of the new nodes.
+                self.flow_node = match flow_node {
+                    FlowNode::New(na) => Some(FlowNode::Existing(na)),
+                    ref n @ FlowNode::Existing(..) => Some(n.clone()),
+                };
                 flow_node
             }
             Some(ref flow_node) => flow_node.clone(),
