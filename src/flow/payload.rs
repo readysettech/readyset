@@ -207,41 +207,18 @@ impl Packet {
     }
 
     pub fn map_data<F>(&mut self, map: F)
-        where F: FnOnce(Records) -> Records
+        where F: FnOnce(&mut Records)
     {
-        use std::mem;
-        let m = match mem::replace(self, Packet::None) {
-            Packet::Message { link, data } => {
-                Packet::Message {
-                    link: link,
-                    data: map(data),
-                }
-            }
-            Packet::Transaction { link, data, state } => {
-                Packet::Transaction {
-                    link: link,
-                    data: map(data),
-                    state: state,
-                }
-            }
-            Packet::ReplayPiece {
-                link,
-                tag,
-                context,
-                data,
-            } => {
-                Packet::ReplayPiece {
-                    link,
-                    tag,
-                    context,
-                    data: map(data),
-                }
+        match *self {
+            Packet::Message { ref mut data, .. } |
+            Packet::Transaction { ref mut data, .. } |
+            Packet::ReplayPiece { ref mut data, .. } => {
+                map(data);
             }
             _ => {
                 unreachable!();
             }
-        };
-        mem::replace(self, m);
+        }
     }
 
     pub fn is_regular(&self) -> bool {

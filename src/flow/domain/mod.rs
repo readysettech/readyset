@@ -1071,11 +1071,11 @@ impl Domain {
                         continue;
                     }
 
-                    m.map_data(|mut rs| {
+                    m.map_data(|rs| {
                         rs.retain(|r| {
+                                      let _ = (); // force block format
                                       !columns.iter().enumerate().all(|(i, &c)| r[c] == for_key[i])
                                   });
-                        rs
                     });
                 }
 
@@ -1090,29 +1090,56 @@ impl Domain {
 
                 // replay our (pruned) buffer
                 while let Some(m) = buffer.pop_front() {
+                    use std::mem;
                     self.handle(m, inject_tx);
                     match self.waiting.get_mut(&ni) {
                         None => {}
                         Some(&mut Waiting::Paused {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
-                                  }) => {
-                            // while processing this update, *we* missed in some other node.
-                            // we need to make sure we keep working through our backlog when the
-                            // hole is eventually filled.
-                            next_buffer.append(&mut buffer);
-                            next_queued.append(&mut queued);
-                            return;
-                        }
+                                  }) |
                         Some(&mut Waiting::Target {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
                                       ..
                                   }) => {
+                            // while processing this update, *we* missed in some other node.
+                            // we need to make sure we keep working through our backlog when the
+                            // hole is eventually filled.
+                            //
+                            // OR
+                            //
                             // a downstream node missed on us while processing this update.
                             // make sure we keep our backlog so it eventually gets processed.
-                            next_buffer.append(&mut buffer);
-                            next_queued.append(&mut queued);
+
+                            // semantically, we now want to do
+                            // next_buffer.append(&mut buffer);
+                            // next_queued.append(&mut queued);
+                            //
+                            // however, we know that since we only replayed *one* packet, and that
+                            // can trigger at most *one* miss, we *must* have at most one new
+                            // buffered message (if we missed while processing m), and at most one
+                            // new queued node (if we were missed on). thus, it is likely to be
+                            // much more efficient to start from our *current* buffer/queued, and
+                            // push that one element to the front, than to copy over all the
+                            // current elements into the new one.
+                            //
+                            // so, swap the buffers
+                            mem::swap(next_buffer, &mut buffer);
+                            // take the one buffered element if there is one, and stick it first
+                            if let Some(buffered) = buffer.pop_front() {
+                                next_buffer.push_front(buffered);
+                            }
+                            // make sure there aren't more
+                            assert_eq!(buffer.len(), 0);
+                            // then swap the queued queue
+                            mem::swap(next_queued, &mut queued);
+                            // same, stick the new one first if there is one
+                            if let Some(queued) = queued.pop_front() {
+                                next_queued.push_front(queued);
+                            }
+                            // and make sure there was indeed at most one
+                            assert_eq!(queued.len(), 0);
                             return;
                         }
                     }

@@ -79,7 +79,7 @@ impl NodeDescriptor {
                     // hole with incomplete (i.e., non-replay) state.
                     if m.is_regular() && r.is_partial() {
                         let key = r.key();
-                        m.map_data(|mut data| {
+                        m.map_data(|data| {
                             data.retain(|row| {
                                 match r.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
@@ -95,7 +95,6 @@ impl NodeDescriptor {
                                     }
                                 }
                             });
-                            data
                         });
                     }
 
@@ -104,7 +103,7 @@ impl NodeDescriptor {
                     // duplicated replay.
                     if !m.is_regular() && r.is_partial() {
                         let key = r.key();
-                        m.map_data(|mut data| {
+                        m.map_data(|data| {
                             data.retain(|row| {
                                 match r.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
@@ -124,7 +123,6 @@ impl NodeDescriptor {
                                     }
                                 }
                             });
-                            data
                         });
                     }
 
@@ -237,23 +235,34 @@ impl NodeDescriptor {
 
                 let mut data_clone = None;
                 m.map_data(|data| {
+                    use std::mem;
+
+                    // we need to own the data
+                    let old_data = mem::replace(data, Records::default());
+
                     // clone if we're partially materialized; we may need to back out
                     if state.get_mut(addr.as_local()).map(|s| s.is_partial()).unwrap_or(false) {
-                        data_clone = Some(data.clone());
+                        data_clone = Some(old_data.clone());
                     }
-                    match i.on_input(from, data, nodes, state) {
+
+                    let new_data = match i.on_input(from, old_data, nodes, state) {
                         ProcessingResult::Done(rs) => rs,
                         ProcessingResult::NeedReplay { node, key, was } => {
                             need_replay = Some((node, key));
                             was
                         }
-                    }
+                    };
+
+                    mem::replace(data, new_data);
                 });
 
                 match need_replay {
                     None => {
                         if let Err(key) = materialize(m.data(), state.get_mut(addr.as_local())) {
-                            m.map_data(|_| data_clone.take().unwrap());
+                            m.map_data(|data| {
+                                           use std::mem;
+                                           mem::replace(data, data_clone.take().unwrap());
+                                       });
                             return FinalProcessingResult::NeedReplay {
                                        node: addr,
                                        was: m,
