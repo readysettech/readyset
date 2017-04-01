@@ -398,9 +398,6 @@ impl SqlToMirConverter {
 
         // Resolve column IDs in parent
         let over_col = over.1;
-        /*let group_col = group_by.iter()
-            .map(|c| self.field_to_columnid(parent_ni, &c.name).unwrap())
-            .collect::<Vec<_>>();*/
 
         // The function node's set of output columns is the group columns plus the function
         // column
