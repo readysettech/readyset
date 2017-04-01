@@ -549,7 +549,6 @@ impl Domain {
                                          });
             }
             Packet::RequestPartialReplay { tag, key } => {
-
                 let (m, source) = match self.replay_paths[&tag] {
                     ReplayPath {
                         source: Some(source),
@@ -1260,7 +1259,7 @@ impl Domain {
                         // unblocked.
                         queued.append(&mut pqueued);
 
-                        if let Some((waited_for, target_buffered, target_queued)) = waited_for {
+                        if let Some((waited_for, mut target_buffered, target_queued)) = waited_for {
                             // since we process the paused node's buffer first, there might
                             // messages waiting to be processed at the ancestor that we were waiting
                             // for a replay into. we need to make sure that those buffered messages are
@@ -1284,9 +1283,22 @@ impl Domain {
                                               releases,
                                               ..
                                           }) => {
+                                    use std::mem;
+                                    // we must have caused this to happen.
                                     assert_eq!(releases, Some(paused));
-                                    buffer.append(target_buffered);
+                                    // make sure the node wakes up any other nodes that were
+                                    // waiting for it when it finishes the replay.
                                     queued.append(target_queued);
+                                    // since we must have failed a lookup into waited_for, and it
+                                    // was previously idle, we know that there can be no bufferd
+                                    // updates.
+                                    assert_eq!(buffer.len(), 0);
+                                    // we now *want* to do
+                                    //
+                                    //   buffer.append(target_buffered);
+                                    //
+                                    // but since buffer is empty, we can instead just swap
+                                    mem::swap(buffer, &mut target_buffered);
                                 }
                                 Some(&mut Waiting::Paused { .. }) => unreachable!(),
                             }
