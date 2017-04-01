@@ -36,8 +36,9 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Vec<Column> {
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<Column>)>>,
-    nodes: HashMap<(String, usize), MirNodeRef>,
+    current: HashMap<String, usize>,
     log: slog::Logger,
+    nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
 }
 
@@ -45,8 +46,9 @@ impl Default for SqlToMirConverter {
     fn default() -> Self {
         SqlToMirConverter {
             base_schemas: HashMap::default(),
-            nodes: HashMap::default(),
+            current: HashMap::default(),
             log: slog::Logger::root(slog::Discard, None),
+            nodes: HashMap::default(),
             schema_version: 0,
         }
     }
@@ -100,6 +102,13 @@ impl SqlToMirConverter {
         }
     }
 
+    pub fn get_leaf(&self, name: &str) -> Option<NodeAddress> {
+        match self.current.get(name) {
+            None => None,
+            Some(v) => self.get_flow_node_address(name, *v),
+        }
+    }
+
     pub fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
@@ -107,6 +116,7 @@ impl SqlToMirConverter {
                 let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref());
                 let rcn = Rc::new(RefCell::new(n));
                 self.nodes.insert((String::from(name), self.schema_version), rcn.clone());
+                self.current.insert(String::from(name), self.schema_version);
                 MirQuery::singleton(name, rcn)
             }
             SqlQuery::Insert(ref iq) => {
@@ -118,6 +128,7 @@ impl SqlToMirConverter {
                 let n = self.make_base_node(&name, &cols, None);
                 let rcn = Rc::new(RefCell::new(n));
                 self.nodes.insert((String::from(name), self.schema_version), rcn.clone());
+                self.current.insert(String::from(name), self.schema_version);
                 MirQuery::singleton(name, rcn)
             }
             _ => panic!("expected base-yielding query!"),
@@ -150,11 +161,13 @@ impl SqlToMirConverter {
             }
         }
         assert_eq!(leaves.len(), 1);
+        let leaf = leaves.into_iter().next().unwrap();
+        self.current.insert(String::from(leaf.borrow().name()), self.schema_version);
 
         MirQuery {
             name: String::from(name),
             roots: roots,
-            leaf: leaves.into_iter().next().unwrap(),
+            leaf: leaf,
         }
     }
 
@@ -580,15 +593,20 @@ impl SqlToMirConverter {
                     continue;
                 }
 
-                let existing = self.nodes.get(&(String::from(*rel), self.schema_version));
-                let base_for_rel = match existing {
-                    None => {
-                        panic!("Query \"{}\" refers to unknown base \"{}\" node at v{}",
-                               name,
-                               rel,
-                               self.schema_version)
+                let latest_existing = self.current.get(*rel);
+                let base_for_rel = match latest_existing {
+                    None => panic!("Query \"{}\" refers to unknown base node \"{}\"", name, rel),
+                    Some(v) => {
+                        let existing = self.nodes.get(&(String::from(*rel), *v));
+                        match existing {
+                            None => {
+                                panic!("Inconsistency: base node \"{}\" does not exist at v{}",
+                                       *rel,
+                                       v);
+                            }
+                            Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
+                        }
                     }
-                    Some(bmn) => MirNode::reuse(bmn.clone(), self.schema_version),
                 };
                 base_nodes.insert(*rel, Rc::new(RefCell::new(base_for_rel)));
             }
