@@ -533,7 +533,17 @@ impl SqlToMirConverter {
         let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
         let fields = proj_cols.clone()
             .into_iter()
-            .cloned()
+            .map(|c| match c.alias {
+                     Some(ref a) => {
+                         Column {
+                             name: a.clone(),
+                             table: c.table.clone(),
+                             alias: Some(a.clone()),
+                             function: c.function.clone(),
+                         }
+                     }
+                     None => c.clone(),
+                 })
             .chain(literal_names.into_iter().map(|n| {
                 Column {
                     name: n,
@@ -544,11 +554,25 @@ impl SqlToMirConverter {
             }))
             .collect();
 
+        // remove aliases from emit columns because they are later compared to parent node columns
+        // and need to be equal. Note that `fields`, which holds the column names applied,
+        // preserves the aliases.
+        let emit_cols = proj_cols.into_iter()
+            .cloned()
+            .map(|mut c| {
+                match c.alias {
+                    Some(_) => c.alias = None,
+                    None => (),
+                };
+                c
+            })
+            .collect();
+
         MirNode::new(name,
                      self.schema_version,
                      fields,
                      MirNodeType::Project {
-                         emit: proj_cols.into_iter().cloned().collect(),
+                         emit: emit_cols,
                          literals: literals,
                      },
                      vec![parent_node.clone()],
@@ -904,29 +928,16 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
-                v.extend(qg.relations[*s].columns.clone().into_iter());
+            let projected_columns: Vec<&Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
+                v.extend(qg.relations[*s].columns.iter());
                 v
             });
 
             // translate aliases on leaf columns only
-            let fields = projected_columns.iter()
-                .map(|c| match c.alias {
-                         Some(ref a) => {
-                             Column {
-                                 name: a.clone(),
-                                 table: c.table.clone(),
-                                 alias: Some(a.clone()),
-                                 function: c.function.clone(),
-                             }
-                         }
-                         None => c.clone(),
-                     })
-                .collect::<Vec<Column>>();
             let leaf_project_node =
                 self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
                                        final_node,
-                                       fields.iter().collect(),
+                                       projected_columns,
                                        vec![]);
             nodes_added.push(leaf_project_node.clone());
 
