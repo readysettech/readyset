@@ -162,8 +162,11 @@ impl SqlToMirConverter {
                 assert_eq!(name, ctq.table.name);
                 let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref());
                 let rcn = Rc::new(RefCell::new(n));
-                self.nodes.insert((String::from(name), self.schema_version), rcn.clone());
-                self.current.insert(String::from(name), self.schema_version);
+                let node_id = (String::from(name), self.schema_version);
+                if !self.nodes.contains_key(&node_id) {
+                    self.nodes.insert(node_id, rcn.clone());
+                    self.current.insert(String::from(name), self.schema_version);
+                }
                 MirQuery::singleton(name, rcn)
             }
             SqlQuery::Insert(ref iq) => {
@@ -174,8 +177,11 @@ impl SqlToMirConverter {
                     .unzip();
                 let n = self.make_base_node(&name, &cols, None);
                 let rcn = Rc::new(RefCell::new(n));
-                self.nodes.insert((String::from(name), self.schema_version), rcn.clone());
-                self.current.insert(String::from(name), self.schema_version);
+                let node_id = (String::from(name), self.schema_version);
+                if !self.nodes.contains_key(&node_id) {
+                    self.nodes.insert(node_id, rcn.clone());
+                    self.current.insert(String::from(name), self.schema_version);
+                }
                 MirQuery::singleton(name, rcn)
             }
             _ => panic!("expected base-yielding query!"),
@@ -191,13 +197,20 @@ impl SqlToMirConverter {
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes {
-            self.nodes.insert((String::from(mn.borrow().name()), self.schema_version),
-                              mn.clone());
+            let node_id = (String::from(mn.borrow().name()), self.schema_version);
+            // only add the node if we don't have it registered at this schema version already. If
+            // we don't do this, we end up adding the node again for every re-use of it, with
+            // increasingly deeper chains of nested `MirNode::Reuse` structures.
+            if !self.nodes.contains_key(&node_id) {
+                self.nodes.insert(node_id, mn.clone());
+            }
+
             trace!(self.log,
                    "Added MIR node ({}, v{}): {:?}",
                    mn.borrow().name(),
                    self.schema_version,
                    mn);
+
             if mn.borrow().ancestors().len() == 0 {
                 // root
                 roots.push(mn.clone());
@@ -242,8 +255,6 @@ impl SqlToMirConverter {
                           name,
                           existing_sv);
                     let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
-                    self.nodes.insert((String::from(name), self.schema_version),
-                                      existing_node.clone());
                     return MirNode::reuse(existing_node, self.schema_version);
                 } else {
                     // match, but schema is different, so we'll need to either:
