@@ -1039,7 +1039,7 @@ fn live_writes() {
     let vc_state = g.get_getter(vc).unwrap();
     let add = g.get_mutator(vote);
 
-    let ids = 10000;
+    let ids = 1000;
     let votes = 7;
 
     // continuously write to vote
