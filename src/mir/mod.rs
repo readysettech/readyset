@@ -95,14 +95,12 @@ impl MirQuery {
             }
         }
 
-        let leaf_na = match *self.leaf
-                   .borrow()
-                   .flow_node
-                   .as_ref()
-                   .expect("Leaf must have FlowNode by now") {
-            FlowNode::New(na) |
-            FlowNode::Existing(na) => na,
-        };
+        let leaf_na = self.leaf
+            .borrow()
+            .flow_node
+            .as_ref()
+            .expect("Leaf must have FlowNode by now")
+            .address();
 
         QueryFlowParts {
             name: self.name.clone(),
@@ -689,13 +687,11 @@ fn make_join_node(name: &str,
     let tuples_for_cols = |n: MirNodeRef, cols: &Vec<Column>| -> Vec<(NodeAddress, usize)> {
         cols.iter()
             .map(|c| {
-                let na = match *n.borrow()
-                           .flow_node
-                           .as_ref()
-                           .expect("must have flow node") {
-                    FlowNode::New(na) => na,
-                    FlowNode::Existing(na) => na,
-                };
+                let na = n.borrow()
+                    .flow_node
+                    .as_ref()
+                    .expect("must have flow node")
+                    .address();
                 (na,
                  n.borrow()
                      .columns

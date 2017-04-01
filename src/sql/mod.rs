@@ -336,13 +336,11 @@ impl SqlIncorporator {
                 let (qg, reuse) = self.consider_query_graph(&query_name, sq);
                 match reuse {
                     QueryGraphReuse::ExactMatch(mn) => {
-                        let flow_node = match *mn.borrow()
-                                   .flow_node
-                                   .as_ref()
-                                   .unwrap() {
-                            FlowNode::New(na) |
-                            FlowNode::Existing(na) => na,
-                        };
+                        let flow_node = mn.borrow()
+                            .flow_node
+                            .as_ref()
+                            .unwrap()
+                            .address();
                         QueryFlowParts {
                             name: query_name.clone(),
                             new_nodes: vec![],
