@@ -894,6 +894,13 @@ fn make_topk_node(name: &str,
 fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mut Migration) {
     let na = node.borrow().flow_node_addr().unwrap();
 
+    // we must add a new reader for this query. This also requires adding an identity node (at
+    // least currently), since a node can only have a single associated reader. However, the
+    // identity node exists at the MIR level, so we don't need to consider it here, as it has
+    // already been added.
+
+    // TODO(malte): consider the case when the projected columns need reordering
+
     if !key_cols.is_empty() {
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
@@ -905,6 +912,7 @@ fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mu
             .unwrap();
         mig.maintain(na, first_key_col_id);
     } else {
+        // if no key specified, default to the first column
         mig.maintain(na, 0);
     }
 }
