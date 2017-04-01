@@ -261,7 +261,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
         assert!(missing.is_some());
         ProcessingResult::NeedReplay {
-            node: self.src,
+            node: self.us.unwrap(),
             key: missing.unwrap(),
             was: rs,
         }
