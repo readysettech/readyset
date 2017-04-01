@@ -567,6 +567,13 @@ pub fn reconstruct(log: &Logger,
               })
         .unwrap();
 
+    let mut root_unbounded_tx =
+        root_domain.map(|d| {
+                            let (tx, rx) = mpsc::channel();
+                            txs[&d].send(Packet::RequestUnboundedTx(tx)).unwrap();
+                            rx.recv().unwrap()
+                        });
+
     // NOTE:
     // there could be no paths left here. for example, if a symmetric join is joining an existing
     // view with a newm, empty view, the empty view will be chosen for replay, and will be
@@ -705,7 +712,7 @@ pub fn reconstruct(log: &Logger,
                         }
                         Some(..) => {
                             // otherwise, should know what how to trigger partial replay
-                            *trigger = TriggerEndpoint::End(txs[&segments[0].0].clone());
+                            *trigger = TriggerEndpoint::End(root_unbounded_tx.take().unwrap());
                         }
                     }
                 }

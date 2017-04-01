@@ -250,7 +250,6 @@ impl Domain {
                 unimplemented!();
             }
             TriggerEndpoint::End(ref mut trigger) => {
-                // TODO: potential deadlock (other domain tries to send to us)
                 trigger.send(Packet::RequestPartialReplay { tag, key }).unwrap();
             }
             TriggerEndpoint::Start(..) => unreachable!(),
@@ -720,6 +719,7 @@ impl Domain {
                 sender.send((domain_stats, node_stats)).unwrap();
             }
             Packet::None => unreachable!("None packets should never be sent around"),
+            Packet::RequestUnboundedTx(_) => unreachable!("Requests for unbounded tx channel are handled by event loop"),
             Packet::Quit => unreachable!("Quit messages are handled by event loop"),
         }
     }
@@ -1409,15 +1409,18 @@ impl Domain {
             .name(format!("domain{}", name))
             .spawn(move || {
                 let (mut inject_tx, inject_rx) = mpsc::sync_channel(1);
+                let (back_tx, back_rx) = mpsc::channel();
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
                 let mut rx_handle = sel.handle(&rx);
                 let mut inject_rx_handle = sel.handle(&inject_rx);
+                let mut back_rx_handle = sel.handle(&back_rx);
 
                 unsafe {
                     rx_handle.add();
                     inject_rx_handle.add();
+                    back_rx_handle.add();
                 }
 
                 self.total_time.start();
@@ -1431,17 +1434,19 @@ impl Domain {
                         rx_handle.recv()
                     } else if id == inject_rx_handle.id() {
                         inject_rx_handle.recv()
+                    } else if id == back_rx_handle.id() {
+                        back_rx_handle.recv()
                     } else {
                         unreachable!()
                     };
-                    if m.is_err() {
-                        break;
+                    match m {
+                        Err(_) => break,
+                        Ok(Packet::Quit) => break,
+                        Ok(Packet::RequestUnboundedTx(ack)) => {
+                            ack.send(back_tx.clone()).unwrap();
+                        }
+                        Ok(m) => self.handle(m, &mut inject_tx),
                     }
-                    let m = m.unwrap();
-                    if let Packet::Quit = m {
-                        break;
-                    }
-                    self.handle(m, &mut inject_tx);
                 }
             })
             .unwrap()
