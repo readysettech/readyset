@@ -90,6 +90,53 @@ impl SqlToMirConverter {
         filter
     }
 
+    pub fn add_leaf_below(&mut self,
+                          leaf: MirNodeRef,
+                          name: &str,
+                          params: &Vec<Column>)
+                          -> MirQuery {
+        let columns: Vec<Column> = leaf.borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
+
+        // reuse the previous leaf node
+        let parent = Rc::new(RefCell::new(MirNode::reuse(leaf, self.schema_version)));
+
+        // add an identity node and then another leaf
+        let id = MirNode::new(&format!("{}_id", name),
+                              self.schema_version,
+                              columns.clone(),
+                              MirNodeType::Identity,
+                              vec![parent.clone()],
+                              vec![]);
+        let rc_idn = Rc::new(RefCell::new(id));
+        parent.borrow_mut().add_child(rc_idn.clone());
+
+        let new_leaf = MirNode::new(name,
+                                    self.schema_version,
+                                    columns,
+                                    MirNodeType::Leaf {
+                                        node: parent.clone(),
+                                        keys: params.clone(),
+                                    },
+                                    vec![rc_idn.clone()],
+                                    vec![]);
+        let rcn = Rc::new(RefCell::new(new_leaf));
+        rc_idn.borrow_mut().add_child(rcn.clone());
+
+        self.current.insert(String::from(name), self.schema_version);
+        self.nodes.insert((String::from(name), self.schema_version), rcn.clone());
+
+        // wrap in a (very short) query to return
+        MirQuery {
+            name: String::from(name),
+            roots: vec![parent],
+            leaf: rcn,
+        }
+    }
+
     pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeAddress> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,

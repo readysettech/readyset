@@ -8,8 +8,7 @@ use flow::Migration;
 use flow::core::NodeAddress;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
-use ops::identity::Identity;
-use self::mir::{FlowNode, MirNodeRef, SqlToMirConverter};
+use self::mir::{MirNodeRef, SqlToMirConverter};
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -183,56 +182,45 @@ impl SqlIncorporator {
         (qg, QueryGraphReuse::None)
     }
 
-    fn add_reader_to_existing_query(&mut self,
-                                    query_name: &str,
-                                    params: &Vec<Column>,
-                                    leaf: MirNodeRef,
-                                    mut mig: &mut Migration)
-                                    -> QueryFlowParts {
-        // XXX(malte): rewrite to use MIR
-
-        // we must add a new reader for this query. This also requires adding an
-        // identity node (at least currently), since a node can only have a single
-        // associated reader.
-        // TODO(malte): consider the case when the projected columns need reordering
-        let id_fields = leaf.borrow()
-            .columns()
+    fn add_leaf_to_existing_query(&mut self,
+                                  query_name: &str,
+                                  params: &Vec<Column>,
+                                  leaf: MirNodeRef,
+                                  mut mig: &mut Migration)
+                                  -> QueryFlowParts {
+        // We want to hang the new leaf off the last non-leaf node of the query, so backtrack one
+        // step here.
+        let final_node_of_query = leaf.borrow()
+            .ancestors()
             .iter()
-            .cloned()
+            .next()
+            .unwrap()
+            .clone();
+
+        let mut mir = self.mir_converter.add_leaf_below(final_node_of_query, query_name, params);
+
+        trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
+
+        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
+        // Note that we don't need to optimize the MIR here, because the query is trivial.
+        let qfp = mir.into_flow_parts(&mut mig);
+
+        // TODO(malte): we currently need to remember these for local state, but should figure out
+        // a better plan (see below)
+        let fields = mir.leaf
+            .borrow()
+            .columns()
+            .into_iter()
+            .map(|c| String::from(c.name.as_str()))
             .collect::<Vec<_>>();
-        let parent_na = match *leaf.borrow()
-                   .flow_node
-                   .as_ref()
-                   .expect("must have flow node") {
-            FlowNode::New(na) |
-            FlowNode::Existing(na) => na,
-        };
-        let id_na = mig.add_ingredient(String::from(query_name),
-                                       id_fields.iter()
-                                           .map(|c| c.name.as_str())
-                                           .collect::<Vec<_>>()
-                                           .as_slice(),
-                                       Identity::new(parent_na));
-        self.leaf_addresses.insert(String::from(query_name), id_na);
 
-        // TODO(malte): this does not yet cover the case when there are multiple query
-        // parameters, which require compound key support on Reader nodes.
-        if !params.is_empty() {
-            //assert_eq!(params.len(), 1);
-            let key_column = params.iter().next().unwrap();
-            mig.maintain(id_na,
-                         id_fields.iter().position(|ref c| c.name == key_column.name).unwrap());
-        } else {
-            // no query parameters, so we index on the first (and often only) column
-            mig.maintain(id_na, 0);
-        }
+        // TODO(malte): get rid of duplication and figure out where to track this state
+        self.view_schemas.insert(String::from(query_name), fields);
 
-        return QueryFlowParts {
-                   name: String::from(query_name),
-                   new_nodes: vec![id_na],
-                   reused_nodes: vec![parent_na],
-                   query_leaf: id_na,
-               };
+        // We made a new query, so store the query graph and the corresponding leaf MIR node
+        //self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
+
+        qfp
     }
 
     fn add_base_via_mir(&mut self,
@@ -349,7 +337,7 @@ impl SqlIncorporator {
                         }
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
-                        self.add_reader_to_existing_query(&query_name, &params, mn, mig)
+                        self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
                     }
                     QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
