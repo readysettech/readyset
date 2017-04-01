@@ -92,10 +92,10 @@ impl SqlToMirConverter {
 
     pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeAddress> {
         match self.nodes.get(&(name.to_string(), version)) {
-            None => panic!(format!("node ({}, {}) not found!", name, version)),
+            None => None,
             Some(ref node) => {
                 match node.borrow().flow_node {
-                    None => panic!(format!("no flow node on ({}, {})", name, version)),
+                    None => None,
                     Some(ref flow_node) => Some(flow_node.address()),
                 }
             }
