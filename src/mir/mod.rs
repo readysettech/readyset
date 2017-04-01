@@ -133,8 +133,8 @@ impl MirNode {
                inner: MirNodeType,
                ancestors: Vec<MirNodeRef>,
                children: Vec<MirNodeRef>)
-               -> Self {
-        MirNode {
+               -> MirNodeRef {
+        let mn = MirNode {
             name: String::from(name),
             from_version: v,
             columns: columns,
@@ -142,13 +142,22 @@ impl MirNode {
             ancestors: ancestors.clone(),
             children: children.clone(),
             flow_node: None,
+        };
+
+        let rc_mn = Rc::new(RefCell::new(mn));
+
+        // register as child on ancestors
+        for ref ancestor in ancestors {
+            ancestor.borrow_mut().add_child(rc_mn.clone());
         }
+
+        rc_mn
     }
 
-    pub fn reuse(node: MirNodeRef, v: usize) -> Self {
+    pub fn reuse(node: MirNodeRef, v: usize) -> MirNodeRef {
         let rcn = node.clone();
 
-        MirNode {
+        let mn = MirNode {
             name: node.borrow().name.clone(),
             from_version: v,
             columns: node.borrow().columns.clone(),
@@ -156,7 +165,16 @@ impl MirNode {
             ancestors: node.borrow().ancestors.clone(),
             children: node.borrow().children.clone(),
             flow_node: None, // will be set in `into_flow_parts`
+        };
+
+        let rc_mn = Rc::new(RefCell::new(mn));
+
+        // register as child on ancestors
+        for ref ancestor in &node.borrow().ancestors {
+            ancestor.borrow_mut().add_child(rc_mn.clone());
         }
+
+        rc_mn
     }
 
     pub fn add_ancestor(&mut self, a: MirNodeRef) {
