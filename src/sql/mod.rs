@@ -293,7 +293,6 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        //self.node_fields.insert(qfp.query_leaf, fields.clone());
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
