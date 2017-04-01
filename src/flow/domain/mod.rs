@@ -912,10 +912,10 @@ impl Domain {
                     data,
                     context,
                 } => {
-                    debug!(self.log, "replaying batch"; "#" => data.len());
-
                     let dst = *path.last().unwrap().as_local();
                     if let ReplayPieceContext::Partial { ref for_key } = context {
+                        trace!(self.log, "replaying batch"; "#" => data.len());
+
                         use flow::node::Type;
                         if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
                             // we're waiting for this particular replay packet to release a buffer.
@@ -935,6 +935,8 @@ impl Domain {
                                 wh.mark_filled(&for_key[0]);
                             }
                         }
+                    } else {
+                        debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
                     // forward the current message through all local nodes.
@@ -1019,7 +1021,7 @@ impl Domain {
                         }
                         ReplayPieceContext::Partial { for_key } => {
                             if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
-                                debug!(self.log, "partial replay completed"; "local" => dst.id());
+                                trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 finished = Some((tag, dst, Some(for_key)));
                             } else {
                                 // replay to a node that's not waiting for it?
