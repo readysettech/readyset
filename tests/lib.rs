@@ -1011,7 +1011,6 @@ fn full_vote_migration() {
 }
 
 #[test]
-#[ignore]
 fn live_writes() {
     use std::time::Duration;
     use distributary::{Blender, Aggregation, DataType};
