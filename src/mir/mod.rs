@@ -555,7 +555,9 @@ impl Debug for MirNodeType {
                            .as_slice()
                            .join(", "))
             }
-            MirNodeType::GroupConcat { .. } => unimplemented!(),
+            MirNodeType::GroupConcat { ref on, ref separator } => {
+                write!(f, "||([{}], \"{}\")", on.name, separator)
+            }
             MirNodeType::Identity => write!(f, "≡"),
             MirNodeType::Join { .. } => write!(f, "⋈ []"),
             MirNodeType::Leaf { ref keys, .. } => {
