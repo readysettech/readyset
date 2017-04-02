@@ -77,6 +77,7 @@ enum Waiting {
     Paused {
         buffer: VecDeque<Packet>,
         queued: VecDeque<LocalNodeIndex>,
+        acks: Vec<mpsc::Sender<()>>,
     },
 
     /// A target node is waiting for an incoming replay.
@@ -200,6 +201,7 @@ impl Domain {
                     Waiting::Paused {
                         buffer: buffered,
                         queued: VecDeque::new(),
+                        acks: Vec::new(),
                     }
                 }
                 Some(Waiting::Paused { .. }) => {
@@ -1158,14 +1160,6 @@ impl Domain {
                     }
                 }
 
-                // we want to ack before we look at any subsequently received updates, because
-                // otherwise we might just never ack (if the source domain keep sending us stuff).
-                // in particular, it would probably preclude domains from occasionally reading from
-                // their main channel.
-                for ack in acks {
-                    ack.send(()).unwrap();
-                }
-
                 // NOTE
                 // it is important that we only release our buffer only after any downstream nodes
                 // have had their turn. consider what could otherwise happen in the following
@@ -1208,10 +1202,12 @@ impl Domain {
                         Some(&mut Waiting::Paused {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
+                                      acks: ref mut next_acks,
                                   }) |
                         Some(&mut Waiting::Target {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
+                                      acks: ref mut next_acks,
                                       ..
                                   }) => {
                             // while processing this update, *we* missed in some other node.
@@ -1251,9 +1247,22 @@ impl Domain {
                             }
                             // and make sure there was indeed at most one
                             assert_eq!(queued.len(), 0);
+                            // and same with acks
+                            mem::swap(next_acks, &mut acks);
+                            // same, stick the new one first if there is one
+                            if let Some(ack) = acks.pop() {
+                                next_acks.push(ack);
+                            }
+                            // and make sure there was indeed at most one
+                            assert_eq!(acks.len(), 0);
                             return;
                         }
                     }
+                }
+
+                // let source domains know that our buffers are drained
+                for ack in acks {
+                    ack.send(()).unwrap();
                 }
 
                 return;
@@ -1342,6 +1351,7 @@ impl Domain {
         if let Some(Waiting::Paused {
                         buffer: mut pbuffer,
                         queued: mut pqueued,
+                        acks: mut packs,
                     }) = self.waiting.remove(&paused) {
             // keep processing the buffered entries for this paused node until we've either gone
             // through all of them, or until we trigger another replay.
@@ -1354,6 +1364,7 @@ impl Domain {
                     Some(Waiting::Paused {
                              mut buffer,
                              mut queued,
+                             mut acks,
                          }) => {
                         // yup, seems we hit another missing entry while replaying.
 
@@ -1372,6 +1383,13 @@ impl Domain {
                         }
                         assert!(queued.is_empty());
                         queued = pqueued;
+
+                        // also keep track of our acks
+                        if let Some(p) = acks.pop() {
+                            packs.push(p);
+                        }
+                        assert!(acks.is_empty());
+                        acks = packs;
 
                         if let Some((waited_for,
                                      mut target_buffered,
@@ -1429,7 +1447,12 @@ impl Domain {
                         }
 
                         // put back what we stole
-                        self.waiting.insert(paused, Waiting::Paused { buffer, queued });
+                        self.waiting.insert(paused,
+                                            Waiting::Paused {
+                                                buffer,
+                                                queued,
+                                                acks,
+                                            });
                         return true;
                     }
                     Some(..) => {
@@ -1447,6 +1470,10 @@ impl Domain {
                 // care about triggering further replays, because the node will then automatically
                 // trigger a replay of queue itself again.
                 self.release_paused(node, None);
+            }
+
+            for ack in packs {
+                ack.send(()).unwrap();
             }
         } else {
             unreachable!();
