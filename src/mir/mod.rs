@@ -271,11 +271,16 @@ impl MirNode {
                     MirNodeType::GroupConcat { ref on, ref separator } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
+                        let group_cols = parent.borrow()
+                            .columns()
+                            .iter()
+                            .cloned()
+                            .collect();
                         make_grouped_node(&name,
                                           parent,
                                           self.columns.as_slice(),
                                           on,
-                                          &vec![],
+                                          &group_cols,
                                           GroupedNodeType::GroupConcat(separator.to_string()),
                                           mig)
                     }
