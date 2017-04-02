@@ -56,8 +56,6 @@ impl Index {
 pub mod single;
 pub mod local;
 
-type InjectCh = mpsc::SyncSender<Packet>;
-
 enum DomainMode {
     Forwarding,
     Replaying {
@@ -109,6 +107,8 @@ pub struct Domain {
     waiting: local::Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
 
+    inject_tx: Option<mpsc::SyncSender<Packet>>,
+
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
     wait_time: Timer<SimpleTracker, RealTime>,
@@ -136,6 +136,9 @@ impl Domain {
             mode: DomainMode::Forwarding,
             waiting: local::Map::new(),
             replay_paths: HashMap::new(),
+
+            inject_tx: None,
+
             total_time: Timer::new(),
             total_ptime: Timer::new(),
             wait_time: Timer::new(),
@@ -444,7 +447,7 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, m: Packet, inject_tx: &mut InjectCh) {
+    fn handle(&mut self, m: Packet) {
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
@@ -464,7 +467,7 @@ impl Domain {
             }
             m @ Packet::ReplayPiece { .. } |
             m @ Packet::FullReplay { .. } => {
-                self.handle_replay(m, inject_tx);
+                self.handle_replay(m);
             }
             Packet::AddNode { node, parents } => {
                 use std::cell;
@@ -596,7 +599,7 @@ impl Domain {
                 };
 
                 if let Some(m) = m {
-                    self.handle_replay(m, inject_tx);
+                    self.handle_replay(m);
                     return;
                 }
 
@@ -639,10 +642,10 @@ impl Domain {
                     state: state,
                 };
 
-                self.handle_replay(m, inject_tx);
+                self.handle_replay(m);
             }
             Packet::Finish(tag, ni) => {
-                self.finish_replay(tag, ni, inject_tx);
+                self.finish_replay(tag, ni);
             }
             Packet::Ready { node, index, ack } => {
 
@@ -723,7 +726,7 @@ impl Domain {
         }
     }
 
-    fn handle_replay(&mut self, m: Packet, inject_tx: &mut InjectCh) {
+    fn handle_replay(&mut self, m: Packet) {
         let mut finished = None;
         let mut playback = None;
         let mut need_replay = None;
@@ -862,7 +865,7 @@ impl Domain {
                         playback = Some(p);
 
                         let log = self.log.new(None);
-                        let inject_tx = inject_tx.clone();
+                        let inject_tx = self.inject_tx.clone().unwrap();
                         thread::Builder::new()
                         .name(format!("replay{}.{}",
                                       self.nodes.iter().next().unwrap().borrow().domain().index(),
@@ -1045,7 +1048,7 @@ impl Domain {
         }
 
         if let Some(p) = playback {
-            self.handle(p, inject_tx);
+            self.handle(p);
         }
 
         if let Some((tag, ni, for_key)) = finished {
@@ -1081,7 +1084,7 @@ impl Domain {
                 // did we fill a hole that someone else was waiting on?
                 if let Some(node) = releases {
                     // yes, so we need to replay their buffer first.
-                    if self.release_paused(node, Some((ni, &mut buffer, &mut queued)), inject_tx) {
+                    if self.release_paused(node, Some((ni, &mut buffer, &mut queued))) {
                         // releasing that buffer triggered another replay!
                         return;
                     }
@@ -1090,7 +1093,7 @@ impl Domain {
                 // replay our (pruned) buffer
                 while let Some(m) = buffer.pop_front() {
                     use std::mem;
-                    self.handle(m, inject_tx);
+                    self.handle(m);
                     match self.waiting.get_mut(&ni) {
                         None => {}
                         Some(&mut Waiting::Paused {
@@ -1150,7 +1153,7 @@ impl Domain {
                     // the return value here -- if any of the triggered nodes do another lookup
                     // that misses into us, they'll either trigger a replay, or queue themselves
                     // again.
-                    self.release_paused(node, None, inject_tx);
+                    self.release_paused(node, None);
                 }
 
                 return;
@@ -1209,7 +1212,10 @@ impl Domain {
             // this (informal) argument relies on there only being one active replay in the system
             // at any given point in time, so we may need to revisit it for partial materialization
             // (TODO)
-            match inject_tx.try_send(Packet::Finish(tag, ni)) {
+            match self.inject_tx
+                      .as_mut()
+                      .unwrap()
+                      .try_send(Packet::Finish(tag, ni)) {
                 Ok(_) => {}
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     // can't happen, since we know the reader thread (us) is still running
@@ -1230,8 +1236,7 @@ impl Domain {
                       paused: LocalNodeIndex,
                       waited_for: Option<(LocalNodeIndex,
                                           &mut VecDeque<Packet>,
-                                          &mut VecDeque<LocalNodeIndex>)>,
-                      inject_tx: &mut InjectCh)
+                                          &mut VecDeque<LocalNodeIndex>)>)
                       -> bool {
         if let Some(Waiting::Paused {
                         buffer: mut pbuffer,
@@ -1240,7 +1245,7 @@ impl Domain {
             // keep processing the buffered entries for this paused node until we've either gone
             // through all of them, or until we trigger another replay.
             while let Some(m) = pbuffer.pop_front() {
-                self.handle(m, inject_tx);
+                self.handle(m);
                 // did we start waiting again?
                 // NOTE: we need to .remove() since the block beneath must have &mut self
                 match self.waiting.remove(&paused) {
@@ -1322,7 +1327,7 @@ impl Domain {
                 // yes, so we need to replay their queues too. note that here, like above, we don't
                 // care about triggering further replays, because the node will then automatically
                 // trigger a replay of queue itself again.
-                self.release_paused(node, None, inject_tx);
+                self.release_paused(node, None);
             }
         } else {
             unreachable!();
@@ -1331,7 +1336,7 @@ impl Domain {
         false
     }
 
-    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex, inject_tx: &mut InjectCh) {
+    fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex) {
         let finished = if let DomainMode::Replaying {
                    ref to,
                    ref mut buffered,
@@ -1424,7 +1429,10 @@ impl Domain {
             //    true), we also know that it will not send again until the replay is over
             //  - the replay is over when we acknowedge the replay, which we haven't done yet
             //    (otherwise we'd be hitting the if branch above).
-            match inject_tx.try_send(Packet::Finish(tag, node)) {
+            match self.inject_tx
+                      .as_mut()
+                      .unwrap()
+                      .try_send(Packet::Finish(tag, node)) {
                 Ok(_) => {}
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     // can't happen, since we know the reader thread (us) is still running
@@ -1449,7 +1457,7 @@ impl Domain {
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {
-                let (mut inject_tx, inject_rx) = mpsc::sync_channel(1);
+                let (inject_tx, inject_rx) = mpsc::sync_channel(1);
                 let (back_tx, back_rx) = mpsc::channel();
 
                 // construct select so we can receive on all channels at the same time
@@ -1463,6 +1471,8 @@ impl Domain {
                     inject_rx_handle.add();
                     back_rx_handle.add();
                 }
+
+                self.inject_tx = Some(inject_tx);
 
                 self.total_time.start();
                 self.total_ptime.start();
@@ -1480,13 +1490,14 @@ impl Domain {
                     } else {
                         unreachable!()
                     };
+
                     match m {
                         Err(_) => break,
                         Ok(Packet::Quit) => break,
                         Ok(Packet::RequestUnboundedTx(ack)) => {
                             ack.send(back_tx.clone()).unwrap();
                         }
-                        Ok(m) => self.handle(m, &mut inject_tx),
+                        Ok(m) => self.handle(m),
                     }
                 }
             })
