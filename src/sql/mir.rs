@@ -224,7 +224,10 @@ impl SqlToMirConverter {
                 leaves.push(mn);
             }
         }
-        assert_eq!(leaves.len(), 1);
+        assert_eq!(leaves.len(),
+                   1,
+                   "expected just one leaf! leaves: {:?}",
+                   leaves);
         let leaf = leaves.into_iter().next().unwrap();
         self.current.insert(String::from(leaf.borrow().name()), self.schema_version);
 
