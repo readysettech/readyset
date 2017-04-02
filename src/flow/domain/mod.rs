@@ -85,6 +85,7 @@ enum Waiting {
     /// this node. We know that other replays that go *through* this node won't have this node as
     /// the last node in the path, because the last node in the path must then be an Egress node.
     Target {
+        waiting_for: Tag,
         buffer: VecDeque<Packet>,
         releases: Option<LocalNodeIndex>,
         queued: VecDeque<LocalNodeIndex>,
@@ -222,6 +223,7 @@ impl Domain {
                     buffered.push_front(was);
                 }
                 Waiting::Target {
+                    waiting_for: tag,
                     buffer: buffered,
                     releases: release,
                     queued: VecDeque::new(),
@@ -727,6 +729,7 @@ impl Domain {
     }
 
     fn handle_replay(&mut self, m: Packet) {
+        let tag = m.tag().unwrap();
         let mut finished = None;
         let mut playback = None;
         let mut need_replay = None;
@@ -737,7 +740,7 @@ impl Domain {
                          ref path,
                          ref mut done_tx,
                          ..
-                     } = self.replay_paths.get_mut(&m.tag().unwrap()).unwrap();
+                     } = self.replay_paths.get_mut(&tag).unwrap();
 
             match self.mode {
                 DomainMode::Forwarding if done_tx.is_some() => {
@@ -760,6 +763,23 @@ impl Domain {
                 DomainMode::Replaying { .. } => {
                     // another packet the local state we are constructing
                 }
+            }
+
+            // should this really be buffered?
+            match self.waiting.get_mut(path[0].as_local()) {
+                Some(&mut Waiting::Paused { ref mut buffer, .. }) => {
+                    buffer.push_back(m);
+                    return;
+                }
+                Some(&mut Waiting::Target {
+                              ref mut buffer,
+                              ref waiting_for,
+                              ..
+                          }) if *waiting_for != tag => {
+                    buffer.push_back(m);
+                    return;
+                }
+                _ => {}
             }
 
             // we may be able to just absorb all the state in one go if we're lucky!
@@ -914,39 +934,13 @@ impl Domain {
                     data,
                     context,
                 } => {
-                    let dst = *path.last().unwrap().as_local();
-                    if let ReplayPieceContext::Partial { ref for_key } = context {
+                    if let ReplayPieceContext::Partial { .. } = context {
                         trace!(self.log, "replaying batch"; "#" => data.len());
-
-                        use flow::node::Type;
-                        if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
-                            // we're waiting for this particular replay packet to release a buffer.
-                            // mark the state for the key being replayed as *not* a hole in
-                            // path.last() otherwise we'll just end up with the same NeedReply
-                            // response that triggered this replay initially.
-                            self.state
-                                .get_mut(&dst)
-                                .unwrap()
-                                .mark_filled(for_key.clone());
-                        } else {
-                            let mut n = self.nodes[&dst].borrow_mut();
-                            if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                // we're filling a hole in a Reader.
-                                // we need to ensure that the hole for the key we're replaying ends
-                                // up being filled, even if that hole is empty!
-                                wh.mark_filled(&for_key[0]);
-                            }
-                        }
                     } else {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
                     // forward the current message through all local nodes.
-                    // note that it's okay to bypass all the extra buffering logic in dispatch()
-                    // here, because we know that no nodes along path are materialized (replay is
-                    // always just across non-materialized nodes), except potentially the last one.
-                    // the last one is materialized if we're the target domain, and we're replaying
-                    // into it.
                     let mut m = Packet::ReplayPiece {
                         link,
                         tag,
@@ -954,10 +948,62 @@ impl Domain {
                         context: context.clone(),
                     };
 
+                    // keep track of whether we're filling any partial holes
+                    let mut release = false;
+                    let partial_key =
+                        if let ReplayPieceContext::Partial { ref for_key } = context {
+                            Some(for_key)
+                        } else {
+                            None
+                        };
+
                     // we may be replaying a partially processed state replay, in which case we
                     // need to make sure to only process along the remaining suffix of the path.
                     let skip = path.iter().position(|ni| ni == &m.link().dst).unwrap();
+
                     for (i, ni) in path.iter().enumerate().skip(skip) {
+                        // do we have to buffer at this node?
+                        match self.waiting.get_mut(ni.as_local()) {
+                            Some(&mut Waiting::Paused { ref mut buffer, .. }) => {
+                                buffer.push_back(m);
+                                return;
+                            }
+                            Some(&mut Waiting::Target { ref waiting_for, .. }) if *waiting_for ==
+                                                                                  tag => {
+                                // it's waiting, but for us!
+                                release = true;
+                            }
+                            Some(&mut Waiting::Target { ref mut buffer, .. }) => {
+                                buffer.push_back(m);
+                                return;
+                            }
+                            _ => {}
+                        }
+
+                        // are we about to fill a hole?
+                        if i == path.len() - 1 && partial_key.is_some() {
+                            let partial_key = partial_key.unwrap();
+                            if release {
+                                // we're waiting for this particular replay packet to release a
+                                // buffer. mark the state for the key being replayed as *not* a
+                                // hole otherwise we'll just end up with the same NeedReply
+                                // response that triggered this replay initially.
+                                self.state
+                                    .get_mut(ni.as_local())
+                                    .unwrap()
+                                    .mark_filled(partial_key.clone());
+                            } else {
+                                // we could be filling a hole in a Reader. we need to ensure
+                                // that the hole for the key we're replaying ends up being
+                                // filled, even if that hole is empty!
+                                use flow::node::Type;
+                                let mut n = self.nodes[ni.as_local()].borrow_mut();
+                                if let Type::Reader(Some(ref mut wh), _) = *n.inner {
+                                    wh.mark_filled(&partial_key[0]);
+                                }
+                            }
+                        }
+
                         // process the current message in this node
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
                         m = match n.process(m, &mut self.state, &self.nodes, false) {
@@ -965,24 +1011,26 @@ impl Domain {
                             single::FinalProcessingResult::NeedReplay {
                                 node, key, was, ..
                             } => {
-                                if let ReplayPieceContext::Partial { ref for_key } = context {
-                                    use flow::node::Type;
+                                // oh no, we missed during replay!
 
-                                    // make sure the hole isn't considered filled
-                                    if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
+                                // let's make sure holes aren't considered filled
+                                if i == path.len() - 1 && partial_key.is_some() {
+                                    let partial_key = partial_key.unwrap();
+                                    if release {
                                         self.state
-                                            .get_mut(&dst)
+                                            .get_mut(ni.as_local())
                                             .unwrap()
-                                            .mark_hole(&for_key[..]);
+                                            .mark_hole(&partial_key[..]);
                                     } else {
-                                        // even in Reader nodes
-                                        let mut n = self.nodes[&dst].borrow_mut();
+                                        use flow::node::Type;
+                                        let mut n = self.nodes[ni.as_local()].borrow_mut();
                                         if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                            wh.mark_hole(&for_key[0]);
+                                            wh.mark_hole(&partial_key[0]);
                                         }
                                     }
                                 }
 
+                                // and then request a replay
                                 need_replay = Some((node, *ni.as_local(), key, was));
                                 break 'outer;
                             }
@@ -1010,6 +1058,7 @@ impl Domain {
                         m.link_mut().dst = path[i + 1];
                     }
 
+                    let dst = *path.last().unwrap().as_local();
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
                             debug!(self.log, "last batch processed"; "terminal" => done_tx.is_some());
