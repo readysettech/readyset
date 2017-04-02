@@ -401,17 +401,7 @@ impl SqlToMirConverter {
 
         // The function node's set of output columns is the group columns plus the function
         // column
-        let mut combined_columns = Vec::from_iter(group_by.iter().map(|c| match c.alias {
-                                                                          Some(ref a) => {
-                                                       Column {
-                                                           name: a.clone(),
-                                                           alias: Some(a.clone()),
-                                                           table: c.table.clone(),
-                                                           function: c.function.clone(),
-                                                       }
-                                                   }
-                                                                          None => (*c).clone(),
-                                                                      }));
+        let mut combined_columns = group_by.iter().map(|c| (*c).clone()).collect::<Vec<Column>>();
         combined_columns.push(computed_col.clone());
 
         // make the new operator
