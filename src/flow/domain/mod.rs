@@ -87,7 +87,6 @@ enum Waiting {
     Target {
         waiting_for: Tag,
         buffer: VecDeque<Packet>,
-        releases: Option<LocalNodeIndex>,
         queued: VecDeque<LocalNodeIndex>,
     },
 }
@@ -199,13 +198,11 @@ impl Domain {
                     }
                 }
                 Some(Waiting::Paused { .. }) => {
-                    // the join was waiting for a replay into one of its ancestors when
-                    // processing this update. but since dispatch() was called, we must be
-                    // processing normally.
+                    // we were sent a message while paused... that shouldn't happen.
                     unreachable!();
                 }
                 Some(Waiting::Target { .. }) => {
-                    // the join is waiting for a replay, but somehow dispatch was called?
+                    // a join is the target of a replay, but is also processing a packet?
                     unreachable!();
                 }
             };
@@ -222,11 +219,14 @@ impl Domain {
                     // also process the message that just missed again
                     buffered.push_front(was);
                 }
+                let mut queued = VecDeque::new();
+                if let Some(release) = release {
+                    queued.push_back(release);
+                }
                 Waiting::Target {
                     waiting_for: tag,
                     buffer: buffered,
-                    releases: release,
-                    queued: VecDeque::new(),
+                    queued: queued,
                 }
             }
             Some(&mut Waiting::Paused { ref mut queued, .. }) |
@@ -1103,7 +1103,6 @@ impl Domain {
         if let Some((tag, ni, for_key)) = finished {
             if let Some(Waiting::Target {
                             mut buffer,
-                            releases,
                             mut queued,
                             ..
                         }) = self.waiting.remove(&ni) {
@@ -1130,14 +1129,49 @@ impl Domain {
                     });
                 }
 
-                // did we fill a hole that someone else was waiting on?
-                if let Some(node) = releases {
-                    // yes, so we need to replay their buffer first.
+                // did someone else try to do lookups into us while we were being filled?
+                while let Some(node) = queued.pop_front() {
+                    // yes, so we need to replay their queues too.
+                    // if any of the triggered nodes do another lookup that misses into us, they'll
+                    // either trigger a replay, or queue themselves again. in that case, we should
+                    // stop processing this node, and wait for that replay.
                     if self.release_paused(node, Some((ni, &mut buffer, &mut queued))) {
-                        // releasing that buffer triggered another replay!
                         return;
                     }
                 }
+
+                // NOTE
+                // it is important that we only release our buffer only after any downstream nodes
+                // have had their turn. consider what could otherwise happen in the following
+                // graph:
+                //
+                //   L     R
+                //   |     |
+                //   +--+--+
+                //      |
+                //      J
+                //
+                //  say R1 arrives at J with key K1, and K1 misses in L.
+                //  L now has to do a replay for K1.
+                //  meanwhile, it buffers some updates (say L2 and L3, with keys K2 and K3).
+                //  J also buffers some more updates from R (say R4, with key K4).
+                //  the replay for K1 at L then finishes.
+                //  consider what would happen if we replay L's buffer first.
+                //  assume K2 is not present in R.
+                //  L forwards K2 to J, which misses in R.
+                //  R now has to replay, so enters Target state.
+                //  J is waiting for R, so enters Paused state.
+                //  what state should L be in?
+                //  it isn't Paused, because it's not waiting on another node really.
+                //  it isn't Target, because it's not waiting on a state replay.
+                //  but it also isn't not waiting, because it still has L3 to replay.
+                //  we *could* make it Paused, and add it to the queued list of J, but that seems
+                //  really weird, and could (maybe) lead to cycles.
+                //  if we instead replay J first, and then L, this problem does not arise.
+                //  any buffered messages at J must be from R, and so must miss in L, so L can
+                //  re-enter the Target state.
+                //  unfortunately, this argument *only* works as long as we have two-way joins.
+                //  with three-way joins, J could miss in some other node N...
 
                 // replay our (pruned) buffer
                 while let Some(m) = buffer.pop_front() {
@@ -1194,15 +1228,6 @@ impl Domain {
                             return;
                         }
                     }
-                }
-
-                // did someone else try to do lookups into us while we were being filled?
-                for node in queued {
-                    // yes, so we need to replay their queues too. note that we don't care about
-                    // the return value here -- if any of the triggered nodes do another lookup
-                    // that misses into us, they'll either trigger a replay, or queue themselves
-                    // again.
-                    self.release_paused(node, None);
                 }
 
                 return;
@@ -1329,17 +1354,20 @@ impl Domain {
                                     // all buffered updates should be L, so all misses during
                                     // buffer replay should remain in R), but with more elaborate
                                     // joins (and possibly unions) this could happen.
+                                    //
+                                    // NOTE: we *may* be able to just replay the rest of buffer in
+                                    // this case, and essentially transfer our buffer to J. we'd
+                                    // need to think carefully about that though.
                                     unimplemented!();
                                 }
                                 Some(&mut Waiting::Target {
                                               ref mut buffer,
                                               ref mut queued,
-                                              releases,
                                               ..
                                           }) => {
                                     use std::mem;
                                     // we must have caused this to happen.
-                                    assert_eq!(releases, Some(paused));
+                                    assert!(queued.iter().any(|q| q == &paused));
                                     // make sure the node wakes up any other nodes that were
                                     // waiting for it when it finishes the replay.
                                     queued.append(target_queued);
