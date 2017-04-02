@@ -43,6 +43,9 @@ pub fn push_all_base_columns(q: &mut MirQuery) {
             .cloned()
             .collect();
         for child in mn.borrow().children() {
+            // N.B. this terminates before reaching the actual leaf, since the last node of the
+            // query (before the MIR `Leaf` node) already carries the query name. (`Leaf` nodes are
+            // virtual nodes that will be removed and converted into materializations.)
             if child.borrow().versioned_name() == q.leaf.borrow().versioned_name() {
                 continue;
             }
