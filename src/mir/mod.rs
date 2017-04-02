@@ -16,6 +16,9 @@ use ops::project::Project;
 use ops::permute::Permute;
 use sql::QueryFlowParts;
 
+mod rewrite;
+mod optimize;
+
 #[derive(Clone, Debug)]
 pub enum FlowNode {
     New(NodeAddress),
@@ -110,9 +113,9 @@ impl MirQuery {
         }
     }
 
-    pub fn optimize(self) -> MirQuery {
-        // XXX(malte): currently a no-op
-        self
+    pub fn optimize(mut self) -> MirQuery {
+        rewrite::pull_required_base_columns(&mut self);
+        optimize::optimize(self)
     }
 }
 
@@ -183,6 +186,11 @@ impl MirNode {
 
     pub fn add_child(&mut self, c: MirNodeRef) {
         self.children.push(c)
+    }
+
+    pub fn add_column(&mut self, c: Column) {
+        self.columns.push(c.clone());
+        self.inner.add_column(c);
     }
 
     pub fn ancestors(&self) -> &[MirNodeRef] {
@@ -450,6 +458,34 @@ pub enum MirNodeType {
 impl MirNodeType {
     fn description(&self) -> String {
         format!("{:?}", self)
+    }
+
+    fn add_column(&mut self, c: Column) {
+        match *self {
+            MirNodeType::Aggregation { ref mut group_by, .. } => {
+                group_by.push(c);
+            }
+            MirNodeType::Base { .. } => panic!("can't add columns to base nodes!"),
+            MirNodeType::Extremum { ref mut group_by, .. } => {
+                group_by.push(c);
+            }
+            MirNodeType::Filter { ref mut conditions } => {
+                conditions.push(None);
+            }
+            MirNodeType::Join { ref mut project, .. } |
+            MirNodeType::LeftJoin { ref mut project, .. } => {
+                project.push(c);
+            }
+            MirNodeType::Project { ref mut emit, .. } |
+            MirNodeType::Permute { ref mut emit } => {
+                emit.push(c);
+            }
+            MirNodeType::Union { .. } => unimplemented!(),
+            MirNodeType::TopK { ref mut group_by, .. } => {
+                group_by.push(c);
+            }
+            _ => (),
+        }
     }
 }
 
