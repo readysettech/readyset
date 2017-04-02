@@ -61,6 +61,7 @@ impl SqlToMirConverter {
     /// vector of conditions that `shortcut` understands.
     fn to_conditions(&self,
                      ct: &ConditionTree,
+                     mut columns: &mut Vec<Column>,
                      n: &MirNodeRef)
                      -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): we only support one level of condition nesting at this point :(
@@ -78,14 +79,25 @@ impl SqlToMirConverter {
             ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
             _ => unimplemented!(),
         };
-        let num_columns = n.borrow().columns().len();
-        let mut filter = vec![None; num_columns];
-        filter[n.borrow()
-            .columns()
-            .iter()
-            .position(|c| *c == l)
-            .unwrap()] = Some((ct.operator.clone(), DataType::from(r)));
-        filter
+
+        let num_columns = columns.len();
+        let vn = n.borrow().versioned_name();
+        let mut filters = vec![None; num_columns];
+
+        let f = Some((ct.operator.clone(), DataType::from(r)));
+        match n.borrow()
+                  .columns()
+                  .iter()
+                  .position(|c| *c == l) {
+            None => {
+                columns.push(l);
+                filters.push(f);
+            }
+            Some(cid) => {
+                filters[cid] = f;
+            }
+        }
+        filters
     }
 
     pub fn add_leaf_below(&mut self,
@@ -322,18 +334,18 @@ impl SqlToMirConverter {
 
         let mut prev_node = parent;
         for (i, cond) in predicates.iter().enumerate() {
-            // convert ConditionTree to a chain of Filter operators.
-            // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
-            let filter = self.to_conditions(cond, &prev_node);
-            let parent_fields = prev_node.borrow()
+            let mut fields = prev_node.borrow()
                 .columns()
                 .iter()
                 .cloned()
                 .collect();
+            // convert ConditionTree to a chain of Filter operators.
+            // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
+            let filter = self.to_conditions(cond, &mut fields, &prev_node);
             let f_name = format!("{}_f{}", name, i);
             let n = MirNode::new(&f_name,
                                  self.schema_version,
-                                 parent_fields,
+                                 fields,
                                  MirNodeType::Filter { conditions: filter },
                                  vec![prev_node.clone()],
                                  vec![]);
