@@ -399,6 +399,20 @@ impl SqlToMirConverter {
         // Resolve column IDs in parent
         let over_col = over.1;
 
+        // move alias to name in computed column (which needs not to
+        // match against a parent node column, and is often aliased)
+        let computed_col = match computed_col.alias {
+            None => computed_col.clone(),
+            Some(ref a) => {
+                Column {
+                    name: a.clone(),
+                    alias: None,
+                    table: computed_col.table.clone(),
+                    function: computed_col.function.clone(),
+                }
+            }
+        };
+
         // The function node's set of output columns is the group columns plus the function
         // column
         let mut combined_columns = group_by.iter().map(|c| (*c).clone()).collect::<Vec<Column>>();
