@@ -863,6 +863,7 @@ impl SqlToMirConverter {
                                                         computed_col,
                                                         group_cols.iter().collect(),
                                                         parent_node);
+                        prev_node = Some(n.clone());
                         func_nodes.push(n);
                         new_node_count += 1;
                     }
