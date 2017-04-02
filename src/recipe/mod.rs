@@ -76,10 +76,10 @@ impl Recipe {
                 // `name` might be an alias for another identical query, so resolve via QID here
                 // TODO(malte): better error handling
                 let na = match self.aliases.get(name) {
-                    None => inc.get_flow_node_address(name, self.version),
+                    None => inc.get_query_address(name),
                     Some(ref qid) => {
                         let (ref internal_qn, _) = self.expressions[qid];
-                        inc.get_flow_node_address(internal_qn.as_ref().unwrap(), self.version)
+                        inc.get_query_address(internal_qn.as_ref().unwrap())
                     }
                 };
                 match na {

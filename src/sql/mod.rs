@@ -110,9 +110,14 @@ impl SqlIncorporator {
         Ok(res)
     }
 
-    /// Retrieves the flow node associated with a given view name and schema version.
-    pub fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeAddress> {
+    #[cfg(test)]
+    fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeAddress> {
         self.mir_converter.get_flow_node_address(name, v)
+    }
+
+    /// Retrieves the flow node associated with a given query's leaf view.
+    pub fn get_query_address(&self, name: &str) -> Option<NodeAddress> {
+        self.mir_converter.get_leaf(name)
     }
 
     fn consider_query_graph(&mut self,
