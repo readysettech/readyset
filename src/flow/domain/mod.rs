@@ -1332,11 +1332,19 @@ impl Domain {
 
                         // transfer over the remaining buffered things and leave it up to the next
                         // arrival of a replay for that to continue.
-                        buffer.append(&mut pbuffer);
+                        if let Some(p) = buffer.pop_front() {
+                            pbuffer.push_front(p);
+                        }
+                        assert!(buffer.is_empty());
+                        buffer = pbuffer;
 
                         // make sure that any nodes that were queued on our state are eventually
                         // unblocked.
-                        queued.append(&mut pqueued);
+                        if let Some(p) = queued.pop_front() {
+                            pqueued.push_front(p);
+                        }
+                        assert!(queued.is_empty());
+                        queued = pqueued;
 
                         if let Some((waited_for, mut target_buffered, target_queued)) = waited_for {
                             // since we process the paused node's buffer first, there might
