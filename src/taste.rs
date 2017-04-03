@@ -163,6 +163,19 @@ pub fn taste_commit(ws: &Workspace,
                                    results: None,
                                }));
                 }
+                io::ErrorKind::InvalidData => {
+                    println!("Skipping commit {} which has an invalid Taster config.",
+                             commit.id);
+                    return Ok((None,
+                               TastingResult {
+                                   branch: branch,
+                                   commit: commit.clone(),
+                                   build: build_success,
+                                   test: test_success,
+                                   bench: false,
+                                   results: None,
+                               }));
+                }
                 _ => unimplemented!(),
             }
         }
