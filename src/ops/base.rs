@@ -167,6 +167,16 @@ impl Base {
             fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
         }
     }
+
+    /// Flush any buffered writes.
+    pub fn flush(&mut self) {
+        let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
+        self.persist_to_log(&copy_buffered_writes);
+        self.last_flushed_at = Some(Instant::now());
+
+        // Clear buffer after we've persisted records to log.
+        self.buffered_writes.as_mut().unwrap().clear();
+    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
@@ -263,14 +273,10 @@ impl Ingredient for Base {
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
 
                     let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
-                    self.persist_to_log(&copy_buffered_writes);
-                    self.last_flushed_at = Some(Instant::now());
+                    self.flush();
 
                     // This returns everything that was buffered, plus the newly inserted records.
                     records_to_return = Some(copy_buffered_writes);
-
-                    // Clear buffer after we've persisted records to log.
-                    self.buffered_writes.as_mut().unwrap().clear();
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
