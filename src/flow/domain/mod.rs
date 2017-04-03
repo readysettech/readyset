@@ -565,7 +565,7 @@ impl Domain {
                             debug!(log, "starting state chunker"; "node" => to.as_local().id());
 
                             let iter = state.into_iter()
-                                .flat_map(|(_, rs)| rs)
+                                .flat_map(|rs| rs)
                                 .chunks(BATCH_SIZE);
                             let mut iter = iter
                                 .into_iter()
