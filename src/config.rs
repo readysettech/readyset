@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Error, Read};
+use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
 use toml;
 
@@ -29,7 +29,10 @@ pub fn parse_config(cfg: &Path,
     let mut buf = String::new();
     try!(f.read_to_string(&mut buf));
 
-    let value = toml::Parser::new(&buf).parse().unwrap();
+    let value = match toml::Parser::new(&buf).parse() {
+        None => return Err(Error::new(ErrorKind::InvalidInput, "failed to parse taster config!")),
+        Some(v) => v,
+    };
 
     let to_bench = |t: (&String, &toml::Value)| {
         Benchmark {
