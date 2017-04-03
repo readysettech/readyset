@@ -233,12 +233,12 @@ impl Ingredient for Join {
 
                         if (positive && rc == 1) || (!positive && rc == 0) {
                             ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
-                                let foo: Records = vec![
+                                                               let foo: Records = vec![
                                     (self.generate_null(r), !positive),
                                     (self.generate_row(r, &row), positive)
                                 ].into();
-                                foo.into()
-                            }));
+                                                               foo.into()
+                                                           }));
                             continue;
                         }
                     } else if other_rows.peek().is_none() {
@@ -253,7 +253,7 @@ impl Ingredient for Join {
                 }
             }
 
-            return ProcessingResult::Done(ret.into());
+            return ProcessingResult::Done(ret.into(), 0);
         }
 
         let missing = missing.unwrap();

@@ -174,7 +174,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup(&self, key: &KeyType<T>) -> Option<&Vec<Arc<Vec<T>>>> {
+    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Arc<Vec<T>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -480,7 +480,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         None
     }
 
-    pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> LookupResult<T> {
+    pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {

@@ -105,7 +105,7 @@ impl Ingredient for Project {
                 **r = sync::Arc::new(new_r);
             }
         }
-        ProcessingResult::Done(rs)
+        ProcessingResult::Done(rs, 0)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

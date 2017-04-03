@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flow::prelude;
 
 pub enum ProcessingResult {
-    Done(prelude::Records),
+    Done(prelude::Records, usize),
     NeedReplay {
         node: prelude::NodeAddress,
         key: Vec<prelude::DataType>,

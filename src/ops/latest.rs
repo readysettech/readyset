@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use flow::prelude::*;
 
@@ -80,67 +79,47 @@ impl Ingredient for Latest {
                                .unwrap()
                                .as_local())
             .expect("latest must have its own state materialized");
-        let currents: Result<Vec<_>, _> = rs.iter()
-            .filter_map(|r| {
-                if !r.is_positive() {
-                    return None;
-                }
 
-                let r = r.rec();
-                match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
-                    LookupResult::Some(rs) => {
-                        debug_assert!(rs.len() <= 1, "a group had more than 1 result");
-                        Some(Ok(rs.get(0)))
-                    }
-                    LookupResult::Missing => Some(Err(r[self.key[0]].clone())),
-                }
-            })
-            .collect();
-
-        let currents = match currents {
-            Ok(c) => c,
-            Err(key) => {
-                return ProcessingResult::NeedReplay {
-                           node: from,
-                           key: vec![key],
-                           was: rs,
-                       };
-            }
-        };
-
-        // We don't allow standalone negatives as input to a latest. This is because it
-        // would be very computationally expensive (and currently impossible) to find what
-        // the *previous* latest was if the current latest was revoked. However, if a
-        // record is negated, and a positive for the same key is given in the same group,
-        // then we should just emit the new record as the new latest.
-        //
-        // We do this by processing in two steps. We first process all positives, emitting
-        // all the -/+ pairs for each one, and keeping track of which keys we have handled.
-        // Then, we assert that there are no negatives whose key does not appear in the
-        // list of keys that have been handled.
-        let (pos, _): (Vec<_>, _) = rs.into_iter().partition(|r| r.is_positive());
-        let mut handled = HashSet::new();
-
-        // buffer emitted records
-        let mut out = Vec::with_capacity(pos.len());
-        for (i, r) in pos.into_iter().enumerate() {
-            let group: Vec<_> = self.key
-                .iter()
-                .map(|&col| r[col].clone())
-                .collect();
-            handled.insert(group);
-
-            if let Some(current) = currents[i] {
-                out.push(Record::Negative(current.clone()));
+        let mut holes = 0;
+        let mut out = Vec::with_capacity(rs.len());
+        {
+            let currents = rs.into_iter().filter_map(|r| {
+            // We don't allow standalone negatives as input to a latest. This is because it would
+            // be very computationally expensive (and currently impossible) to find what the
+            // *previous* latest was if the current latest was revoked.
+            if !r.is_positive() {
+                return None;
             }
 
-            // if there was a previous latest for this key, revoke old record
-            out.push(r);
+            match db.lookup(&[self.key[0]], &KeyType::Single(&r[self.key[0]])) {
+                LookupResult::Some(rs) => {
+                    debug_assert!(rs.len() <= 1, "a group had more than 1 result");
+                    Some((r, rs.get(0)))
+                }
+                LookupResult::Missing => {
+                    // we don't actively materialize holes unless requested by a read. this can't
+                    // be a read, because reads cause replay, which fill holes with an empty set
+                    // before processing!
+                    holes += 1;
+                    None
+                }
+            }
+        });
+
+            // buffer emitted records
+            for (r, current) in currents {
+                if let Some(current) = current {
+                    out.push(Record::Negative(current.clone()));
+                }
+
+                // if there was a previous latest for this key, revoke old record
+                out.push(r);
+            }
         }
 
         // TODO: check that there aren't any standalone negatives
 
-        ProcessingResult::Done(out.into())
+        ProcessingResult::Done(out.into(), holes)
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
