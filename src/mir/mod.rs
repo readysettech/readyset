@@ -564,7 +564,20 @@ impl Debug for MirNodeType {
                 write!(f, "||([{}], \"{}\")", on.name, separator)
             }
             MirNodeType::Identity => write!(f, "≡"),
-            MirNodeType::Join { .. } => write!(f, "⋈ []"),
+            MirNodeType::Join { ref on_left, ref on_right, ref project } => {
+                let jc = on_left.iter()
+                    .zip(on_right)
+                    .map(|(l, r)| format!("{}:{}", l.name, r.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f,
+                       "⋈ [{} on {}]",
+                       project.iter()
+                           .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "),
+                       jc)
+            }
             MirNodeType::Leaf { ref keys, .. } => {
                 let key_cols = keys.iter()
                     .map(|k| k.name.clone())
