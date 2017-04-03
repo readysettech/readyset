@@ -839,14 +839,9 @@ mod tests {
 
     #[test]
     fn it_incorporates_implicit_multi_join() {
-        use slog::{self, DrainExt};
-        use slog_term;
-
         // set up graph
         let mut g = Blender::new();
-        let l = slog::Logger::root(slog_term::streamer().full().build().fuse(), None);
-        g.log_with(l.clone());
-        let mut inc = SqlIncorporator::new(l);
+        let mut inc = SqlIncorporator::default();
         let mut mig = g.start_migration();
 
         // Establish base write types for "users" and "articles" and "votes"
