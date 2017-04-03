@@ -508,19 +508,21 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 }
 
-impl<T: Hash + Eq + Clone> IntoIterator for State<T> {
-    type Item = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::Item;
-    type IntoIter = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::IntoIter;
+impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
+    type Item = Vec<Arc<Vec<T>>>;
+    type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
-        for (_, state, partial) in self.state {
-            if let KeyedState::Single(map) = state {
-                if partial {
-                    unimplemented!();
-                }
-                return map.into_iter();
-            }
-        }
-        // TODO: allow into_iter without single key (breaks Self::IntoIter type)
-        unimplemented!();
+        self.state
+            .into_iter()
+            .find(|&(_, _, partial)| !partial)
+            .map(|(_, state, _)| -> Self::IntoIter {
+                     match state {
+                         KeyedState::Single(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Double(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Tri(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Quad(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                     }
+                 })
+            .unwrap()
     }
 }

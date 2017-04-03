@@ -1,5 +1,18 @@
-use mir::MirQuery;
+use mir::{MirNodeRef, MirQuery};
 use nom_sql::Column;
+
+fn has_column(n: &MirNodeRef, column: &Column) -> bool {
+    if n.borrow().columns().contains(column) {
+        return true;
+    } else {
+        for a in n.borrow().ancestors() {
+            if has_column(a, column) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 pub fn pull_required_base_columns(q: &mut MirQuery) {
     let mut queue = Vec::new();
@@ -25,13 +38,10 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
                 // base, do nothing
                 continue;
             }
-            // XXX(malte): this is still buggy -- it will pull a column through *all* ancestors
-            // rather than just one that can actually supply it. We actually need to trace back all
-            // paths and pick a random one out of those found.
             for c in &needed_columns {
-                if c.table.is_some() && c.function.is_none() &&
-                   !ancestor.borrow().columns().contains(c) {
+                if c.table.is_some() && c.function.is_none() && has_column(ancestor, c) {
                     ancestor.borrow_mut().add_column(c.clone());
+                    break;
                 }
             }
             queue.push(ancestor.clone());
