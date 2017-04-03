@@ -77,7 +77,6 @@ enum Waiting {
     Paused {
         buffer: VecDeque<Packet>,
         queued: VecDeque<LocalNodeIndex>,
-        acks: Vec<mpsc::Sender<()>>,
     },
 
     /// A target node is waiting for an incoming replay.
@@ -89,7 +88,6 @@ enum Waiting {
         waiting_for: Tag,
         buffer: VecDeque<Packet>,
         queued: VecDeque<LocalNodeIndex>,
-        acks: Vec<mpsc::Sender<()>>,
     },
 }
 
@@ -201,7 +199,6 @@ impl Domain {
                     Waiting::Paused {
                         buffer: buffered,
                         queued: VecDeque::new(),
-                        acks: Vec::new(),
                     }
                 }
                 Some(Waiting::Paused { .. }) => {
@@ -234,7 +231,6 @@ impl Domain {
                     waiting_for: tag,
                     buffer: buffered,
                     queued: queued,
-                    acks: Vec::new(),
                 }
             }
             Some(&mut Waiting::Paused { ref mut queued, .. }) |
@@ -1087,10 +1083,8 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!(self.log, "batch processed");
                         }
-                        ReplayPieceContext::Partial { for_key, ack } => {
-                            if let Some(&mut Waiting::Target { ref mut acks, .. }) =
-                                self.waiting.get_mut(&dst) {
-                                acks.push(ack);
+                        ReplayPieceContext::Partial { for_key, .. } => {
+                            if let Some(&Waiting::Target { .. }) = self.waiting.get(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 finished = Some((tag, dst, Some(for_key)));
                             } else {
@@ -1123,7 +1117,6 @@ impl Domain {
             if let Some(Waiting::Target {
                             mut buffer,
                             mut queued,
-                            mut acks,
                             ..
                         }) = self.waiting.remove(&ni) {
 
@@ -1155,7 +1148,7 @@ impl Domain {
                     // if any of the triggered nodes do another lookup that misses into us, they'll
                     // either trigger a replay, or queue themselves again. in that case, we should
                     // stop processing this node, and wait for that replay.
-                    if self.release_paused(node, Some((ni, &mut buffer, &mut queued, &mut acks))) {
+                    if self.release_paused(node, Some((ni, &mut buffer, &mut queued))) {
                         return;
                     }
                 }
@@ -1202,12 +1195,10 @@ impl Domain {
                         Some(&mut Waiting::Paused {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
-                                      acks: ref mut next_acks,
                                   }) |
                         Some(&mut Waiting::Target {
                                       buffer: ref mut next_buffer,
                                       queued: ref mut next_queued,
-                                      acks: ref mut next_acks,
                                       ..
                                   }) => {
                             // while processing this update, *we* missed in some other node.
@@ -1247,22 +1238,9 @@ impl Domain {
                             }
                             // and make sure there was indeed at most one
                             assert_eq!(queued.len(), 0);
-                            // and same with acks
-                            mem::swap(next_acks, &mut acks);
-                            // same, stick the new one first if there is one
-                            if let Some(ack) = acks.pop() {
-                                next_acks.push(ack);
-                            }
-                            // and make sure there was indeed at most one
-                            assert_eq!(acks.len(), 0);
                             return;
                         }
                     }
-                }
-
-                // let source domains know that our buffers are drained
-                for ack in acks {
-                    ack.send(()).unwrap();
                 }
 
                 return;
@@ -1345,13 +1323,11 @@ impl Domain {
                       paused: LocalNodeIndex,
                       waited_for: Option<(LocalNodeIndex,
                                           &mut VecDeque<Packet>,
-                                          &mut VecDeque<LocalNodeIndex>,
-                                          &mut Vec<mpsc::Sender<()>>)>)
+                                          &mut VecDeque<LocalNodeIndex>)>)
                       -> bool {
         if let Some(Waiting::Paused {
                         buffer: mut pbuffer,
                         queued: mut pqueued,
-                        acks: mut packs,
                     }) = self.waiting.remove(&paused) {
             // keep processing the buffered entries for this paused node until we've either gone
             // through all of them, or until we trigger another replay.
@@ -1364,7 +1340,6 @@ impl Domain {
                     Some(Waiting::Paused {
                              mut buffer,
                              mut queued,
-                             mut acks,
                          }) => {
                         // yup, seems we hit another missing entry while replaying.
 
@@ -1384,17 +1359,7 @@ impl Domain {
                         assert!(queued.is_empty());
                         queued = pqueued;
 
-                        // also keep track of our acks
-                        if let Some(p) = acks.pop() {
-                            packs.push(p);
-                        }
-                        assert!(acks.is_empty());
-                        acks = packs;
-
-                        if let Some((waited_for,
-                                     mut target_buffered,
-                                     target_queued,
-                                     mut target_acks)) = waited_for {
+                        if let Some((waited_for, mut target_buffered, target_queued)) = waited_for {
                             // since we process the paused node's buffer first, there might
                             // messages waiting to be processed at the ancestor that we were waiting
                             // for a replay into. we need to make sure that those buffered messages are
@@ -1419,7 +1384,6 @@ impl Domain {
                                 Some(&mut Waiting::Target {
                                               ref mut buffer,
                                               ref mut queued,
-                                              ref mut acks,
                                               ..
                                           }) => {
                                     use std::mem;
@@ -1438,21 +1402,13 @@ impl Domain {
                                     //
                                     // but since buffer is empty, we can instead just swap
                                     mem::swap(buffer, &mut target_buffered);
-                                    // same with acks
-                                    mem::swap(acks, &mut target_acks);
-                                    acks.append(target_acks);
                                 }
                                 Some(&mut Waiting::Paused { .. }) => unreachable!(),
                             }
                         }
 
                         // put back what we stole
-                        self.waiting.insert(paused,
-                                            Waiting::Paused {
-                                                buffer,
-                                                queued,
-                                                acks,
-                                            });
+                        self.waiting.insert(paused, Waiting::Paused { buffer, queued });
                         return true;
                     }
                     Some(..) => {
@@ -1470,10 +1426,6 @@ impl Domain {
                 // care about triggering further replays, because the node will then automatically
                 // trigger a replay of queue itself again.
                 self.release_paused(node, None);
-            }
-
-            for ack in packs {
-                ack.send(()).unwrap();
             }
         } else {
             unreachable!();
@@ -1626,6 +1578,7 @@ impl Domain {
 
                 self.total_time.start();
                 self.total_ptime.start();
+                let mut skip_main = 0;
                 let mut is_normal = true;
                 loop {
                     self.wait_time.start();
@@ -1640,11 +1593,28 @@ impl Domain {
                         if self.replay_acks == 0 {
                             unsafe { rx_handle.add() };
                             is_normal = true;
+                            skip_main = 0;
                         }
                         continue;
                     }
 
+                    // figure out whether we should allow reading from main
+                    if !is_normal {
+                        if skip_main == 100 {
+                            // we've skipped for ten iterations, time to enable main again
+                            unsafe { rx_handle.add() };
+                        } else {
+                            // we should skip some more
+                            skip_main += 1;
+                        }
+                    }
+
                     let m = if id == rx_handle.id() {
+                        if !is_normal {
+                            // we got to read once, now wait again
+                            unsafe { rx_handle.remove() };
+                            skip_main = 0;
+                        }
                         rx_handle.recv()
                     } else if id == inject_rx_handle.id() {
                         inject_rx_handle.recv()
@@ -1660,11 +1630,17 @@ impl Domain {
                         Ok(Packet::RequestUnboundedTx(ack)) => {
                             ack.send(back_tx.clone()).unwrap();
                         }
-                        Ok(m) => self.handle(m),
+                        Ok(m) => {
+                            if let Packet::ReplayPiece {
+                                       context: ReplayPieceContext::Partial { ref ack, .. }, ..
+                                   } = m {
+                                ack.send(()).unwrap();
+                            }
+                            self.handle(m)
+                        }
                     }
 
                     if is_normal && self.replay_acks != 0 {
-                        unsafe { rx_handle.remove() };
                         is_normal = false;
                     }
                 }
