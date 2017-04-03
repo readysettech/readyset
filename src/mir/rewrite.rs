@@ -39,6 +39,8 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
     }
 }
 
+// currently unused
+#[allow(dead_code)]
 pub fn push_all_base_columns(q: &mut MirQuery) {
     let mut queue = Vec::new();
     queue.extend(q.roots.clone());

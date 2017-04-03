@@ -9,7 +9,6 @@ use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
 use std::ops::Deref;
 use std::vec::Vec;
 
@@ -364,7 +363,6 @@ impl SqlToMirConverter {
         use ops::grouped::aggregate::Aggregation;
         use ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
-        use nom_sql::FieldExpression::*;
 
         let mknode = |over: &Column, t: GroupedNodeType| {
             self.make_grouped_node(name, &func_col, (parent, &over), group_cols, t)

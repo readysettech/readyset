@@ -2,7 +2,6 @@ use nom_sql::{Column, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug};
-use std::iter::FromIterator;
 use std::rc::Rc;
 
 use flow::Migration;
@@ -180,6 +179,8 @@ impl MirNode {
         rc_mn
     }
 
+    // currently unused
+    #[allow(dead_code)]
     pub fn add_ancestor(&mut self, a: MirNodeRef) {
         self.ancestors.push(a)
     }
@@ -428,12 +429,16 @@ pub enum MirNodeType {
         project: Vec<Column>,
     },
     /// on left column, on right column, emit columns
+    // currently unused
+    #[allow(dead_code)]
     LeftJoin {
         on_left: Vec<Column>,
         on_right: Vec<Column>,
         project: Vec<Column>,
     },
     /// group columns
+    // currently unused
+    #[allow(dead_code)]
     Latest { group_by: Vec<Column> },
     /// emit columns
     Project {
@@ -441,8 +446,12 @@ pub enum MirNodeType {
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
+    // currently unused
+    #[allow(dead_code)]
     Permute { emit: Vec<Column> },
     /// emit columns left, emit columns right
+    // currently unused
+    #[allow(dead_code)]
     Union {
         emit_left: Vec<Column>,
         emit_right: Vec<Column>,
