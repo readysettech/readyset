@@ -289,6 +289,13 @@ impl IntoIterator for Records {
         self.0.into_iter()
     }
 }
+impl<'a> IntoIterator for &'a Records {
+    type Item = &'a Record;
+    type IntoIter = ::std::slice::Iter<'a, Record>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
 
 /// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<DataType>>;

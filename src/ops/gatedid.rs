@@ -69,7 +69,7 @@ impl Ingredient for GatedIdentity {
             .unwrap()
             .recv()
             .unwrap();
-        ProcessingResult::Done(rs)
+        ProcessingResult::Done(rs, 0)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

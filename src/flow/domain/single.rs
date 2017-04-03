@@ -27,7 +27,7 @@ pub struct NodeDescriptor {
 }
 
 pub enum FinalProcessingResult {
-    Done(Packet),
+    Done(Packet, usize),
     NeedReplay {
         node: NodeAddress,
         key: Vec<DataType>,
@@ -63,14 +63,8 @@ impl NodeDescriptor {
         let addr = self.addr();
         match *self.inner {
             flow::node::Type::Ingress => {
-                if let Err(key) = materialize(m.data(), state.get_mut(addr.as_local())) {
-                    return FinalProcessingResult::NeedReplay {
-                               node: addr,
-                               was: m,
-                               key: vec![key],
-                           };
-                }
-                FinalProcessingResult::Done(m)
+                let holes = materialize(m.data(), state.get_mut(addr.as_local()));
+                FinalProcessingResult::Done(m, holes)
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
@@ -166,7 +160,7 @@ impl NodeDescriptor {
                 });
 
                 // readers never have children
-                FinalProcessingResult::Done(Packet::None)
+                FinalProcessingResult::Done(Packet::None, 0)
             }
             flow::node::Type::Hook(ref mut h) => {
                 if let &mut Some(ref mut h) = h {
@@ -174,7 +168,7 @@ impl NodeDescriptor {
                 } else {
                     unreachable!();
                 }
-                FinalProcessingResult::Done(Packet::None)
+                FinalProcessingResult::Done(Packet::None, 0)
             }
             flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
@@ -227,27 +221,26 @@ impl NodeDescriptor {
                     }
                 }
                 debug_assert!(m.is_none());
-                FinalProcessingResult::Done(Packet::None)
+                FinalProcessingResult::Done(Packet::None, 0)
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
                 let mut need_replay = None;
 
-                let mut data_clone = None;
+                let mut holes = 0;
                 m.map_data(|data| {
                     use std::mem;
 
                     // we need to own the data
                     let old_data = mem::replace(data, Records::default());
 
-                    // clone if we're partially materialized; we may need to back out
-                    if state.get_mut(addr.as_local()).map(|s| s.is_partial()).unwrap_or(false) {
-                        data_clone = Some(old_data.clone());
-                    }
-
                     let new_data = match i.on_input(from, old_data, nodes, state) {
-                        ProcessingResult::Done(rs) => rs,
+                        ProcessingResult::Done(rs, missed) => {
+                            holes = missed;
+                            rs
+                        }
                         ProcessingResult::NeedReplay { node, key, was } => {
+                            // TODO: once join is fixed, this should *only* happen for ReplayPiece
                             need_replay = Some((node, key));
                             was
                         }
@@ -258,18 +251,8 @@ impl NodeDescriptor {
 
                 match need_replay {
                     None => {
-                        if let Err(key) = materialize(m.data(), state.get_mut(addr.as_local())) {
-                            m.map_data(|data| {
-                                           use std::mem;
-                                           mem::replace(data, data_clone.take().unwrap());
-                                       });
-                            return FinalProcessingResult::NeedReplay {
-                                       node: addr,
-                                       was: m,
-                                       key: vec![key],
-                                   };
-                        }
-                        FinalProcessingResult::Done(m)
+                        let holes = materialize(m.data(), state.get_mut(addr.as_local()));
+                        FinalProcessingResult::Done(m, holes)
                     }
                     Some((node, key)) => {
                         FinalProcessingResult::NeedReplay {
@@ -285,31 +268,25 @@ impl NodeDescriptor {
     }
 }
 
-pub fn materialize(rs: &Records, state: Option<&mut State>) -> Result<(), DataType> {
+pub fn materialize(rs: &Records, state: Option<&mut State>) -> usize {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
-        return Ok(());
+        return 0;
     }
 
     // yes!
+    let mut holes = 0;
     let mut state = state.unwrap();
-
-    // are we partially materialized?
-    if state.is_partial() {
-        // yes -- we need to check that we're not hitting any holes
-        for r in rs.iter() {
-            if let Some(cols) = state.hits_hole(r) {
-                // we need a replay of this update!
-                if cols.len() != 1 {
-                    unimplemented!();
-                }
-                return Err(r[cols[0]].clone());
+    for r in rs {
+        if state.is_partial() {
+            // we need to check that we're not hitting any holes
+            if state.hits_hole(r).is_some() {
+                // we would need a replay of this update.
+                holes += 1;
+                continue;
             }
         }
-    }
-
-    for r in rs.iter() {
         match *r {
             Record::Positive(ref r) => state.insert(r.clone()),
             Record::Negative(ref r) => state.remove(r),
@@ -317,7 +294,7 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) -> Result<(), DataTy
         }
     }
 
-    Ok(())
+    holes
 }
 
 use std::ops::Deref;

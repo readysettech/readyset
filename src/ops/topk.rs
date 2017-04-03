@@ -68,56 +68,48 @@ impl TopK {
              group: &[DataType])
              -> ProcessingResult {
 
-        let mut missing = None;
-        // this loop is frustrating. it is *only* here so that we have a way of
-        // releasing all borrows of new, so that new can be returned in the case of an
-        // error.
-        for _ in 0..1 {
-            let mut delta: Vec<Record> = Vec::new();
-            let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
-            current.sort_by(self.cmp_rows.as_ref());
-            for r in new.iter() {
-                if let &Record::Negative(ref a) = r {
-                    let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
-                    if let Ok(idx) = idx {
-                        current.remove(idx);
-                        delta.push(r.clone())
-                    }
+        let mut delta: Vec<Record> = Vec::new();
+        let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
+        current.sort_by(self.cmp_rows.as_ref());
+        for r in new.iter() {
+            if let &Record::Negative(ref a) = r {
+                let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
+                if let Ok(idx) = idx {
+                    current.remove(idx);
+                    delta.push(r.clone())
                 }
             }
+        }
 
-            let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
-                .filter_map(|r| match r {
-                                &Record::Positive(ref a) => Some((a, false)),
-                                _ => None,
-                            })
-                .chain(current.into_iter().map(|a| (a, true)))
-                .collect();
-            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+        let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
+            .filter_map(|r| match r {
+                            &Record::Positive(ref a) => Some((a, false)),
+                            _ => None,
+                        })
+            .chain(current.into_iter().map(|a| (a, true)))
+            .collect();
+        output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
 
-            let src_db =
+        let src_db =
             state.get(self.src.as_local()).expect("topk must have its parent's state materialized");
-            if output_rows.len() < self.k {
-                let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
-                    LookupResult::Some(rs) => rs,
-                    LookupResult::Missing => {
-                        missing = Some(group.into_iter().cloned().collect());
-                        break;
-                    }
+        if output_rows.len() < self.k {
+            let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
+                LookupResult::Some(rs) => rs,
+                LookupResult::Missing => unreachable!(),
+            };
+
+            // Get the minimum element of output_rows.
+            if let Some((min, _)) = output_rows.iter().cloned().next() {
+                let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
+                    (self.cmp_rows)(&&r, &&min) == Ordering::Equal
                 };
 
-                // Get the minimum element of output_rows.
-                if let Some((min, _)) = output_rows.iter().cloned().next() {
-                    let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
-                        (self.cmp_rows)(&&r, &&min) == Ordering::Equal
-                    };
+                let mut current_mins: Vec<_> = output_rows.iter()
+                    .filter(is_min)
+                    .cloned()
+                    .collect();
 
-                    let mut current_mins: Vec<_> = output_rows.iter()
-                        .filter(is_min)
-                        .cloned()
-                        .collect();
-
-                    output_rows = rs.iter()
+                output_rows = rs.iter()
                     .filter_map(|r| {
                         // Make sure that no duplicates are added to output_rows. This is simplified
                         // by the fact that it currently contains all rows greater than `min`, and
@@ -140,41 +132,33 @@ impl TopK {
                     })
                     .chain(output_rows.into_iter())
                     .collect();
-                } else {
-                    output_rows = rs.iter().map(|rs| (rs, false)).collect();
-                }
-                output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+            } else {
+                output_rows = rs.iter().map(|rs| (rs, false)).collect();
             }
+            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+        }
 
-            if output_rows.len() > self.k {
-                // Remove the topk elements from `output_rows`, splitting them off into `rows`. Then
-                // swap and rename so that `output_rows` contains the top K elements, and `bottom_rows`
-                // contains the rest.
-                let i = output_rows.len() - self.k;
-                let mut rows = output_rows.split_off(i);
-                mem::swap(&mut output_rows, &mut rows);
-                let bottom_rows = rows;
+        if output_rows.len() > self.k {
+            // Remove the topk elements from `output_rows`, splitting them off into `rows`. Then
+            // swap and rename so that `output_rows` contains the top K elements, and `bottom_rows`
+            // contains the rest.
+            let i = output_rows.len() - self.k;
+            let mut rows = output_rows.split_off(i);
+            mem::swap(&mut output_rows, &mut rows);
+            let bottom_rows = rows;
 
-                // Emit negatives for any elements in `bottom_rows` that were originally in
-                // current_topk.
-                delta.extend(bottom_rows.into_iter()
+            // Emit negatives for any elements in `bottom_rows` that were originally in
+            // current_topk.
+            delta.extend(bottom_rows.into_iter()
                 .filter(|p| p.1)
                 .map(|p| Record::Negative(p.0.clone())));
-            }
+        }
 
-            // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-            delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
+        // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
+        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
                                                                       Record::Positive(p.0.clone())
                                                                   }));
-            return ProcessingResult::Done(delta.into());
-        }
-
-        assert!(missing.is_some());
-        ProcessingResult::NeedReplay {
-            node: self.src,
-            key: missing.unwrap(),
-            was: new,
-        }
+        ProcessingResult::Done(delta.into(), 0)
     }
 }
 
@@ -230,7 +214,7 @@ impl Ingredient for TopK {
         debug_assert_eq!(from, self.src);
 
         if rs.is_empty() {
-            return ProcessingResult::Done(rs);
+            return ProcessingResult::Done(rs, 0);
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -257,52 +241,57 @@ impl Ingredient for TopK {
                                .unwrap()
                                .as_local())
             .expect("topk must have its own state materialized");
-        let current: Result<Vec<_>, _> = consolidate.iter()
-            .map(|(group, _)| match db.lookup(&self.group_by[..], &KeyType::from(&group[..])) {
-                     LookupResult::Some(rs) => Ok(rs),
-                     LookupResult::Missing => Err(group.clone()),
-                 })
-            .collect();
 
-        let mut current = match current {
-            Ok(current) => current.into_iter(),
-            Err(key) => {
-                return ProcessingResult::NeedReplay {
-                           node: from,
-                           key: key,
-                           was: rs,
-                       };
+        let mut holes = 0;
+        let mut out = Vec::with_capacity(2 * self.k);
+        {
+            let group_by = &self.group_by[..];
+            let current = consolidate.into_iter().filter_map(|(group, diffs)| {
+                match db.lookup(group_by, &KeyType::from(&group[..])) {
+                    LookupResult::Some(rs) => Some((group, diffs, rs)),
+                    LookupResult::Missing => {
+                        holes += 1;
+                        None
+                    }
+                }
+            });
+
+            for (group, mut diffs, old_rs) in current {
+                // Retrieve then update the number of times in this group
+                let count: i64 = *self.counts.get(&group).unwrap_or(&0) as i64;
+                let count_diff: i64 = diffs.iter()
+                    .map(|r| match r {
+                             &Record::Positive(..) => 1,
+                             &Record::Negative(..) => -1,
+                             &Record::DeleteRequest(..) => unreachable!(),
+                         })
+                    .sum();
+
+                if count + count_diff <= self.k as i64 {
+                    out.append(&mut diffs);
+                } else {
+                    assert!(count as usize >= old_rs.len());
+
+                    let mut res = match self.apply(old_rs, diffs.into(), state, &group[..]) {
+                        ProcessingResult::Done(rs, holes) => {
+                            debug_assert_eq!(holes, 0);
+                            rs.into()
+                        }
+                        ProcessingResult::NeedReplay { .. } => {
+                            // we received a record with this key
+                            // our parent must have seen and emitted that key
+                            // and if they missed, they would have replayed *before* relaying to us.
+                            // thus, since we got this key, our parent must have it.
+                            unreachable!()
+                        }
+                    };
+                    out.append(&mut res);
+                }
+                self.counts.insert(group, (count + count_diff) as usize);
             }
-        };
-
-        let mut out = Vec::new();
-        for (group, mut diffs) in consolidate {
-            // Retrieve then update the number of times in this group
-            let count: i64 = *self.counts.get(&group).unwrap_or(&0) as i64;
-            let count_diff: i64 = diffs.iter()
-                .map(|r| match r {
-                         &Record::Positive(..) => 1,
-                         &Record::Negative(..) => -1,
-                         &Record::DeleteRequest(..) => unreachable!(),
-                     })
-                .sum();
-
-            if count + count_diff <= self.k as i64 {
-                out.append(&mut diffs);
-            } else {
-                let old_rs = current.next().unwrap();
-                assert!(count as usize >= old_rs.len());
-
-                let mut res = match self.apply(old_rs, diffs.into(), state, &group[..]) {
-                    ProcessingResult::Done(rs) => rs.into(),
-                    ProcessingResult::NeedReplay { .. } => unimplemented!(),
-                };
-                out.append(&mut res);
-            }
-            self.counts.insert(group, (count + count_diff) as usize);
         }
 
-        ProcessingResult::Done(out.into())
+        ProcessingResult::Done(out.into(), holes)
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

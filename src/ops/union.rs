@@ -93,7 +93,7 @@ impl Ingredient for Union {
                 }
             })
             .collect();
-        ProcessingResult::Done(rs)
+        ProcessingResult::Done(rs, 0)
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
@@ -114,12 +114,12 @@ impl Ingredient for Union {
         emit.sort();
         emit.iter()
             .map(|&(src, emit)| {
-                let cols = emit.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}:[{}]", src, cols)
-            })
+                     let cols = emit.iter()
+                         .map(|e| e.to_string())
+                         .collect::<Vec<_>>()
+                         .join(", ");
+                     format!("{}:[{}]", src, cols)
+                 })
             .collect::<Vec<_>>()
             .join(" ⋃ ")
     }

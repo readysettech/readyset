@@ -315,8 +315,9 @@ impl Domain {
         drop(n);
 
         let m = match m {
-            single::FinalProcessingResult::Done(m) => m,
-            single::FinalProcessingResult::NeedReplay { node, key, was, .. } => {
+            single::FinalProcessingResult::Done(m, _) => m,
+            single::FinalProcessingResult::NeedReplay { node, key, was } => {
+                // TODO: we should make join ignore keys it misses on during non-replay forward
                 Self::handle_partial_miss(waiting,
                                           paths,
                                           *me.as_local(),
@@ -950,12 +951,12 @@ impl Domain {
 
                     // keep track of whether we're filling any partial holes
                     let mut release = false;
-                    let partial_key =
-                        if let ReplayPieceContext::Partial { ref for_key } = context {
-                            Some(for_key)
-                        } else {
-                            None
-                        };
+                    let partial_key = if let ReplayPieceContext::Partial { ref for_key } =
+                        context {
+                        Some(for_key)
+                    } else {
+                        None
+                    };
 
                     // we may be replaying a partially processed state replay, in which case we
                     // need to make sure to only process along the remaining suffix of the path.
@@ -1007,7 +1008,7 @@ impl Domain {
                         // process the current message in this node
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
                         m = match n.process(m, &mut self.state, &self.nodes, false) {
-                            single::FinalProcessingResult::Done(m) => m,
+                            single::FinalProcessingResult::Done(m, _) => m,
                             single::FinalProcessingResult::NeedReplay {
                                 node, key, was, ..
                             } => {

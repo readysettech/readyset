@@ -133,12 +133,12 @@ pub mod test {
 
             let nodes: Vec<_> = nodes.into_iter()
                 .map(|(ni, n)| {
-                    single::NodeDescriptor {
-                        index: ni,
-                        inner: n,
-                        children: Vec::default(),
-                    }
-                })
+                         single::NodeDescriptor {
+                             index: ni,
+                             inner: n,
+                             children: Vec::default(),
+                         }
+                     })
                 .collect();
 
             self.nodes = nodes.into_iter()
@@ -202,7 +202,10 @@ pub mod test {
                 let id = self.nut.unwrap().1;
                 let mut n = self.nodes[id.as_local()].borrow_mut();
                 match n.inner.on_input(src, u.into(), &self.nodes, &self.states) {
-                    ProcessingResult::Done(rs) => rs,
+                    ProcessingResult::Done(rs, holes) => {
+                        assert_eq!(holes, 0);
+                        rs
+                    }
                     ProcessingResult::NeedReplay { .. } => unreachable!(),
                 }
             };
@@ -215,12 +218,12 @@ pub mod test {
                 return u;
             }
 
-            let ok = single::materialize(&u,
-                                         self.states.get_mut(self.nut
-                                                                 .unwrap()
-                                                                 .1
-                                                                 .as_local()));
-            assert!(ok.is_ok());
+            let holes = single::materialize(&u,
+                                            self.states.get_mut(self.nut
+                                                                    .unwrap()
+                                                                    .1
+                                                                    .as_local()));
+            assert_eq!(holes, 0);
             u
         }
 
