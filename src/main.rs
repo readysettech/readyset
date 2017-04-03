@@ -291,7 +291,7 @@ pub fn main() {
                         Ok((cfg, tr)) => {
                             notify(cfg.as_ref(), &tr, &push);
                             // Taste others if needed
-                            if !taste_head_only || !tr.build || !tr.bench {
+                            if !taste_head_only {
                                 for c in commits.iter() {
                                     if c.id == head_commit.id {
                                         // skip HEAD as we've already tested it
