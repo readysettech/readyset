@@ -660,7 +660,8 @@ fn make_base_node(name: &str,
             .collect();
         mig.add_ingredient(name,
                            column_names.as_slice(),
-                           ops::base::Base::new(pkey_column_ids))
+                           ops::base::Base::new(pkey_column_ids,
+                                                ops::base::BaseDurabilityLevel::None))
     } else {
         mig.add_ingredient(name, column_names.as_slice(), ops::base::Base::default())
     };
