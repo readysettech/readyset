@@ -1,4 +1,4 @@
-use nom::{alphanumeric, digit, multispace};
+use nom::{digit, multispace};
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::collections::{HashSet, VecDeque};
 use std::str;
@@ -157,8 +157,8 @@ named!(predicate<&[u8], ConditionExpression>,
         |   chain!(
                 field: delimited!(opt!(multispace),
                                   alt_complete!(
-                                        delimited!(tag!("\""), opt!(alphanumeric), tag!("\""))
-                                      | delimited!(tag!("'"), opt!(alphanumeric), tag!("'"))
+                                        delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
+                                      | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
                                   ),
                                   opt!(multispace)),
                 || {
