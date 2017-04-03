@@ -8,7 +8,7 @@ pub struct Backend {
     getters: HashMap<String, Getter>,
     mutators: HashMap<String, Mutator>,
     recipe: Recipe,
-    soup: Blender,
+    pub soup: Blender,
 }
 
 impl Backend {

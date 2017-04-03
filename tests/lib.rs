@@ -429,7 +429,7 @@ fn it_works_deletion() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, JoinBuilder};
+    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, Join, JoinType};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -461,9 +461,8 @@ fn votes() {
         let vcq = mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-            .from(article, vec![1, 0])
-            .join(vc, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let endq = mig.maintain(end, 0);
 
@@ -513,8 +512,8 @@ fn votes() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap();
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-    "no entry for [1,2,1|2] in {:?}",
-    res);
+            "no entry for [1,2,1|2] in {:?}",
+            res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
@@ -524,7 +523,7 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, JoinBuilder, Identity};
+    use distributary::{Base, BaseDurabilityLevel, Union, Aggregation, Join, JoinType, Identity};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -558,9 +557,8 @@ fn transactional_vote() {
         let vcq = mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
-        let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-            .from(article, vec![1, 0])
-            .join(vc, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
         let end = mig.add_ingredient("end", &["id", "title", "votes"], j);
         let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
@@ -646,8 +644,8 @@ fn transactional_vote() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap().0;
     assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-    "no entry for [1,2,1|2] in {:?}",
-    res);
+            "no entry for [1,2,1|2] in {:?}",
+            res);
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
@@ -982,9 +980,11 @@ fn state_replay_migration_stream() {
         // add a new base and a join
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["x", "z"], Base::new(vec![0], BaseDurabilityLevel::None));
-        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
-            .from(a, vec![1, 0])
-            .join(b, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = distributary::Join::new(a,
+                                        b,
+                                        distributary::JoinType::Inner,
+                                        vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // for predictability, ensure the new nodes are in the same domain
@@ -1016,7 +1016,7 @@ fn state_replay_migration_stream() {
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]);
     assert_eq!(out.recv(),
-    Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
+               Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
 
     // there should now be no more records
     drop(g);
@@ -1052,9 +1052,11 @@ fn migration_depends_on_unchanged_domain() {
     // joins require their inputs to be materialized
     // we need a new base as well so we can actually make a join
     let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base::default());
-    let j = distributary::JoinBuilder::new(vec![(left, 0), (tmp, 1)])
-        .from(left, vec![1, 0])
-        .join(tmp, vec![1, 0]);
+    let j = distributary::Join::new(left,
+                                    tmp,
+                                    distributary::JoinType::Inner,
+                                    vec![distributary::JoinSource::B(0, 0),
+                                         distributary::JoinSource::R(1)]);
     let j = mig.add_ingredient("join", &["a", "b"], j);
 
     // we assign tmp and j to the same domain just to make the graph less complex
@@ -1073,7 +1075,7 @@ fn full_vote_migration() {
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
     // that, so we run the test a couple of times.
     for _ in 0..5 {
-        use distributary::{Blender, Base, BaseDurabilityLevel, JoinBuilder, Aggregation, DataType};
+        use distributary::{Blender, Base, BaseDurabilityLevel, Join, JoinType, Aggregation, DataType};
         let mut g = Blender::new();
         let article;
         let vote;
@@ -1097,9 +1099,8 @@ fn full_vote_migration() {
                                     Aggregation::COUNT.over(vote, 0, &[1]));
 
             // add final join using first field from article and first from vc
-            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (vc, 1)])
-                .from(article, vec![1, 0])
-                .join(vc, vec![1, 0]);
+            use distributary::JoinSource::*;
+            let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
             end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
             mig.maintain(end, 0);
@@ -1140,9 +1141,8 @@ fn full_vote_migration() {
                                         Aggregation::SUM.over(rating, 2, &[1]));
 
             // join vote count and rsum (and in theory, sum them)
-            let j = JoinBuilder::new(vec![(rs, 0), (rs, 1), (vc, 1)])
-                .from(rs, vec![1, 0])
-                .join(vc, vec![1, 0]);
+            use distributary::JoinSource::*;
+            let j = Join::new(rs, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
             let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
             mig.assign_domain(rating, domain);
@@ -1150,9 +1150,10 @@ fn full_vote_migration() {
             mig.assign_domain(total, domain);
 
             // finally, produce end result
-            let j = JoinBuilder::new(vec![(article, 0), (article, 1), (total, 1), (total, 2)])
-                .from(article, vec![1, 0])
-                .join(total, vec![1, 0, 0]);
+            let j = Join::new(article,
+                              total,
+                              JoinType::Inner,
+                              vec![B(0, 0), L(1), R(1), R(2)]);
             let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
             let last = mig.maintain(newend, 0);
 
@@ -1175,8 +1176,8 @@ fn full_vote_migration() {
             assert_eq!(rows.len(), 1, "every article should have only one entry");
             let row = rows.into_iter().next().unwrap();
             assert_eq!(row[0],
-            i.into(),
-            "each article result should have the right id");
+                       i.into(),
+                       "each article result should have the right id");
             assert_eq!(row[1], title, "all articles should have title 'foo'");
             assert_eq!(row[2], raten, "all articles should have one 5-star rating");
             assert_eq!(row[3], voten, "all articles should have one vote");
@@ -1287,9 +1288,11 @@ fn state_replay_migration_query() {
     let out = {
         // add join and a reader node
         let mut mig = g.start_migration();
-        let j = distributary::JoinBuilder::new(vec![(a, 0), (a, 1), (b, 1)])
-            .from(a, vec![1, 0])
-            .join(b, vec![1, 0]);
+        use distributary::JoinSource::*;
+        let j = distributary::Join::new(a,
+                                        b,
+                                        distributary::JoinType::Inner,
+                                        vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
@@ -1312,10 +1315,100 @@ fn state_replay_migration_query() {
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(out(&2.into()),
-    Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
+               Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
 
     // there are (/should be) no records with x == 3
     assert!(out(&3.into()).unwrap().is_empty());
+}
+
+#[test]
+fn recipe_activates() {
+    let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
+    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    assert_eq!(r.version(), 0);
+    assert_eq!(r.expressions().len(), 1);
+    assert_eq!(r.prior(), None);
+
+    let mut g = distributary::Blender::new();
+    {
+        let mut mig = g.start_migration();
+        assert!(r.activate(&mut mig).is_ok());
+        mig.commit();
+    }
+    // one base node
+    assert_eq!(g.inputs().len(), 1);
+}
+
+#[test]
+fn recipe_activates_and_migrates() {
+    let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
+    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    assert_eq!(r.version(), 0);
+    assert_eq!(r.expressions().len(), 1);
+    assert_eq!(r.prior(), None);
+
+    let mut g = distributary::Blender::new();
+    {
+        let mut mig = g.start_migration();
+        assert!(r.activate(&mut mig).is_ok());
+        mig.commit();
+    }
+    // one base node
+    assert_eq!(g.inputs().len(), 1);
+
+    let r_copy = r.clone();
+
+    let r1_txt = "SELECT a FROM b;\n
+                  SELECT a, c FROM b WHERE a = 42;";
+    let mut r1 = r.extend(r1_txt).unwrap();
+    assert_eq!(r1.version(), 1);
+    assert_eq!(r1.expressions().len(), 3);
+    assert_eq!(**r1.prior().unwrap(), r_copy);
+    {
+        let mut mig = g.start_migration();
+        assert!(r1.activate(&mut mig).is_ok());
+        mig.commit();
+    }
+    // still one base node
+    assert_eq!(g.inputs().len(), 1);
+    // two leaf nodes
+    assert_eq!(g.outputs().len(), 2);
+}
+
+#[test]
+fn recipe_activates_and_migrates_with_join() {
+    let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
+                 INSERT INTO b (r, s) VALUES (?, ?);\n";
+    let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
+    assert_eq!(r.version(), 0);
+    assert_eq!(r.expressions().len(), 2);
+    assert_eq!(r.prior(), None);
+
+    let mut g = distributary::Blender::new();
+    {
+        let mut mig = g.start_migration();
+        assert!(r.activate(&mut mig).is_ok());
+        mig.commit();
+    }
+    // two base nodes
+    assert_eq!(g.inputs().len(), 2);
+
+    let r_copy = r.clone();
+
+    let r1_txt = "SELECT y, s FROM a, b WHERE a.x = b.r;";
+    let mut r1 = r.extend(r1_txt).unwrap();
+    assert_eq!(r1.version(), 1);
+    assert_eq!(r1.expressions().len(), 3);
+    assert_eq!(**r1.prior().unwrap(), r_copy);
+    {
+        let mut mig = g.start_migration();
+        assert!(r1.activate(&mut mig).is_ok());
+        mig.commit();
+    }
+    // still two base nodes
+    assert_eq!(g.inputs().len(), 2);
+    // one leaf node
+    assert_eq!(g.outputs().len(), 1);
 }
 
 #[test]
@@ -1325,7 +1418,7 @@ fn tpc_w() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let mut r = distributary::Recipe::blank();
+    let mut r = distributary::Recipe::blank(None);
     {
         let mut mig = g.start_migration();
 
@@ -1337,10 +1430,10 @@ fn tpc_w() {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-                String::from(l) + "\n"
-            } else {
-                String::from(l)
-            })
+                     String::from(l) + "\n"
+                 } else {
+                     String::from(l)
+                 })
             .collect();
 
         // Add them one by one

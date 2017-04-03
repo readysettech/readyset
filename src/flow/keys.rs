@@ -140,21 +140,21 @@ fn trace<F>(graph: &Graph,
         return paths;
     }
 
-    let (specific_parent, column) = resolved.into_iter().next().unwrap();
-    // we know join parents are all in the same domain as the join.
-    let specific_parent = if specific_parent.is_global() {
-        *specific_parent.as_global()
-    } else {
-        local_to_global[&specific_parent]
-    };
-    // we know joins don't generate values.
-    let column = column.unwrap();
-
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
     // TODO: provide an early-termination mechanism?
     match on_join(node, &parents[..]) {
         None => {
+            let resolved: HashMap<_, _> = resolved.into_iter()
+                .map(|(parent, c)| {
+                    let parent = if parent.is_global() {
+                        *parent.as_global()
+                    } else {
+                        local_to_global[&parent]
+                    };
+                    (parent, c)
+                })
+                .collect();
             // our caller wants information about all our parents.
             // since the column we're chasing only follows a single path through a join (unless it
             // is a join key, which we don't yet handle), we need to produce (_, None) for all the
@@ -162,7 +162,7 @@ fn trace<F>(graph: &Graph,
             let mut paths = Vec::with_capacity(parents.len());
             for parent in parents {
                 let mut path = path.clone();
-                if parent == specific_parent {
+                if let Some(&Some(column)) = resolved.get(&parent) {
                     path.push((parent, Some(column)));
                     paths.extend(trace(graph, on_join, path));
                 } else {
@@ -173,6 +173,16 @@ fn trace<F>(graph: &Graph,
             paths
         }
         Some(parent) => {
+            let (specific_parent, column) = resolved.into_iter().next().unwrap();
+            // we know join parents are all in the same domain as the join.
+            let specific_parent = if specific_parent.is_global() {
+                *specific_parent.as_global()
+            } else {
+                local_to_global[&specific_parent]
+            };
+            // we know joins don't generate values.
+            let column = column.unwrap();
+
             // our caller only cares about *one* parent.
             // hopefully we can give key information about that parent
             if parent == specific_parent {

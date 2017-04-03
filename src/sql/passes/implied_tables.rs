@@ -17,18 +17,13 @@ fn rewrite_conditional<F>(expand_columns: &F,
     use nom_sql::ConditionBase::*;
 
     let translate_ct_arm =
-        |i: Option<Box<ConditionExpression>>| -> Option<Box<ConditionExpression>> {
-            match i {
-                Some(bce) => {
-                    let new_ce = match *bce {
-                        Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
-                        Base(b) => Base(b),
-                        x => rewrite_conditional(expand_columns, x, avail_tables),
-                    };
-                    Some(Box::new(new_ce))
-                }
-                x => x,
-            }
+        |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
+            let new_ce = match *bce {
+                Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
+                Base(b) => Base(b),
+                x => rewrite_conditional(expand_columns, x, avail_tables),
+            };
+            Box::new(new_ce)
         };
 
     match ce {
@@ -42,23 +37,12 @@ fn rewrite_conditional<F>(expand_columns: &F,
             };
             ComparisonOp(rewritten_ct)
         }
-        LogicalOp(ct) => {
-            let rewritten_ct = ConditionTree {
-                operator: ct.operator,
-                left: match ct.left {
-                    Some(lct) => {
-                        Some(Box::new(rewrite_conditional(expand_columns, *lct, avail_tables)))
-                    }
-                    x => x,
-                },
-                right: match ct.right {
-                    Some(rct) => {
-                        Some(Box::new(rewrite_conditional(expand_columns, *rct, avail_tables)))
-                    }
-                    x => x,
-                },
-            };
-            LogicalOp(rewritten_ct)
+        LogicalOp(ConditionTree{operator, box left, box right}) => {
+            LogicalOp(ConditionTree {
+                operator: operator,
+                left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
+                right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+            })
         }
         x => x,
     }
@@ -103,6 +87,8 @@ impl ImpliedTableExpansion for SqlQuery {
             }
         };
 
+        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
+
         // Traverses a query and calls `find_table` on any column that has no explicit table set,
         // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
         // which can use the simpler `set_table`.
@@ -114,23 +100,17 @@ impl ImpliedTableExpansion for SqlQuery {
                             // There is no implied table (other than "self") for anonymous function
                             // columns, but we have to peek inside the function to expand implied
                             // tables in its specification
-                            match *f {
-                                Avg(ref mut fe) |
-                                Count(ref mut fe) |
-                                Sum(ref mut fe) |
-                                Min(ref mut fe) |
-                                Max(ref mut fe) |
-                                GroupConcat(ref mut fe, _) => {
-                                    match *fe {
-                                        FieldExpression::Seq(ref mut fields) => {
-                                            for f in fields.iter_mut() {
-                                                f.table = find_table(f, tables_in_query);
-                                            }
-                                        }
-                                        _ => (),
-                                    }
+                            match (*f).as_mut() {
+                                &mut Avg(ref mut fe, _) |
+                                &mut Count(ref mut fe, _) |
+                                &mut Sum(ref mut fe, _) |
+                                &mut Min(ref mut fe) |
+                                &mut Max(ref mut fe) |
+                                &mut GroupConcat(ref mut fe, _) => {
+                                    fe.table = find_table(fe, tables_in_query);
                                     None
                                 }
+                                &mut CountStar => None,
                             }
                         }
                         None => find_table(&f, tables_in_query),
@@ -162,8 +142,6 @@ impl ImpliedTableExpansion for SqlQuery {
             f
         };
 
-
-        let err = "Must apply StarExpansion pass before ImpliedTableExpansion"; // for wrapping
         match self {
             SqlQuery::Select(mut sq) => {
                 let mut tables: Vec<Table> = sq.tables.clone();
@@ -178,12 +156,13 @@ impl ImpliedTableExpansion for SqlQuery {
                     }
                 }
                 // Expand within field list
-                sq.fields = match sq.fields {
-                    FieldExpression::All => panic!(err),
-                    FieldExpression::Seq(fs) => {
-                        FieldExpression::Seq(fs.into_iter()
-                                                 .map(|f| expand_columns(f, &tables))
-                                                 .collect())
+                for field in sq.fields.iter_mut() {
+                    match field {
+                        &mut FieldExpression::All => panic!(err),
+                        &mut FieldExpression::AllInTable(_) => panic!(err),
+                        &mut FieldExpression::Col(ref mut f) => {
+                            *f = expand_columns(f.clone(), &tables);
+                        }
                     }
                 };
                 // Expand within WHERE clause
@@ -307,14 +286,15 @@ mod tests {
     fn it_expands_implied_tables_for_select() {
         use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, SelectStatement};
 
-        let wrap = |cb| Some(Box::new(ConditionExpression::Base(cb)));
+        let wrap = |cb| Box::new(ConditionExpression::Base(cb));
 
         // SELECT name, title FROM users, articles WHERE users.id = author;
         // -->
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
-            fields: FieldExpression::Seq(vec![Column::from("name"), Column::from("title")]),
+            fields: vec![FieldExpression::Col(Column::from("name")),
+                         FieldExpression::Col(Column::from("title"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("users.id"))),
@@ -332,8 +312,8 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column::from("users.name"),
-                                                     Column::from("articles.title")]));
+                           vec![FieldExpression::Col(Column::from("users.name")),
+                                FieldExpression::Col(Column::from("articles.title"))]);
                 assert_eq!(tq.where_clause,
                            Some(ConditionExpression::ComparisonOp(ConditionTree {
                                operator: Operator::Equal,

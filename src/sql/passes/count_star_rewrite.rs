@@ -10,7 +10,7 @@ impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
         use nom_sql::FunctionExpression::*;
 
-        let rewrite_count_star = |mut c: Column, tables: &Vec<Table>| -> Column {
+        let rewrite_count_star = |c: &mut Column, tables: &Vec<Table>| {
             assert!(tables.len() > 0);
             let bogo_table = tables.get(0).unwrap();
             let bogo_column = write_schemas.get(&bogo_table.name)
@@ -18,33 +18,14 @@ impl CountStarRewrite for SqlQuery {
                 .last()
                 .unwrap();
 
-            let rewrite = |fe: FieldExpression| -> FieldExpression {
-                match fe {
-                    FieldExpression::All => {
-                        FieldExpression::Seq(vec![Column {
-                                                      name: bogo_column.clone(),
-                                                      alias: None,
-                                                      table: Some(bogo_table.name.clone()),
-                                                      function: None,
-                                                  }])
-                    }
-                    x => x,
-                }
-            };
-            c.function = match c.function {
-                Some(f) => {
-                    Some(match f {
-                             Avg(fe) => Avg(rewrite(fe)),
-                             Count(fe) => Count(rewrite(fe)),
-                             Sum(fe) => Sum(rewrite(fe)),
-                             Min(fe) => Min(rewrite(fe)),
-                             Max(fe) => Max(rewrite(fe)),
-                             GroupConcat(fe, sep) => GroupConcat(rewrite(fe), sep),
-                         })
-                }
-                None => None,
-            };
-            c
+            if let Some(box CountStar) = c.function {
+                c.function = Some(Box::new(Count(Column{
+                    name: bogo_column.clone(),
+                    alias: None,
+                    table: Some(bogo_table.name.clone()),
+                    function: None,
+                }, false)));
+            }
         };
 
         let err = "Must apply StarExpansion pass before CountStarRewrite"; // for wrapping
@@ -52,14 +33,13 @@ impl CountStarRewrite for SqlQuery {
             SqlQuery::Select(mut sq) => {
                 // Expand within field list
                 let tables = sq.tables.clone();
-                sq.fields = match sq.fields {
-                    FieldExpression::All => panic!(err),
-                    FieldExpression::Seq(fs) => {
-                        FieldExpression::Seq(fs.into_iter()
-                                                 .map(|c| rewrite_count_star(c, &tables))
-                                                 .collect())
+                for field in sq.fields.iter_mut() {
+                    match field {
+                        &mut FieldExpression::All => panic!(err),
+                        &mut FieldExpression::AllInTable(_) => panic!(err),
+                        &mut FieldExpression::Col(ref mut c) => rewrite_count_star(c, &tables),
                     }
-                };
+                }
                 // TODO: also expand function columns within WHERE clause
 
                 SqlQuery::Select(sq)
@@ -93,13 +73,13 @@ mod tests {
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(tq.fields,
-                           FieldExpression::Seq(vec![Column {
+                           vec![FieldExpression::Col(Column {
                                name: String::from("count(all)"),
                                alias: None,
                                table: None,
-                               function: Some(FunctionExpression::Count(
-                                   FieldExpression::Seq(vec![Column::from("users.age")]))),
-                           }]));
+                               function: Some(Box::new(FunctionExpression::Count(
+                                   Column::from("users.age"), false))),
+                           })]);
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
