@@ -39,13 +39,13 @@ fn trace<F>(graph: &Graph,
     if n.is_localized() {
         let domain = n.domain();
         local_to_global.extend(parents.iter().filter_map(|&ni| {
-            let n = &graph[ni];
-            if n.domain() == domain {
-                Some((n.addr(), ni))
-            } else {
-                None
-            }
-        }));
+                                                             let n = &graph[ni];
+                                                             if n.domain() == domain {
+                                                                 Some((n.addr(), ni))
+                                                             } else {
+                                                                 None
+                                                             }
+                                                         }));
     }
 
     // have we reached a base node?

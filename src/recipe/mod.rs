@@ -76,15 +76,22 @@ impl Recipe {
                 // `name` might be an alias for another identical query, so resolve via QID here
                 // TODO(malte): better error handling
                 let na = match self.aliases.get(name) {
-                    None => inc.address_for(name),
+                    None => inc.get_query_address(name),
                     Some(ref qid) => {
                         let (ref internal_qn, _) = self.expressions[qid];
-                        inc.address_for(internal_qn.as_ref().unwrap())
+                        inc.get_query_address(internal_qn.as_ref().unwrap())
                     }
                 };
-                Ok(na)
+                match na {
+                    None => {
+                        Err(format!("No flow graph node for \"{}\" exists at v{}",
+                                    name,
+                                    self.version))
+                    }
+                    Some(na) => Ok(na),
+                }
             }
-            None => Err(String::from("Recipe not applied")),
+            None => Err(format!("Recipe not applied")),
         }
     }
 
@@ -153,6 +160,16 @@ impl Recipe {
                 self.compute_delta(pr)
             }
         };
+
+        // upgrade schema version *before* applying changes, so that new queries are correctly
+        // tagged with the new version. If this recipe was just created, there is no need to
+        // upgrade the schema version, as the SqlIncorporator's version will still be at zero.
+        if self.version > 0 {
+            self.inc
+                .as_mut()
+                .unwrap()
+                .upgrade_schema(self.version);
+        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
