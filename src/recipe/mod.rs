@@ -29,12 +29,16 @@ pub struct Recipe {
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
+
     /// Recipe revision.
     version: usize,
     /// Preceding recipe.
     prior: Option<Box<Recipe>>,
+
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: Option<SqlIncorporator>,
+
+    log: slog::Logger,
 }
 
 impl PartialEq for Recipe {
@@ -75,9 +79,20 @@ impl Recipe {
             prior: None,
             inc: match log {
                 None => Some(SqlIncorporator::default()),
-                Some(log) => Some(SqlIncorporator::new(log)),
+                Some(ref log) => Some(SqlIncorporator::new(log.clone())),
+            },
+            log: match log {
+                None => slog::Logger::root(slog::Discard, None),
+                Some(log) => log,
             },
         }
+    }
+
+    /// Set the `Logger` to use for internal log messages.
+    ///
+    /// By default, all log messages are discarded.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
     }
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
@@ -147,7 +162,12 @@ impl Recipe {
 
         let inc = match log {
             None => SqlIncorporator::default(),
-            Some(log) => SqlIncorporator::new(log),
+            Some(ref log) => SqlIncorporator::new(log.clone()),
+        };
+
+        let log = match log {
+            None => slog::Logger::root(slog::Discard, None),
+            Some(log) => log,
         };
 
         Recipe {
@@ -157,6 +177,7 @@ impl Recipe {
             version: 0,
             prior: None,
             inc: Some(inc),
+            log: log,
         }
     }
 
@@ -269,9 +290,10 @@ impl Recipe {
             expression_order: self.expression_order.clone(),
             aliases: self.aliases.clone(),
             version: self.version + 1,
+            inc: prior_inc,
+            log: self.log.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
-            inc: prior_inc,
         };
 
         // apply changes
