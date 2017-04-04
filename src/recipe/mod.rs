@@ -144,11 +144,14 @@ impl Recipe {
     pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>, log: Option<slog::Logger>) -> Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
+        let mut duplicates = 0;
         let expressions = qs.into_iter()
             .map(|(n, q)| {
                 let qid = hash_query(&q);
                 if !expression_order.contains(&qid) {
                     expression_order.push(qid);
+                } else {
+                    duplicates += 1;
                 }
                 match n {
                     None => (),
@@ -170,6 +173,8 @@ impl Recipe {
             Some(log) => log,
         };
 
+        debug!(log, format!("{} duplicate queries", duplicates); "version" => 0);
+
         Recipe {
             expressions: expressions,
             expression_order: expression_order,
@@ -185,10 +190,9 @@ impl Recipe {
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
     pub fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
-        println!("Recipe v{} contains {} queries, {} of which are reads",
-                 self.version,
-                 self.expressions.len(),
-                 self.aliases.len());
+        debug!(self.log, format!("{} queries, {} of which are named",
+                                 self.expressions.len(),
+                                 self.aliases.len()); "version" => self.version);
 
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
@@ -236,7 +240,7 @@ impl Recipe {
 
         // TODO(malte): deal with removal.
         for qid in removed {
-            println!("Query removal of {:?}", qid);
+            error!(self.log, format!("Unhandled query removal of {:?}", qid); "version" => self.version);
             //unimplemented!()
         }
 
@@ -348,14 +352,13 @@ impl Recipe {
             .collect::<Vec<_>>();
 
         if !parsed_queries.iter().all(|pq| pq.2.is_ok()) {
-            println!("Failed to parse recipe!");
             for pq in parsed_queries {
                 match pq.2 {
-                    Err(e) => println!("Query \"{}\", parse error: {}", pq.1, e),
+                    Err(e) => return Err(format!("Query \"{}\", parse error: {}", pq.1, e)),
                     Ok(_) => (),
                 }
             }
-            return Err(String::from("Failed to parse recipe!"));
+            return Err(format!("Failed to parse recipe!"));
         }
 
         Ok(parsed_queries.into_iter().map(|t| (t.0, t.2.unwrap())).collect::<Vec<_>>())
