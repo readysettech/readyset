@@ -2,6 +2,8 @@ use flow::core::{NodeAddress, DataType};
 use mir::{GroupedNodeType, MirNode, MirNodeType};
 // TODO(malte): remove if possible
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
+use ops::join::JoinType;
+
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
               SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderClause};
@@ -465,7 +467,8 @@ impl SqlToMirConverter {
                       name: &str,
                       jps: &[ConditionTree],
                       left_node: MirNodeRef,
-                      right_node: MirNodeRef)
+                      right_node: MirNodeRef,
+                      kind: JoinType)
                       -> MirNodeRef {
         let projected_cols_left = left_node.borrow()
             .columns()
@@ -500,10 +503,21 @@ impl SqlToMirConverter {
             right_join_columns.push(r_col);
         }
         assert_eq!(left_join_columns.len(), right_join_columns.len());
-        let inner = MirNodeType::Join {
-            on_left: left_join_columns,
-            on_right: right_join_columns,
-            project: fields.clone(),
+        let inner = match kind {
+            JoinType::Inner => {
+                MirNodeType::Join {
+                    on_left: left_join_columns,
+                    on_right: right_join_columns,
+                    project: fields.clone(),
+                }
+            }
+            JoinType::Left => {
+                MirNodeType::LeftJoin {
+                    on_left: left_join_columns,
+                    on_right: right_join_columns,
+                    project: fields.clone(),
+                }
+            }
         };
         MirNode::new(name,
                      self.schema_version,
@@ -673,53 +687,77 @@ impl SqlToMirConverter {
                 qg.edges.iter().collect();
             sorted_edges.sort_by_key(|k| &(k.0).0);
             let mut prev_node = None;
-            for &(&(ref src, ref dst), edge) in &sorted_edges {
-                match *edge {
-                    // Edge represents a LEFT JOIN
-                    QueryGraphEdge::LeftJoin(_) => unimplemented!(),
-                    // Edge represents a JOIN
-                    QueryGraphEdge::Join(ref jps) => {
-                        let left_node;
-                        let right_node;
 
-                        if joined_tables.contains(src) && joined_tables.contains(dst) {
-                            // We have already handled *both* tables that are part of the join.
-                            // This should never occur, because their join predicates must be
-                            // associated with the same query graph edge.
-                            unreachable!();
-                        } else if joined_tables.contains(src) {
-                            // join left against previous join, right against base
-                            left_node = prev_node.unwrap();
-                            right_node = base_nodes[dst.as_str()].clone();
-                        } else if joined_tables.contains(dst) {
-                            // join right against previous join, left against base
-                            left_node = base_nodes[src.as_str()].clone();
-                            right_node = prev_node.unwrap();
-                        } else {
-                            // We've seen neither of these tables before
-                            // If we already have a join in prev_ni, we must assume that some
-                            // future join will bring these unrelated join arms together.
-                            // TODO(malte): make that actually work out...
-                            left_node = base_nodes[src.as_str()].clone();
-                            right_node = base_nodes[dst.as_str()].clone();
-                        };
-                        // make node
-                        let jn = self.make_join_node(&format!("q_{:x}_n{}",
-                                                              qg.signature().hash,
-                                                              new_node_count),
-                                                     jps,
-                                                     left_node,
-                                                     right_node);
-                        join_nodes.push(jn.clone());
-                        new_node_count += 1;
-                        prev_node = Some(jn);
-
-                        // we've now joined both tables
-                        joined_tables.insert(src);
-                        joined_tables.insert(dst);
+            {
+                let pick_join_columns = |src: &String,
+                                         dst: &String,
+                                         prev_node: Option<MirNodeRef>,
+                                         joined_tables: &HashSet<_>|
+                 -> (MirNodeRef, MirNodeRef) {
+                    let left_node;
+                    let right_node;
+                    if joined_tables.contains(src) && joined_tables.contains(dst) {
+                        // We have already handled *both* tables that are part of the join.
+                        // This should never occur, because their join predicates must be
+                        // associated with the same query graph edge.
+                        unreachable!();
+                    } else if joined_tables.contains(src) {
+                        // join left against previous join, right against base
+                        left_node = prev_node.as_ref().unwrap().clone();
+                        right_node = base_nodes[dst.as_str()].clone();
+                    } else if joined_tables.contains(dst) {
+                        // join right against previous join, left against base
+                        left_node = base_nodes[src.as_str()].clone();
+                        right_node = prev_node.as_ref().unwrap().clone();
+                    } else {
+                        // We've seen neither of these tables before
+                        // If we already have a join in prev_ni, we must assume that some
+                        // future join will bring these unrelated join arms together.
+                        // TODO(malte): make that actually work out...
+                        left_node = base_nodes[src.as_str()].clone();
+                        right_node = base_nodes[dst.as_str()].clone();
                     }
-                    // Edge represents a GROUP BY, which we handle later
-                    QueryGraphEdge::GroupBy(_) => (),
+                    (left_node, right_node)
+                };
+
+                for &(&(ref src, ref dst), edge) in &sorted_edges {
+                    let jn = match *edge {
+                        // Edge represents a LEFT JOIN
+                        QueryGraphEdge::LeftJoin(ref jps) => {
+                            let (left_node, right_node) =
+                                pick_join_columns(src, dst, prev_node, &joined_tables);
+                            self.make_join_node(&format!("q_{:x}_n{}",
+                                                         qg.signature().hash,
+                                                         new_node_count),
+                                                jps,
+                                                left_node,
+                                                right_node,
+                                                JoinType::Left)
+                        }
+                        // Edge represents a JOIN
+                        QueryGraphEdge::Join(ref jps) => {
+                            let (left_node, right_node) =
+                                pick_join_columns(src, dst, prev_node, &joined_tables);
+                            self.make_join_node(&format!("q_{:x}_n{}",
+                                                         qg.signature().hash,
+                                                         new_node_count),
+                                                jps,
+                                                left_node,
+                                                right_node,
+                                                JoinType::Inner)
+                        }
+                        // Edge represents a GROUP BY, which we handle later
+                        QueryGraphEdge::GroupBy(_) => continue,
+                    };
+
+                    // bookkeeping (shared between both join types)
+                    join_nodes.push(jn.clone());
+                    new_node_count += 1;
+                    prev_node = Some(jn);
+
+                    // we've now joined both tables
+                    joined_tables.insert(src);
+                    joined_tables.insert(dst);
                 }
             }
 

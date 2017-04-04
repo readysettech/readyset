@@ -121,7 +121,9 @@ impl Recipe {
         let expressions = qs.into_iter()
             .map(|(n, q)| {
                 let qid = hash_query(&q);
-                expression_order.push(qid);
+                if !expression_order.contains(&qid) {
+                    expression_order.push(qid);
+                }
                 match n {
                     None => (),
                     Some(ref name) => {
