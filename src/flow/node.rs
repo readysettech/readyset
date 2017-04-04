@@ -58,7 +58,7 @@ impl Reader {
         self.state.clone().map(|arc| {
                                    Box::new(move |q: &DataType| -> Result<Datas, ()> {
                                                 arc.find_and(q, |rs| {
-                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                        rs.into_iter().map(|v| (&**v).clone()).collect()
                     })
                                                     .map(|r| r.0.unwrap_or_else(Vec::new))
                                             }) as Box<_>
