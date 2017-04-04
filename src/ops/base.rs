@@ -49,7 +49,8 @@ pub struct Base {
 /// reduced write performance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BaseDurabilityLevel {
-    /// No durability at all: records aren't written to a log.
+    /// No durability at all: records aren't written to a log. This is the default durability level
+    /// if none is specified.
     None,
     /// Buffered writes: records are accumulated in an in-memory buffer and occasionally flushed to
     /// the durable log, which may itself buffer in the file system. Results in large batched
@@ -203,7 +204,7 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             buffered_writes: Some(Records::default()),
-            durability: BaseDurabilityLevel::Buffered,
+            durability: BaseDurabilityLevel::None,
             durable_log: None,
             durable_log_path: None,
             global_address: None,
@@ -354,7 +355,7 @@ mod tests {
     #[test]
     fn it_works() {
         let b = Base::default();
-        assert_eq!(b.durability, BaseDurabilityLevel::Buffered);
+        assert_eq!(b.durability, BaseDurabilityLevel::None);
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
     }
