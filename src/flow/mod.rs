@@ -605,10 +605,10 @@ impl<'a> Migration<'a> {
             let generator = inner.token_generator.clone().unwrap();
             Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
                 arc.find_and(q,
-                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
+                              |rs| rs.into_iter().map(|r|(&**r).clone()).collect())
                     .map(|(res, ts)| {
                         let token = generator.generate(ts, q.clone());
-                        (res, token)
+                        (res.unwrap_or_else(Vec::new), token)
                     })
             })
         } else {
