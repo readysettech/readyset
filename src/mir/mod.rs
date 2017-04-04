@@ -301,6 +301,7 @@ impl MirNode {
                                        on_left,
                                        on_right,
                                        project,
+                                       JoinType::Inner,
                                        mig)
                     }
                     MirNodeType::Latest { ref group_by } => {
@@ -328,7 +329,6 @@ impl MirNode {
                         assert_eq!(self.ancestors.len(), 2);
                         let left = self.ancestors[0].clone();
                         let right = self.ancestors[1].clone();
-                        // XXX(malte): fix
                         make_join_node(&name,
                                        left,
                                        right,
@@ -336,6 +336,7 @@ impl MirNode {
                                        on_left,
                                        on_right,
                                        project,
+                                       JoinType::Left,
                                        mig)
                     }
                     MirNodeType::Project { ref emit, ref literals } => {
@@ -594,7 +595,20 @@ impl Debug for MirNodeType {
                     .join(", ");
                 write!(f, "Leaf [⚷: {}]", key_cols)
             }
-            MirNodeType::LeftJoin { .. } => write!(f, "⋉ []"),
+            MirNodeType::LeftJoin { ref on_left, ref on_right, ref project } => {
+                let jc = on_left.iter()
+                    .zip(on_right)
+                    .map(|(l, r)| format!("{}:{}", l.name, r.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f,
+                       "⋉ [{} on {}]",
+                       project.iter()
+                           .map(|c| c.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "),
+                       jc)
+            }
             MirNodeType::Latest { ref group_by } => {
                 let key_cols = group_by.iter()
                     .map(|k| k.name.clone())
@@ -757,6 +771,7 @@ fn make_join_node(name: &str,
                   on_left: &Vec<Column>,
                   on_right: &Vec<Column>,
                   proj_cols: &Vec<Column>,
+                  kind: JoinType,
                   mut mig: &mut Migration)
                   -> FlowNode {
     use ops::join::JoinSource;
@@ -814,8 +829,10 @@ fn make_join_node(name: &str,
     let left_na = left.borrow().flow_node_addr().unwrap();
     let right_na = right.borrow().flow_node_addr().unwrap();
 
-    let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
-
+    let j = match kind {
+        JoinType::Inner => Join::new(left_na, right_na, JoinType::Inner, join_config),
+        JoinType::Left => Join::new(left_na, right_na, JoinType::Left, join_config),
+    };
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
 
     FlowNode::New(n)

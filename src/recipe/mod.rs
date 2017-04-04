@@ -9,6 +9,17 @@ use std::vec::Vec;
 
 type QueryID = u64;
 
+/// Represents the result of a recipe activation.
+#[derive(Clone, Debug)]
+pub struct ActivationResult {
+    /// Map of query names to `NodeAddress` handles for reads/writes.
+    pub new_nodes: HashMap<String, NodeAddress>,
+    /// Number of expressions the recipe added compared to the prior recipe.
+    pub expressions_added: usize,
+    /// Number of expressions the recipe removed compared to the prior recipe.
+    pub expressions_removed: usize,
+}
+
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
 pub struct Recipe {
@@ -18,12 +29,16 @@ pub struct Recipe {
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
+
     /// Recipe revision.
     version: usize,
     /// Preceding recipe.
     prior: Option<Box<Recipe>>,
+
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: Option<SqlIncorporator>,
+
+    log: slog::Logger,
 }
 
 impl PartialEq for Recipe {
@@ -64,9 +79,20 @@ impl Recipe {
             prior: None,
             inc: match log {
                 None => Some(SqlIncorporator::default()),
-                Some(log) => Some(SqlIncorporator::new(log)),
+                Some(ref log) => Some(SqlIncorporator::new(log.clone())),
+            },
+            log: match log {
+                None => slog::Logger::root(slog::Discard, None),
+                Some(log) => log,
             },
         }
+    }
+
+    /// Set the `Logger` to use for internal log messages.
+    ///
+    /// By default, all log messages are discarded.
+    pub fn log_with(&mut self, log: slog::Logger) {
+        self.log = log;
     }
 
     /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
@@ -118,10 +144,15 @@ impl Recipe {
     pub fn from_queries(qs: Vec<(Option<String>, SqlQuery)>, log: Option<slog::Logger>) -> Recipe {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
+        let mut duplicates = 0;
         let expressions = qs.into_iter()
             .map(|(n, q)| {
                 let qid = hash_query(&q);
-                expression_order.push(qid);
+                if !expression_order.contains(&qid) {
+                    expression_order.push(qid);
+                } else {
+                    duplicates += 1;
+                }
                 match n {
                     None => (),
                     Some(ref name) => {
@@ -134,8 +165,15 @@ impl Recipe {
 
         let inc = match log {
             None => SqlIncorporator::default(),
-            Some(log) => SqlIncorporator::new(log),
+            Some(ref log) => SqlIncorporator::new(log.clone()),
         };
+
+        let log = match log {
+            None => slog::Logger::root(slog::Discard, None),
+            Some(log) => log,
+        };
+
+        debug!(log, format!("{} duplicate queries", duplicates); "version" => 0);
 
         Recipe {
             expressions: expressions,
@@ -144,21 +182,30 @@ impl Recipe {
             version: 0,
             prior: None,
             inc: Some(inc),
+            log: log,
         }
     }
 
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(&mut self,
-                    mig: &mut Migration)
-                    -> Result<HashMap<String, NodeAddress>, String> {
+    pub fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
+        debug!(self.log, format!("{} queries, {} of which are named",
+                                 self.expressions.len(),
+                                 self.aliases.len()); "version" => self.version);
+
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
             Some(ref pr) => {
                 // compute delta over prior recipe
                 self.compute_delta(pr)
             }
+        };
+
+        let mut result = ActivationResult {
+            new_nodes: HashMap::default(),
+            expressions_added: added.len(),
+            expressions_removed: removed.len(),
         };
 
         // upgrade schema version *before* applying changes, so that new queries are correctly
@@ -174,7 +221,6 @@ impl Recipe {
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
         // returned to the caller (who may use them to obtain mutators and getters)
-        let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
 
@@ -189,16 +235,16 @@ impl Recipe {
             for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
             }
-            new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+            result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 
         // TODO(malte): deal with removal.
         for qid in removed {
-            println!("Query removal of {:?}", qid);
+            error!(self.log, format!("Unhandled query removal of {:?}", qid); "version" => self.version);
             //unimplemented!()
         }
 
-        Ok(new_nodes)
+        Ok(result)
     }
 
     /// Work out the delta between two recipes.
@@ -248,9 +294,10 @@ impl Recipe {
             expression_order: self.expression_order.clone(),
             aliases: self.aliases.clone(),
             version: self.version + 1,
+            inc: prior_inc,
+            log: self.log.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
-            inc: prior_inc,
         };
 
         // apply changes
@@ -305,14 +352,13 @@ impl Recipe {
             .collect::<Vec<_>>();
 
         if !parsed_queries.iter().all(|pq| pq.2.is_ok()) {
-            println!("Failed to parse recipe!");
             for pq in parsed_queries {
                 match pq.2 {
-                    Err(e) => println!("Query \"{}\", parse error: {}", pq.1, e),
+                    Err(e) => return Err(format!("Query \"{}\", parse error: {}", pq.1, e)),
                     Ok(_) => (),
                 }
             }
-            return Err(String::from("Failed to parse recipe!"));
+            return Err(format!("Failed to parse recipe!"));
         }
 
         Ok(parsed_queries.into_iter().map(|t| (t.0, t.2.unwrap())).collect::<Vec<_>>())

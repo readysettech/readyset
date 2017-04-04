@@ -390,16 +390,16 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 }
 
-impl<T: Hash + Eq + Clone> IntoIterator for State<T> {
-    type Item = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::Item;
-    type IntoIter = <FnvHashMap<T, Vec<Arc<Vec<T>>>> as IntoIterator>::IntoIter;
-    fn into_iter(self) -> Self::IntoIter {
-        for (_, state) in self.state {
-            if let KeyedState::Single(map) = state {
-                return map.into_iter();
-            }
+impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
+    type Item = Vec<Arc<Vec<T>>>;
+    type IntoIter = Box<Iterator<Item = Self::Item>>;
+    fn into_iter(mut self) -> Self::IntoIter {
+        match self.state.pop() {
+            Some((_, KeyedState::Single(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
+            Some((_, KeyedState::Double(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
+            Some((_, KeyedState::Tri(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
+            Some((_, KeyedState::Quad(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
+            None => unreachable!(),
         }
-        // TODO: allow into_iter without single key (breaks Self::IntoIter type)
-        unimplemented!();
     }
 }

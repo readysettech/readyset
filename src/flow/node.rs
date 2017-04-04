@@ -56,13 +56,13 @@ impl Reader {
         (&self)
          -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>> {
         self.state.clone().map(|arc| {
-            Box::new(move |q: &DataType| -> Result<Datas, ()> {
-                         arc.find_and(q, |rs| {
-                        rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>()
+                                   Box::new(move |q: &DataType| -> Result<Datas, ()> {
+                                                arc.find_and(q, |rs| {
+                        rs.into_iter().map(|v| (&**v).clone()).collect()
                     })
-                             .map(|r| r.0)
-                     }) as Box<_>
-        })
+                                                    .map(|r| r.0.unwrap_or_else(Vec::new))
+                                            }) as Box<_>
+                               })
     }
 
     pub fn key(&self) -> Result<usize, String> {
