@@ -9,6 +9,17 @@ use std::vec::Vec;
 
 type QueryID = u64;
 
+/// Represents the result of a recipe activation.
+#[derive(Clone, Debug)]
+pub struct ActivationResult {
+    /// Map of query names to `NodeAddress` handles for reads/writes.
+    pub new_nodes: HashMap<String, NodeAddress>,
+    /// Number of expressions the recipe added compared to the prior recipe.
+    pub expressions_added: usize,
+    /// Number of expressions the recipe removed compared to the prior recipe.
+    pub expressions_removed: usize,
+}
+
 /// Represents a Soup recipe.
 #[derive(Clone, Debug)]
 pub struct Recipe {
@@ -152,15 +163,24 @@ impl Recipe {
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(&mut self,
-                    mig: &mut Migration)
-                    -> Result<HashMap<String, NodeAddress>, String> {
+    pub fn activate(&mut self, mig: &mut Migration) -> Result<ActivationResult, String> {
+        println!("Recipe v{} contains {} queries, {} of which are reads",
+                 self.version,
+                 self.expressions.len(),
+                 self.aliases.len());
+
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
             Some(ref pr) => {
                 // compute delta over prior recipe
                 self.compute_delta(pr)
             }
+        };
+
+        let mut result = ActivationResult {
+            new_nodes: HashMap::default(),
+            expressions_added: added.len(),
+            expressions_removed: removed.len(),
         };
 
         // upgrade schema version *before* applying changes, so that new queries are correctly
@@ -176,7 +196,6 @@ impl Recipe {
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
         // returned to the caller (who may use them to obtain mutators and getters)
-        let mut new_nodes = HashMap::default();
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();
 
@@ -191,7 +210,7 @@ impl Recipe {
             for na in qfp.new_nodes.iter() {
                 mig.assign_domain(na.clone(), d);
             }
-            new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+            result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 
         // TODO(malte): deal with removal.
@@ -200,7 +219,7 @@ impl Recipe {
             //unimplemented!()
         }
 
-        Ok(new_nodes)
+        Ok(result)
     }
 
     /// Work out the delta between two recipes.
