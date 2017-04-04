@@ -48,6 +48,15 @@ impl Token {
     pub fn empty() -> Self {
         Token { conflicts: Vec::new() }
     }
+
+    /// Get the latest timestamp associated with this Token.
+    pub fn get_timestamp(&self) -> i64 {
+        self.conflicts
+            .iter()
+            .map(|c| c.0)
+            .max()
+            .unwrap_or(-1)
+    }
 }
 
 impl Debug for Token {
