@@ -277,10 +277,9 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter
-        (&self,
-         node: core::NodeAddress)
-         -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync>> {
+    pub fn get_getter(&self,
+                      node: core::NodeAddress)
+                      -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send>> {
 
         // reader should be a child of the given node
         trace!(self.log, "creating reader"; "for" => node.as_global().index());
@@ -294,6 +293,40 @@ impl Blender {
             .next(); // there should be at most one
 
         reader.and_then(|r| r.get_reader())
+    }
+
+    /// Obtain a new function for querying a given (already maintained) transactional reader node.
+    pub fn get_transactional_getter
+        (&self,
+         node: core::NodeAddress)
+-> Option<Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send>>{
+
+        // reader should be a child of the given node
+        trace!(self.log, "creating transactional reader"; "for" => node.as_global().index());
+        let reader = self.ingredients
+            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
+            .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
+                            Some(inner)
+                        } else {
+                            None
+                        })
+            .next(); // there should be at most one
+
+        reader.map(|inner| {
+            let arc = inner.state
+                .as_ref()
+                .unwrap()
+                .clone();
+            let generator = inner.token_generator.clone().unwrap();
+            Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
+                arc.find_and(q,
+                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
+                    .map(|(res, ts)| {
+                        let token = generator.generate(ts, q.clone());
+                        (res.unwrap_or_else(Vec::new), token)
+                    })
+            }) as Box<_>
+        })
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
@@ -546,7 +579,7 @@ impl<'a> Migration<'a> {
     pub fn maintain(&mut self,
                     n: core::NodeAddress,
                     key: usize)
-                    -> Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync> {
+                    -> Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send> {
         self.ensure_reader_for(n);
         let ri = self.readers[n.as_global()];
 
@@ -579,7 +612,7 @@ impl<'a> Migration<'a> {
         (&mut self,
          n: core::NodeAddress,
          key: usize)
--> Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send + Sync>{
+         -> Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send> {
         self.ensure_reader_for(n);
         self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];

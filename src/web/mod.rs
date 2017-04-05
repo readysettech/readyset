@@ -86,7 +86,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
     }
 
     for (path, ep) in outs.into_iter() {
-        let get = ep.f;
+        let get = Mutex::new(ep.f);
         let args = ep.arguments;
         insert_routes! {
             &mut router => {
@@ -99,7 +99,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                             key.into_owned().into()
                         };
 
-                        let data = get(&key).into_iter().map(|row| {
+                        let data = get.lock().unwrap()(&key).into_iter().map(|row| {
                                 args
                                 .clone()
                                 .into_iter()

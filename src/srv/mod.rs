@@ -7,7 +7,8 @@ use futures;
 use tokio_core::reactor;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::rc::Rc;
 use std::thread;
 
 /// Available RPC methods
@@ -34,16 +35,14 @@ pub mod ext {
 
 use self::ext::*;
 
-type Put = Box<Fn(Vec<DataType>) + Send + 'static>;
-type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>;
+type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>;
 
 struct Server {
-    put: HashMap<NodeAddress, (String, Vec<String>, Mutex<Put>)>,
+    put: HashMap<NodeAddress, (String, Vec<String>, Mutex<flow::Mutator>)>,
     get: HashMap<NodeAddress, (String, Vec<String>, Get)>,
-    _g: Mutex<flow::Blender>, // never read or written, just needed so the server doesn't stop
 }
 
-impl ext::FutureService for Arc<Server> {
+impl ext::FutureService for Rc<Server> {
     type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
     fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
         let get = &self.get[&view.into()];
@@ -52,7 +51,11 @@ impl ext::FutureService for Arc<Server> {
 
     type InsertFut = futures::Finished<i64, Never>;
     fn insert(&self, view: usize, args: Vec<DataType>) -> Self::InsertFut {
-        self.put[&view.into()].2.lock().unwrap()(args);
+        self.put[&view.into()]
+            .2
+            .lock()
+            .unwrap()
+            .put(args);
         futures::finished(0)
     }
 
@@ -73,6 +76,7 @@ impl ext::FutureService for Arc<Server> {
 /// Will terminate and wait for all server threads when dropped.
 pub struct ServerHandle {
     threads: Vec<(futures::sync::oneshot::Sender<()>, thread::JoinHandle<()>)>,
+    _g: flow::Blender, // never read or written, just needed so the server doesn't stop
 }
 
 impl Drop for ServerHandle {
@@ -90,6 +94,39 @@ impl Drop for ServerHandle {
     }
 }
 
+fn make_server(soup: &flow::Blender) -> Server {
+    // Figure out what inputs and outputs to expose
+    let ins = soup.inputs()
+        .into_iter()
+        .map(|(ni, n)| {
+            (ni,
+             (n.name().to_owned(),
+              n.fields()
+                  .iter()
+                  .cloned()
+                  .collect(),
+              Mutex::new(soup.get_mutator(ni))))
+        })
+        .collect();
+    let outs = soup.outputs()
+        .into_iter()
+        .map(|(ni, n, r)| {
+            (ni,
+             (n.name().to_owned(),
+              n.fields()
+                  .iter()
+                  .cloned()
+                  .collect(),
+              r.get_reader().unwrap()))
+        })
+        .collect();
+
+    Server {
+        put: ins,
+        get: outs,
+    }
+}
+
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
@@ -97,58 +134,17 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
                                             addr: T,
                                             threads: usize)
                                             -> ServerHandle {
-    // Figure out what inputs and outputs to expose
-    let (ins, outs) = {
-        let ins: Vec<_> = soup.inputs()
-            .into_iter()
-            .map(|(ni, n)| {
-                (ni,
-                 (n.name().to_owned(),
-                  n.fields()
-                      .iter()
-                      .cloned()
-                      .collect(),
-                  soup.get_mutator(ni)))
-            })
-            .collect();
-        let outs: Vec<_> = soup.outputs()
-            .into_iter()
-            .map(|(ni, n, r)| {
-                (ni,
-                 (n.name().to_owned(),
-                  n.fields()
-                      .iter()
-                      .cloned()
-                      .collect(),
-                  r.get_reader().unwrap()))
-            })
-            .collect();
-        (ins, outs)
-    };
-
-    let s = Server {
-        put: ins.into_iter()
-            .map(|(ni, (nm, args, mutator))| {
-                     (ni,
-                      (nm,
-                       args,
-                       Mutex::new(Box::new(move |v: Vec<DataType>| mutator.put(v)) as Box<_>)))
-                 })
-            .collect(),
-        get: outs.into_iter().map(|(ni, (nm, args, getter))| (ni, (nm, args, getter))).collect(),
-        _g: Mutex::new(soup),
-    };
-
     let addr = addr.into();
-    let s = Arc::new(s);
     let threads = (0..threads)
-        .map(move |i| {
-            let s = s.clone();
+        .map(|i| {
+            // Arc is just there so we can easily have Server be Clone
+            let s = make_server(&soup);
             let (tx, rx) = futures::sync::oneshot::channel();
             let jh = thread::Builder::new()
                 .name(format!("rpc{}", i))
                 .spawn(move || {
                     let mut core = reactor::Core::new().unwrap();
+                    let s = Rc::new(s);
                     let (_, handle) = s.listen(addr,
                                                &core.handle(),
                                                tarpc::future::server::Options::default())
@@ -165,5 +161,8 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
         })
         .collect();
 
-    ServerHandle { threads: threads }
+    ServerHandle {
+        threads: threads,
+        _g: soup,
+    }
 }
