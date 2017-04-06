@@ -816,7 +816,9 @@ fn make_grouped_node(name: &str,
         .columns()
         .iter()
         .position(|c| c == on)
-        .unwrap();
+        .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
+                         on,
+                         parent.borrow().columns()));
     let group_col_indx = group_by.iter()
         .map(|c| {
             parent.borrow()
@@ -902,7 +904,7 @@ fn make_join_node(name: &str,
             .columns
             .iter()
             .position(|ref nc| *nc == col)
-            .expect("column not found!")
+            .expect(&format!("column {:?} not found!", col))
     };
 
     let join_config = proj_cols.iter()
@@ -1005,7 +1007,9 @@ fn make_project_node(name: &str,
                 .columns
                 .iter()
                 .position(|ref nc| *nc == c)
-                .unwrap()
+                .expect(&format!("column {:?} not found on {}",
+                                 c,
+                                 parent.borrow().versioned_name()))
         })
         .collect::<Vec<_>>();
 
