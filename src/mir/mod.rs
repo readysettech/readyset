@@ -274,6 +274,37 @@ impl MirNode {
         &self.name
     }
 
+    pub fn referenced_columns(&self) -> Vec<Column> {
+        // all projected columns
+        let mut columns: Vec<Column> = self.columns.clone();
+
+        // + any parent columns referenced internally by the operator
+        match self.inner {
+            MirNodeType::Aggregation { ref on, .. } |
+            MirNodeType::Extremum { ref on, .. } |
+            MirNodeType::GroupConcat { ref on, .. } => {
+                // need the "over" column
+                if !columns.contains(on) {
+                    columns.push(on.clone());
+                }
+            }
+            MirNodeType::Filter { .. } => {
+                let parent = self.ancestors
+                    .iter()
+                    .next()
+                    .unwrap();
+                // need all parent columns
+                for c in parent.borrow().columns() {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
+                }
+            }
+            _ => (),
+        }
+        columns
+    }
+
     pub fn versioned_name(&self) -> String {
         format!("{}_v{}", self.name, self.from_version)
     }
