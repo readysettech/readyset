@@ -35,15 +35,16 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
                     })
             .collect();
 
+        let mut found: Vec<&Column> = Vec::new();
         for ancestor in mn.borrow().ancestors() {
             if ancestor.borrow().ancestors().len() == 0 {
                 // base, do nothing
                 continue;
             }
             for c in &needed_columns {
-                if c.table.is_some() && c.function.is_none() && has_column(ancestor, c) {
+                if !found.contains(&c) && has_column(ancestor, c) {
                     ancestor.borrow_mut().add_column(c.clone());
-                    break;
+                    found.push(c);
                 }
             }
             queue.push(ancestor.clone());
