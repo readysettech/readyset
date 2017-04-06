@@ -761,6 +761,28 @@ impl SqlToMirConverter {
                 }
             }
 
+
+            // 3. Get columns used by each filter node.
+            let mut filter_columns = HashMap::new();
+            let mut filter_nodes = Vec::new();
+            let mut moved_filters = Vec::new();
+            let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
+            sorted_rels.sort();
+            for rel in &sorted_rels {
+                let qgn = &qg.relations[*rel];
+                if *rel != "computed_columns" {
+                    if !qgn.predicates.is_empty() {
+                        for cond in &qgn.predicates {
+                          let col = match *cond.left.as_ref() {
+                              ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+                              _ => unimplemented!(),
+                          };
+                          filter_columns.entry(col).or_insert(Vec::new()).push(rel.to_string());
+                        }
+                    }
+                }
+            }
+
             // 3. Grouped and function nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
             match qg.relations.get("computed_columns") {
@@ -791,6 +813,34 @@ impl SqlToMirConverter {
                                 for fn_col in &computed_cols_cgn.columns {
                                     // we must also push parameter columns through the group by
                                     let over_col = target_columns_from_computed_column(fn_col);
+
+                                    // Check if filter reordering is needed
+                                    if filter_columns.contains_key(over_col) {
+                                      let rels  = filter_columns.get(over_col).unwrap();
+                                      for rel in rels {
+                                        if !moved_filters.contains(rel) {
+                                          let qgn = &qg.relations[rel.as_str()];
+                                          let parent = match prev_node {
+                                              None => base_nodes[rel.as_str()].clone(),
+                                              Some(pn) => pn,
+                                          };
+                                          let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
+                                                                                    qg.signature().hash,
+                                                                                    new_node_count),
+                                                                           parent,
+                                                                           &qgn.predicates);
+                                          assert!(fns.len() > 0);
+                                          new_node_count += fns.len();
+                                          prev_node = Some(fns.iter()
+                                                               .last()
+                                                               .unwrap()
+                                                               .clone());
+                                          filter_nodes.extend(fns);
+                                          moved_filters.push(rel.to_string());
+                                        }
+                                      }
+                                    }
+
                                     let over_table = over_col.table
                                         .as_ref()
                                         .unwrap()
@@ -842,6 +892,34 @@ impl SqlToMirConverter {
                             &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
                         let over_col = target_columns_from_computed_column(computed_col);
+
+                        // Check if filter reordering is needed
+                        if filter_columns.contains_key(over_col) {
+                          let rels  = filter_columns.get(over_col).unwrap();
+                          for rel in rels {
+                            if !moved_filters.contains(rel) {
+                              let qgn = &qg.relations[rel.as_str()];
+                              let parent = match prev_node {
+                                  None => base_nodes[rel.as_str()].clone(),
+                                  Some(pn) => pn,
+                              };
+                              let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
+                                                                        qg.signature().hash,
+                                                                        new_node_count),
+                                                               parent,
+                                                               &qgn.predicates);
+                              assert!(fns.len() > 0);
+                              new_node_count += fns.len();
+                              prev_node = Some(fns.iter()
+                                                   .last()
+                                                   .unwrap()
+                                                   .clone());
+                              filter_nodes.extend(fns);
+                              moved_filters.push(rel.to_string());
+                            }
+                          }
+                        }
+
                         let over_table = over_col.table
                             .as_ref()
                             .unwrap()
@@ -887,16 +965,14 @@ impl SqlToMirConverter {
             }
 
             // 3. Generate the necessary filter node for each relation node in the query graph.
-            let mut filter_nodes = Vec::new();
+
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be
             // added in a different order every time, which will yield different node identifiers
             // and make it difficult for applications to check what's going on.
-            let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
-            sorted_rels.sort();
             for rel in &sorted_rels {
                 let qgn = &qg.relations[*rel];
                 // we've already handled computed columns
-                if *rel != "computed_columns" {
+                if *rel != "computed_columns" && !moved_filters.contains(rel) {
                     // the following conditional is required to avoid "empty" nodes (without any
                     // projected columns) that are required as inputs to joins
                     if !qgn.predicates.is_empty() {
@@ -922,13 +998,8 @@ impl SqlToMirConverter {
             }
 
             // 4. Get the final node
-            let mut final_node: MirNodeRef = if !filter_nodes.is_empty() {
-                filter_nodes.last().unwrap().clone()
-            } else if !func_nodes.is_empty() {
-                // TODO(malte): This won't work if computed columns are used within JOIN clauses
-                func_nodes.last().unwrap().clone()
-            } else if !join_nodes.is_empty() {
-                join_nodes.last().unwrap().clone()
+            let mut final_node: MirNodeRef = if prev_node.is_some() {
+                prev_node.unwrap().clone()
             } else {
                 // no join, filter, or function node --> base node is parent
                 assert_eq!(sorted_rels.len(), 1);
