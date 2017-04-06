@@ -804,6 +804,10 @@ fn make_grouped_node(name: &str,
                      mut mig: &mut Migration)
                      -> FlowNode {
     assert!(group_by.len() > 0);
+    assert!(group_by.len() <= 4,
+            format!("can't have >4 group columns due to compound key restrictions, {} needs {}",
+                    name,
+                    group_by.len()));
 
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
