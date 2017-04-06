@@ -277,10 +277,9 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter
-        (&self,
-         node: core::NodeAddress)
-         -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send + Sync>> {
+    pub fn get_getter(&self,
+                      node: core::NodeAddress)
+                      -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send>> {
 
         // reader should be a child of the given node
         trace!(self.log, "creating reader"; "for" => node.as_global().index());
@@ -300,7 +299,7 @@ impl Blender {
     pub fn get_transactional_getter
         (&self,
          node: core::NodeAddress)
--> Option<Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send + Sync>>{
+-> Option<Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send>>{
 
         // reader should be a child of the given node
         trace!(self.log, "creating transactional reader"; "for" => node.as_global().index());
@@ -645,7 +644,8 @@ impl<'a> Migration<'a> {
                           n: core::NodeAddress,
                           name: String,
                           servers: &[(&str, usize)],
-                          key: usize) -> io::Result<core::NodeAddress> {
+                          key: usize)
+                          -> io::Result<core::NodeAddress> {
         let h = try!(hook::Hook::new(name, servers, vec![key]));
         let h = node::Type::Hook(Some(h));
         let h = self.mainline.ingredients[*n.as_global()].mirror(h);
@@ -791,13 +791,13 @@ impl<'a> Migration<'a> {
         debug!(log, "calculating materializations");
         let index = domain_nodes.iter()
             .map(|(domain, nodes)| {
-                use self::migrate::materialization::{pick, index};
-                debug!(log, "picking materializations"; "domain" => domain.index());
-                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
-                debug!(log, "deriving indices"; "domain" => domain.index());
-                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
-                (*domain, idx)
-            })
+                     use self::migrate::materialization::{pick, index};
+                     debug!(log, "picking materializations"; "domain" => domain.index());
+                     let mat = pick(&log, &mainline.ingredients, &nodes[..]);
+                     debug!(log, "deriving indices"; "domain" => domain.index());
+                     let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
+                     (*domain, idx)
+                 })
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();

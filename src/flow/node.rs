@@ -52,9 +52,8 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn get_reader
-        (&self)
-         -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send + Sync>> {
+    pub fn get_reader(&self)
+                      -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
         self.state.clone().map(|arc| {
                                    Box::new(move |q: &DataType| -> Result<Datas, ()> {
                                                 arc.find_and(q, |rs| {
