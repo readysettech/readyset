@@ -160,7 +160,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
         debug_assert_eq!(from, self.src);
 
         if rs.is_empty() {
-            return ProcessingResult::Done(rs, 0);
+            return ProcessingResult {
+                       results: rs,
+                       misses: vec![],
+                   };
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -181,7 +184,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             consolidate.entry(group).or_insert_with(Vec::new).push(val);
         }
 
-        let mut holes = 0;
+        let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * consolidate.len());
         for (group, diffs) in consolidate {
             // find the current value for this group
@@ -197,7 +200,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
                     rs.get(0)
                 }
                 LookupResult::Missing => {
-                    holes += 1;
+                    misses.push(Miss {
+                                    node: *self.us.unwrap().as_local(),
+                                    key: group.iter().map(|&dt| dt.clone()).collect(),
+                                });
                     continue;
                 }
             };
@@ -252,7 +258,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             }
         }
 
-        ProcessingResult::Done(out.into(), holes)
+        ProcessingResult {
+            results: out.into(),
+            misses: misses,
+        }
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

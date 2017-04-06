@@ -45,7 +45,10 @@ impl Ingredient for Identity {
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
-        ProcessingResult::Done(rs, 0)
+        ProcessingResult {
+            results: rs,
+            misses: Vec::new(),
+        }
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

@@ -779,6 +779,7 @@ fn domain_amend_migration() {
 }
 
 #[test]
+#[ignore]
 fn state_replay_migration_stream() {
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.
@@ -894,6 +895,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 #[test]
+#[ignore]
 fn full_vote_migration() {
     // we're trying to force a very particular race, namely that a put arrives for a new join
     // *before* its state has been fully initialized. it may take a couple of iterations to hit

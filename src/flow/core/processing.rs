@@ -3,13 +3,15 @@ use std::sync::Arc;
 
 use flow::prelude;
 
-pub enum ProcessingResult {
-    Done(prelude::Records, usize),
-    NeedReplay {
-        node: prelude::NodeAddress,
-        key: Vec<prelude::DataType>,
-        was: prelude::Records,
-    },
+#[derive(PartialEq, Eq, Debug)]
+pub struct Miss {
+    pub node: prelude::LocalNodeIndex,
+    pub key: Vec<prelude::DataType>,
+}
+
+pub struct ProcessingResult {
+    pub results: prelude::Records,
+    pub misses: Vec<Miss>,
 }
 
 pub trait Ingredient

@@ -158,109 +158,107 @@ impl Ingredient for Join {
                 nodes: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        let missing: Option<(NodeAddress, Vec<DataType>)>;
-        'outer: loop {
-            if from == self.right && self.kind == JoinType::Left {
-                // If records are being received from the right, then populate self.right_counts
-                // with the number of records that existed for each key *before* this batch of
-                // records was processed.
-                self.right_counts.clear();
-                for r in rs.iter() {
-                    let ref key = r.rec()[self.on.1];
-                    let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
+        let mut misses = Vec::new();
 
-                    if let Some(rc) = self.right_counts.get_mut(&key) {
-                        *rc = adjust(*rc);
-                        continue;
-                    }
+        if from == self.right && self.kind == JoinType::Left {
+            // If records are being received from the right, then populate self.right_counts
+            // with the number of records that existed for each key *before* this batch of
+            // records was processed.
+            self.right_counts.clear();
+            for r in rs.iter() {
+                let ref key = r.rec()[self.on.1];
+                let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
 
-                    let rc = self.lookup(self.right,
-                                         &[self.on.0],
-                                         &KeyType::Single(&key),
-                                         nodes,
-                                         state)
-                        .unwrap();
-                    if rc.is_none() {
-                        missing = Some((self.right, vec![key.clone()]));
-                        break 'outer;
-                    }
-                    self.right_counts.insert(key.clone(), adjust(rc.unwrap().count()));
+                if let Some(rc) = self.right_counts.get_mut(&key) {
+                    *rc = adjust(*rc);
+                    continue;
                 }
-            }
 
-            let (other, from_key, other_key) = if from == self.left {
-                (self.right, self.on.0, self.on.1)
-            } else {
-                (self.left, self.on.1, self.on.0)
+                let rc = self.lookup(self.right,
+                                     &[self.on.0],
+                                     &KeyType::Single(&key),
+                                     nodes,
+                                     state)
+                    .unwrap();
+                if rc.is_none() {
+                    // we got something from right, but that row's key is not in right??
+                    unreachable!();
+                }
+                self.right_counts.insert(key.clone(), adjust(rc.unwrap().count()));
+            }
+        }
+
+        let (other, from_key, other_key) = if from == self.left {
+            (self.right, self.on.0, self.on.1)
+        } else {
+            (self.left, self.on.1, self.on.0)
+        };
+
+        // okay, so here's what's going on:
+        // the record(s) we receive are all from one side of the join. we need to query the
+        // other side(s) for records matching the incoming records on that side's join
+        // fields.
+        let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
+        for rec in rs.iter() {
+            let (row, positive) = match *rec {
+                Record::Positive(ref row) => (row, true),
+                Record::Negative(ref row) => (row, false),
+                _ => unreachable!(),
             };
 
-            // okay, so here's what's going on:
-            // the record(s) we receive are all from one side of the join. we need to query the
-            // other side(s) for records matching the incoming records on that side's join
-            // fields.
-            let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
-            for rec in rs.iter() {
-                let (row, positive) = match *rec {
-                    Record::Positive(ref row) => (row, true),
-                    Record::Negative(ref row) => (row, false),
-                    _ => unreachable!(),
-                };
+            let other_rows = self.lookup(other,
+                                         &[other_key],
+                                         &KeyType::Single(&row[from_key]),
+                                         nodes,
+                                         state)
+                .unwrap();
+            if other_rows.is_none() {
+                misses.push(Miss {
+                                node: *other.as_local(),
+                                key: vec![row[from_key].clone()],
+                            });
+                continue;
+            }
+            let mut other_rows = other_rows.unwrap().peekable();
 
-                let other_rows = self.lookup(other,
-                                             &[other_key],
-                                             &KeyType::Single(&row[from_key]),
-                                             nodes,
-                                             state)
-                    .unwrap();
-                if other_rows.is_none() {
-                    missing = Some((other, vec![row[from_key].clone()]));
-                    break 'outer;
-                }
-                let mut other_rows = other_rows.unwrap().peekable();
+            if self.kind == JoinType::Left {
+                // emit null rows if necessary for left join
+                if from == self.right {
+                    let rc = {
+                        let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
+                        if positive {
+                            *rc += 1;
+                        } else {
+                            *rc -= 1;
+                        }
+                        *rc
+                    };
 
-                if self.kind == JoinType::Left {
-                    // emit null rows if necessary for left join
-                    if from == self.right {
-                        let rc = {
-                            let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
-                            if positive {
-                                *rc += 1;
-                            } else {
-                                *rc -= 1;
-                            }
-                            *rc
-                        };
-
-                        if (positive && rc == 1) || (!positive && rc == 0) {
-                            ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
-                                                               let foo: Records = vec![
+                    if (positive && rc == 1) || (!positive && rc == 0) {
+                        ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
+                                                           let foo: Records = vec![
                                     (self.generate_null(r), !positive),
                                     (self.generate_row(r, &row), positive)
                                 ].into();
-                                                               foo.into()
-                                                           }));
-                            continue;
-                        }
-                    } else if other_rows.peek().is_none() {
-                        ret.push((self.generate_null(&row), positive).into());
+                                                           foo.into()
+                                                       }));
+                        continue;
                     }
-                }
-
-                if from == self.right {
-                    ret.extend(other_rows.map(|r| (self.generate_row(r, &row), positive).into()));
-                } else {
-                    ret.extend(other_rows.map(|r| (self.generate_row(&row, r), positive).into()));
+                } else if other_rows.peek().is_none() {
+                    ret.push((self.generate_null(&row), positive).into());
                 }
             }
 
-            return ProcessingResult::Done(ret.into(), 0);
+            if from == self.right {
+                ret.extend(other_rows.map(|r| (self.generate_row(r, &row), positive).into()));
+            } else {
+                ret.extend(other_rows.map(|r| (self.generate_row(&row, r), positive).into()));
+            }
         }
 
-        let missing = missing.unwrap();
-        ProcessingResult::NeedReplay {
-            node: missing.0,
-            key: missing.1,
-            was: rs,
+        ProcessingResult {
+            results: ret.into(),
+            misses: misses,
         }
     }
 
