@@ -57,6 +57,18 @@ impl Token {
             .max()
             .unwrap_or(-1)
     }
+
+    /// Convert to a token that only relies on coarse checktables.
+    pub fn make_coarse(&mut self) {
+        for &mut (_, _, ref mut vc) in self.conflicts.iter_mut() {
+            for c in vc.iter_mut() {
+                match *c {
+                    Conflict::BaseTable(..) => {}
+                    Conflict::BaseColumn(n, _) => *c = Conflict::BaseTable(n),
+                }
+            }
+        }
+    }
 }
 
 impl Debug for Token {
