@@ -16,15 +16,14 @@ fn rewrite_conditional<F>(expand_columns: &F,
     use nom_sql::ConditionExpression::*;
     use nom_sql::ConditionBase::*;
 
-    let translate_ct_arm =
-        |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
-            let new_ce = match *bce {
-                Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
-                Base(b) => Base(b),
-                x => rewrite_conditional(expand_columns, x, avail_tables),
-            };
-            Box::new(new_ce)
+    let translate_ct_arm = |bce: Box<ConditionExpression>| -> Box<ConditionExpression> {
+        let new_ce = match *bce {
+            Base(Field(f)) => Base(Field(expand_columns(f, avail_tables))),
+            Base(b) => Base(b),
+            x => rewrite_conditional(expand_columns, x, avail_tables),
         };
+        Box::new(new_ce)
+    };
 
     match ce {
         ComparisonOp(ct) => {
@@ -37,12 +36,12 @@ fn rewrite_conditional<F>(expand_columns: &F,
             };
             ComparisonOp(rewritten_ct)
         }
-        LogicalOp(ConditionTree{operator, box left, box right}) => {
+        LogicalOp(ConditionTree { operator, box left, box right }) => {
             LogicalOp(ConditionTree {
-                operator: operator,
-                left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
-                right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
-            })
+                          operator: operator,
+                          left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
+                          right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+                      })
         }
         x => x,
     }
@@ -170,7 +169,7 @@ impl ImpliedTableExpansion for SqlQuery {
                             *f = expand_columns(f.clone(), &tables);
                         }
                     }
-                };
+                }
                 // Expand within WHERE clause
                 sq.where_clause = match sq.where_clause {
                     None => None,
