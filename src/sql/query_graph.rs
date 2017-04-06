@@ -451,19 +451,23 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
-        match field {
-            &FieldExpression::All |
-            &FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
-            &FieldExpression::Col(ref c) => {
+        match *field {
+            FieldExpression::All |
+            FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
+            FieldExpression::Col(ref c) => {
                 match c.function {
                     None => (),  // we've already dealt with this column as part of some relation
                     Some(_) => {
-                        // add a special node representing the computed columns
-                        // TODO(malte): the predicates here should probably reflect HAVING
-                        // conditions, if any are present
-                        let mut n = new_node(String::from("computed_columns"), vec![], st);
+                        // add a special node representing the computed columns; if it already
+                        // exists, add another computed column to it
+                        let mut n = qg.relations
+                            .entry(String::from("computed_columns"))
+                            .or_insert_with(|| {
+                                                new_node(String::from("computed_columns"),
+                                                         vec![],
+                                                         st)
+                                            });
                         n.columns.push(c.clone());
-                        qg.relations.insert(String::from("computed_columns"), n);
                     }
                 }
             }
