@@ -36,6 +36,7 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b6006205807b186
 clap = "2.13"
 # distributions
 rand = "0.3"
+zipf = "0.2.0"
 # sampling
 hdrsample = "2.1"
 # postgresql
