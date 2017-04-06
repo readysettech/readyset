@@ -1,4 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression, SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
+              JoinConstraint, JoinRightSide, SqlQuery};
 
 use std::collections::HashMap;
 
@@ -64,12 +65,35 @@ impl AliasRemoval for SqlQuery {
 
         match self {
             SqlQuery::Select(mut sq) => {
-                // Collect table aliases
-                for t in &sq.tables {
-                    match t.alias {
-                        None => (),
-                        Some(ref a) => {
-                            table_aliases.insert(a.clone(), t.name.clone());
+                {
+                    // Collect table aliases
+                    let mut add_alias = |alias: &str, name: &str| {
+                        table_aliases.insert(alias.to_string(), name.to_string());
+                    };
+                    for t in &sq.tables {
+                        match t.alias {
+                            None => (),
+                            Some(ref a) => add_alias(a, &t.name),
+                        }
+                    }
+                    for jc in &sq.join {
+                        match jc.right {
+                            JoinRightSide::Table(ref t) => {
+                                match t.alias {
+                                    None => (),
+                                    Some(ref a) => add_alias(a, &t.name),
+                                }
+                            }
+                            JoinRightSide::Tables(ref ts) => {
+                                for t in ts {
+                                    match t.alias {
+                                        None => (),
+                                        Some(ref a) => add_alias(a, &t.name),
+                                    }
+                                }
+                            }
+                            JoinRightSide::NestedJoin(_) => unimplemented!(),
+                            _ => (),
                         }
                     }
                 }
@@ -90,6 +114,19 @@ impl AliasRemoval for SqlQuery {
                         _ => {}
                     }
                 }
+                // Remove them from join clauses
+                sq.join = sq.join
+                    .into_iter()
+                    .map(|mut jc| {
+                        jc.constraint = match jc.constraint {
+                            JoinConstraint::On(cond) => {
+                                JoinConstraint::On(rewrite_conditional(&table_aliases, cond))
+                            }
+                            c @ JoinConstraint::Using(..) => c,
+                        };
+                        jc
+                    })
+                    .collect();
                 // Remove them from conditions
                 sq.where_clause = match sq.where_clause {
                     None => None,
