@@ -60,8 +60,14 @@ impl ImpliedTableExpansion for SqlQuery {
         let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
             let mut matches = write_schemas.iter()
                 .filter(|&(t, _)| if tables_in_query.len() > 0 {
-                            tables_in_query.contains(&Table::from(t.as_str()))
+                            for qt in tables_in_query {
+                                if qt.name == *t {
+                                    return true;
+                                }
+                            }
+                            false
                         } else {
+                            // preserve all tables if there are no tables in the query
                             true
                         })
                 .filter_map(|(t, ws)| {
