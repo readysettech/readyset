@@ -1,7 +1,7 @@
 use nom_sql::{Column, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Error, Formatter, Debug};
+use std::fmt::{Error, Formatter, Debug, Display};
 use std::rc::Rc;
 
 use flow::Migration;
@@ -118,6 +118,59 @@ impl MirQuery {
     }
 }
 
+impl Display for MirQuery {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        use std::collections::VecDeque;
+
+        // starting at the roots, print nodes in topological order
+        let mut node_queue = VecDeque::new();
+        node_queue.extend(self.roots.iter().cloned());
+        let mut in_edge_counts = HashMap::new();
+        for n in &node_queue {
+            in_edge_counts.insert(n.borrow().versioned_name(), 0);
+        }
+
+        writeln!(f, "digraph {{")?;
+        writeln!(f, "node [shape=record, fontsize=10]")?;
+
+        while !node_queue.is_empty() {
+            let n = node_queue.pop_front().unwrap();
+            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
+            let vn = n.borrow().versioned_name();
+            writeln!(f,
+                     "\"{}\" [label=\"{{ {} | {} }}\"]",
+                     vn,
+                     vn,
+                     n.borrow()
+                         .columns()
+                         .iter()
+                         .map(|c| c.name.as_str())
+                         .collect::<Vec<_>>()
+                         .join(", \\n"))?;
+
+            for child in n.borrow().children.iter() {
+                let nd = child.borrow().versioned_name();
+                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
+                let in_edges = if in_edge_counts.contains_key(&nd) {
+                    in_edge_counts[&nd]
+                } else {
+                    child.borrow().ancestors.len()
+                };
+                assert!(in_edges >= 1);
+                if in_edges == 1 {
+                    // last edge removed
+                    node_queue.push_back(child.clone());
+                }
+                in_edge_counts.insert(nd, in_edges - 1);
+            }
+        }
+        write!(f, "}}")?;
+
+        Ok(())
+    }
+}
+
 pub struct MirNode {
     name: String,
     from_version: usize,
@@ -222,7 +275,7 @@ impl MirNode {
     }
 
     pub fn versioned_name(&self) -> String {
-        format!("{}:v{}", self.name, self.from_version)
+        format!("{}_v{}", self.name, self.from_version)
     }
 
     /// Produce a compact, human-readable description of this node; analogous to the method of the
