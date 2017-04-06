@@ -98,22 +98,32 @@ impl AliasRemoval for SqlQuery {
                     }
                 }
                 // Remove them from fields
-                for field in sq.fields.iter_mut() {
-                    match field {
-                        &mut FieldExpression::Col(ref mut col) => {
-                            if col.table.is_some() {
-                                let t = col.table.take().unwrap();
-                                col.table = if table_aliases.contains_key(&t) {
-                                    Some(table_aliases[&t].clone())
-                                } else {
-                                    Some(t.clone())
-                                };
-                                col.function = None;
-                            }
+                sq.fields = sq.fields
+                    .into_iter()
+                    .map(|field| match field {
+                             // WTF rustfmt?
+                             FieldExpression::Col(mut col) => {
+                        if col.table.is_some() {
+                            let t = col.table.take().unwrap();
+                            col.table = if table_aliases.contains_key(&t) {
+                                Some(table_aliases[&t].clone())
+                            } else {
+                                Some(t.clone())
+                            };
+                            col.function = None;
                         }
-                        _ => {}
+                        FieldExpression::Col(col)
                     }
-                }
+                             FieldExpression::AllInTable(t) => {
+                                 if table_aliases.contains_key(&t) {
+                                     FieldExpression::AllInTable(table_aliases[&t].clone())
+                                 } else {
+                                     FieldExpression::AllInTable(t)
+                                 }
+                             }
+                             f => f,
+                         })
+                    .collect();
                 // Remove them from join clauses
                 sq.join = sq.join
                     .into_iter()
