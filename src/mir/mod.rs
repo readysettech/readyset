@@ -275,8 +275,14 @@ impl MirNode {
     }
 
     pub fn referenced_columns(&self) -> Vec<Column> {
-        // all projected columns
-        let mut columns: Vec<Column> = self.columns.clone();
+        // all projected columns, minus those with aliases, which we add with their original names
+        // below. This is important because we'll otherwise end up searching (and fail to find)
+        // aliased columns further up in the MIR graph.
+        let mut columns: Vec<Column> = self.columns
+            .iter()
+            .filter(|c| c.alias.is_none() || c.function.is_some()) // alias ok if computed column
+            .cloned()
+            .collect();
 
         // + any parent columns referenced internally by the operator
         match self.inner {
@@ -295,6 +301,14 @@ impl MirNode {
                     .unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
+                }
+            }
+            MirNodeType::Project { ref emit, .. } |
+            MirNodeType::Permute { ref emit } => {
+                for c in emit {
                     if !columns.contains(&c) {
                         columns.push(c.clone());
                     }
