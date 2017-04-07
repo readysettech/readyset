@@ -198,16 +198,12 @@ pub mod test {
                                                  .1
                                                  .as_local()));
 
-            let u = {
+            let mut u = {
                 let id = self.nut.unwrap().1;
                 let mut n = self.nodes[id.as_local()].borrow_mut();
-                match n.inner.on_input(src, u.into(), &self.nodes, &self.states) {
-                    ProcessingResult::Done(rs, holes) => {
-                        assert_eq!(holes, 0);
-                        rs
-                    }
-                    ProcessingResult::NeedReplay { .. } => unreachable!(),
-                }
+                let m = n.inner.on_input(src, u.into(), &self.nodes, &self.states);
+                assert_eq!(m.misses, vec![]);
+                m.results
             };
 
             if !remember ||
@@ -218,12 +214,16 @@ pub mod test {
                 return u;
             }
 
-            let holes = single::materialize(&u,
-                                            self.states.get_mut(self.nut
-                                                                    .unwrap()
-                                                                    .1
-                                                                    .as_local()));
-            assert_eq!(holes, 0);
+            let misses = single::materialize(&mut u,
+                                             *self.nut
+                                                  .unwrap()
+                                                  .1
+                                                  .as_local(),
+                                             self.states.get_mut(self.nut
+                                                                     .unwrap()
+                                                                     .1
+                                                                     .as_local()));
+            assert_eq!(misses, vec![]);
             u
         }
 

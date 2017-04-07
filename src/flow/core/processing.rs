@@ -3,13 +3,15 @@ use std::sync::Arc;
 
 use flow::prelude;
 
-pub enum ProcessingResult {
-    Done(prelude::Records, usize),
-    NeedReplay {
-        node: prelude::NodeAddress,
-        key: Vec<prelude::DataType>,
-        was: prelude::Records,
-    },
+#[derive(PartialEq, Eq, Debug)]
+pub struct Miss {
+    pub node: prelude::LocalNodeIndex,
+    pub key: Vec<prelude::DataType>,
+}
+
+pub struct ProcessingResult {
+    pub results: prelude::Records,
+    pub misses: Vec<Miss>,
 }
 
 pub trait Ingredient
@@ -24,9 +26,7 @@ pub trait Ingredient
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
-    fn must_replay_among(&self,
-                         &HashSet<prelude::NodeAddress>)
-                         -> Option<HashSet<prelude::NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<prelude::NodeAddress>> {
         None
     }
 

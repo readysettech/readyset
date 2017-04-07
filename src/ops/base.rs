@@ -93,7 +93,10 @@ impl Ingredient for Base {
             }
                  })
             .collect();
-        ProcessingResult::Done(rs, 0)
+        ProcessingResult {
+            results: rs,
+            misses: Vec::new(),
+        }
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

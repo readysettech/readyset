@@ -164,6 +164,7 @@ pub struct Blender {
     source: NodeIndex,
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
+    partial: HashSet<NodeIndex>,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
     domains: Vec<thread::JoinHandle<()>>,
@@ -181,6 +182,7 @@ impl Default for Blender {
             source: source,
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
+            partial: Default::default(),
 
             txs: HashMap::default(),
             domains: Vec::new(),
@@ -852,6 +854,7 @@ impl<'a> Migration<'a> {
                                              &mut mainline.ingredients,
                                              mainline.source,
                                              &new,
+                                             &mut mainline.partial,
                                              index,
                                              &mut mainline.txs);
 

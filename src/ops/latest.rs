@@ -80,7 +80,7 @@ impl Ingredient for Latest {
                                .as_local())
             .expect("latest must have its own state materialized");
 
-        let mut holes = 0;
+        let mut misses = Vec::new();
         let mut out = Vec::with_capacity(rs.len());
         {
             let currents = rs.into_iter().filter_map(|r| {
@@ -100,7 +100,10 @@ impl Ingredient for Latest {
                     // we don't actively materialize holes unless requested by a read. this can't
                     // be a read, because reads cause replay, which fill holes with an empty set
                     // before processing!
-                    holes += 1;
+                    misses.push(Miss{
+                        node: *self.us.unwrap().as_local(),
+                        key: vec![r[self.key[0]].clone()],
+                    });
                     None
                 }
             }
@@ -119,7 +122,10 @@ impl Ingredient for Latest {
 
         // TODO: check that there aren't any standalone negatives
 
-        ProcessingResult::Done(out.into(), holes)
+        ProcessingResult {
+            results: out.into(),
+            misses: misses,
+        }
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

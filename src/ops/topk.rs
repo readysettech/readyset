@@ -61,12 +61,16 @@ impl TopK {
     /// Returns the set of Record structs to be emitted by this node, for some group. In steady
     /// state operation this will typically include some number of positives (at most k), and the
     /// same number of negatives.
+    ///
+    /// Cannot result in partial misses because we received a record with this key, so our parent
+    /// must have seen and emitted that key. If they missed, they would have replayed *before*
+    /// relaying to us. thus, since we got this key, our parent must have it.
     fn apply(&self,
              current_topk: &[Arc<Vec<DataType>>],
              new: Records,
              state: &StateMap,
              group: &[DataType])
-             -> ProcessingResult {
+             -> Records {
 
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
@@ -158,7 +162,7 @@ impl TopK {
         delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
                                                                       Record::Positive(p.0.clone())
                                                                   }));
-        ProcessingResult::Done(delta.into(), 0)
+        delta.into()
     }
 }
 
@@ -214,7 +218,10 @@ impl Ingredient for TopK {
         debug_assert_eq!(from, self.src);
 
         if rs.is_empty() {
-            return ProcessingResult::Done(rs, 0);
+            return ProcessingResult {
+                       results: rs,
+                       misses: vec![],
+                   };
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -242,15 +249,19 @@ impl Ingredient for TopK {
                                .as_local())
             .expect("topk must have its own state materialized");
 
-        let mut holes = 0;
+        let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * self.k);
         {
+            let us = *self.us.unwrap().as_local();
             let group_by = &self.group_by[..];
             let current = consolidate.into_iter().filter_map(|(group, diffs)| {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
-                        holes += 1;
+                        misses.push(Miss {
+                                        node: us,
+                                        key: group.clone(),
+                                    });
                         None
                     }
                 }
@@ -272,26 +283,16 @@ impl Ingredient for TopK {
                 } else {
                     assert!(count as usize >= old_rs.len());
 
-                    let mut res = match self.apply(old_rs, diffs.into(), state, &group[..]) {
-                        ProcessingResult::Done(rs, holes) => {
-                            debug_assert_eq!(holes, 0);
-                            rs.into()
-                        }
-                        ProcessingResult::NeedReplay { .. } => {
-                            // we received a record with this key
-                            // our parent must have seen and emitted that key
-                            // and if they missed, they would have replayed *before* relaying to us.
-                            // thus, since we got this key, our parent must have it.
-                            unreachable!()
-                        }
-                    };
-                    out.append(&mut res);
+                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..]).into());
                 }
                 self.counts.insert(group, (count + count_diff) as usize);
             }
         }
 
-        ProcessingResult::Done(out.into(), holes)
+        ProcessingResult {
+            results: out.into(),
+            misses: misses,
+        }
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

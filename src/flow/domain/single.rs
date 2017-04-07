@@ -26,13 +26,9 @@ pub struct NodeDescriptor {
     pub children: Vec<NodeAddress>,
 }
 
-pub enum FinalProcessingResult {
-    Done(Packet, usize),
-    NeedReplay {
-        node: NodeAddress,
-        key: Vec<DataType>,
-        was: Packet,
-    },
+pub struct FinalProcessingResult {
+    pub output: Packet,
+    pub misses: Vec<Miss>,
 }
 
 impl NodeDescriptor {
@@ -63,8 +59,16 @@ impl NodeDescriptor {
         let addr = self.addr();
         match *self.inner {
             flow::node::Type::Ingress => {
-                let holes = materialize(m.data(), state.get_mut(addr.as_local()));
-                FinalProcessingResult::Done(m, holes)
+                let mut misses = Vec::new();
+                m.map_data(|rs| {
+                               misses = materialize(rs,
+                                                    *addr.as_local(),
+                                                    state.get_mut(addr.as_local()));
+                           });
+                FinalProcessingResult {
+                    output: m,
+                    misses: misses,
+                }
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
@@ -160,7 +164,10 @@ impl NodeDescriptor {
                 });
 
                 // readers never have children
-                FinalProcessingResult::Done(Packet::None, 0)
+                FinalProcessingResult {
+                    output: Packet::None,
+                    misses: Vec::new(),
+                }
             }
             flow::node::Type::Hook(ref mut h) => {
                 if let &mut Some(ref mut h) = h {
@@ -168,7 +175,10 @@ impl NodeDescriptor {
                 } else {
                     unreachable!();
                 }
-                FinalProcessingResult::Done(Packet::None, 0)
+                FinalProcessingResult {
+                    output: Packet::None,
+                    misses: Vec::new(),
+                }
             }
             flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
@@ -221,46 +231,35 @@ impl NodeDescriptor {
                     }
                 }
                 debug_assert!(m.is_none());
-                FinalProcessingResult::Done(Packet::None, 0)
+                FinalProcessingResult {
+                    output: Packet::None,
+                    misses: Vec::new(),
+                }
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
-                let mut need_replay = None;
 
-                let mut holes = 0;
+                let mut misses = Vec::new();
                 m.map_data(|data| {
                     use std::mem;
 
                     // we need to own the data
                     let old_data = mem::replace(data, Records::default());
 
-                    let new_data = match i.on_input(from, old_data, nodes, state) {
-                        ProcessingResult::Done(rs, missed) => {
-                            holes = missed;
-                            rs
-                        }
-                        ProcessingResult::NeedReplay { node, key, was } => {
-                            // TODO: once join is fixed, this should *only* happen for ReplayPiece
-                            need_replay = Some((node, key));
-                            was
-                        }
-                    };
-
-                    mem::replace(data, new_data);
+                    let m = i.on_input(from, old_data, nodes, state);
+                    mem::replace(data, m.results);
+                    misses = m.misses;
                 });
 
-                match need_replay {
-                    None => {
-                        let holes = materialize(m.data(), state.get_mut(addr.as_local()));
-                        FinalProcessingResult::Done(m, holes)
-                    }
-                    Some((node, key)) => {
-                        FinalProcessingResult::NeedReplay {
-                            node: node,
-                            key: key,
-                            was: m,
-                        }
-                    }
+                m.map_data(|rs| {
+                               misses.extend(materialize(rs,
+                                                         *addr.as_local(),
+                                                         state.get_mut(addr.as_local())));
+                           });
+
+                FinalProcessingResult {
+                    output: m,
+                    misses: misses,
                 }
             }
             flow::node::Type::Source => unreachable!(),
@@ -268,23 +267,28 @@ impl NodeDescriptor {
     }
 }
 
-pub fn materialize(rs: &Records, state: Option<&mut State>) -> usize {
+pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut State>) -> Vec<Miss> {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
-        return 0;
+        return Vec::new();
     }
 
     // yes!
-    let mut holes = 0;
-    let mut state = state.unwrap();
-    for r in rs {
+    let mut holes = Vec::new();
+    let state = state.unwrap();
+    rs.retain(|r| {
         if state.is_partial() {
             // we need to check that we're not hitting any holes
-            if state.hits_hole(r).is_some() {
+            if let Some(columns) = state.hits_hole(r) {
                 // we would need a replay of this update.
-                holes += 1;
-                continue;
+                holes.push(Miss {
+                               node: node,
+                               key: columns.into_iter().map(|&c| r[c].clone()).collect(),
+                           });
+
+                // we don't want to propagate records that miss
+                return false;
             }
         }
         match *r {
@@ -292,7 +296,9 @@ pub fn materialize(rs: &Records, state: Option<&mut State>) -> usize {
             Record::Negative(ref r) => state.remove(r),
             Record::DeleteRequest(..) => unreachable!(),
         }
-    }
+
+        true
+    });
 
     holes
 }
