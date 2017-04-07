@@ -14,6 +14,12 @@ pub struct ProcessingResult {
     pub misses: Vec<Miss>,
 }
 
+pub enum RawProcessingResult {
+    Regular(ProcessingResult),
+    ReplayPiece(prelude::Records),
+    Captured,
+}
+
 pub trait Ingredient
     where Self: Send
 {
@@ -94,6 +100,17 @@ pub trait Ingredient
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
                 -> ProcessingResult;
+
+    fn on_input_raw(&mut self,
+                    from: prelude::NodeAddress,
+                    data: prelude::Records,
+                    is_replay_of: Option<(usize, prelude::DataType)>,
+                    domain: &prelude::DomainNodes,
+                    states: &prelude::StateMap)
+                    -> RawProcessingResult {
+        let _ = is_replay_of;
+        RawProcessingResult::Regular(self.on_input(from, data, domain, states))
+    }
 
     fn can_query_through(&self) -> bool {
         false

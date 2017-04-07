@@ -622,7 +622,7 @@ pub fn reconstruct(log: &Logger,
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
         let mut last_domain = None;
-        for (node, _) in path {
+        for (node, key) in path {
             let domain = graph[node].domain();
             if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
@@ -632,27 +632,25 @@ pub fn reconstruct(log: &Logger,
             segments.last_mut()
                 .unwrap()
                 .1
-                .push(node);
+                .push((node, key));
         }
 
         debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
 
-        let locals = |i: usize| -> Vec<NodeAddress> {
-            if i == 0 {
+        let locals = |i: usize| -> Vec<(NodeAddress, Option<usize>)> {
+            let skip = if i == 0 {
                 // we're not replaying through the starter node
-                segments[i]
-                    .1
-                    .iter()
-                    .skip(1)
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
+                1
             } else {
-                segments[i]
-                    .1
-                    .iter()
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
-            }
+                0
+            };
+
+            segments[i]
+                .1
+                .iter()
+                .skip(skip)
+                .map(|&(ni, key)| (graph[ni].addr(), key))
+                .collect()
         };
 
         let (wait_tx, wait_rx) = mpsc::sync_channel(segments.len());
@@ -687,7 +685,7 @@ pub fn reconstruct(log: &Logger,
             if i == 0 {
                 // first domain also gets to know source node
                 if let Packet::SetupReplayPath { ref mut source, .. } = setup {
-                    *source = Some(graph[nodes[0]].addr());
+                    *source = Some(graph[nodes[0].0].addr());
                 }
             }
             if segments.len() == 1 {
@@ -727,9 +725,9 @@ pub fn reconstruct(log: &Logger,
 
             if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
-                if let flow::node::Type::Egress { ref tags, .. } = *graph[*nodes.last().unwrap()] {
+                if let flow::node::Type::Egress { ref tags, .. } = *graph[nodes.last().unwrap().0] {
                     let mut tags = tags.lock().unwrap();
-                    tags.insert(tag, segments[i + 1].1[0].into());
+                    tags.insert(tag, segments[i + 1].1[0].0.into());
                 } else {
                     unreachable!();
                 }
@@ -751,7 +749,7 @@ pub fn reconstruct(log: &Logger,
             txs[&segments[0].0]
                 .send(Packet::StartReplay {
                           tag: tag,
-                          from: graph[segments[0].1[0]].addr(),
+                          from: graph[segments[0].1[0].0].addr(),
                           ack: wait_tx.clone(),
                       })
                 .unwrap();

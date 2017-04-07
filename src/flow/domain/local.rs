@@ -4,12 +4,16 @@ use std::iter::FromIterator;
 use std::collections::hash_map::Entry;
 
 pub struct Map<T> {
+    n: usize,
     things: Vec<Option<T>>,
 }
 
 impl<T> Default for Map<T> {
     fn default() -> Self {
-        Map { things: Vec::default() }
+        Map {
+            n: 0,
+            things: Vec::default(),
+        }
     }
 }
 
@@ -31,6 +35,9 @@ impl<T> Map<T> {
 
         let old = self.things[i].take();
         self.things[i] = Some(value);
+        if old.is_none() {
+            self.n += 1;
+        }
         old
     }
 
@@ -55,11 +62,37 @@ impl<T> Map<T> {
             return None;
         }
 
-        self.things[i].take()
+        let ret = self.things[i].take();
+        if ret.is_some() {
+            self.n -= 1;
+        }
+        ret
     }
 
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (NodeAddress, &'a T)> + 'a> {
+        Box::new(self.things
+                     .iter()
+                     .enumerate()
+                     .filter_map(|(i, t)| {
+                                     t.as_ref().map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                 }))
+    }
+
+    pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
         Box::new(self.things.iter().filter_map(|t| t.as_ref()))
+    }
+
+    pub fn len(&self) -> usize {
+        self.n
+    }
+}
+
+use std::fmt;
+impl<T> fmt::Debug for Map<T>
+    where T: fmt::Debug
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
@@ -85,6 +118,7 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
             return Map::default();
         }
 
+        let n = sorted.len();
         let end = sorted.keys().last().unwrap() + 1;
         let mut vs = Vec::with_capacity(end);
         for (i, v) in sorted {
@@ -94,7 +128,20 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
             vs.push(Some(v));
         }
 
-        Map { things: vs }
+        Map { n: n, things: vs }
+    }
+}
+
+impl<T: 'static> IntoIterator for Map<T> {
+    type Item = (NodeAddress, T);
+    type IntoIter = Box<Iterator<Item = Self::Item>>;
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.things
+                     .into_iter()
+                     .enumerate()
+                     .filter_map(|(i, v)| {
+                                     v.map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                 }))
     }
 }
 

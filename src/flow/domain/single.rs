@@ -50,6 +50,7 @@ impl NodeDescriptor {
 
     pub fn process(&mut self,
                    mut m: Packet,
+                   keyed_by: Option<usize>,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    swap: bool)
@@ -239,6 +240,17 @@ impl NodeDescriptor {
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
 
+                let replay = if let Packet::ReplayPiece {
+                           context: flow::payload::ReplayPieceContext::Partial { ref for_key }, ..
+                       } = m {
+                    assert!(keyed_by.is_some());
+                    assert_eq!(for_key.len(), 1);
+                    Some((keyed_by.unwrap(), for_key[0].clone()))
+                } else {
+                    None
+                };
+
+                let mut captured = false;
                 let mut misses = Vec::new();
                 m.map_data(|data| {
                     use std::mem;
@@ -246,10 +258,28 @@ impl NodeDescriptor {
                     // we need to own the data
                     let old_data = mem::replace(data, Records::default());
 
-                    let m = i.on_input(from, old_data, nodes, state);
-                    mem::replace(data, m.results);
-                    misses = m.misses;
+                    match i.on_input_raw(from, old_data, replay, nodes, state) {
+                        RawProcessingResult::Regular(m) => {
+                            mem::replace(data, m.results);
+                            misses = m.misses;
+                        }
+                        RawProcessingResult::ReplayPiece(rs) => {
+                            // we already know that m must be a ReplayPiece since only a
+                            // ReplayPiece can release a ReplayPiece.
+                            mem::replace(data, rs);
+                        }
+                        RawProcessingResult::Captured => {
+                            captured = true;
+                        }
+                    }
                 });
+
+                if captured {
+                    return FinalProcessingResult {
+                               output: Packet::None,
+                               misses: misses,
+                           };
+                }
 
                 m.map_data(|rs| {
                                misses.extend(materialize(rs,

@@ -115,7 +115,7 @@ pub enum Packet {
     SetupReplayPath {
         tag: Tag,
         source: Option<NodeAddress>,
-        path: Vec<NodeAddress>,
+        path: Vec<(NodeAddress, Option<usize>)>,
         done_tx: Option<mpsc::SyncSender<()>>,
         trigger: TriggerEndpoint,
         ack: mpsc::SyncSender<()>,

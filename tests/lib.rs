@@ -900,12 +900,11 @@ fn migration_depends_on_unchanged_domain() {
     assert!(true);
 }
 
-#[test]
-fn full_vote_migration() {
+fn do_full_vote_migration(old_puts_after: bool) {
     // we're trying to force a very particular race, namely that a put arrives for a new join
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
     // that, so we run the test a couple of times.
-    for _ in 0..5 {
+    for _ in 0..3 {
         use distributary::{Blender, Base, Join, JoinType, Aggregation, DataType};
         let mut g = Blender::new();
         let article;
@@ -944,7 +943,6 @@ fn full_vote_migration() {
 
         let n = 1000i64;
         let title: DataType = "foo".into();
-        let voten: DataType = 1.into();
         let raten: DataType = 5.into();
 
         for i in 0..n {
@@ -994,6 +992,9 @@ fn full_vote_migration() {
         let last = g.get_getter(last).unwrap();
         let mutr = g.get_mutator(rating);
         for i in 0..n {
+            if old_puts_after {
+                mutv.put(vec![1.into(), i.into()]);
+            }
             mutr.put(vec![1.into(), i.into(), raten.clone()]);
         }
 
@@ -1010,11 +1011,25 @@ fn full_vote_migration() {
                        "each article result should have the right id");
             assert_eq!(row[1], title, "all articles should have title 'foo'");
             assert_eq!(row[2], raten, "all articles should have one 5-star rating");
-            assert_eq!(row[3], voten, "all articles should have one vote");
+            if old_puts_after {
+                assert_eq!(row[3], 2.into(), "all articles should have two votes");
+            } else {
+                assert_eq!(row[3], 1.into(), "all articles should have one vote");
+            }
         }
     }
 
     assert!(true);
+}
+
+#[test]
+fn full_vote_migration_only_new() {
+    do_full_vote_migration(false);
+}
+
+#[test]
+fn full_vote_migration_new_and_old() {
+    do_full_vote_migration(true);
 }
 
 #[test]

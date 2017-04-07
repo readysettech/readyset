@@ -86,7 +86,7 @@ impl DomainState {
                -> Self {
 
         // Look through nodes to find all that have a child who is a base node.
-        let base_for_ingress = nodes.iter()
+        let base_for_ingress = nodes.values()
             .filter_map(|n| {
                 if n.borrow().children.is_empty() {
                     return None;
@@ -120,7 +120,11 @@ impl DomainState {
     fn assign_ts(&mut self, packet: &mut Packet) -> bool {
         match *packet {
             Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
-            Packet::Transaction { ref mut state, ref link, ref data } => {
+            Packet::Transaction {
+                ref mut state,
+                ref link,
+                ref data,
+            } => {
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
                 if let TransactionState::Pending(token, send) = pending {
@@ -151,7 +155,9 @@ impl DomainState {
 
     fn buffer_transaction(&mut self, m: Packet) {
         let (ts, base, prev_ts) = match m {
-            Packet::Transaction { state: TransactionState::Committed(ts, base, ref prevs), .. } => {
+            Packet::Transaction {
+                state: TransactionState::Committed(ts, base, ref prevs), ..
+            } => {
                 if self.ts == ts - 1 {
                     (ts, Some(base), ts - 1)
                 } else {

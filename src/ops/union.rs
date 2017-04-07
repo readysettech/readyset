@@ -4,10 +4,26 @@ use std::sync;
 use flow::prelude::*;
 
 /// A union of a set of views.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Union {
     emit: HashMap<NodeAddress, Vec<usize>>,
     cols: HashMap<NodeAddress, usize>,
+
+    replay_key: Option<usize>,
+    replay_pieces: HashMap<DataType, Map<Records>>,
+}
+
+impl Clone for Union {
+    fn clone(&self) -> Self {
+        Union {
+            emit: self.emit.clone(),
+            cols: self.cols.clone(),
+
+            // nothing can have been received yet
+            replay_key: None,
+            replay_pieces: HashMap::new(),
+        }
+    }
 }
 
 impl Union {
@@ -28,6 +44,9 @@ impl Union {
         Union {
             emit: emit,
             cols: HashMap::new(),
+
+            replay_key: None,
+            replay_pieces: HashMap::new(),
         }
     }
 }
@@ -96,6 +115,82 @@ impl Ingredient for Union {
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
+        }
+    }
+
+    fn on_input_raw(&mut self,
+                    from: NodeAddress,
+                    rs: Records,
+                    is_replay_of: Option<(usize, DataType)>,
+                    n: &DomainNodes,
+                    s: &StateMap)
+                    -> RawProcessingResult {
+        match is_replay_of {
+            None => {
+                if self.replay_key.is_none() || self.replay_pieces.is_empty() {
+                    // no replay going on, so we're done.
+                    return RawProcessingResult::Regular(self.on_input(from, rs, n, s));
+                }
+
+                // partial replays are flowing through us, and at least one piece is being waited
+                // for. we need to take out any records that should be buffered (i.e., those that
+                // are for a replay piece that is still waiting for its other half).
+                let rs = rs.into_iter().filter_map(|r| {
+                    if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[self.replay_key.unwrap()]) {
+                        if let Some(ref mut rs) = pieces.get_mut(from.as_local()) {
+                            // we've received a replay piece from this ancestor already, and are
+                            // waiting for replay pieces from other ancestors. we need to
+                            // incorporate this record into the replay piece so that it doesn't end
+                            // up getting lost.
+                            rs.push(r);
+                        } else {
+                            // we haven't received a replay piece for this key from this ancestor.
+                            // note however that this will *definitely* miss downstream, since
+                            // we're awaiting a replay for the key. we can therefore safely drop it
+                            // here.
+                        }
+                        None
+                    } else {
+                        // we're not waiting on replay pieces for this key
+                        Some(r)
+                    }
+                }).collect();
+
+                RawProcessingResult::Regular(self.on_input(from, rs, n, s))
+            }
+            Some((key_col, key_val)) => {
+                if self.replay_key.is_none() {
+                    self.replay_key = Some(key_col);
+                } else {
+                    // we can't buffer for multiple different replay keys at the same time
+                    assert_eq!(self.replay_key.unwrap(), key_col);
+                }
+
+                let finished = {
+                    // store this replay piece
+                    let pieces = self.replay_pieces.entry(key_val.clone()).or_insert_with(Map::new);
+                    // there better be only one replay from each ancestor
+                    assert!(!pieces.contains_key(from.as_local()));
+                    pieces.insert(*from.as_local(), rs);
+                    // does this release the replay?
+                    pieces.len() == self.emit.len()
+                };
+
+                if finished {
+                    // yes! construct the final replay records.
+                    let rs = self.replay_pieces
+                        .remove(&key_val)
+                        .unwrap()
+                        .into_iter()
+                        .flat_map(|(from, rs)| self.on_input(from, rs, n, s).results)
+                        .collect();
+
+                    RawProcessingResult::ReplayPiece(rs)
+                } else {
+                    // no. need to keep buffering (and emit nothing)
+                    RawProcessingResult::Captured
+                }
+            }
         }
     }
 
