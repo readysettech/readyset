@@ -190,10 +190,10 @@ mod tests {
                            r: ConditionBase)
                            -> ConditionExpression {
         ConditionExpression::ComparisonOp(ConditionTree {
-            operator: op,
-            left: Box::new(ConditionExpression::Base(l)),
-            right: Box::new(ConditionExpression::Base(r)),
-        })
+                                              operator: op,
+                                              left: Box::new(ConditionExpression::Base(l)),
+                                              right: Box::new(ConditionExpression::Base(r)),
+                                          })
     }
 
     #[test]
@@ -282,34 +282,34 @@ mod tests {
         use ConditionBase::*;
 
         let a = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Placeholder)),
-        });
+                                 operator: Operator::Equal,
+                                 left: Box::new(Base(Field("foo".into()))),
+                                 right: Box::new(Base(Placeholder)),
+                             });
 
         let b = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("bar".into()))),
-            right: Box::new(Base(Literal("12".into()))),
-        });
+                                 operator: Operator::Equal,
+                                 left: Box::new(Base(Field("bar".into()))),
+                                 right: Box::new(Base(Literal("12".into()))),
+                             });
 
         let left = LogicalOp(ConditionTree {
-            operator: Operator::Or,
-            left: Box::new(a),
-            right: Box::new(b),
-        });
+                                 operator: Operator::Or,
+                                 left: Box::new(a),
+                                 right: Box::new(b),
+                             });
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("foobar".into()))),
-            right: Box::new(Base(Literal("a".into()))),
-        });
+                                     operator: Operator::Equal,
+                                     left: Box::new(Base(Field("foobar".into()))),
+                                     right: Box::new(Base(Literal("a".into()))),
+                                 });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::And,
-            left: Box::new(left),
-            right: Box::new(right),
-        });
+                                     operator: Operator::And,
+                                     left: Box::new(left),
+                                     right: Box::new(right),
+                                 });
 
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1, complete);
@@ -323,34 +323,34 @@ mod tests {
         use ConditionBase::*;
 
         let a = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("foo".into()))),
-            right: Box::new(Base(Placeholder)),
-        });
+                                 operator: Operator::Equal,
+                                 left: Box::new(Base(Field("foo".into()))),
+                                 right: Box::new(Base(Placeholder)),
+                             });
 
         let b = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("bar".into()))),
-            right: Box::new(Base(Literal("12".into()))),
-        });
+                                 operator: Operator::Equal,
+                                 left: Box::new(Base(Field("bar".into()))),
+                                 right: Box::new(Base(Literal("12".into()))),
+                             });
 
         let left = LogicalOp(ConditionTree {
-            operator: Operator::And,
-            left: Box::new(a),
-            right: Box::new(b),
-        });
+                                 operator: Operator::And,
+                                 left: Box::new(a),
+                                 right: Box::new(b),
+                             });
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("foobar".into()))),
-            right: Box::new(Base(Literal("a".into()))),
-        });
+                                     operator: Operator::Equal,
+                                     left: Box::new(Base(Field("foobar".into()))),
+                                     right: Box::new(Base(Literal("a".into()))),
+                                 });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::Or,
-            left: Box::new(left),
-            right: Box::new(right),
-        });
+                                     operator: Operator::Or,
+                                     left: Box::new(left),
+                                     right: Box::new(right),
+                                 });
 
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1, complete);
@@ -363,23 +363,24 @@ mod tests {
         use ConditionExpression::*;
         use ConditionBase::*;
 
-        let left = NegationOp(Box::new(ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("bar".into()))),
-            right: Box::new(Base(Literal("12".into()))),
-        })));
+        let left =
+            NegationOp(Box::new(ComparisonOp(ConditionTree {
+                                                 operator: Operator::Equal,
+                                                 left: Box::new(Base(Field("bar".into()))),
+                                                 right: Box::new(Base(Literal("12".into()))),
+                                             })));
 
         let right = ComparisonOp(ConditionTree {
-            operator: Operator::Equal,
-            left: Box::new(Base(Field("foobar".into()))),
-            right: Box::new(Base(Literal("a".into()))),
-        });
+                                     operator: Operator::Equal,
+                                     left: Box::new(Base(Field("foobar".into()))),
+                                     right: Box::new(Base(Literal("a".into()))),
+                                 });
 
         let complete = LogicalOp(ConditionTree {
-            operator: Operator::Or,
-            left: Box::new(left),
-            right: Box::new(right),
-        });
+                                     operator: Operator::Or,
+                                     left: Box::new(left),
+                                     right: Box::new(right),
+                                 });
 
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1, complete);

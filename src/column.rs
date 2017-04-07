@@ -16,9 +16,15 @@ pub enum FunctionExpression {
 impl Display for FunctionExpression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            FunctionExpression::Avg(ref col, d) if d => write!(f, "avg(distinct {})", col.name.as_str()),
-            FunctionExpression::Count(ref col, d) if d => write!(f, "count(distinct {})", col.name.as_str()),
-            FunctionExpression::Sum(ref col, d) if d => write!(f, "sum(distinct {})", col.name.as_str()),
+            FunctionExpression::Avg(ref col, d) if d => {
+                write!(f, "avg(distinct {})", col.name.as_str())
+            }
+            FunctionExpression::Count(ref col, d) if d => {
+                write!(f, "count(distinct {})", col.name.as_str())
+            }
+            FunctionExpression::Sum(ref col, d) if d => {
+                write!(f, "sum(distinct {})", col.name.as_str())
+            }
 
             FunctionExpression::Avg(ref col, _) => write!(f, "avg({})", col.name.as_str()),
             FunctionExpression::Count(ref col, _) => write!(f, "count({})", col.name.as_str()),
@@ -26,8 +32,9 @@ impl Display for FunctionExpression {
             FunctionExpression::Sum(ref col, _) => write!(f, "sum({})", col.name.as_str()),
             FunctionExpression::Max(ref col) => write!(f, "max({})", col.name.as_str()),
             FunctionExpression::Min(ref col) => write!(f, "min({})", col.name.as_str()),
-            FunctionExpression::GroupConcat(ref col, ref s) => write!(f, "group_concat({}, {})",
-                                                                      col.name.as_str(), s),
+            FunctionExpression::GroupConcat(ref col, ref s) => {
+                write!(f, "group_concat({}, {})", col.name.as_str(), s)
+            }
         }
     }
 }
