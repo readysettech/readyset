@@ -2,6 +2,7 @@ mod mir;
 mod passes;
 mod query_graph;
 mod query_signature;
+mod reuse;
 
 use nom_sql::parser as sql_parser;
 use flow::Migration;
@@ -173,6 +174,10 @@ impl SqlIncorporator {
                        "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
                        qg,
                        existing_qg);
+                if reuse::check_compatibility(&qg, existing_qg) {
+                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                    info!(self.log, "Reusing existing QG for {}", query_name);
+                }
             }
             reuse_candidates += 1;
             // TODO(malte): more QG-level reuse
