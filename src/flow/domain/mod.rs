@@ -105,11 +105,9 @@ pub struct Domain {
 
     mode: DomainMode,
     waiting: local::Map<Waiting>,
-    replay_acks: usize,
     replay_paths: HashMap<Tag, ReplayPath>,
 
     inject_tx: Option<mpsc::SyncSender<Packet>>,
-    replay_ack_tx: Option<mpsc::Sender<()>>,
 
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
@@ -138,10 +136,8 @@ impl Domain {
             mode: DomainMode::Forwarding,
             waiting: local::Map::new(),
             replay_paths: HashMap::new(),
-            replay_acks: 0,
 
             inject_tx: None,
-            replay_ack_tx: None,
 
             total_time: Timer::new(),
             total_ptime: Timer::new(),
@@ -626,10 +622,7 @@ impl Domain {
                     Some(Packet::ReplayPiece {
                              link: Link::new(source, path[0]),
                              tag: tag,
-                             context: ReplayPieceContext::Partial {
-                                 for_key: Vec::from(key),
-                                 ack: self.replay_ack_tx.clone().unwrap(),
-                             },
+                             context: ReplayPieceContext::Partial { for_key: Vec::from(key) },
                              data: Records::from_iter(rs.into_iter().cloned()),
                          })
                 } else {
@@ -643,11 +636,6 @@ impl Domain {
 
         if let Some(m) = m {
             self.handle_replay(m);
-            if let ReplayPath { trigger: TriggerEndpoint::Start(..), .. } =
-                self.replay_paths[&tag] {
-                // wait for replay to be handled
-                self.replay_acks += 1;
-            }
             return;
         }
 
@@ -867,12 +855,12 @@ impl Domain {
                     };
 
                     // keep track of whether we're filling any partial holes
-                    let partial_key =
-                        if let ReplayPieceContext::Partial { ref for_key, .. } = context {
-                            Some(for_key)
-                        } else {
-                            None
-                        };
+                    let partial_key = if let ReplayPieceContext::Partial { ref for_key } =
+                        context {
+                        Some(for_key)
+                    } else {
+                        None
+                    };
 
                     for (i, ni) in path.iter().enumerate() {
                         use flow::node::Type;
@@ -989,7 +977,7 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!(self.log, "batch processed");
                         }
-                        ReplayPieceContext::Partial { for_key, .. } => {
+                        ReplayPieceContext::Partial { for_key } => {
                             if self.waiting.contains_key(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 finished = Some((tag, dst, Some(for_key)));
@@ -1235,64 +1223,29 @@ impl Domain {
             .spawn(move || {
                 let (inject_tx, inject_rx) = mpsc::sync_channel(1);
                 let (back_tx, back_rx) = mpsc::channel();
-                let (replay_ack_tx, replay_ack_rx) = mpsc::channel();
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
                 let mut rx_handle = sel.handle(&rx);
                 let mut inject_rx_handle = sel.handle(&inject_rx);
                 let mut back_rx_handle = sel.handle(&back_rx);
-                let mut replay_ack_rx_handle = sel.handle(&replay_ack_rx);
 
                 unsafe {
                     rx_handle.add();
                     inject_rx_handle.add();
                     back_rx_handle.add();
-                    replay_ack_rx_handle.add();
                 }
 
                 self.inject_tx = Some(inject_tx);
-                self.replay_ack_tx = Some(replay_ack_tx);
 
                 self.total_time.start();
                 self.total_ptime.start();
-                let mut skip_main = 0;
-                let mut is_normal = true;
                 loop {
                     self.wait_time.start();
                     let id = sel.wait();
                     self.wait_time.stop();
 
-                    // are we still waiting for replays?
-                    if id == replay_ack_rx_handle.id() {
-                        replay_ack_rx.recv().unwrap();
-                        self.replay_acks -= 1;
-                        // nope, all done! back to normal.
-                        if self.replay_acks == 0 {
-                            unsafe { rx_handle.add() };
-                            is_normal = true;
-                            skip_main = 0;
-                        }
-                        continue;
-                    }
-
-                    // figure out whether we should allow reading from main
-                    if !is_normal {
-                        if skip_main == 100 {
-                            // we've skipped for ten iterations, time to enable main again
-                            unsafe { rx_handle.add() };
-                        } else {
-                            // we should skip some more
-                            skip_main += 1;
-                        }
-                    }
-
                     let m = if id == rx_handle.id() {
-                        if !is_normal {
-                            // we got to read once, now wait again
-                            unsafe { rx_handle.remove() };
-                            skip_main = 0;
-                        }
                         rx_handle.recv()
                     } else if id == inject_rx_handle.id() {
                         inject_rx_handle.recv()
@@ -1308,18 +1261,7 @@ impl Domain {
                         Ok(Packet::RequestUnboundedTx(ack)) => {
                             ack.send(back_tx.clone()).unwrap();
                         }
-                        Ok(m) => {
-                            if let Packet::ReplayPiece {
-                                       context: ReplayPieceContext::Partial { ref ack, .. }, ..
-                                   } = m {
-                                ack.send(()).unwrap();
-                            }
-                            self.handle(m)
-                        }
-                    }
-
-                    if is_normal && self.replay_acks != 0 {
-                        is_normal = false;
+                        Ok(m) => self.handle(m),
                     }
                 }
             })

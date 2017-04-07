@@ -43,10 +43,7 @@ pub enum InitialState {
 
 #[derive(Clone)]
 pub enum ReplayPieceContext {
-    Partial {
-        for_key: Vec<DataType>,
-        ack: mpsc::Sender<()>,
-    },
+    Partial { for_key: Vec<DataType> },
     Regular { last: bool },
 }
 
