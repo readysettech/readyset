@@ -169,17 +169,22 @@ impl SqlIncorporator {
         let mut reuse_candidates = 0;
         for &(ref existing_qg, _) in self.query_graphs.values() {
             // queries are different, but one might be a generalization of the other
-            if existing_qg.signature().is_generalization_of(&qg.signature()) {
-                trace!(self.log,
-                       "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
-                       qg,
-                       existing_qg);
-                if reuse::check_compatibility(&qg, existing_qg) {
-                    // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                    info!(self.log, "Reusing existing QG for {}", query_name);
+            if existing_qg
+                   .signature()
+                   .is_generalization_of(&qg.signature()) {
+                match reuse::check_compatibility(&qg, existing_qg) {
+                    Some(reuse) => {
+                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                        info!(self.log, "Reusing existing QG for {}", query_name);
+                        trace!(self.log,
+                               "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
+                               qg,
+                               existing_qg);
+                        reuse_candidates += 1;
+                    }
+                    None => (),
                 }
             }
-            reuse_candidates += 1;
             // TODO(malte): more QG-level reuse
             // return QueryGraphReuse::ExtendExisting
         }
