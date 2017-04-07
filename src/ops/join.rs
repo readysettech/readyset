@@ -121,18 +121,10 @@ impl Ingredient for Join {
         true
     }
 
-    fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<NodeAddress>> {
         match self.kind {
             JoinType::Left => Some(Some(self.left).into_iter().collect()),
-            JoinType::Inner => {
-                if empty.contains(&self.left) {
-                    Some(Some(self.left).into_iter().collect())
-                } else if empty.contains(&self.right) {
-                    Some(Some(self.right).into_iter().collect())
-                } else {
-                    Some(vec![self.left, self.right].into_iter().collect())
-                }
-            }
+            JoinType::Inner => Some(vec![self.left, self.right].into_iter().collect()),
         }
     }
 

@@ -26,9 +26,7 @@ pub trait Ingredient
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
-    fn must_replay_among(&self,
-                         &HashSet<prelude::NodeAddress>)
-                         -> Option<HashSet<prelude::NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<prelude::NodeAddress>> {
         None
     }
 

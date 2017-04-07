@@ -309,6 +309,7 @@ pub fn initialize(log: &Logger,
                   graph: &mut Graph,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
+                  partial: &mut HashSet<NodeIndex>,
                   mut materialize: HashMap<domain::Index,
                                            HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>) {
@@ -391,7 +392,14 @@ pub fn initialize(log: &Logger,
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
             info!(log, "beginning reconstruction of {:?}", *graph[node]);
-            reconstruct(&log, graph, &empty, &materialize, txs, node, index_on);
+            reconstruct(&log,
+                        graph,
+                        &empty,
+                        partial,
+                        &materialize,
+                        txs,
+                        node,
+                        index_on);
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
             ready(txs, vec![]);
@@ -403,6 +411,7 @@ pub fn initialize(log: &Logger,
 pub fn reconstruct(log: &Logger,
                    graph: &mut Graph,
                    empty: &HashSet<NodeIndex>,
+                   partial: &mut HashSet<NodeIndex>,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
@@ -440,7 +449,7 @@ pub fn reconstruct(log: &Logger,
     //
     // so, first things first, let's find all our paths up the tree
     let mut paths = {
-        let mut on_join = cost_fn(log, graph, empty, materialized, txs);
+        let mut on_join = cost_fn(log, graph, empty, partial, materialized, txs);
         // TODO: what if we're constructing multiple indices?
         // TODO: what if we have a compound index?
         let trace_col = index_on[0][0];
@@ -508,6 +517,7 @@ pub fn reconstruct(log: &Logger,
                          .is_some();
     if partial_ok {
         warn!(log, "using partial materialization");
+        partial.insert(node);
     }
 
     let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
@@ -759,6 +769,7 @@ pub fn reconstruct(log: &Logger,
 fn cost_fn<'a, T>(log: &'a Logger,
                   graph: &'a Graph,
                   empty: &'a HashSet<NodeIndex>,
+                  partial: &'a HashSet<NodeIndex>,
                   materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
                   txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
                   -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
@@ -774,7 +785,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
         };
 
         // keep track of remaining parents
-        let mut parents: Vec<_> = parents.iter().map(|&ni| ni).collect();
+        let mut parents = Vec::from(parents);
 
         let n = &graph[node];
         assert!(n.is_internal());
@@ -785,16 +796,32 @@ fn cost_fn<'a, T>(log: &'a Logger,
             .map(|ni| graph[*ni].addr())
             .collect();
 
-        let options =
-            n.must_replay_among(&empty).expect("join did not have must replay preference");
+        let options = n.must_replay_among().expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
         parents.retain(|&parent| options.contains(&graph[parent].addr()));
         assert!(!parents.is_empty());
 
+        // if there is only one left, we don't have a choice
         if parents.len() == 1 {
             // no need to pick
             return parents.pop();
+        }
+
+        // if *all* the options are empty, we can safely pick any of them
+        if parents.iter().all(|&p| empty.contains(&graph[p].addr())) {
+            return parents.pop();
+        }
+
+        // if any parent is empty, it is tempting to conclude that the join must be empty (which it
+        // must indeed be), and therefore that we can just pick that parent and get a free full
+        // materialization. *however*, this would cause the node to be marked as fully
+        // materialized, which is *not* okay if it has partially a materialized ancestor!
+        if let Some(&parent) = parents.iter().find(|&&p| empty.contains(&graph[p].addr())) {
+            if !parents.iter().any(|p| partial.contains(p)) {
+                // no partial ancestors!
+                return Some(parent);
+            }
         }
 
         // we want to pick the ancestor that causes us to do the least amount of work.

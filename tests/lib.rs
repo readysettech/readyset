@@ -895,7 +895,6 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 #[test]
-#[ignore]
 fn full_vote_migration() {
     // we're trying to force a very particular race, namely that a put arrives for a new join
     // *before* its state has been fully initialized. it may take a couple of iterations to hit
