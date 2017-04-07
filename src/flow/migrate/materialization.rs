@@ -506,12 +506,25 @@ pub fn reconstruct(log: &Logger,
     //
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
-    let partial_ok = index_on.len() == 1 && index_on[0].len() == 1 && paths.len() == 1 &&
-                     paths[0]
-                         .last()
-                         .unwrap()
-                         .1
-                         .is_some();
+    let mut partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
+                         paths.iter().all(|path| {
+                                              path.last()
+                                                  .unwrap()
+                                                  .1
+                                                  .is_some()
+                                          });
+
+    // FIXME: if a reader has no materialized views between it and a union, we will end
+    // up in this case. we *can* solve that case by requesting replays across all
+    // the tagged paths through the union, but since we at this point in the code don't
+    // yet know about those paths, that's a bit inconvenient. we might be able to mvoe
+    // this entire block below the main loop somehow (?), but for now:
+    if partial_ok {
+        if let Type::Reader(_, Reader { .. }) = *graph[node] {
+            partial_ok = paths.len() == 1;
+        }
+    }
+
     if partial_ok {
         warn!(log, "using partial materialization");
         partial.insert(node);
@@ -539,6 +552,10 @@ pub fn reconstruct(log: &Logger,
             assert!(state.is_some());
             let state = state.as_mut().unwrap();
             assert_eq!(state.len(), 0);
+
+            if paths.len() != 1 {
+                unreachable!(); // due to FIXME above
+            }
 
             // since we're partially materializing a reader node,
             // we need to give it a way to trigger replays.
@@ -574,7 +591,7 @@ pub fn reconstruct(log: &Logger,
               })
         .unwrap();
 
-    let mut root_unbounded_tx =
+    let root_unbounded_tx =
         root_domain.map(|d| {
                             let (tx, rx) = mpsc::channel();
                             txs[&d].send(Packet::RequestUnboundedTx(tx)).unwrap();
@@ -717,7 +734,7 @@ pub fn reconstruct(log: &Logger,
                         }
                         Some(..) => {
                             // otherwise, should know what how to trigger partial replay
-                            *trigger = TriggerEndpoint::End(root_unbounded_tx.take().unwrap());
+                            *trigger = TriggerEndpoint::End(root_unbounded_tx.clone().unwrap());
                         }
                     }
                 }
