@@ -338,9 +338,6 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                             _ => unimplemented!(),
                         }
                     });
-
-                // remember the table for the next join
-                prev_table = Some(&table.name);
             }
             _ => unimplemented!(),
         }
