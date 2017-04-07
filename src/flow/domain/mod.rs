@@ -875,43 +875,55 @@ impl Domain {
                         };
 
                     for (i, ni) in path.iter().enumerate() {
+                        use flow::node::Type;
+
+                        let mut n = self.nodes[ni.as_local()].borrow_mut();
+                        let is_reader = if let Type::Reader(Some(..), _) = *n.inner {
+                            true
+                        } else {
+                            false
+                        };
+
+                        // figure out if we're the target of a partial replay.
+                        // this is the case either if the current node is waiting for a replay,
+                        // *or* if the target is a reader. the last case is special in that when a
+                        // client requests a replay, the Reader isn't marked as "waiting".
+                        let target = partial_key.is_some() &&
+                                     (is_reader || self.waiting.contains_key(ni.as_local()));
+
+                        // targets better be last
+                        assert!(!target || i == path.len() - 1);
+
                         // are we about to fill a hole?
-                        if i == path.len() - 1 && partial_key.is_some() && done_tx.is_none() {
+                        if target {
                             let partial_key = partial_key.unwrap();
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(ni.as_local()) {
                                 state.mark_filled(partial_key.clone());
-                            } else {
+                            } else if let Type::Reader(Some(ref mut wh), _) = *n.inner {
                                 // we must be filling a hole in a Reader. we need to ensure that
                                 // the hole for the key we're replaying ends up being filled, even
                                 // if that hole is empty!
-                                use flow::node::Type;
-                                let mut n = self.nodes[ni.as_local()].borrow_mut();
-                                if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                    wh.mark_filled(&partial_key[0]);
-                                }
+                                wh.mark_filled(&partial_key[0]);
+                            } else {
+                                unreachable!();
                             }
                         }
 
                         // process the current message in this node
-                        let mut pr = {
-                            let mut n = self.nodes[ni.as_local()].borrow_mut();
-                            let pr = n.process(m, &mut self.state, &self.nodes, false);
+                        let mut pr = n.process(m, &mut self.state, &self.nodes, false);
 
-                            // we filled a hole! swap the reader.
-                            if pr.misses.is_empty() && i == path.len() - 1 &&
-                               partial_key.is_some() &&
-                               done_tx.is_none() {
-                                use flow::node::Type;
-                                if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                    wh.mark_hole(&partial_key.as_ref().unwrap()[0]);
-                                }
+                        // we filled a hole! swap the reader.
+                        if pr.misses.is_empty() && target && is_reader {
+                            if let Type::Reader(Some(ref mut wh), _) = *n.inner {
+                                wh.mark_hole(&partial_key.as_ref().unwrap()[0]);
                             }
+                        }
 
-                            pr
-                        };
+                        // we're done with the node
+                        drop(n);
 
                         if partial_key.is_some() && !pr.misses.is_empty() {
                             // oh no, we missed during partial replay!
@@ -925,7 +937,7 @@ impl Domain {
                             let miss = pr.misses.swap_remove(0);
 
                             // let's make sure holes aren't considered filled
-                            if i == path.len() - 1 {
+                            if target {
                                 let partial_key = partial_key.unwrap();
                                 if let Some(state) = self.state.get_mut(ni.as_local()) {
                                     state.mark_hole(&partial_key[..]);
@@ -943,7 +955,6 @@ impl Domain {
                             break 'outer;
                         }
                         m = pr.output;
-
 
                         if i == path.len() - 1 {
                             // don't unnecessarily construct the last Message which is then
