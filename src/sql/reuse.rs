@@ -4,9 +4,10 @@ use sql::query_graph::{QueryGraph, QueryGraphEdge};
 use std::str;
 use std::vec::Vec;
 
+#[derive(Clone, Debug)]
 pub enum ReuseType {
     DirectExtension,
-    BackjoinRequired,
+    BackjoinRequired(Vec<Table>),
 }
 
 fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
@@ -190,16 +191,35 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
     for (name, ex_qgn) in &existing_qg.relations {
         let new_qgn = &new_qg.relations[name];
 
-        // iterate over predicates and ensure that each matching one on the existing QG is implied
-        // by the new one
+        // does EQG already have *all* the columns we project?
         let all_projected = new_qgn
             .columns
             .iter()
             .all(|nc| ex_qgn.columns.contains(nc));
         if all_projected {
+            // if so, super -- we can extend directly
             return Some(ReuseType::DirectExtension);
         } else {
-            return None;
+            if name == "computed_columns" {
+                // NQG has some extra columns, and they're computed ones (i.e., grouped/function
+                // columns). We can recompute those, but not via a backjoin.
+                // TODO(malte): be cleverer about this situation
+                return None;
+            }
+
+            // find the extra columns in the EQG to identify backjoins required
+            let backjoin_tables: Vec<_> = new_qgn
+                .columns
+                .iter()
+                .filter(|nc| !ex_qgn.columns.contains(nc) && nc.table.is_some())
+                .map(|c| Table::from(c.table.as_ref().unwrap().as_str()))
+                .collect();
+
+            if backjoin_tables.len() > 0 {
+                return Some(ReuseType::BackjoinRequired(backjoin_tables));
+            } else {
+                panic!("expected to find some backjoin tables!");
+            }
         }
     }
     // XXX(malte):  5b. NQG projects a superset of EQG's edges --> need backjoin
