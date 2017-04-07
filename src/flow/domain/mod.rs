@@ -918,7 +918,7 @@ impl Domain {
                         // we filled a hole! swap the reader.
                         if pr.misses.is_empty() && target && is_reader {
                             if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                wh.mark_hole(&partial_key.as_ref().unwrap()[0]);
+                                wh.swap();
                             }
                         }
 
