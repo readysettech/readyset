@@ -175,12 +175,7 @@ impl SqlIncorporator {
                 match reuse::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        info!(self.log, "Reusing existing QG for {}", query_name);
-                        trace!(self.log,
-                               "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
-                               qg,
-                               existing_qg);
-                        reuse_candidates.push(reuse);
+                        reuse_candidates.push((reuse, existing_qg));
                     }
                     None => (),
                 }
@@ -190,6 +185,10 @@ impl SqlIncorporator {
             info!(self.log,
                   "Identified {} candidate QGs for reuse",
                   reuse_candidates.len());
+            trace!(self.log,
+                   "This QG: {:#?}\nReuse candidates:\n{:#?}",
+                   qg,
+                   reuse_candidates);
             // TODO(malte): score reuse candidates
 
             // return QueryGraphReuse::ExtendExisting(mir_query)
