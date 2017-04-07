@@ -166,7 +166,7 @@ impl SqlIncorporator {
             }
         }
 
-        let mut reuse_candidates = 0;
+        let mut reuse_candidates = Vec::new();
         for &(ref existing_qg, _) in self.query_graphs.values() {
             // queries are different, but one might be a generalization of the other
             if existing_qg
@@ -180,18 +180,19 @@ impl SqlIncorporator {
                                "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
                                qg,
                                existing_qg);
-                        reuse_candidates += 1;
+                        reuse_candidates.push(reuse);
                     }
                     None => (),
                 }
             }
-            // TODO(malte): more QG-level reuse
-            // return QueryGraphReuse::ExtendExisting
         }
-        if reuse_candidates > 0 {
+        if reuse_candidates.len() > 0 {
             info!(self.log,
                   "Identified {} candidate QGs for reuse",
-                  reuse_candidates);
+                  reuse_candidates.len());
+            // TODO(malte): score reuse candidates
+
+            // return QueryGraphReuse::ExtendExisting(mir_query)
         }
 
         (qg, QueryGraphReuse::None)
