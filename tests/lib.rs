@@ -79,8 +79,10 @@ fn tpcw_test_tables() {
 
 #[test]
 fn finkelstein82_test_queries() {
-    assert!(test_queries_from_file(Path::new("tests/finkelstein82.txt"), "Finkelstein 1982")
-        .is_ok())
+    let res = test_queries_from_file(Path::new("tests/finkelstein82.txt"), "Finkelstein 1982");
+    assert!(res.is_ok());
+    // There are 3 tables and 6 queries
+    assert_eq!(res.unwrap(), 9);
 }
 
 #[test]
