@@ -780,6 +780,12 @@ fn domain_amend_migration() {
 
 #[test]
 #[ignore]
+// this test is ignored because partial materialization does not forward for keys unless they are
+// explicitly queried for. to re-add support for streaming consumers of Readers, we would need to
+// add a mechanism for registering interesting a key (effectively triggering a replay of that key
+// when called). this should be fairly straightforward to add in the existing infrastructure (just
+// use the same trigger that's given to the `backlog::ReadHandle` when it is partial), but it's
+// work we're fine putting off for now.
 fn state_replay_migration_stream() {
     // we're going to set up a migration test that requires replaying existing state
     // to do that, we'll first create a schema with just a base table, and write some stuff to it.
