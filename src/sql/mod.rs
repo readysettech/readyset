@@ -908,7 +908,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn it_incorporates_finkelstein1982_naively() {
         use std::io::Read;
         use std::fs::File;
@@ -916,30 +915,30 @@ mod tests {
         // set up graph
         let mut g = Blender::new();
         let mut inc = SqlIncorporator::default();
-        let mut mig = g.start_migration();
+        {
+            let mut mig = g.start_migration();
 
-        let mut f = File::open("tests/finkelstein82.txt").unwrap();
-        let mut s = String::new();
+            let mut f = File::open("tests/finkelstein82.txt").unwrap();
+            let mut s = String::new();
 
-        // Load queries
-        f.read_to_string(&mut s).unwrap();
-        let lines: Vec<String> = s.lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("#"))
-            .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
-                     String::from(l) + "\n"
-                 } else {
-                     String::from(l)
-                 })
-            .collect();
+            // Load queries
+            f.read_to_string(&mut s).unwrap();
+            let lines: Vec<String> = s.lines()
+                .filter(|l| !l.is_empty() && !l.starts_with("#"))
+                .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
+                         String::from(l) + "\n"
+                     } else {
+                         String::from(l)
+                     })
+                .collect();
 
-        // Add them one by one
-        for (i, q) in lines.iter().enumerate() {
-            if let Ok(qfp) = inc.add_query(q, None, &mut mig) {
-                println!("{}: {} -- {}\n", qfp.name, i, q);
-            } else {
-                println!("Failed to parse: {}\n", q);
-            };
-            // println!("{}", inc.graph);
+            // Add them one by one
+            for (i, q) in lines.iter().enumerate() {
+                assert!(inc.add_query(q, None, &mut mig).is_ok());
+            }
+            mig.commit();
         }
+
+        println!("{}", g);
     }
 }
