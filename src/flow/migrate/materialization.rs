@@ -448,16 +448,13 @@ pub fn reconstruct(log: &Logger,
     //   4. tell the domain nearest to the root to start replaying
     //
     // so, first things first, let's find all our paths up the tree
-    let mut paths = {
+    let paths = {
         let mut on_join = cost_fn(log, graph, empty, partial, materialized, txs);
         // TODO: what if we're constructing multiple indices?
         // TODO: what if we have a compound index?
         let trace_col = index_on[0][0];
         keys::provenance_of(graph, node, trace_col, &mut *on_join)
     };
-
-    // next eliminate any that terminate in empty base nodes
-    paths.retain(|path| !empty.contains(&path.last().unwrap().0));
 
     // cut paths so they only reach to the the closest materialized node
     let paths: Vec<_> = paths.into_iter()
