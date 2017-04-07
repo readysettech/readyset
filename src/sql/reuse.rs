@@ -1,7 +1,6 @@
-use nom_sql::Operator;
-use sql::query_graph::{QueryGraph, QueryGraphEdge, QueryGraphNode};
+use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, Table};
+use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
-use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
@@ -64,6 +63,49 @@ fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
     }
 }
 
+fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
+    if np.left == ep.left {
+        // use Finkelstein-style direct elimination to check if this NQG predicate
+        // implies the corresponding predicates in the EQG
+        match *np.right {
+            ConditionExpression::Base(ConditionBase::Literal(ref nv)) => {
+                match *ep.right {
+                    ConditionExpression::Base(ConditionBase::Literal(ref ev)) => {
+                        let ep_op_needed = if nv == ev {
+                            direct_elimination(&np.operator, &Operator::Equal)
+                        } else if nv < ev {
+                            direct_elimination(&np.operator, &Operator::Less)
+                        } else if nv > ev {
+                            direct_elimination(&np.operator, &Operator::Greater)
+                        } else {
+                            None
+                        };
+                        match ep_op_needed {
+                            None => return false,
+                            Some(op) => {
+                                // TODO(malte): the condition is actually weaker than
+                                // this inequality suggests -- it's sufficient for the
+                                // needed operator to be *weaker* than ep.operator to
+                                // reject the EQG.
+                                if ep.operator != op {
+                                    return false;
+                                } else {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    _ => panic!("right-hand side of predicate must currently be literal"),
+                }
+            }
+            _ => panic!("right-hand side of predicate must currently be literal"),
+        }
+    } else {
+        // difference columns on LHS of predicate => cannot imply each other
+        return false;
+    }
+}
+
 pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
     // 1. NQG's nodes is subset of EQG's nodes
     // -- already established via signature check
@@ -91,11 +133,11 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
         // by the new one
         for np in &new_qgn.predicates {
             for ep in &ex_qgn.predicates {
-                if np.left == ep.left || np.right == ep.left {
-                    println!("matching predicates --\nexisting: {:#?},\nnew: {:#?}",
-                             ep,
-                             np);
-                    // TODO(malte): implement implication detection
+                println!("matching predicates --\nexisting: {:#?},\nnew: {:#?}",
+                         ep,
+                         np);
+                if !predicate_implies(np, ep) {
+                    return None;
                 }
             }
         }
@@ -164,4 +206,37 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
 
     // XXX(malte): should this be a positive? If so, what?
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nom_sql::Column;
+
+    #[test]
+    fn predicate_implication() {
+        use nom_sql::ConditionExpression::*;
+        use nom_sql::ConditionBase::*;
+
+        let pa = ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal("10".into()))),
+        };
+        let pb = ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal("10".into()))),
+        };
+        let pc = ConditionTree {
+            operator: Operator::Equal,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal("5".into()))),
+        };
+
+        assert!(predicate_implies(&pa, &pb));
+        assert!(predicate_implies(&pb, &pa));
+        assert!(!predicate_implies(&pa, &pc));
+        assert!(!predicate_implies(&pc, &pa));
+    }
 }
