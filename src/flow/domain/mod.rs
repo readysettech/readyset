@@ -1251,6 +1251,12 @@ impl Domain {
                 self.total_time.start();
                 self.total_ptime.start();
                 loop {
+                    // treat partial replay requests preferentially
+                    if let Ok(m) = back_rx.try_recv() {
+                        self.handle(m);
+                        continue;
+                    }
+
                     self.wait_time.start();
                     let id = sel.wait();
                     self.wait_time.stop();
