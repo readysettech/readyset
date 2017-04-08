@@ -1241,9 +1241,13 @@ impl Domain {
                 let mut back_rx_handle = sel.handle(&back_rx);
 
                 unsafe {
-                    rx_handle.add();
+                    // select is currently not fair, but tries in order
+                    // first try inject, because it'll complete a replay
                     inject_rx_handle.add();
+                    // then see if there are outstanding replay requests
                     back_rx_handle.add();
+                    // and lastly, see if there's new data
+                    rx_handle.add();
                 }
 
                 self.inject_tx = Some(inject_tx);
@@ -1251,12 +1255,6 @@ impl Domain {
                 self.total_time.start();
                 self.total_ptime.start();
                 loop {
-                    // treat partial replay requests preferentially
-                    if let Ok(m) = back_rx.try_recv() {
-                        self.handle(m);
-                        continue;
-                    }
-
                     self.wait_time.start();
                     let id = sel.wait();
                     self.wait_time.stop();
