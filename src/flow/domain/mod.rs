@@ -897,19 +897,23 @@ impl Domain {
                         let mut misses =
                             n.process(&mut m, keyed_by, &mut self.state, &self.nodes, false);
 
-                        let still_hole = if let Packet::None = m {
-                            // the node captured our replay -- nothing more for us to do.
-                            // it will eventually release, and then all the other things will
-                            // happen. for now though, we need to reset the hole we opened up.
-                            true
-                        } else {
-                            !misses.is_empty()
-                        };
-
                         if partial_key.is_some() && target {
-                            if still_hole {
-                                // oh no, we missed during partial replay!
-                                // let's make sure holes aren't considered filled
+                            let hole_filled = if let Packet::None = m {
+                                // this can happen for one of two reasons: either, we're a Reader,
+                                // which always consumes its input, or we're another node, in which
+                                // case the node captured our replay. in the former case, the hole
+                                // was filled correctly. in the latter case, there is nothing more
+                                // for us to do. it will eventually release, and then all the other
+                                // things will happen. for now though, we need to reset the hole we
+                                // opened up. crucially though, the hole was *not* filled.
+                                is_reader
+                            } else {
+                                // we produced some output, but did we also miss?
+                                // if we did, we don't want to consider the hole filled.
+                                misses.is_empty()
+                            };
+
+                            if !hole_filled {
                                 let partial_key = partial_key.unwrap();
                                 if let Some(state) = self.state.get_mut(ni.as_local()) {
                                     state.mark_hole(&partial_key[..]);
