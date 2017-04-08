@@ -174,43 +174,33 @@ impl Domain {
         }
 
         // how do we replay to miss?
-        let tag = {
-            let mut tags = paths.iter()
-                .filter(|&(_, ref info)| match info.trigger {
-                            TriggerEndpoint::End(..) |
-                            TriggerEndpoint::Local(..) => {
-                                info.path
-                                    .last()
-                                    .unwrap()
-                                    .0
-                                    .as_local() == &miss
-                            }
-                            _ => false,
-                        })
-                .map(|(tag, _)| *tag);
+        let tags = paths.iter_mut().filter(|&(_, ref info)| match info.trigger {
+                                               TriggerEndpoint::End(..) |
+                                               TriggerEndpoint::Local(..) => {
+                                                   info.path
+                                                       .last()
+                                                       .unwrap()
+                                                       .0
+                                                       .as_local() ==
+                                                   &miss
+                                               }
+                                               _ => false,
+                                           });
 
-            let tag = tags.next();
-            if tags.next().is_some() {
-                // union for example
-                unimplemented!();
+        for (&tag, replay) in tags {
+            // send a message to the source domain(s) responsible
+            // for the chosen tag so they'll start replay.
+            let key = key.clone(); // :(
+            match replay.trigger {
+                TriggerEndpoint::Local(ref key) => {
+                    unimplemented!();
+                }
+                TriggerEndpoint::End(ref mut trigger) => {
+                    trigger.send(Packet::RequestPartialReplay { tag, key }).unwrap();
+                }
+                TriggerEndpoint::Start(..) => unreachable!(),
+                TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
             }
-
-            tag.expect("partial replay attempted on node with no partial path")
-        };
-
-
-        // send a message to the source domain(s) responsible
-        // for the chosen tag so they'll start replay.
-        let replay = paths.get_mut(&tag).unwrap();
-        match replay.trigger {
-            TriggerEndpoint::Local(ref key) => {
-                unimplemented!();
-            }
-            TriggerEndpoint::End(ref mut trigger) => {
-                trigger.send(Packet::RequestPartialReplay { tag, key }).unwrap();
-            }
-            TriggerEndpoint::Start(..) => unreachable!(),
-            TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
         }
     }
 

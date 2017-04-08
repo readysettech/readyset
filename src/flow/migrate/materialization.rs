@@ -530,7 +530,6 @@ pub fn reconstruct(log: &Logger,
         partial.insert(node);
     }
 
-    let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
     let domain = graph[node].domain();
     let addr = graph[node].addr();
     let cols = graph[node].fields().len();
@@ -541,6 +540,8 @@ pub fn reconstruct(log: &Logger,
     use flow::payload::InitialState;
     use flow::node::{Type, Reader, NodeHandle};
 
+    // if there's only one path
+    let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
     let mut first_tag = Some(Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
 
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -590,13 +591,6 @@ pub fn reconstruct(log: &Logger,
                   state: s,
               })
         .unwrap();
-
-    let root_unbounded_tx =
-        root_domain.map(|d| {
-                            let (tx, rx) = mpsc::channel();
-                            txs[&d].send(Packet::RequestUnboundedTx(tx)).unwrap();
-                            rx.recv().unwrap()
-                        });
 
     // NOTE:
     // there could be no paths left here. for example, if a symmetric join is joining an existing
@@ -734,7 +728,10 @@ pub fn reconstruct(log: &Logger,
                         }
                         Some(..) => {
                             // otherwise, should know what how to trigger partial replay
-                            *trigger = TriggerEndpoint::End(root_unbounded_tx.clone().unwrap());
+                            let (tx, rx) = mpsc::channel();
+                            txs[&segments[0].0].send(Packet::RequestUnboundedTx(tx)).unwrap();
+                            let root_unbounded_tx = rx.recv().unwrap();
+                            *trigger = TriggerEndpoint::End(root_unbounded_tx);
                         }
                     }
                 }
