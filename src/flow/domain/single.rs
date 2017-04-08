@@ -26,11 +26,6 @@ pub struct NodeDescriptor {
     pub children: Vec<NodeAddress>,
 }
 
-pub struct FinalProcessingResult {
-    pub output: Packet,
-    pub misses: Vec<Miss>,
-}
-
 impl NodeDescriptor {
     pub fn new(graph: &mut Graph, node: NodeIndex) -> Self {
         use petgraph;
@@ -49,12 +44,12 @@ impl NodeDescriptor {
     }
 
     pub fn process(&mut self,
-                   mut m: Packet,
+                   m: &mut Packet,
                    keyed_by: Option<usize>,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    swap: bool)
-                   -> FinalProcessingResult {
+                   -> Vec<Miss> {
 
         use flow::payload::TransactionState;
         let addr = self.addr();
@@ -66,10 +61,7 @@ impl NodeDescriptor {
                                                     *addr.as_local(),
                                                     state.get_mut(addr.as_local()));
                            });
-                FinalProcessingResult {
-                    output: m,
-                    misses: misses,
-                }
+                misses
             }
             flow::node::Type::Reader(ref mut w, ref r) => {
                 if let Some(ref mut state) = *w {
@@ -128,7 +120,7 @@ impl NodeDescriptor {
                     state.add(m.data().iter().cloned());
                     if let Packet::Transaction {
                                state: TransactionState::Committed(ts, ..), ..
-                           } = m {
+                           } = *m {
                         state.update_ts(ts);
                     }
 
@@ -164,11 +156,7 @@ impl NodeDescriptor {
                         .is_ok()
                 });
 
-                // readers never have children
-                FinalProcessingResult {
-                    output: Packet::None,
-                    misses: Vec::new(),
-                }
+                vec![]
             }
             flow::node::Type::Hook(ref mut h) => {
                 if let &mut Some(ref mut h) = h {
@@ -176,10 +164,7 @@ impl NodeDescriptor {
                 } else {
                     unreachable!();
                 }
-                FinalProcessingResult {
-                    output: Packet::None,
-                    misses: Vec::new(),
-                }
+                vec![]
             }
             flow::node::Type::Egress { ref txs, ref tags } => {
                 // send any queued updates to all external children
@@ -199,7 +184,8 @@ impl NodeDescriptor {
                         .expect("egress node told about replay message, but not on replay path")
                                             });
 
-                let mut m = Some(m); // so we can use .take()
+                use std::mem;
+                let mut m = Some(mem::replace(m, Packet::None)); // so we can use .take()
                 for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
                     let mut take = txi == txn;
                     if let Some(replay_to) = replay_to.as_ref() {
@@ -232,17 +218,14 @@ impl NodeDescriptor {
                     }
                 }
                 debug_assert!(m.is_none());
-                FinalProcessingResult {
-                    output: Packet::None,
-                    misses: Vec::new(),
-                }
+                vec![]
             }
             flow::node::Type::Internal(ref mut i) => {
                 let from = m.link().src;
 
                 let replay = if let Packet::ReplayPiece {
                            context: flow::payload::ReplayPieceContext::Partial { ref for_key }, ..
-                       } = m {
+                       } = *m {
                     assert!(keyed_by.is_some());
                     assert_eq!(for_key.len(), 1);
                     Some((keyed_by.unwrap(), for_key[0].clone()))
@@ -275,10 +258,9 @@ impl NodeDescriptor {
                 });
 
                 if captured {
-                    return FinalProcessingResult {
-                               output: Packet::None,
-                               misses: misses,
-                           };
+                    use std::mem;
+                    mem::replace(m, Packet::None);
+                    return misses;
                 }
 
                 m.map_data(|rs| {
@@ -287,10 +269,7 @@ impl NodeDescriptor {
                                                          state.get_mut(addr.as_local())));
                            });
 
-                FinalProcessingResult {
-                    output: m,
-                    misses: misses,
-                }
+                misses
             }
             flow::node::Type::Source => unreachable!(),
         }

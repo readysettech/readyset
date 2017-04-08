@@ -204,7 +204,7 @@ impl Domain {
         }
     }
 
-    fn dispatch(m: Packet,
+    fn dispatch(mut m: Packet,
                 not_ready: &HashSet<LocalNodeIndex>,
                 mode: &mut DomainMode,
                 waiting: &mut local::Map<Waiting>,
@@ -239,14 +239,12 @@ impl Domain {
         let mut n = nodes[me.as_local()].borrow_mut();
         process_times.start(*me.as_local());
         process_ptimes.start(*me.as_local());
-        let m = n.process(m, None, states, nodes, true);
+        n.process(&mut m, None, states, nodes, true);
         process_ptimes.stop();
         process_times.stop();
         drop(n);
 
-        let m = m.output;
         // ignore misses during regular forwarding
-
         match m {
             Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
@@ -265,7 +263,7 @@ impl Domain {
             Packet::FullReplay { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
-            m => unreachable!("dispatch process got {:?}", m),
+            ref m => unreachable!("dispatch process got {:?}", m),
         }
 
         let mut m = Some(m); // so we can choose to take() the last one
@@ -292,7 +290,13 @@ impl Domain {
                                                  process_times,
                                                  process_ptimes,
                                                  enable_output) {
-                    output_messages.entry(k).or_insert_with(Vec::new).append(&mut v);
+                    use std::collections::hash_map::Entry;
+                    match output_messages.entry(k) {
+                        Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
+                        Entry::Vacant(slot) => {
+                            slot.insert(v);
+                        }
+                    }
                 }
             } else {
                 let mut data = m.take_data();
@@ -350,7 +354,7 @@ impl Domain {
             };
 
             let addr = n.borrow().addr();
-            let m = Packet::Transaction {
+            let mut m = Packet::Transaction {
                 link: Link::new(addr, addr), // TODO: message should be from actual parent, not self.
                 data: data,
                 state: ts.clone(),
@@ -362,7 +366,7 @@ impl Domain {
 
             self.process_times.start(*addr.as_local());
             self.process_ptimes.start(*addr.as_local());
-            self.nodes[addr.as_local()].borrow_mut().process(m,
+            self.nodes[addr.as_local()].borrow_mut().process(&mut m,
                                                              None,
                                                              &mut self.state,
                                                              &self.nodes,
@@ -740,13 +744,13 @@ impl Domain {
                         let mut n = self.nodes[node.as_local()].borrow_mut();
                         if let Type::Egress { .. } = *n.inner {
                             // forward the state to the next domain without doing anything with it.
-                            let p = Packet::FullReplay {
+                            let mut p = Packet::FullReplay {
                                 tag: tag,
                                 link: link, // the egress node will fix this up
                                 state: state,
                             };
                             debug!(self.log, "doing bulk egress forward");
-                            n.process(p, None, &mut self.state, &self.nodes, false);
+                            n.process(&mut p, None, &mut self.state, &self.nodes, false);
                             debug!(self.log, "bulk egress forward completed");
                             drop(n);
                         } else {
@@ -899,15 +903,16 @@ impl Domain {
                         }
 
                         // process the current message in this node
-                        let mut pr = n.process(m, keyed_by, &mut self.state, &self.nodes, false);
+                        let mut misses =
+                            n.process(&mut m, keyed_by, &mut self.state, &self.nodes, false);
 
-                        let still_hole = if let Packet::None = pr.output {
+                        let still_hole = if let Packet::None = m {
                             // the node captured our replay -- nothing more for us to do.
                             // it will eventually release, and then all the other things will
                             // happen. for now though, we need to reset the hole we opened up.
                             true
                         } else {
-                            !pr.misses.is_empty()
+                            !misses.is_empty()
                         };
 
                         if partial_key.is_some() && target {
@@ -934,27 +939,25 @@ impl Domain {
                         // we're done with the node
                         drop(n);
 
-                        if let Packet::None = pr.output {
+                        if let Packet::None = m {
                             // there is nothing more to do with this message
                             // it's either hit the end of a path, or it has been captured
                             break;
                         }
 
                         // if we missed during replay, we need to do a replay
-                        if partial_key.is_some() && !pr.misses.is_empty() {
+                        if partial_key.is_some() && !misses.is_empty() {
                             // replays are always for just one key
-                            assert!(pr.misses.iter().all(|miss| {
-                                                             miss.node == pr.misses[0].node &&
-                                                             miss.key == pr.misses[0].key
-                                                         }));
-                            let miss = pr.misses.swap_remove(0);
+                            assert!(misses.iter().all(|miss| {
+                                                          miss.node == misses[0].node &&
+                                                          miss.key == misses[0].key
+                                                      }));
+                            let miss = misses.swap_remove(0);
                             need_replay = Some((miss.node, miss.key, tag));
                             break 'outer;
                         }
 
                         // we're all good -- continue propagating
-                        m = pr.output;
-
                         if m.is_empty() {
                             if let ReplayPieceContext::Regular { last: false } = context {
                                 // don't continue processing empty updates, *except* if this is the

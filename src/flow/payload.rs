@@ -246,8 +246,9 @@ impl Packet {
         }
     }
 
-    pub fn take_data(self) -> Records {
-        match self {
+    pub fn take_data(&mut self) -> Records {
+        use std::mem;
+        match mem::replace(self, Packet::None) {
             Packet::Message { data, .. } => data,
             Packet::Transaction { data, .. } => data,
             Packet::ReplayPiece { data, .. } => data,
