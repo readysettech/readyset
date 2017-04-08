@@ -147,15 +147,10 @@ impl Domain {
         }
     }
 
-    fn on_replay_miss(waiting: &mut local::Map<Waiting>,
-                      paths: &mut HashMap<Tag, ReplayPath>,
-                      miss: LocalNodeIndex,
-                      key: Vec<DataType>,
-                      needed_for: Tag) {
-
+    fn on_replay_miss(&mut self, miss: LocalNodeIndex, key: Vec<DataType>, needed_for: Tag) {
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut already_filling = false;
-        let mut subscribed = match waiting.remove(&miss) {
+        let mut subscribed = match self.waiting.remove(&miss) {
             Some(Waiting { subscribed }) => {
                 already_filling = subscribed.iter().any(|s| s.key == key);
                 subscribed
@@ -166,7 +161,7 @@ impl Domain {
                             key: key.clone(),
                             tag: needed_for,
                         });
-        waiting.insert(miss, Waiting { subscribed });
+        self.waiting.insert(miss, Waiting { subscribed });
 
         if already_filling {
             // no need to trigger again
@@ -174,18 +169,18 @@ impl Domain {
         }
 
         // how do we replay to miss?
-        let tags = paths.iter_mut().filter(|&(_, ref info)| match info.trigger {
-                                               TriggerEndpoint::End(..) |
-                                               TriggerEndpoint::Local(..) => {
-                                                   info.path
-                                                       .last()
-                                                       .unwrap()
-                                                       .0
-                                                       .as_local() ==
-                                                   &miss
-                                               }
-                                               _ => false,
-                                           });
+        let tags = self.replay_paths.iter_mut().filter(|&(_, ref info)| match info.trigger {
+                                                           TriggerEndpoint::End(..) |
+                                                           TriggerEndpoint::Local(..) => {
+                                                               info.path
+                                                                   .last()
+                                                                   .unwrap()
+                                                                   .0
+                                                                   .as_local() ==
+                                                               &miss
+                                                           }
+                                                           _ => false,
+                                                       });
 
         for (&tag, replay) in tags {
             // send a message to the source domain(s) responsible
@@ -641,11 +636,7 @@ impl Domain {
         // we must have missed in our lookup,
         // so we have a partial replay through a partial replay
         // trigger a replay to source node, and enqueue this request.
-        Self::on_replay_miss(&mut self.waiting,
-                             &mut self.replay_paths,
-                             *source.as_local(),
-                             Vec::from(key),
-                             tag);
+        self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
     }
 
     fn handle_replay(&mut self, m: Packet) {
@@ -1007,7 +998,7 @@ impl Domain {
         }
 
         if let Some((node, key, tag)) = need_replay {
-            Self::on_replay_miss(&mut self.waiting, &mut self.replay_paths, node, key, tag);
+            self.on_replay_miss(node, key, tag);
             return;
         }
 
