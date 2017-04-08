@@ -477,6 +477,7 @@ impl Domain {
                                          });
             }
             Packet::RequestPartialReplay { tag, key } => {
+                trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "got replay request");
                 self.seed_replay(tag, &key[..]);
             }
             Packet::StartReplay { tag, from, ack } => {
@@ -629,6 +630,7 @@ impl Domain {
         };
 
         if let Some(m) = m {
+            trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "satisfied replay request");
             self.handle_replay(m);
             return;
         }
@@ -834,7 +836,7 @@ impl Domain {
                     context,
                 } => {
                     if let ReplayPieceContext::Partial { .. } = context {
-                        trace!(self.log, "replaying batch"; "#" => data.len());
+                        trace!(self.log, "replaying batch"; "#" => data.len(), "tag" => tag.id());
                     } else {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
