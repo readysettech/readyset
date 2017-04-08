@@ -9,7 +9,7 @@ use flow::Migration;
 use flow::core::NodeAddress;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
-use self::mir::{MirNodeRef, SqlToMirConverter};
+use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -45,7 +45,7 @@ pub struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeAddress>,
     num_queries: usize,
-    query_graphs: HashMap<u64, (QueryGraph, MirNodeRef)>,
+    query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
 }
@@ -140,7 +140,7 @@ impl SqlIncorporator {
         let qg_hash = qg.signature().hash;
         match self.query_graphs.get(&qg_hash) {
             None => (),
-            Some(&(ref existing_qg, ref leaf_mir_node)) => {
+            Some(&(ref existing_qg, ref mir_query)) => {
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature() &&
@@ -150,18 +150,16 @@ impl SqlIncorporator {
                     info!(self.log,
                           "An exact match for query \"{}\" already exists, reusing it",
                           query_name);
-                    return (qg, QueryGraphReuse::ExactMatch(leaf_mir_node.clone()));
+                    return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
                     // QGs are identical, except for parameters (or their order)
                     info!(self.log,
                           "Query \"{}\" has an exact match modulo parameters, so making a new reader",
                           query_name);
 
-                    let params = qg.parameters()
-                        .into_iter()
-                        .cloned()
-                        .collect();
-                    return (qg, QueryGraphReuse::ReaderOntoExisting(leaf_mir_node.clone(), params));
+                    let params = qg.parameters().into_iter().cloned().collect();
+                    return (qg,
+                            QueryGraphReuse::ReaderOntoExisting(mir_query.leaf.clone(), params));
                 }
             }
         }
@@ -232,8 +230,8 @@ impl SqlIncorporator {
         // TODO(malte): get rid of duplication and figure out where to track this state
         self.view_schemas.insert(String::from(query_name), fields);
 
-        // We made a new query, so store the query graph and the corresponding leaf MIR node
-        //self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
+        // We made a new query, so store the query graph and the corresponding leaf MIR query
+        //self.query_graphs.insert(qg.signature().hash, (qg, mir));
 
         qfp
     }
@@ -301,7 +299,7 @@ impl SqlIncorporator {
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
+        self.query_graphs.insert(qg.signature().hash, (qg, mir));
 
         qfp
     }
