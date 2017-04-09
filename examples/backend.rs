@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use distributary::{Blender, DataType, Mutator, Recipe};
 
 type Datas = Vec<Vec<DataType>>;
-type Getter = Box<Fn(&DataType) -> Result<Datas, ()> + Send + Sync>;
+type Getter = Box<Fn(&DataType) -> Result<Datas, ()> + Send>;
 
 pub struct Backend {
     getters: HashMap<String, Getter>,

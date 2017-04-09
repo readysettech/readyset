@@ -968,7 +968,6 @@ impl SqlToMirConverter {
                 v
             });
 
-            // translate aliases on leaf columns only
             let leaf_project_node =
                 self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
                                        final_node,

@@ -21,8 +21,11 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
     while !queue.is_empty() {
         let mn = queue.pop().unwrap();
 
+        // a node needs all of the columns it projects into its output
+        // however, it may also need *additional* columns to perform its functionality; consider,
+        // e.g., a filter that filters on a column that it doesn't project
         let needed_columns: Vec<Column> = mn.borrow()
-            .columns()
+            .referenced_columns()
             .into_iter()
             .filter(|c| {
                         !mn.borrow()
@@ -30,18 +33,18 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
                              .iter()
                              .any(|a| a.borrow().columns().contains(c))
                     })
-            .cloned()
             .collect();
 
+        let mut found: Vec<&Column> = Vec::new();
         for ancestor in mn.borrow().ancestors() {
             if ancestor.borrow().ancestors().len() == 0 {
                 // base, do nothing
                 continue;
             }
             for c in &needed_columns {
-                if c.table.is_some() && c.function.is_none() && has_column(ancestor, c) {
+                if !found.contains(&c) && has_column(ancestor, c) {
                     ancestor.borrow_mut().add_column(c.clone());
-                    break;
+                    found.push(c);
                 }
             }
             queue.push(ancestor.clone());

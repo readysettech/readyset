@@ -268,10 +268,12 @@ impl SqlIncorporator {
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter.named_query_to_mir(query_name, query, &qg);
 
-        trace!(self.log, "Unoptimized MIR: {:#?}", mir);
+        trace!(self.log, "Unoptimized MIR: {}", mir);
 
         // run MIR-level optimizations
         mir = mir.optimize();
+
+        trace!(self.log, "Optimized MIR: {}", mir);
 
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)

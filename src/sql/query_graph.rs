@@ -211,6 +211,34 @@ fn classify_conditionals(ce: &ConditionExpression,
     }
 }
 
+fn tables_referred_in_condition(ce: &ConditionExpression) -> Vec<String> {
+    let mut tables = Vec::new();
+    match *ce {
+        ConditionExpression::LogicalOp(ref ct) |
+        ConditionExpression::ComparisonOp(ref ct) => {
+            for t in tables_referred_in_condition(&*ct.left)
+                    .into_iter()
+                    .chain(tables_referred_in_condition(&*ct.right).into_iter()) {
+                if !tables.contains(&t) {
+                    tables.push(t.clone());
+                }
+            }
+        }
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => {
+            match f.table {
+                Some(ref t) => {
+                    if !tables.contains(t) {
+                        tables.push(t.clone());
+                    }
+                }
+                None => (),
+            }
+        }
+        _ => unimplemented!(),
+    }
+    tables
+}
+
 pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
@@ -272,26 +300,38 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         Box::new(ConditionExpression::Base(ConditionBase::Field(col)))
     };
     // 2a. Explicit joins
-    let mut prev_table = None;
+    // The table specified in the query is available for USING joins.
+    let prev_table = Some(st.tables
+                              .last()
+                              .as_ref()
+                              .unwrap()
+                              .name
+                              .clone());
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
-                // if this is the first explicit join, we're joining against the last table in
-                // the list of tables
-                if prev_table.is_none() {
-                    prev_table = Some(&st.tables
-                                           .last()
-                                           .as_ref()
-                                           .unwrap()
-                                           .name);
-                }
+                // will be defined by join constraint
+                let left_table;
+                let right_table;
 
                 let join_pred = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
+                        // find all distinct tables mentioned in the condition
+                        // conditions for now.
+                        let mut tables_mentioned = tables_referred_in_condition(cond);
+
                         match *cond {
                             ConditionExpression::ComparisonOp(ref ct) => {
-                                // the tables might be the other way around compared to how
-                                // they're specified in the query; if so, flip them
+                                assert_eq!(tables_mentioned.len(), 2);
+                                // XXX(malte): these should always be in query order; I think they
+                                // usually are in practice, but there is no guarantee since we just
+                                // extract them in whatever order they're mentiond in the join
+                                // predicate in
+                                left_table = tables_mentioned.remove(0);
+                                right_table = tables_mentioned.remove(0);
+
+                                // the condition tree might specify tables in opposite order to
+                                // their join order in the query; if so, flip them
                                 // TODO(malte): this only deals with simple, flat join
                                 // conditions for now.
                                 let l = match *ct.left.as_ref() {
@@ -302,8 +342,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     ConditionExpression::Base(ConditionBase::Field(ref f)) => f,
                                     _ => unimplemented!(),
                                 };
-                                if *l.table.as_ref().unwrap() == table.name &&
-                                   *r.table.as_ref().unwrap() == *prev_table.unwrap() {
+                                if *l.table.as_ref().unwrap() == right_table &&
+                                   *r.table.as_ref().unwrap() == left_table {
                                     ConditionTree {
                                         operator: ct.operator.clone(),
                                         left: ct.right.clone(),
@@ -319,25 +359,28 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     JoinConstraint::Using(ref cols) => {
                         assert_eq!(cols.len(), 1);
                         let col = cols.iter().next().unwrap();
+
+                        left_table = prev_table.as_ref().unwrap().clone();
+                        right_table = table.name.clone();
+
                         ConditionTree {
                             operator: Operator::Equal,
-                            left: wrapcol(prev_table.unwrap(), &col.name),
-                            right: wrapcol(&table.name, &col.name),
+                            left: wrapcol(&left_table, &col.name),
+                            right: wrapcol(&right_table, &col.name),
                         }
                     }
                 };
 
-                // add joined table to relations if not present already
-                let against = table.name.clone();
                 // add edge for join
-                let mut _e =
-                    qg.edges.entry((prev_table.unwrap().clone(), against)).or_insert_with(|| {
-                        match jc.operator {
-                            JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
-                            JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
-                            _ => unimplemented!(),
-                        }
-                    });
+                let mut _e = qg.edges
+                    .entry((left_table.clone(), right_table.clone()))
+                    .or_insert_with(|| match jc.operator {
+                                        JoinOperator::LeftJoin => {
+                                            QueryGraphEdge::LeftJoin(vec![join_pred])
+                                        }
+                                        JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
+                                        _ => unimplemented!(),
+                                    });
             }
             _ => unimplemented!(),
         }
@@ -451,19 +494,23 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // 4. Add query graph nodes for any computed columns, which won't be represented in the
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
-        match field {
-            &FieldExpression::All |
-            &FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
-            &FieldExpression::Col(ref c) => {
+        match *field {
+            FieldExpression::All |
+            FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
+            FieldExpression::Col(ref c) => {
                 match c.function {
                     None => (),  // we've already dealt with this column as part of some relation
                     Some(_) => {
-                        // add a special node representing the computed columns
-                        // TODO(malte): the predicates here should probably reflect HAVING
-                        // conditions, if any are present
-                        let mut n = new_node(String::from("computed_columns"), vec![], st);
+                        // add a special node representing the computed columns; if it already
+                        // exists, add another computed column to it
+                        let mut n = qg.relations
+                            .entry(String::from("computed_columns"))
+                            .or_insert_with(|| {
+                                                new_node(String::from("computed_columns"),
+                                                         vec![],
+                                                         st)
+                                            });
                         n.columns.push(c.clone());
-                        qg.relations.insert(String::from("computed_columns"), n);
                     }
                 }
             }
