@@ -506,18 +506,30 @@ pub fn reconstruct(log: &Logger,
     //
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
-    let partial_ok = index_on.len() == 1 && index_on[0].len() == 1 && paths.len() == 1 &&
-                     paths[0]
-                         .last()
-                         .unwrap()
-                         .1
-                         .is_some();
+    let mut partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
+                         paths.iter().all(|path| {
+                                              path.last()
+                                                  .unwrap()
+                                                  .1
+                                                  .is_some()
+                                          });
+
+    // FIXME: if a reader has no materialized views between it and a union, we will end
+    // up in this case. we *can* solve that case by requesting replays across all
+    // the tagged paths through the union, but since we at this point in the code don't
+    // yet know about those paths, that's a bit inconvenient. we might be able to mvoe
+    // this entire block below the main loop somehow (?), but for now:
+    if partial_ok {
+        if let Type::Reader(_, Reader { .. }) = *graph[node] {
+            partial_ok = paths.len() == 1;
+        }
+    }
+
     if partial_ok {
         warn!(log, "using partial materialization");
         partial.insert(node);
     }
 
-    let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
     let domain = graph[node].domain();
     let addr = graph[node].addr();
     let cols = graph[node].fields().len();
@@ -528,6 +540,8 @@ pub fn reconstruct(log: &Logger,
     use flow::payload::InitialState;
     use flow::node::{Type, Reader, NodeHandle};
 
+    // if there's only one path
+    let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
     let mut first_tag = Some(Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
 
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -539,6 +553,10 @@ pub fn reconstruct(log: &Logger,
             assert!(state.is_some());
             let state = state.as_mut().unwrap();
             assert_eq!(state.len(), 0);
+
+            if paths.len() != 1 {
+                unreachable!(); // due to FIXME above
+            }
 
             // since we're partially materializing a reader node,
             // we need to give it a way to trigger replays.
@@ -573,13 +591,6 @@ pub fn reconstruct(log: &Logger,
                   state: s,
               })
         .unwrap();
-
-    let mut root_unbounded_tx =
-        root_domain.map(|d| {
-                            let (tx, rx) = mpsc::channel();
-                            txs[&d].send(Packet::RequestUnboundedTx(tx)).unwrap();
-                            rx.recv().unwrap()
-                        });
 
     // NOTE:
     // there could be no paths left here. for example, if a symmetric join is joining an existing
@@ -622,7 +633,7 @@ pub fn reconstruct(log: &Logger,
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
         let mut last_domain = None;
-        for (node, _) in path {
+        for (node, key) in path {
             let domain = graph[node].domain();
             if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
@@ -632,27 +643,25 @@ pub fn reconstruct(log: &Logger,
             segments.last_mut()
                 .unwrap()
                 .1
-                .push(node);
+                .push((node, key));
         }
 
         debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
 
-        let locals = |i: usize| -> Vec<NodeAddress> {
-            if i == 0 {
+        let locals = |i: usize| -> Vec<(NodeAddress, Option<usize>)> {
+            let skip = if i == 0 {
                 // we're not replaying through the starter node
-                segments[i]
-                    .1
-                    .iter()
-                    .skip(1)
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
+                1
             } else {
-                segments[i]
-                    .1
-                    .iter()
-                    .map(|&ni| graph[ni].addr())
-                    .collect::<Vec<_>>()
-            }
+                0
+            };
+
+            segments[i]
+                .1
+                .iter()
+                .skip(skip)
+                .map(|&(ni, key)| (graph[ni].addr(), key))
+                .collect()
         };
 
         let (wait_tx, wait_rx) = mpsc::sync_channel(segments.len());
@@ -687,7 +696,7 @@ pub fn reconstruct(log: &Logger,
             if i == 0 {
                 // first domain also gets to know source node
                 if let Packet::SetupReplayPath { ref mut source, .. } = setup {
-                    *source = Some(graph[nodes[0]].addr());
+                    *source = Some(graph[nodes[0].0].addr());
                 }
             }
             if segments.len() == 1 {
@@ -719,7 +728,10 @@ pub fn reconstruct(log: &Logger,
                         }
                         Some(..) => {
                             // otherwise, should know what how to trigger partial replay
-                            *trigger = TriggerEndpoint::End(root_unbounded_tx.take().unwrap());
+                            let (tx, rx) = mpsc::channel();
+                            txs[&segments[0].0].send(Packet::RequestUnboundedTx(tx)).unwrap();
+                            let root_unbounded_tx = rx.recv().unwrap();
+                            *trigger = TriggerEndpoint::End(root_unbounded_tx);
                         }
                     }
                 }
@@ -727,9 +739,9 @@ pub fn reconstruct(log: &Logger,
 
             if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
-                if let flow::node::Type::Egress { ref tags, .. } = *graph[*nodes.last().unwrap()] {
+                if let flow::node::Type::Egress { ref tags, .. } = *graph[nodes.last().unwrap().0] {
                     let mut tags = tags.lock().unwrap();
-                    tags.insert(tag, segments[i + 1].1[0].into());
+                    tags.insert(tag, segments[i + 1].1[0].0.into());
                 } else {
                     unreachable!();
                 }
@@ -751,7 +763,7 @@ pub fn reconstruct(log: &Logger,
             txs[&segments[0].0]
                 .send(Packet::StartReplay {
                           tag: tag,
-                          from: graph[segments[0].1[0]].addr(),
+                          from: graph[segments[0].1[0].0].addr(),
                           ack: wait_tx.clone(),
                       })
                 .unwrap();

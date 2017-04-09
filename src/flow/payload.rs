@@ -115,7 +115,7 @@ pub enum Packet {
     SetupReplayPath {
         tag: Tag,
         source: Option<NodeAddress>,
-        path: Vec<NodeAddress>,
+        path: Vec<(NodeAddress, Option<usize>)>,
         done_tx: Option<mpsc::SyncSender<()>>,
         trigger: TriggerEndpoint,
         ack: mpsc::SyncSender<()>,
@@ -246,8 +246,9 @@ impl Packet {
         }
     }
 
-    pub fn take_data(self) -> Records {
-        match self {
+    pub fn take_data(&mut self) -> Records {
+        use std::mem;
+        match mem::replace(self, Packet::None) {
             Packet::Message { data, .. } => data,
             Packet::Transaction { data, .. } => data,
             Packet::ReplayPiece { data, .. } => data,
