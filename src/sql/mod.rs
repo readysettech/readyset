@@ -10,6 +10,7 @@ use flow::core::NodeAddress;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
+use self::reuse::ReuseType;
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -32,6 +33,7 @@ pub struct QueryFlowParts {
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
+    ExtendExisting(MirQuery),
     ReaderOntoExisting(MirNodeRef, Vec<Column>),
     None,
 }
@@ -191,7 +193,15 @@ impl SqlIncorporator {
             // TODO(malte): score reuse candidates
             let choice = reuse::choose_best_option(reuse_candidates);
 
-            // return QueryGraphReuse::ExtendExisting(mir_query)
+            match choice.0 {
+                ReuseType::DirectExtension => {
+                    let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
+                    return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
+                }
+                ReuseType::BackjoinRequired(_) => {
+                    error!(self.log, "Choose unsupported reuse via backjoin!");
+                }
+            }
         }
 
         (qg, QueryGraphReuse::None)
@@ -306,6 +316,31 @@ impl SqlIncorporator {
         qfp
     }
 
+    fn extend_existing_query(&mut self,
+                             query_name: &str,
+                             query: &SelectStatement,
+                             qg: QueryGraph,
+                             extend_mir: MirQuery,
+                             mut mig: &mut Migration)
+                             -> QueryFlowParts {
+        // no QG-level reuse possible, so we'll build a new query.
+        // first, compute the MIR representation of the SQL query
+        let mut new_query_mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
+        // TODO(malte): should we run the MIR-level optimizations here?
+        let new_opt_mir = new_query_mir.optimize();
+
+        // compare to existing query MIR and reuse prefix
+        let mut reused_mir = reuse::merge_mir_for_queries(&new_opt_mir, &extend_mir);
+        let qfp = reused_mir.into_flow_parts(&mut mig);
+
+        // We made a new query, so store the query graph and the corresponding leaf MIR node
+        self.query_graphs
+            .insert(qg.signature().hash, (qg, reused_mir));
+
+        qfp
+    }
+
     fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
@@ -354,6 +389,9 @@ impl SqlIncorporator {
                             reused_nodes: vec![flow_node],
                             query_leaf: flow_node,
                         }
+                    }
+                    QueryGraphReuse::ExtendExisting(mq) => {
+                        self.extend_existing_query(&query_name, sq, qg, mq, mig)
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
                         self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
