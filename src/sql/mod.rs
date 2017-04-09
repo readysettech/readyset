@@ -187,7 +187,9 @@ impl SqlIncorporator {
                    "This QG: {:#?}\nReuse candidates:\n{:#?}",
                    qg,
                    reuse_candidates);
+
             // TODO(malte): score reuse candidates
+            let choice = reuse::choose_best_option(reuse_candidates);
 
             // return QueryGraphReuse::ExtendExisting(mir_query)
         }

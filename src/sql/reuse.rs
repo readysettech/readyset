@@ -228,6 +228,36 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
     None
 }
 
+pub fn choose_best_option(options: Vec<(ReuseType, &QueryGraph)>) -> (ReuseType, &QueryGraph) {
+    let mut best_choice = None;
+    let mut best_score = 0;
+
+    for (o, qg) in options {
+        let mut score = 0;
+
+        // crude scoring: direct extension always preferrable over backjoins; reusing larger
+        // queries is also preferrable as they are likely to cover a larger fraction of the new
+        // query's nodes. Edges (group by, join) count for more than extra relations.
+        match o {
+            ReuseType::DirectExtension => {
+                score += 2 * qg.relations.len() + 4 * qg.edges.len() + 10;
+            }
+            ReuseType::BackjoinRequired(ref tables) => {
+                score += qg.relations.len() + 3 * qg.edges.len();
+            }
+        }
+
+        if score > best_score {
+            best_score = score;
+            best_choice = Some((o, qg));
+        }
+    }
+
+    assert!(best_score > 0);
+
+    best_choice.unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
