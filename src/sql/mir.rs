@@ -769,17 +769,18 @@ impl SqlToMirConverter {
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             sorted_rels.sort();
             for rel in &sorted_rels {
+                if *rel == "computed_columns" {
+                  continue;
+                }
+
                 let qgn = &qg.relations[*rel];
-                if *rel != "computed_columns" {
-                    if !qgn.predicates.is_empty() {
-                        for cond in &qgn.predicates {
-                          let col = match *cond.left.as_ref() {
-                              ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                              _ => unimplemented!(),
-                          };
-                          filter_columns.entry(col).or_insert(Vec::new()).push(rel.to_string());
-                        }
-                    }
+                for cond in &qgn.predicates {
+                  let col = match *cond.left.as_ref() {
+                      ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+                      _ => unimplemented!(),
+                  };
+
+                  filter_columns.entry(col).or_insert(Vec::new()).push(rel.to_string());
                 }
             }
 
