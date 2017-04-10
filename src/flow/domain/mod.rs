@@ -635,7 +635,7 @@ impl Domain {
                              transaction_state: transaction_state,
                     });
                     (m, source, false)
-                } else if transactional_state.is_some() {
+                } else if transaction_state.is_some() {
                     let m = Some(Packet::ReplayPiece {
                         link: Link::new(source, path[0].0),
                         tag: tag,
