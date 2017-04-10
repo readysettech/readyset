@@ -614,7 +614,7 @@ mod tests {
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
-        assert_eq!(filter.description(), format!("σ[f0 = \"42\"]"));
+        assert_eq!(filter.description(), format!("σ[f0 = 42]"));
         // leaf view node
         let edge = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge.fields(), &["name"]);

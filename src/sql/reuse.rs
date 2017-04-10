@@ -299,7 +299,7 @@ mod tests {
         let pb = ConditionTree {
             operator: Operator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(IntegerLiteral(10.into()))),
+            right: Box::new(Base(IntegerLiteral(20.into()))),
         };
         let pc = ConditionTree {
             operator: Operator::Equal,
@@ -308,8 +308,8 @@ mod tests {
         };
 
         assert!(predicate_implies(&pa, &pb));
-        assert!(predicate_implies(&pb, &pa));
+        assert!(!predicate_implies(&pb, &pa));
         assert!(!predicate_implies(&pa, &pc));
-        assert!(!predicate_implies(&pc, &pa));
+        assert!(predicate_implies(&pc, &pa));
     }
 }
