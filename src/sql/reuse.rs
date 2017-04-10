@@ -65,45 +65,61 @@ fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
     }
 }
 
+fn check_op_elimination<T>(nv: T, ev: T, nop: &Operator, eop: &Operator) -> bool
+    where T: PartialOrd
+{
+    let ep_op_needed = if nv == ev {
+        direct_elimination(nop, &Operator::Equal)
+    } else if nv < ev {
+        direct_elimination(nop, &Operator::Less)
+    } else if nv > ev {
+        direct_elimination(nop, &Operator::Greater)
+    } else {
+        None
+    };
+    match ep_op_needed {
+        None => return false,
+        Some(op) => {
+            // TODO(malte): the condition is actually weaker than
+            // this inequality suggests -- it's sufficient for the
+            // needed operator to be *weaker* than ep.operator to
+            // reject the EQG.
+            if *eop != op {
+                return false;
+            } else {
+                return true;
+            }
+        }
+    }
+}
+
 fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
     if np.left == ep.left {
         // use Finkelstein-style direct elimination to check if this NQG predicate
         // implies the corresponding predicates in the EQG
         match *np.right {
-            ConditionExpression::Base(ConditionBase::Literal(ref nv)) => {
+            ConditionExpression::Base(ConditionBase::StringLiteral(ref nv)) => {
                 match *ep.right {
-                    ConditionExpression::Base(ConditionBase::Literal(ref ev)) => {
-                        let ep_op_needed = if nv == ev {
-                            direct_elimination(&np.operator, &Operator::Equal)
-                        } else if nv < ev {
-                            direct_elimination(&np.operator, &Operator::Less)
-                        } else if nv > ev {
-                            direct_elimination(&np.operator, &Operator::Greater)
-                        } else {
-                            None
-                        };
-                        match ep_op_needed {
-                            None => return false,
-                            Some(op) => {
-                                // TODO(malte): the condition is actually weaker than
-                                // this inequality suggests -- it's sufficient for the
-                                // needed operator to be *weaker* than ep.operator to
-                                // reject the EQG.
-                                if ep.operator != op {
-                                    return false;
-                                } else {
-                                    return true;
-                                }
-                            }
-                        }
+                    ConditionExpression::Base(ConditionBase::StringLiteral(ref ev)) => {
+                        check_op_elimination(nv, ev, &np.operator, &ep.operator)
                     }
+                    ConditionExpression::Base(ConditionBase::IntegerLiteral(_)) => false,
+                    _ => panic!("right-hand side of predicate must currently be literal"),
+                }
+            }
+            ConditionExpression::Base(ConditionBase::IntegerLiteral(ref nv)) => {
+                match *ep.right {
+                    ConditionExpression::Base(ConditionBase::IntegerLiteral(ref ev)) => {
+                        check_op_elimination(nv, ev, &np.operator, &ep.operator)
+                    }
+                    ConditionExpression::Base(ConditionBase::StringLiteral(_)) => false,
                     _ => panic!("right-hand side of predicate must currently be literal"),
                 }
             }
             _ => panic!("right-hand side of predicate must currently be literal"),
         }
     } else {
-        // difference columns on LHS of predicate => cannot imply each other
+        // different columns on LHS of predicate => cannot imply each other
         return false;
     }
 }
@@ -278,17 +294,17 @@ mod tests {
         let pa = ConditionTree {
             operator: Operator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(Literal("10".into()))),
+            right: Box::new(Base(IntegerLiteral(10.into()))),
         };
         let pb = ConditionTree {
             operator: Operator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(Literal("10".into()))),
+            right: Box::new(Base(IntegerLiteral(10.into()))),
         };
         let pc = ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(Literal("5".into()))),
+            right: Box::new(Base(IntegerLiteral(5.into()))),
         };
 
         assert!(predicate_implies(&pa, &pb));

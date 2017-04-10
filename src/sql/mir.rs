@@ -73,14 +73,17 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
         let r = match *ct.right.as_ref() {
-            ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+            ConditionExpression::Base(ConditionBase::IntegerLiteral(ref i)) => DataType::from(*i),
+            ConditionExpression::Base(ConditionBase::StringLiteral(ref s)) => {
+                DataType::from(s.clone())
+            }
             _ => unimplemented!(),
         };
 
         let num_columns = columns.len();
         let mut filters = vec![None; num_columns];
 
-        let f = Some((ct.operator.clone(), DataType::from(r)));
+        let f = Some((ct.operator.clone(), r));
         match n.borrow()
                   .columns()
                   .iter()
