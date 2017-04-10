@@ -94,33 +94,28 @@ fn check_op_elimination<T>(nv: T, ev: T, nop: &Operator, eop: &Operator) -> bool
 }
 
 fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
-    if np.left == ep.left {
-        // use Finkelstein-style direct elimination to check if this NQG predicate
-        // implies the corresponding predicates in the EQG
-        match *np.right {
-            ConditionExpression::Base(ConditionBase::StringLiteral(ref nv)) => {
-                match *ep.right {
-                    ConditionExpression::Base(ConditionBase::StringLiteral(ref ev)) => {
-                        check_op_elimination(nv, ev, &np.operator, &ep.operator)
-                    }
-                    ConditionExpression::Base(ConditionBase::IntegerLiteral(_)) => false,
-                    _ => panic!("right-hand side of predicate must currently be literal"),
+    // use Finkelstein-style direct elimination to check if this NQG predicate
+    // implies the corresponding predicates in the EQG
+    match *np.right {
+        ConditionExpression::Base(ConditionBase::StringLiteral(ref nv)) => {
+            match *ep.right {
+                ConditionExpression::Base(ConditionBase::StringLiteral(ref ev)) => {
+                    check_op_elimination(nv, ev, &np.operator, &ep.operator)
                 }
+                ConditionExpression::Base(ConditionBase::IntegerLiteral(_)) => false,
+                _ => panic!("right-hand side of predicate must currently be literal"),
             }
-            ConditionExpression::Base(ConditionBase::IntegerLiteral(ref nv)) => {
-                match *ep.right {
-                    ConditionExpression::Base(ConditionBase::IntegerLiteral(ref ev)) => {
-                        check_op_elimination(nv, ev, &np.operator, &ep.operator)
-                    }
-                    ConditionExpression::Base(ConditionBase::StringLiteral(_)) => false,
-                    _ => panic!("right-hand side of predicate must currently be literal"),
-                }
-            }
-            _ => panic!("right-hand side of predicate must currently be literal"),
         }
-    } else {
-        // different columns on LHS of predicate => cannot imply each other
-        return false;
+        ConditionExpression::Base(ConditionBase::IntegerLiteral(ref nv)) => {
+            match *ep.right {
+                ConditionExpression::Base(ConditionBase::IntegerLiteral(ref ev)) => {
+                    check_op_elimination(nv, ev, &np.operator, &ep.operator)
+                }
+                ConditionExpression::Base(ConditionBase::StringLiteral(_)) => false,
+                _ => panic!("right-hand side of predicate must currently be literal"),
+            }
+        }
+        _ => panic!("right-hand side of predicate must currently be literal"),
     }
 }
 
@@ -149,14 +144,25 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
 
         // iterate over predicates and ensure that each matching one on the existing QG is implied
         // by the new one
-        for np in &new_qgn.predicates {
-            for ep in &ex_qgn.predicates {
-                println!("matching predicates --\nexisting: {:#?},\nnew: {:#?}",
-                         ep,
-                         np);
-                if !predicate_implies(np, ep) {
-                    return None;
+        for ep in &ex_qgn.predicates {
+            let mut matched = false;
+            for np in &new_qgn.predicates {
+                if np.left == ep.left {
+                    println!("matching predicates --\nexisting: {:#?},\nnew: {:#?}",
+                             ep,
+                             np);
+                    if !predicate_implies(np, ep) {
+                        println!("Failed: {:?} does not imply {:?}", np, ep);
+                        return None;
+                    } else {
+                        matched = true;
+                    }
                 }
+            }
+            if !matched {
+                // We found no matching predicate for np, so we give up now.
+                println!("Failed: no matching predicate for {:#?}", ep);
+                return None;
             }
         }
     }
