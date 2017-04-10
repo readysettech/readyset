@@ -177,12 +177,12 @@ impl NodeDescriptor {
                 // with replay.tag, and then forward this message only on the channel corresponding
                 // to that ingress node.
                 let replay_to = m.tag().map(|tag| {
-                                                tags.lock()
+                    tags.lock()
                         .unwrap()
                         .get(&tag)
                         .map(|n| *n)
                         .expect("egress node told about replay message, but not on replay path")
-                                            });
+                });
 
                 use std::mem;
                 let mut m = Some(mem::replace(m, Packet::None)); // so we can use .take()
@@ -224,8 +224,11 @@ impl NodeDescriptor {
                 let from = m.link().src;
 
                 let replay = if let Packet::ReplayPiece {
-                           context: flow::payload::ReplayPieceContext::Partial { ref for_key }, ..
-                       } = *m {
+                    context: flow::payload::ReplayPieceContext::Partial {
+                        ref for_key, ignore
+                    }, ..
+                } = *m {
+                    assert!(!ignore);
                     assert!(keyed_by.is_some());
                     assert_eq!(for_key.len(), 1);
                     Some((keyed_by.unwrap(), for_key[0].clone()))

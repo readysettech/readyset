@@ -607,7 +607,7 @@ impl Domain {
             return;
         }
 
-        let (m, source) = match self.replay_paths[&tag] {
+        let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
                 trigger: TriggerEndpoint::Start(ref cols),
@@ -625,34 +625,44 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .lookup(&cols[..], &KeyType::Single(&key[0]));
 
-                let m = if let LookupResult::Some(rs) = rs {
+                if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
-                    Some(Packet::ReplayPiece {
+                    let m = Some(Packet::ReplayPiece {
                              link: Link::new(source, path[0].0),
                              tag: tag,
-                             context: ReplayPieceContext::Partial { for_key: Vec::from(key) },
+                             context: ReplayPieceContext::Partial { for_key: Vec::from(key), ignore: false },
                              data: Records::from_iter(rs.into_iter().cloned()),
                              transaction_state: transaction_state,
-                         })
+                    });
+                    (m, source, false)
+                } else if transactional_state.is_some() {
+                    let m = Some(Packet::ReplayPiece {
+                        link: Link::new(source, path[0].0),
+                        tag: tag,
+                        context: ReplayPieceContext::Partial { for_key: Vec::from(key), ignore: true },
+                        data: Vec::<Record>::new().into(),
+                        transaction_state: transaction_state,
+                    });
+                    (m, source, true)
                 } else {
-                    None
-                };
-
-                (m, source)
+                    (None, source, true)
+                }
             }
             _ => unreachable!(),
         };
 
-        if let Some(m) = m {
-            trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "satisfied replay request");
-            self.handle_replay(m);
-            return;
-        }
+        if is_miss {
+            // we have missed in our lookup, so we have a partial replay through a partial replay
+            // trigger a replay to source node, and enqueue this request.
+            self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
 
-        // we must have missed in our lookup,
-        // so we have a partial replay through a partial replay
-        // trigger a replay to source node, and enqueue this request.
-        self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
+            if let Some(m) = m {
+                self.handle_replay(m);
+            }
+        } else {
+            trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "satisfied replay request");
+            self.handle_replay(m.unwrap());
+        }
     }
 
     fn handle_replay(&mut self, m: Packet) {
@@ -846,6 +856,15 @@ impl Domain {
                         }).unwrap();
                     }
                 }
+                mut m @ Packet::ReplayPiece {
+                    context: ReplayPieceContext::Partial { ignore: true, .. }, ..
+                } => {
+                    let mut n = self.nodes[&path.last().unwrap().0.as_local()].borrow_mut();
+                    if n.is_egress() {
+                        // No need to set link src/dst since the egress node will not use them.
+                        n.process(&mut m, None, &mut self.state, &self.nodes, false);
+                    }
+                }
                 Packet::ReplayPiece {
                     tag,
                     link,
@@ -859,17 +878,19 @@ impl Domain {
                         debug!(self.log, "replaying batch"; "#" => data.len());
                     }
 
+                    let is_transactional = transaction_state.is_some();
+
                     // forward the current message through all local nodes.
                     let mut m = Packet::ReplayPiece {
-                        link,
+                        link: link.clone(),
                         tag,
                         data,
                         context: context.clone(),
-                        transaction_state,
+                        transaction_state: transaction_state.clone(),
                     };
 
                     // keep track of whether we're filling any partial holes
-                    let partial_key = if let ReplayPieceContext::Partial { ref for_key } =
+                    let partial_key = if let ReplayPieceContext::Partial { ref for_key, .. } =
                         context {
                         Some(for_key)
                     } else {
@@ -918,7 +939,7 @@ impl Domain {
                         let mut misses =
                             n.process(&mut m, keyed_by, &mut self.state, &self.nodes, false);
 
-                        if partial_key.is_some() && target {
+                        if target {
                             let hole_filled = if let Packet::None = m {
                                 // this can happen for one of two reasons: either, we're a Reader,
                                 // which always consumes its input, or we're another node, in which
@@ -956,6 +977,26 @@ impl Domain {
                         drop(n);
 
                         if let Packet::None = m {
+                            if !target && partial_key.is_some() && is_transactional {
+                                let last_ni = path.last().unwrap().0;
+                                if last_ni != *ni {
+                                    let mut n = self.nodes[&last_ni.as_local()].borrow_mut();
+                                    if n.is_egress() {
+                                        let mut m = Packet::ReplayPiece {
+                                            link: link, // TODO: use dummy link instead
+                                            tag,
+                                            data: Vec::<Record>::new().into(),
+                                            context: ReplayPieceContext::Partial {
+                                                for_key: partial_key.unwrap().clone(),
+                                                ignore: true,
+                                            },
+                                            transaction_state,
+                                        };
+                                        // No need to set link src/dst since the egress node will not use them.
+                                        n.process(&mut m, None, &mut self.state, &self.nodes, false);
+                                    }
+                                }
+                            }
                             // there is nothing more to do with this message
                             // it's either hit the end of a path, or it has been captured
                             break;
@@ -1006,7 +1047,8 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!(self.log, "batch processed");
                         }
-                        ReplayPieceContext::Partial { for_key } => {
+                        ReplayPieceContext::Partial { for_key, ignore } => {
+                            assert!(!ignore);
                             if self.waiting.contains_key(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 finished = Some((tag, dst, Some(for_key)));
