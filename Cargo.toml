@@ -71,6 +71,10 @@ default-features = false
 # for Mac OS X build
 # git = "https://github.com/ms705/timekeeper"
 
+[replace]
+# override for MAX_IN_FLIGHT = 4096
+"tokio-proto:0.1.1" = { git = 'https://github.com/jonhoo/tokio-proto', branch = 'bigger-max-in-flight' }
+
 [profile.release]
 debug=true
 
