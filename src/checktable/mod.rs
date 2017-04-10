@@ -12,6 +12,7 @@ use std::fmt::Debug;
 
 use flow::domain;
 use flow::prelude::*;
+use flow::migrate::materialization::Tag as ReplayPath;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Conflict {
@@ -139,6 +140,10 @@ pub struct CheckTable {
     // For each domain, stores the set of base nodes that it receives updates from.
     domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
 
+    // Domains impacted by each replay path.
+    replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
+
+    last_replay: HashMap<domain::Index, i64>,
     last_migration: Option<i64>,
     last_base: Option<NodeIndex>,
 }
@@ -150,6 +155,8 @@ impl CheckTable {
             toplevel: HashMap::new(),
             granular: HashMap::new(),
             domain_dependencies: HashMap::new(),
+            replay_paths: HashMap::new(),
+            last_replay: HashMap::new(),
             last_migration: None,
             last_base: None,
         }
@@ -201,6 +208,10 @@ impl CheckTable {
             let earliest: i64 = v.iter()
                 .filter_map(|b| self.toplevel.get(b))
                 .chain(self.last_migration.iter())
+                .chain(self.last_replay
+                           .get(d)
+                           .iter()
+                           .map(|t| *t))
                 .max()
                 .cloned()
                 .unwrap_or(0);
@@ -248,6 +259,25 @@ impl CheckTable {
         }
     }
 
+    pub fn claim_replay_timestamp(&mut self,
+                                  path: &ReplayPath)
+                                  -> (i64, Option<HashMap<domain::Index, i64>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prevs = self.compute_previous_timestamps(None);
+
+        // Update checktable state
+        self.last_base = None;
+        for d in self.replay_paths.get(path).unwrap() {
+            self.last_replay.insert(d.clone(), ts);
+        }
+
+        (ts, prevs)
+    }
+
     /// Transition to using `new_domain_dependencies`, and reserve a pair of
     /// timestamps for the migration to happen between.
     pub fn perform_migration(&mut self,
@@ -271,6 +301,11 @@ impl CheckTable {
             .collect();
 
         (ts, ts + 1, prevs)
+    }
+
+    pub fn add_replay_paths(&mut self,
+                            additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>) {
+        self.replay_paths.extend(additional_replay_paths.into_iter());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {

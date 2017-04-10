@@ -53,6 +53,12 @@ pub enum TransactionState {
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
 }
 
+#[derive(Clone)]
+pub struct ReplayTransactionState {
+    pub ts: i64,
+    pub prevs: Option<HashMap<domain::Index, i64>>,
+}
+
 pub enum Packet {
     // Data messages
     //
@@ -75,6 +81,7 @@ pub enum Packet {
         tag: Tag,
         data: Records,
         context: ReplayPieceContext,
+        transaction_state: Option<ReplayTransactionState>,
     },
 
     //

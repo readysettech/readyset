@@ -10,7 +10,7 @@ use std::collections::hash_map::Entry;
 use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
 
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayPieceContext};
+use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext};
 pub use flow::domain::single::NodeDescriptor;
 use flow::statistics;
 
@@ -372,6 +372,19 @@ impl Domain {
         }
     }
 
+    fn process_transactions(&mut self) {
+        loop {
+            match self.transaction_state.get_next_event() {
+                transactions::Event::Transaction(m) => self.transactional_dispatch(m),
+                transactions::Event::StartMigration => {}
+                transactions::Event::CompleteMigration => {}
+                transactions::Event::SeedReplay(tag, key, rts) => self.seed_replay(tag, &key[..], Some(rts)),
+                transactions::Event::Replay(m) => self.handle_replay(m),
+                transactions::Event::None => break,
+            }
+        }
+    }
+
     fn handle(&mut self, m: Packet) {
         match m {
             m @ Packet::Message { .. } => {
@@ -379,16 +392,10 @@ impl Domain {
             }
             m @ Packet::Transaction { .. } |
             m @ Packet::StartMigration { .. } |
-            m @ Packet::CompleteMigration { .. } => {
+            m @ Packet::CompleteMigration { .. } |
+            m @ Packet::ReplayPiece { transaction_state: Some(_), .. } => {
                 self.transaction_state.handle(m);
-                loop {
-                    match self.transaction_state.get_next_event() {
-                        transactions::Event::Transaction(m) => self.transactional_dispatch(m),
-                        transactions::Event::StartMigration => {}
-                        transactions::Event::CompleteMigration => {}
-                        transactions::Event::None => break,
-                    }
-                }
+                self.process_transactions();
             }
             m @ Packet::ReplayPiece { .. } |
             m @ Packet::FullReplay { .. } => {
@@ -478,7 +485,7 @@ impl Domain {
             }
             Packet::RequestPartialReplay { tag, key } => {
                 trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "got replay request");
-                self.seed_replay(tag, &key[..]);
+                self.seed_replay(tag, &key[..], None);
             }
             Packet::StartReplay { tag, from, ack } => {
                 // let coordinator know that we've entered replay loop
@@ -593,7 +600,13 @@ impl Domain {
         }
     }
 
-    fn seed_replay(&mut self, tag: Tag, key: &[DataType]) {
+    fn seed_replay(&mut self, tag: Tag, key: &[DataType], transaction_state: Option<ReplayTransactionState>) {
+        if transaction_state.is_none() {
+            self.transaction_state.schedule_replay(tag, key.into());
+            self.process_transactions();
+            return;
+        }
+
         let (m, source) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
@@ -619,6 +632,7 @@ impl Domain {
                              tag: tag,
                              context: ReplayPieceContext::Partial { for_key: Vec::from(key) },
                              data: Records::from_iter(rs.into_iter().cloned()),
+                             transaction_state: transaction_state,
                          })
                 } else {
                     None
@@ -763,6 +777,7 @@ impl Domain {
                             link: link,
                             context: ReplayPieceContext::Regular { last: true },
                             data: Vec::<Record>::new().into(),
+                            transaction_state: None,
                         };
 
                         debug!(self.log, "empty full state replay conveyed");
@@ -782,6 +797,7 @@ impl Domain {
                             link: link.clone(),
                             context: ReplayPieceContext::Regular { last: false },
                             data: Vec::<Record>::new().into(),
+                            transaction_state: None,
                         };
                         playback = Some(p);
 
@@ -816,6 +832,7 @@ impl Domain {
                                     link: link.clone(), // to will be overwritten by receiver
                                     context: ReplayPieceContext::Regular{last: iter.peek().is_none()},
                                     data: chunk,
+                                    transaction_state: None,
                                 };
 
                                 trace!(log, "sending batch"; "#" => i, "[]" => len);
@@ -834,6 +851,7 @@ impl Domain {
                     link,
                     data,
                     context,
+                    transaction_state,
                 } => {
                     if let ReplayPieceContext::Partial { .. } = context {
                         trace!(self.log, "replaying batch"; "#" => data.len(), "tag" => tag.id());
@@ -847,6 +865,7 @@ impl Domain {
                         tag,
                         data,
                         context: context.clone(),
+                        transaction_state,
                     };
 
                     // keep track of whether we're filling any partial holes
@@ -1025,7 +1044,7 @@ impl Domain {
                     }
 
                     // we've filled the hole that prevented the replay previously!
-                    self.seed_replay(subscription.tag, &subscription.key[..]);
+                    self.seed_replay(subscription.tag, &subscription.key[..], None);
                     false
                 });
 

@@ -312,7 +312,8 @@ pub fn initialize(log: &Logger,
                   partial: &mut HashSet<NodeIndex>,
                   mut materialize: HashMap<domain::Index,
                                            HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>) {
+                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
+                  -> HashMap<Tag, Vec<domain::Index>> {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
     while let Some(node) = topo.next(&*graph) {
@@ -326,7 +327,7 @@ pub fn initialize(log: &Logger,
     }
 
     // TODO: what about adding materialization to *existing* views?
-
+    let mut domains_on_path = HashMap::new();
     let mut empty = HashSet::new();
     for node in topo_list {
         let addr = graph[node].addr();
@@ -392,20 +393,23 @@ pub fn initialize(log: &Logger,
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
             info!(log, "beginning reconstruction of {:?}", *graph[node]);
-            reconstruct(&log,
-                        graph,
-                        &empty,
-                        partial,
-                        &materialize,
-                        txs,
-                        node,
-                        index_on);
+            let new_paths = reconstruct(&log,
+                                        graph,
+                                        &empty,
+                                        partial,
+                                        &materialize,
+                                        txs,
+                                        node,
+                                        index_on);
+            domains_on_path.extend(new_paths.into_iter());
+
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
             ready(txs, vec![]);
             info!(log, "reconstruction completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
         }
     }
+    domains_on_path
 }
 
 pub fn reconstruct(log: &Logger,
@@ -416,7 +420,7 @@ pub fn reconstruct(log: &Logger,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                    node: NodeIndex,
-                   mut index_on: Vec<Vec<usize>>) {
+                   mut index_on: Vec<Vec<usize>>) -> HashMap<Tag, Vec<domain::Index>> {
 
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
@@ -606,6 +610,8 @@ pub fn reconstruct(log: &Logger,
     // TODO FIXME:
     // we need to detect materialized nodes downstream of partially materialized nodes.
 
+    let mut domains_on_path = HashMap::new();
+
     // set up channels for replay along each path
     for mut path in paths {
         // there should always be a replay path
@@ -638,6 +644,13 @@ pub fn reconstruct(log: &Logger,
             if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
                 last_domain = Some(domain);
+
+                if partial_ok {
+                    domains_on_path
+                        .entry(tag.clone())
+                        .or_insert_with(Vec::new)
+                        .push(domain.clone());
+                }
             }
 
             segments.last_mut()
@@ -773,6 +786,7 @@ pub fn reconstruct(log: &Logger,
             done_rx.recv().unwrap();
         }
     }
+    domains_on_path
 }
 
 fn cost_fn<'a, T>(log: &'a Logger,
