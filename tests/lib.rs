@@ -347,8 +347,8 @@ fn transactional_vote() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article1", &["id", "title"], Base::default());
+        let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -356,10 +356,10 @@ fn transactional_vote() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        let articleq = mig.transactional_maintain(article, 0);
+        let articleq = mig.transactional_maintain(article, 0).unwrap();
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -374,9 +374,9 @@ fn transactional_vote() {
         let end2 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end3 = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
 
-        let endq = mig.transactional_maintain(end, 0);
-        let endq_title = mig.transactional_maintain(end2, 1);
-        let endq_votes = mig.transactional_maintain(end3, 2);
+        let endq = mig.transactional_maintain(end, 0).unwrap();
+        let endq_title = mig.transactional_maintain(end2, 1).unwrap();
+        let endq_votes = mig.transactional_maintain(end3, 2).unwrap();
 
         // start processing
         mig.commit();
@@ -563,8 +563,8 @@ fn transactional_migration() {
     let mut g = distributary::Blender::new();
     let (a, aq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        let aq = mig.transactional_maintain(a, 0);
+        let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
+        let aq = mig.transactional_maintain(a, 0).unwrap();
         mig.commit();
         (a, aq)
     };
@@ -582,8 +582,8 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let (b, bq) = {
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
-        let bq = mig.transactional_maintain(b, 0);
+        let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
+        let bq = mig.transactional_maintain(b, 0).unwrap();
         mig.commit();
         (b, bq)
     };
@@ -605,7 +605,7 @@ fn transactional_migration() {
         emits.insert(b, vec![0, 1]);
         let u = distributary::Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        let cq = mig.transactional_maintain(c, 0);
+        let cq = mig.transactional_maintain(c, 0).unwrap();
         let _ = mig.commit();
         cq
     };

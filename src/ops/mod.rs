@@ -35,7 +35,8 @@ pub mod test {
             let mut graph = Graph::new();
             let source = graph.add_node(node::Node::new("source",
                                                         &["because-type-inference"],
-                                                        node::Type::Source));
+                                                        node::Type::Source,
+                                                        true));
             MockGraph {
                 graph: graph,
                 source: source,
@@ -50,7 +51,7 @@ pub mod test {
             use ops::base::Base;
             let mut i: node::Type = Base::default().into();
             i.on_connected(&self.graph);
-            let ni = self.graph.add_node(Node::new(name, fields, i));
+            let ni = self.graph.add_node(Node::new(name, fields, i, false));
             self.graph.add_edge(self.source, ni, false);
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
@@ -81,7 +82,7 @@ pub mod test {
             let parents = i.ancestors();
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
-            let ni = self.graph.add_node(node::Node::new(name, fields, i));
+            let ni = self.graph.add_node(node::Node::new(name, fields, i, false));
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
             if materialized {
