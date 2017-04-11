@@ -388,14 +388,12 @@ fn it_works_w_mat() {
 
 #[test]
 fn it_works_deletion() {
-    use distributary::Base;
-
     // set up graph
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![1]));
-        let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![2]));
+        let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::new(vec![1]));
+        let b = mig.add_ingredient("b", &["_", "x", "y"], distributary::Base::new(vec![2]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
