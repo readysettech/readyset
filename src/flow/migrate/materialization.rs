@@ -291,7 +291,7 @@ pub fn index(log: &Logger,
                 // so we assume it's not in use.
 
                 let ref node = graph[map[&n]];
-                if node.is_internal() && node.is_base() {
+                if node.is_internal() && node.get_base().is_some() {
                     // but it's a base nodes!
                     // we must *always* materialize base nodes
                     // so, just make up some column to index on

@@ -1,6 +1,7 @@
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 
+use ops::base::Base;
 use flow::prelude;
 
 #[derive(PartialEq, Eq, Debug)]
@@ -51,9 +52,14 @@ pub trait Ingredient
     /// otherwise created by this view, None should be returned.
     fn resolve(&self, i: usize) -> Option<Vec<(prelude::NodeAddress, usize)>>;
 
-    /// Returns true for base node types.
-    fn is_base(&self) -> bool {
-        false
+    /// Returns a reference to the underlying Base node (if any)
+    fn get_base(&self) -> Option<&Base> {
+        None
+    }
+
+    /// Returns a mutable reference to the underlying Base node (if any)
+    fn get_base_mut(&mut self) -> Option<&mut Base> {
+        None
     }
 
     fn is_join(&self) -> bool {

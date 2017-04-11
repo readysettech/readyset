@@ -8,25 +8,37 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct Base {
     primary_key: Option<Vec<usize>>,
+    defaults: Vec<DataType>,
     us: Option<NodeAddress>,
+    unmodified: bool,
 }
 
 impl Base {
     /// Create a base node operator.
-    pub fn new(primary_key: Vec<usize>) -> Self {
-        Base {
-            primary_key: Some(primary_key),
-            us: None,
-        }
-    }
-}
-
-impl Default for Base {
-    fn default() -> Self {
+    pub fn new(defaults: Vec<DataType>) -> Self {
         Base {
             primary_key: None,
+            defaults: defaults,
             us: None,
+            unmodified: true,
         }
+    }
+
+    /// Create a base node operator with a known primary key.
+    pub fn with_key(primary_key: Vec<usize>, defaults: Vec<DataType>) -> Self {
+        Base {
+            primary_key: Some(primary_key),
+            defaults: defaults,
+            us: None,
+            unmodified: true,
+        }
+    }
+
+    /// Add a new column to this base node.
+    pub fn add_column(&mut self, default: DataType) -> usize {
+        self.defaults.push(default);
+        self.unmodified = false;
+        self.defaults.len() - 1
     }
 }
 
@@ -68,31 +80,58 @@ impl Ingredient for Base {
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        let rs = rs.into_iter()
-            .map(|r| match r {
-                     Record::Positive(u) => Record::Positive(u),
-                     Record::Negative(u) => Record::Negative(u),
-                     Record::DeleteRequest(key) => {
-                let cols = self.primary_key
+        let rs = rs.into_iter().map(|r| {
+            //rustfmt
+            match r {
+                Record::Positive(u) => Record::Positive(u),
+                Record::Negative(u) => Record::Negative(u),
+                Record::DeleteRequest(key) => {
+                    let cols = self.primary_key
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
-                let db =
+                    let db =
                     state.get(self.us
                                   .as_ref()
                                   .unwrap()
                                   .as_local())
                         .expect("base must have its own state materialized to support deletions");
 
-                match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
-                    LookupResult::Some(rows) => {
-                        assert_eq!(rows.len(), 1);
-                        Record::Negative(rows[0].clone())
+                    match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                        LookupResult::Some(rows) => {
+                            assert_eq!(rows.len(), 1);
+                            Record::Negative(rows[0].clone())
+                        }
+                        LookupResult::Missing => unreachable!(),
                     }
-                    LookupResult::Missing => unreachable!(),
                 }
             }
-                 })
-            .collect();
+        });
+
+        let rs = if self.unmodified {
+            rs.collect()
+        } else {
+            rs.map(|r| {
+                    //rustfmt
+                    if r.len() != self.defaults.len() {
+                        // TODO: *technically* we know that we have the only copy of this Arc
+                        // so we could modify the vector in-place.
+                        let rlen = r.len();
+                        let (v, pos) = r.extract();
+                        let v: Vec<_> = v.iter()
+                            .cloned()
+                            .chain(self.defaults
+                                       .iter()
+                                       .skip(rlen)
+                                       .cloned())
+                            .collect();
+                        (v, pos).into()
+                    } else {
+                        r
+                    }
+                })
+                .collect()
+        };
+
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
@@ -117,8 +156,12 @@ impl Ingredient for Base {
         None
     }
 
-    fn is_base(&self) -> bool {
-        true
+    fn get_base(&self) -> Option<&Base> {
+        Some(self)
+    }
+
+    fn get_base_mut(&mut self) -> Option<&mut Base> {
+        Some(self)
     }
 
     fn description(&self) -> String {

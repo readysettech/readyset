@@ -236,6 +236,11 @@ impl Node {
         &mut self.inner
     }
 
+    pub fn add_column(&mut self, field: &str) -> usize {
+        self.fields.push(field.to_string());
+        self.fields.len() - 1
+    }
+
     pub fn name(&self) -> &str {
         &*self.name
     }

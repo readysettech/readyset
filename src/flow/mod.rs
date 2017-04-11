@@ -262,7 +262,7 @@ impl Blender {
                                                               petgraph::EdgeDirection::Outgoing)
                       })
             .map(|n| (n, &self.ingredients[n]))
-            .filter(|&(_, base)| base.is_internal() && base.is_base())
+            .filter(|&(_, base)| base.is_internal() && base.get_base().is_some())
             .map(|(n, base)| (n.into(), &*base))
             .collect()
     }
@@ -507,6 +507,31 @@ impl<'a> Migration<'a> {
         self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         // and tell the caller its id
         ni.into()
+    }
+
+    /// Add a new column to a base node.
+    ///
+    /// Note that a default value must be provided such that old writes can be converted into this
+    /// new type.
+    pub fn add_column<S: ToString>(&mut self,
+                                   node: core::NodeAddress,
+                                   field: S,
+                                   default: prelude::DataType)
+                                   -> usize {
+        let field = field.to_string();
+        let base = &mut self.mainline.ingredients[*node.as_global()];
+        assert!(base.is_internal() && base.get_base().is_some());
+
+        // we need to tell the base about its new column and its default, so that old writes the do
+        // not have it get the additional value added to them.
+        let col_i1 = base.add_column(&field);
+        let col_i2 = base.get_base_mut().unwrap().add_column(default);
+        assert_eq!(col_i1, col_i2);
+
+        // FIXME: also propagate to domain clone
+        unimplemented!();
+
+        col_i2
     }
 
     #[cfg(test)]

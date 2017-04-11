@@ -49,7 +49,7 @@ fn trace<F>(graph: &Graph,
     }
 
     // have we reached a base node?
-    if n.is_internal() && n.is_base() {
+    if n.is_internal() && n.get_base().is_some() {
         return vec![path];
     }
 

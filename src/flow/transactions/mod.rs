@@ -99,7 +99,7 @@ impl DomainState {
                 }
 
                 let child = nodes[n.borrow().children[0].as_local()].borrow();
-                if !child.is_internal() || !child.is_base() {
+                if !child.is_internal() || !child.get_base().is_some() {
                     return None;
                 }
 

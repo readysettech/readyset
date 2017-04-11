@@ -517,6 +517,15 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .clone();
 
+                {
+                    let n = self.nodes[from.as_local()].borrow();
+                    if n.is_internal() && n.get_base().is_some() {
+                        // FIXME: may need to also include defaults for new columns
+                        unimplemented!();
+                    }
+                    drop(n);
+                }
+
                 debug!(self.log, "current state cloned for replay"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
 
                 let m = Packet::FullReplay {
@@ -540,7 +549,7 @@ impl Domain {
                 if !index.is_empty() {
                     let mut s = {
                         let n = self.nodes[&node].borrow();
-                        if n.is_internal() && n.is_base() {
+                        if n.is_internal() && n.get_base().is_some() {
                             State::base()
                         } else {
                             State::default()
