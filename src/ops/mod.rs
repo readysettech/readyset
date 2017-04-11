@@ -190,9 +190,7 @@ pub mod test {
                 .clear();
         }
 
-        pub fn one<U: Into<Records>>(&mut self,
-                                     src: NodeAddress,
-                                     u: U, remember: bool) -> Records {
+        pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
             assert!(!remember ||
                     self.states.contains_key(self.nut
