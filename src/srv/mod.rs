@@ -5,6 +5,7 @@ use tarpc;
 use tarpc::util::Never;
 use futures;
 use tokio_core::reactor;
+use vec_map::VecMap;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -38,20 +39,20 @@ use self::ext::*;
 type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>;
 
 struct Server {
-    put: HashMap<NodeAddress, (String, Vec<String>, Mutex<flow::Mutator>)>,
-    get: HashMap<NodeAddress, (String, Vec<String>, Get)>,
+    put: VecMap<(String, Vec<String>, Mutex<flow::Mutator>)>,
+    get: VecMap<(String, Vec<String>, Get)>,
 }
 
 impl ext::FutureService for Rc<Server> {
     type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
     fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
-        let get = &self.get[&view.into()];
+        let get = &self.get[view];
         futures::future::result(get.2(&key))
     }
 
     type InsertFut = futures::Finished<i64, Never>;
     fn insert(&self, view: usize, args: Vec<DataType>) -> Self::InsertFut {
-        self.put[&view.into()]
+        self.put[view]
             .2
             .lock()
             .unwrap()
@@ -63,8 +64,8 @@ impl ext::FutureService for Rc<Server> {
     fn list(&self) -> Self::ListFut {
         futures::finished(self.get
                               .iter()
-                              .map(|(&ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
-                              .chain(self.put.iter().map(|(&ni, &(ref n, _, _))| {
+                              .map(|(ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
+                              .chain(self.put.iter().map(|(ni, &(ref n, _, _))| {
                                                              (n.clone(), (ni.into(), true))
                                                          }))
                               .collect())
@@ -99,7 +100,7 @@ fn make_server(soup: &flow::Blender) -> Server {
     let ins = soup.inputs()
         .into_iter()
         .map(|(ni, n)| {
-            (ni,
+            (ni.as_global().index(),
              (n.name().to_owned(),
               n.fields()
                   .iter()
@@ -111,7 +112,7 @@ fn make_server(soup: &flow::Blender) -> Server {
     let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n, r)| {
-            (ni,
+            (ni.as_global().index(),
              (n.name().to_owned(),
               n.fields()
                   .iter()

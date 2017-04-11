@@ -27,6 +27,7 @@ slog-term = "1.5.0"
 
 evmap = "0.6.0"
 arccstr = "0.3.2"
+vec_map = "0.7.0"
 
 spmc = "0.2.1"
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b6006205807b18657724d20453eb720f59653d9d" }
