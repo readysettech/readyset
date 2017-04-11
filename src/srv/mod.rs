@@ -1,20 +1,22 @@
 use flow::prelude::*;
 use flow;
 
+use futures;
 use tarpc;
 use tarpc::util::Never;
-use futures;
 use tokio_core::reactor;
 use vec_map::VecMap;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::rc::Rc;
+use std::net::TcpListener;
+use std::net::TcpStream;
 use std::thread;
 
 /// Available RPC methods
 pub mod ext {
-    use flow::prelude::DataType;
+    use super::*;
     use std::collections::HashMap;
     service! {
         /// Query the given `view` for all records whose columns match the given values.
@@ -32,18 +34,70 @@ pub mod ext {
         /// List all available views, their names, and whether they are writeable.
         rpc list() -> HashMap<String, (usize, bool)>;
     }
-}
 
-use self::ext::*;
+    /// Construct a new `Server` handle for all Soup endpoints
+    pub fn make_server(soup: &flow::Blender) -> Server {
+        // Figure out what inputs and outputs to expose
+        let ins = soup.inputs()
+            .into_iter()
+            .map(|(ni, n)| {
+                (ni.as_global().index(),
+                 (n.name().to_owned(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
+                  Mutex::new(soup.get_mutator(ni))))
+            })
+            .collect();
+        let outs = soup.outputs()
+            .into_iter()
+            .map(|(ni, n, r)| {
+                (ni.as_global().index(),
+                 (n.name().to_owned(),
+                  n.fields()
+                      .iter()
+                      .cloned()
+                      .collect(),
+                  r.get_reader().unwrap()))
+            })
+            .collect();
+
+        Server {
+            put: ins,
+            get: outs,
+        }
+    }
+
+    /// A handle to Soup put and get endpoints
+    pub struct Server {
+        /// All put endpoints.
+        pub put: VecMap<(String, Vec<String>, Mutex<flow::Mutator>)>,
+        /// All get endpoints.
+        pub get: VecMap<(String, Vec<String>, Get)>,
+    }
+
+    /// Handle RPCs from a single `TcpStream`
+    pub fn main(stream: TcpStream, s: Server) -> ! {
+        use tarpc::tokio_proto::BindServer;
+        use tokio_core;
+
+        let mut reactor = reactor::Core::new().unwrap();
+        let h = reactor.handle();
+
+        let stream = tokio_core::net::TcpStream::from_stream(stream, &h).unwrap();
+        let stream = tarpc::stream_type::StreamType::Tcp(stream);
+        let srv = ext::TarpcNewService(Rc::new(s));
+        tarpc::protocol::Proto::new(2 << 20).bind_server(&h, stream, srv);
+        loop {
+            reactor.turn(None)
+        }
+    }
+}
 
 type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>;
 
-struct Server {
-    put: VecMap<(String, Vec<String>, Mutex<flow::Mutator>)>,
-    get: VecMap<(String, Vec<String>, Get)>,
-}
-
-impl ext::FutureService for Rc<Server> {
+impl ext::FutureService for Rc<ext::Server> {
     type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
     fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
         let get = &self.get[view];
@@ -72,98 +126,30 @@ impl ext::FutureService for Rc<Server> {
     }
 }
 
-/// A handle for a running RPC server.
-///
-/// Will terminate and wait for all server threads when dropped.
-pub struct ServerHandle {
-    threads: Vec<(futures::sync::oneshot::Sender<()>, thread::JoinHandle<()>)>,
-    _g: flow::Blender, // never read or written, just needed so the server doesn't stop
-}
-
-impl Drop for ServerHandle {
-    fn drop(&mut self) {
-        let wait: Vec<_> = self.threads
-            .drain(..)
-            .map(|(tx, jh)| {
-                     tx.send(()).unwrap();
-                     jh
-                 })
-            .collect();
-        for jh in wait {
-            jh.join().unwrap();
-        }
-    }
-}
-
-fn make_server(soup: &flow::Blender) -> Server {
-    // Figure out what inputs and outputs to expose
-    let ins = soup.inputs()
-        .into_iter()
-        .map(|(ni, n)| {
-            (ni.as_global().index(),
-             (n.name().to_owned(),
-              n.fields()
-                  .iter()
-                  .cloned()
-                  .collect(),
-              Mutex::new(soup.get_mutator(ni))))
-        })
-        .collect();
-    let outs = soup.outputs()
-        .into_iter()
-        .map(|(ni, n, r)| {
-            (ni.as_global().index(),
-             (n.name().to_owned(),
-              n.fields()
-                  .iter()
-                  .cloned()
-                  .collect(),
-              r.get_reader().unwrap()))
-        })
-        .collect();
-
-    Server {
-        put: ins,
-        get: outs,
-    }
-}
-
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
-pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender,
-                                            addr: T,
-                                            threads: usize)
-                                            -> ServerHandle {
-    let addr = addr.into();
-    let threads = (0..threads)
-        .map(|i| {
-            // Arc is just there so we can easily have Server be Clone
-            let s = make_server(&soup);
-            let (tx, rx) = futures::sync::oneshot::channel();
-            let jh = thread::Builder::new()
-                .name(format!("rpc{}", i))
-                .spawn(move || {
-                    let mut core = reactor::Core::new().unwrap();
-                    let s = Rc::new(s);
-                    let (_, handle) = s.listen(addr,
-                                               &core.handle(),
-                                               tarpc::future::server::Options::default())
-                        .unwrap();
-                    core.handle().spawn(handle);
+pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender, addr: T) {
+    let listener = TcpListener::bind(addr.into()).unwrap();
 
-                    match core.run(rx) {
-                        Ok(_) => println!("RPC server thread quitting normally"),
-                        Err(_) => println!("RPC server thread crashing and burning"),
-                    }
-                })
-                .unwrap();
-            (tx, jh)
-        })
-        .collect();
-
-    ServerHandle {
-        threads: threads,
-        _g: soup,
+    // Figure out what inputs and outputs to expose
+    let mut i = 0;
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let s = ext::make_server(&soup);
+                thread::Builder::new()
+                    .name(format!("rpc{}", i))
+                    .spawn(move || {
+                               stream.set_nodelay(true).unwrap();
+                               ext::main(stream, s);
+                           })
+                    .unwrap();
+                i += 1;
+            }
+            Err(e) => {
+                print!("accept failed {:?}\n", e);
+            }
+        }
     }
 }
