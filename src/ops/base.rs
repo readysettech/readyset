@@ -26,7 +26,7 @@ const BUFFERED_WRITES_FLUSH_INTERVAL_MS: u64 = 1000;
 #[derive(Debug)]
 pub struct Base {
     buffered_writes: Option<Records>,
-    durability: BaseDurabilityLevel,
+    durability: Option<BaseDurabilityLevel>,
     durable_log: Option<BufWriter<File, WhenFull>>,
     durable_log_path: Option<PathBuf>,
     global_address: Option<NodeAddress>,
@@ -49,9 +49,6 @@ pub struct Base {
 /// reduced write performance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BaseDurabilityLevel {
-    /// No durability at all: records aren't written to a log. This is the default durability level
-    /// if none is specified.
-    None,
     /// Buffered writes: records are accumulated in an in-memory buffer and occasionally flushed to
     /// the durable log, which may itself buffer in the file system. Results in large batched
     /// writes, but offers no durability guarantees on crashes.
@@ -63,11 +60,27 @@ pub enum BaseDurabilityLevel {
 }
 
 impl Base {
-    /// Create a base node operator.
-    pub fn new(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
+    /// Create a non-durable base node operator.
+    pub fn new(primary_key: Vec<usize>) -> Self {
         Base {
             buffered_writes: Some(Records::default()),
-            durability: durability,
+            durability: None,
+            durable_log: None,
+            durable_log_path: None,
+            global_address: None,
+            last_flushed_at: Some(Instant::now()),
+            primary_key: Some(primary_key),
+            should_delete_log_on_drop: false,
+            unique_id: ProcessUniqueId::new(),
+            us: None,
+        }
+    }
+
+    /// Create durable base node operator.
+    pub fn new_durable(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
+        Base {
+            buffered_writes: Some(Records::default()),
+            durability: Some(durability),
             durable_log: None,
             durable_log_path: None,
             global_address: None,
@@ -89,9 +102,9 @@ impl Base {
     /// Write records to durable log.
     fn persist_to_log(&mut self, records: &Records) {
         match self.durability {
-            BaseDurabilityLevel::None => panic!("tried to persist non-durable base node!"),
-            BaseDurabilityLevel::Buffered |
-            BaseDurabilityLevel::SyncImmediately => {
+            None => panic!("tried to persist non-durable base node!"),
+            Some(BaseDurabilityLevel::Buffered) |
+            Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.ensure_log_writer();
                 serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
                     .unwrap();
@@ -138,15 +151,15 @@ impl Base {
             };
 
             match self.durability {
-                BaseDurabilityLevel::None => {
+                None => {
                     self.durable_log = None;
                 },
 
-                BaseDurabilityLevel::Buffered |
+                Some(BaseDurabilityLevel::Buffered) |
 
                 // XXX(jmftrindade): buf_redux does not provide a "sync immediately" flush strategy
                 // out of the box, so we handle that from persist_to_log by dropping sync_data.
-                BaseDurabilityLevel::SyncImmediately => {
+                Some(BaseDurabilityLevel::SyncImmediately) => {
                     self.durable_log = Some(BufWriter::with_capacity_and_strategy(
                         LOG_BUFFER_CAPACITY, file, WhenFull))
                 }
@@ -198,7 +211,7 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             buffered_writes: Some(Records::default()),
-            durability: BaseDurabilityLevel::None,
+            durability: None,
             durable_log: None,
             durable_log_path: None,
             global_address: None,
@@ -254,7 +267,7 @@ impl Ingredient for Base {
         let records_to_return;
         let mut copy_rs = rs.clone();
         match self.durability {
-            BaseDurabilityLevel::Buffered => {
+            Some(BaseDurabilityLevel::Buffered) => {
                 // Perform a synchronous flush if one of the following conditions are met:
                 //
                 // 1. Enough time has passed since the last time we flushed.
@@ -278,11 +291,11 @@ impl Ingredient for Base {
                     return Some(Records::default())
                 }
             },
-            BaseDurabilityLevel::SyncImmediately => {
+            Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.persist_to_log(&rs);
                 records_to_return = Some(rs.clone());
             },
-            BaseDurabilityLevel::None => {
+            None => {
                 records_to_return = Some(rs.clone());
             },
         }
@@ -349,31 +362,23 @@ mod tests {
     #[test]
     fn it_works() {
         let b = Base::default();
-        assert_eq!(b.durability, BaseDurabilityLevel::None);
-        assert!(b.durable_log.is_none());
-        assert!(b.durable_log_path.is_none());
-    }
-
-    #[test]
-    fn it_works_durability_none() {
-        let b = Base::new(vec![0], BaseDurabilityLevel::None);
-        assert_eq!(b.durability, BaseDurabilityLevel::None);
+        assert_eq!(b.durability, None);
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
     }
 
     #[test]
     fn it_works_durability_buffered() {
-        let b = Base::new(vec![0], BaseDurabilityLevel::Buffered);
-        assert_eq!(b.durability, BaseDurabilityLevel::Buffered);
+        let b = Base::new_durable(vec![0], BaseDurabilityLevel::Buffered);
+        assert_eq!(b.durability, Some(BaseDurabilityLevel::Buffered));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
     }
 
     #[test]
     fn it_works_durability_sync_immediately() {
-        let b = Base::new(vec![0], BaseDurabilityLevel::SyncImmediately);
-        assert_eq!(b.durability, BaseDurabilityLevel::SyncImmediately);
+        let b = Base::new_durable(vec![0], BaseDurabilityLevel::SyncImmediately);
+        assert_eq!(b.durability, Some(BaseDurabilityLevel::SyncImmediately));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
     }

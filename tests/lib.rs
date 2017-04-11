@@ -16,8 +16,8 @@ fn it_works() {
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
-        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0], BaseDurabilityLevel::None));
+        let a = mig.add_ingredient("a", &["a", "b"], Base::new(vec![0]));
+        let b = mig.add_ingredient("b", &["a", "b"], Base::new(vec![0]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -81,9 +81,11 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     let (a, b, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::SyncImmediately)
+                                       .delete_log_on_drop());
         let b = mig.add_ingredient("b", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::SyncImmediately).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::SyncImmediately)
+                                       .delete_log_on_drop());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -147,9 +149,11 @@ fn it_propagates_writes_w_durability_buffered() {
     let (a, _, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::Buffered)
+                                       .delete_log_on_drop());
         let b = mig.add_ingredient("b", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::Buffered)
+                                       .delete_log_on_drop());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -198,9 +202,11 @@ fn it_propagates_writes_w_durability_buffered_flush_interval() {
     let (a, _, cq) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::Buffered)
+                                       .delete_log_on_drop());
         let b = mig.add_ingredient("b", &["a", "b"],
-                                   Base::new(vec![0], BaseDurabilityLevel::Buffered).delete_log_on_drop());
+                                   Base::new_durable(vec![0], BaseDurabilityLevel::Buffered)
+                                       .delete_log_on_drop());
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -388,9 +394,8 @@ fn it_works_deletion() {
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![1], BaseDurabilityLevel::None));
-        let b = mig.add_ingredient("b", &["_", "x", "y"],
-                                   Base::new(vec![2], BaseDurabilityLevel::None));
+        let a = mig.add_ingredient("a", &["x", "y"], Base::new(vec![1]));
+        let b = mig.add_ingredient("b", &["_", "x", "y"], Base::new(vec![2]));
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
