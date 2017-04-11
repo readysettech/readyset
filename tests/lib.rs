@@ -10,7 +10,7 @@ const SETTLE_TIME_MS: u64 = 100;
 
 #[test]
 fn it_works() {
-    use distributary::{Base, BaseDurabilityLevel};
+    use distributary::Base;
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -388,7 +388,7 @@ fn it_works_w_mat() {
 
 #[test]
 fn it_works_deletion() {
-    use distributary::{Base, BaseDurabilityLevel};
+    use distributary::Base;
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -422,8 +422,7 @@ fn it_works_deletion() {
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
     muta.delete(vec![2.into()]);
-    assert_eq!(cq.recv(),
-    Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
+    assert_eq!(cq.recv(), Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }
 
 #[test]
@@ -804,8 +803,7 @@ fn transactional_migration() {
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that c got them
-    assert_eq!(cq(&3.into()).unwrap().0,
-    vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
+    assert_eq!(cq(&3.into()).unwrap().0, vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
 }
 
 #[test]
@@ -1166,7 +1164,7 @@ fn full_vote_migration() {
 #[test]
 fn live_writes() {
     use std::time::Duration;
-    use distributary::{Base, Blender, Aggregation, DataType};
+    use distributary::{Blender, Aggregation, DataType};
     let mut g = Blender::new();
     let vc_state;
     let vote;
@@ -1176,7 +1174,7 @@ fn live_writes() {
         let mut mig = g.start_migration();
 
         // add vote base table
-        vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        vote = mig.add_ingredient("vote", &["user", "id"], distributary::Base::default());
 
         // add vote count
         vc = mig.add_ingredient("votecount",

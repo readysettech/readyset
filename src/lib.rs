@@ -175,8 +175,7 @@
 //! # let mut g = Blender::new();
 //! # let article = {
 //! # let mut mig = g.start_migration();
-//! # let article = mig.add_ingredient("article", &["id", "title"],
-//! #                                  Base::default());
+//! # let article = mig.add_ingredient("article", &["id", "title"], Base::default());
 //! # mig.commit();
 //! # article
 //! # };
