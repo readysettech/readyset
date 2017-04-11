@@ -36,6 +36,7 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b6006205807b186
 clap = "2.13"
 # distributions
 rand = "0.3"
+zipf = "0.2.0"
 # sampling
 hdrsample = "2.1"
 # postgresql
@@ -75,6 +76,10 @@ version = "0.2.4"
 default-features = false
 # for Mac OS X build
 git = "https://github.com/ms705/timekeeper"
+
+[replace]
+# override for MAX_IN_FLIGHT = 4096
+"tokio-proto:0.1.1" = { git = 'https://github.com/jonhoo/tokio-proto', branch = 'bigger-max-in-flight' }
 
 [profile.release]
 debug=true

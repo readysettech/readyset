@@ -15,28 +15,30 @@ impl StarExpansion for SqlQuery {
                 .clone()
                 .into_iter()
                 .map(move |f| {
-                    FieldExpression::Col(Column::from(format!("{}.{}", table_name, f).as_ref()))
-                })
+                         FieldExpression::Col(Column::from(format!("{}.{}", table_name, f)
+                                                               .as_ref()))
+                     })
         };
 
         if let SqlQuery::Select(ref mut sq) = self {
             let old_fields = mem::replace(&mut sq.fields, vec![]);
-            sq.fields = old_fields.into_iter().flat_map(|field| {
-                match field {
-                    FieldExpression::All => {
-                        let v: Vec<_> = sq.tables.iter()
-                            .map(|t| t.name.clone())
-                            .flat_map(&expand_table)
-                            .collect();
-                        v.into_iter()
-                    }
-                    FieldExpression::AllInTable(t) => {
-                        let v: Vec<_> = expand_table(t).collect();
-                        v.into_iter()
-                    }
-                    FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
+            sq.fields = old_fields.into_iter()
+                .flat_map(|field| match field {
+                              FieldExpression::All => {
+                    let v: Vec<_> = sq.tables
+                        .iter()
+                        .map(|t| t.name.clone())
+                        .flat_map(&expand_table)
+                        .collect();
+                    v.into_iter()
                 }
-            }).collect();
+                              FieldExpression::AllInTable(t) => {
+                    let v: Vec<_> = expand_table(t).collect();
+                    v.into_iter()
+                }
+                              FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
+                          })
+                .collect();
         }
         self
     }

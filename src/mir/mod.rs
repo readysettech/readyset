@@ -1,7 +1,7 @@
 use nom_sql::{Column, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Error, Formatter, Debug};
+use std::fmt::{Error, Formatter, Debug, Display};
 use std::rc::Rc;
 
 use flow::Migration;
@@ -118,6 +118,59 @@ impl MirQuery {
     }
 }
 
+impl Display for MirQuery {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        use std::collections::VecDeque;
+
+        // starting at the roots, print nodes in topological order
+        let mut node_queue = VecDeque::new();
+        node_queue.extend(self.roots.iter().cloned());
+        let mut in_edge_counts = HashMap::new();
+        for n in &node_queue {
+            in_edge_counts.insert(n.borrow().versioned_name(), 0);
+        }
+
+        writeln!(f, "digraph {{")?;
+        writeln!(f, "node [shape=record, fontsize=10]")?;
+
+        while !node_queue.is_empty() {
+            let n = node_queue.pop_front().unwrap();
+            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
+            let vn = n.borrow().versioned_name();
+            writeln!(f,
+                     "\"{}\" [label=\"{{ {} | {} }}\"]",
+                     vn,
+                     vn,
+                     n.borrow()
+                         .columns()
+                         .iter()
+                         .map(|c| c.name.as_str())
+                         .collect::<Vec<_>>()
+                         .join(", \\n"))?;
+
+            for child in n.borrow().children.iter() {
+                let nd = child.borrow().versioned_name();
+                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
+                let in_edges = if in_edge_counts.contains_key(&nd) {
+                    in_edge_counts[&nd]
+                } else {
+                    child.borrow().ancestors.len()
+                };
+                assert!(in_edges >= 1);
+                if in_edges == 1 {
+                    // last edge removed
+                    node_queue.push_back(child.clone());
+                }
+                in_edge_counts.insert(nd, in_edges - 1);
+            }
+        }
+        write!(f, "}}")?;
+
+        Ok(())
+    }
+}
+
 pub struct MirNode {
     name: String,
     from_version: usize,
@@ -221,8 +274,53 @@ impl MirNode {
         &self.name
     }
 
+    pub fn referenced_columns(&self) -> Vec<Column> {
+        // all projected columns, minus those with aliases, which we add with their original names
+        // below. This is important because we'll otherwise end up searching (and fail to find)
+        // aliased columns further up in the MIR graph.
+        let mut columns: Vec<Column> = self.columns
+            .iter()
+            .filter(|c| c.alias.is_none() || c.function.is_some()) // alias ok if computed column
+            .cloned()
+            .collect();
+
+        // + any parent columns referenced internally by the operator
+        match self.inner {
+            MirNodeType::Aggregation { ref on, .. } |
+            MirNodeType::Extremum { ref on, .. } |
+            MirNodeType::GroupConcat { ref on, .. } => {
+                // need the "over" column
+                if !columns.contains(on) {
+                    columns.push(on.clone());
+                }
+            }
+            MirNodeType::Filter { .. } => {
+                let parent = self.ancestors
+                    .iter()
+                    .next()
+                    .unwrap();
+                // need all parent columns
+                for c in parent.borrow().columns() {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
+                }
+            }
+            MirNodeType::Project { ref emit, .. } |
+            MirNodeType::Permute { ref emit } => {
+                for c in emit {
+                    if !columns.contains(&c) {
+                        columns.push(c.clone());
+                    }
+                }
+            }
+            _ => (),
+        }
+        columns
+    }
+
     pub fn versioned_name(&self) -> String {
-        format!("{}:v{}", self.name, self.from_version)
+        format!("{}_v{}", self.name, self.from_version)
     }
 
     /// Produce a compact, human-readable description of this node; analogous to the method of the
@@ -707,6 +805,10 @@ fn make_grouped_node(name: &str,
                      mut mig: &mut Migration)
                      -> FlowNode {
     assert!(group_by.len() > 0);
+    assert!(group_by.len() <= 4,
+            format!("can't have >4 group columns due to compound key restrictions, {} needs {}",
+                    name,
+                    group_by.len()));
 
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -715,7 +817,9 @@ fn make_grouped_node(name: &str,
         .columns()
         .iter()
         .position(|c| c == on)
-        .unwrap();
+        .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
+                         on,
+                         parent.borrow().columns()));
     let group_col_indx = group_by.iter()
         .map(|c| {
             parent.borrow()
@@ -801,7 +905,7 @@ fn make_join_node(name: &str,
             .columns
             .iter()
             .position(|ref nc| *nc == col)
-            .expect("column not found!")
+            .expect(&format!("column {:?} not found!", col))
     };
 
     let join_config = proj_cols.iter()
@@ -904,7 +1008,9 @@ fn make_project_node(name: &str,
                 .columns
                 .iter()
                 .position(|ref nc| *nc == c)
-                .unwrap()
+                .expect(&format!("column {:?} not found on {}",
+                                 c,
+                                 parent.borrow().versioned_name()))
         })
         .collect::<Vec<_>>();
 
