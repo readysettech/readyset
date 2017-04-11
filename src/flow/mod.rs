@@ -464,17 +464,6 @@ impl<'a> Migration<'a> {
             }
         }
 
-        // and tell the caller its id
-        //
-        // FIXME(jmftrindade): Is this the right place to make a base remember its own global
-        // address?  Can't infer the correct type here though.
-        // 
-        // let global_address = NodeAddress::make_global(ni);
-        // let mut i = i.into();
-        // if i.is_base() {
-        //   i.set_global_address(global_address);
-        // }
-        //
         ni.into()
     }
 

@@ -154,12 +154,6 @@ impl Base {
         }
     }
 
-    /// A base node must remember its own global address so that it can use it as an id for durable
-    /// log.
-    fn set_global_address(&mut self, n: NodeAddress) {
-        self.global_address = Some(n);
-    }
-
     /// XXX: This should only be used by tests.  We don't hide it behind cfg test, however, since it
     /// needs to be available for integration tests, which get compiled against the regular build.
     pub fn delete_durable_log(&mut self) {
