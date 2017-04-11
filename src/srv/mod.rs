@@ -4,7 +4,7 @@ use flow;
 use futures;
 use tarpc;
 use tarpc::util::Never;
-use tokio_core::{self, reactor};
+use tokio_core::reactor;
 use vec_map::VecMap;
 
 use std::collections::HashMap;
@@ -79,17 +79,16 @@ pub mod ext {
 
     /// Handle RPCs from a single `TcpStream`
     pub fn main(stream: TcpStream, s: Server) -> ! {
-        let srv = ext::tarpc_service_AsyncServer__(Rc::new(s));
+        use tarpc::tokio_proto::BindServer;
+        use tokio_core;
+
         let mut reactor = reactor::Core::new().unwrap();
-        let h1 = reactor.handle();
-        let b = tarpc::future::server::Bind {
-            handle: h1,
-            new_service: srv,
-            max_payload_size: 2 << 20,
-        };
-        let h2 = reactor.handle();
-        let tokstream = tokio_core::net::TcpStream::from_stream(stream, &h2).unwrap();
-        let _ = b.bind(tokstream);
+        let h = reactor.handle();
+
+        let stream = tokio_core::net::TcpStream::from_stream(stream, &h).unwrap();
+        let stream = tarpc::stream_type::StreamType::Tcp(stream);
+        let srv = ext::TarpcNewService(Rc::new(s));
+        tarpc::protocol::Proto::new(2 << 20).bind_server(&h, stream, srv);
         loop {
             reactor.turn(None)
         }
