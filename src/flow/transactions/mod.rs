@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::mem;
 
 use flow::prelude::*;
-use flow::payload::TransactionState;
+use flow::payload::{TransactionState, ReplayTransactionState};
 use flow::domain;
 
 use checktable;
@@ -18,6 +18,8 @@ enum BufferedTransaction {
     Transaction(NodeIndex, Packet),
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
+    Replay(Packet),
+    SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
 
 struct BufferEntry {
@@ -50,12 +52,16 @@ enum Bundle {
     Messages(usize, Vec<Packet>),
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
+    Replay(Packet),
+    SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
 
 pub enum Event {
     Transaction(Vec<Packet>),
     StartMigration,
     CompleteMigration,
+    Replay(Packet),
+    SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
     None,
 }
 
@@ -171,6 +177,18 @@ impl DomainState {
             }
             Packet::StartMigration { at, prev_ts, .. } => (at, None, prev_ts),
             Packet::CompleteMigration { at, .. } => (at, None, at - 1),
+            Packet::ReplayPiece { transaction_state: Some(ReplayTransactionState { ts, ref prevs }), .. } => {
+                if self.ts == ts - 1 {
+                    (ts, None, ts - 1)
+                } else {
+                    let prev_ts = prevs.as_ref()
+                        .and_then(|p| p.get(&self.domain_index))
+                        .cloned()
+                        .unwrap_or(ts - 1);
+
+                    (ts, None, prev_ts)
+                }
+            }
             _ => unreachable!(),
         };
 
@@ -186,6 +204,9 @@ impl DomainState {
                         Packet::CompleteMigration { ingress_from_base, .. } => {
                             Bundle::MigrationEnd(ingress_from_base)
                         }
+                        Packet::ReplayPiece { .. } => {
+                            Bundle::Replay(m)
+                        },
                         _ => unreachable!(),
                     };
 
@@ -201,6 +222,9 @@ impl DomainState {
                 Packet::CompleteMigration { ingress_from_base, .. } => {
                     BufferedTransaction::MigrationEnd(ingress_from_base)
                 }
+                Packet::ReplayPiece { .. } => {
+                    BufferedTransaction::Replay(m)
+                },
                 _ => unreachable!(),
             };
             let entry = BufferEntry {
@@ -252,6 +276,12 @@ impl DomainState {
                 BufferedTransaction::MigrationEnd(ingress_from_base) => {
                     self.next_transaction = Bundle::MigrationEnd(ingress_from_base);
                 }
+                BufferedTransaction::Replay(packet) => {
+                    self.next_transaction = Bundle::Replay(packet);
+                }
+                BufferedTransaction::SeedReplay(tag, key, rts) => {
+                    self.next_transaction = Bundle::SeedReplay(tag, key, rts);
+                }
             }
         }
     }
@@ -263,7 +293,6 @@ impl DomainState {
                 self.ts += 1;
                 self.update_next_transaction();
                 Event::StartMigration
-
             }
             Bundle::MigrationEnd(ingress_from_base) => {
                 let max_index = ingress_from_base.keys()
@@ -288,7 +317,48 @@ impl DomainState {
                 self.update_next_transaction();
                 Event::Transaction(v)
             }
+            Bundle::Replay(packet) => {
+                self.ts += 1;
+                self.update_next_transaction();
+                Event::Replay(packet)
+            }
+            Bundle::SeedReplay(tag, key, rts) => {
+                self.ts += 1;
+                self.update_next_transaction();
+                Event::SeedReplay(tag, key, rts)
+            }
             Bundle::Empty => Event::None,
+        }
+    }
+
+    pub fn schedule_replay(&mut self, tag: Tag, key: Vec<DataType>) {
+        let (ts, prevs) = self.checktable.lock().unwrap().claim_replay_timestamp(&tag);
+
+        let prev_ts = if self.ts == ts - 1 {
+            ts - 1
+        } else {
+            prevs.as_ref()
+                .and_then(|p| p.get(&self.domain_index))
+                .cloned()
+                .unwrap_or(ts - 1)
+        };
+
+        let rts = ReplayTransactionState{ts: ts, prevs: prevs};
+
+        if self.ts == prev_ts {
+            self.ts = ts - 1;
+
+            if let Bundle::Empty = self.next_transaction {
+                mem::replace(&mut self.next_transaction, Bundle::SeedReplay(tag, key, rts));
+            } else {
+                unreachable!();
+            }
+        } else {
+            self.buffer.push(BufferEntry {
+                ts: ts,
+                prev_ts: prev_ts,
+                transaction: BufferedTransaction::SeedReplay(tag, key, rts),
+            });
         }
     }
 }

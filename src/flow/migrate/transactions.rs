@@ -18,6 +18,7 @@ fn count_base_ingress(graph: &Graph,
     let ingress_nodes: Vec<_> = nodes.into_iter()
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].borrow().is_ingress())
+        .filter(|&ni| graph[ni].borrow().is_transactional())
         .collect();
 
     graph.neighbors_directed(source, petgraph::EdgeDirection::Outgoing)

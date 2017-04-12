@@ -22,7 +22,7 @@ pub mod payload;
 pub mod statistics;
 pub mod keys;
 pub mod core;
-mod migrate;
+pub mod migrate;
 mod transactions;
 mod hook;
 
@@ -878,15 +878,24 @@ impl<'a> Migration<'a> {
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        migrate::materialization::initialize(&log,
-                                             &mut mainline.ingredients,
-                                             mainline.source,
-                                             &new,
-                                             &mut mainline.partial,
-                                             index,
-                                             &mut mainline.txs);
+        let domains_on_path = migrate::materialization::initialize(&log,
+                                                                   &mut mainline.ingredients,
+                                                                   mainline.source,
+                                                                   &new,
+                                                                   &mut mainline.partial,
+                                                                   index,
+                                                                   &mut mainline.txs);
 
         info!(log, "finalizing migration");
+
+        // Ideally this should happen as part of checktable::perform_migration(), but we don't know
+        // the replay paths then. It is harmless to do now since we know the new replay paths won't
+        // request timestamps until after the migration in finished.
+        mainline.checktable
+            .lock()
+            .unwrap()
+            .add_replay_paths(domains_on_path);
+
         migrate::transactions::finalize(ingresses_from_base, &log, &mut mainline.txs, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);

@@ -43,7 +43,10 @@ pub enum InitialState {
 
 #[derive(Clone)]
 pub enum ReplayPieceContext {
-    Partial { for_key: Vec<DataType> },
+    Partial {
+        for_key: Vec<DataType>,
+        ignore: bool,
+    },
     Regular { last: bool },
 }
 
@@ -51,6 +54,12 @@ pub enum ReplayPieceContext {
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
+}
+
+#[derive(Clone)]
+pub struct ReplayTransactionState {
+    pub ts: i64,
+    pub prevs: Option<HashMap<domain::Index, i64>>,
 }
 
 pub enum Packet {
@@ -75,6 +84,7 @@ pub enum Packet {
         tag: Tag,
         data: Records,
         context: ReplayPieceContext,
+        transaction_state: Option<ReplayTransactionState>,
     },
 
     //
