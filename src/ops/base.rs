@@ -29,7 +29,6 @@ pub struct Base {
     durability: Option<BaseDurabilityLevel>,
     durable_log: Option<BufWriter<File, WhenFull>>,
     durable_log_path: Option<PathBuf>,
-    global_address: Option<NodeAddress>,
     last_flushed_at: Option<Instant>,
     primary_key: Option<Vec<usize>>,
     should_delete_log_on_drop: bool,
@@ -40,6 +39,10 @@ pub struct Base {
     // unique within the same process, the assignment of ids is not deterministic across multiple
     // process runs. This is just a tuple of 2 monotonically increasing counters: the first is per
     // process, and the second is "within" that process.
+    //
+    // We should instead make sure that Base nodes remember their own global_address at creation
+    // (or perhaps a globally unique id assigned by a recovery manager), and use that as identifier
+    // for durable log filename.
     unique_id: ProcessUniqueId,
 
     us: Option<NodeAddress>,
@@ -67,7 +70,6 @@ impl Base {
             durability: None,
             durable_log: None,
             durable_log_path: None,
-            global_address: None,
             last_flushed_at: Some(Instant::now()),
             primary_key: Some(primary_key),
             should_delete_log_on_drop: false,
@@ -83,7 +85,6 @@ impl Base {
             durability: Some(durability),
             durable_log: None,
             durable_log_path: None,
-            global_address: None,
             last_flushed_at: Some(Instant::now()),
             primary_key: Some(primary_key),
             should_delete_log_on_drop: false,
@@ -123,45 +124,52 @@ impl Base {
 
     /// Open durable log and initialize a buffered writer to it if successful.
     fn ensure_log_writer(&mut self) {
-        let us = self.us.expect("on_input should never be called before on_commit");
+        match self.durability {
+            None => {
+                panic!("tried to create a log for non-durable base node!");
+            },
 
-        if self.durable_log.is_none() {
-            let now = time::now();
-            let today = time::strftime("%F", &now).unwrap();
-            //let log_filename = format!("/tmp/soup-log-{}-{:?}-{}.json",
-            //                           today, self.global_address.unwrap(), self.unique_id);
-            let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
-                                       today, us, self.unique_id);
-            self.durable_log_path = Some(PathBuf::from(&log_filename));
-            let path = self.durable_log_path.as_ref().unwrap().as_path();
+            Some(BaseDurabilityLevel::Buffered) |
 
-            // TODO(jmftrindade): Current semantics is to overwrite an existing log. Once we
-            // have recovery code, we obviously do not want to overwrite this log before recovering.
-            let file = match OpenOptions::new()
-                .read(false)
-                .append(false)
-                .write(true)
-                .create(true)
-                .open(path) {
-                Err(reason) => {
-                    panic!("Unable to open durable log file {}, reason: {}",
-                           path.display(), reason)
-                }
-                Ok(file) => file,
-            };
+            // XXX(jmftrindade): buf_redux does not provide a "sync immediately" flush strategy
+            // out of the box, so we handle that from persist_to_log by dropping sync_data.
+            Some(BaseDurabilityLevel::SyncImmediately) => {
 
-            match self.durability {
-                None => {
-                    self.durable_log = None;
-                },
+                let us = self.us.expect("on_input should never be called before on_commit");
 
-                Some(BaseDurabilityLevel::Buffered) |
+                if self.durable_log.is_none() {
+                    let now = time::now();
+                    let today = time::strftime("%F", &now).unwrap();
 
-                // XXX(jmftrindade): buf_redux does not provide a "sync immediately" flush strategy
-                // out of the box, so we handle that from persist_to_log by dropping sync_data.
-                Some(BaseDurabilityLevel::SyncImmediately) => {
-                    self.durable_log = Some(BufWriter::with_capacity_and_strategy(
-                        LOG_BUFFER_CAPACITY, file, WhenFull))
+                    // TODO(jmftrindade): Make a base node remember its own global address so that
+                    // we can use that as unique_id for durable logs instead of process unique ids.
+                    //
+                    // let log_filename = format!("/tmp/soup-log-{}-{:?}-{}.json",
+                    //                           today, self.global_address.unwrap(), self.unique_id);
+
+                    let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
+                                               today, us, self.unique_id);
+                    self.durable_log_path = Some(PathBuf::from(&log_filename));
+                    if let Some(ref path) = self.durable_log_path {
+                        // TODO(jmftrindade): Current semantics is to overwrite an existing log.
+                        // Once we have recovery code, we obviously do not want to overwrite this
+                        // log before recovering.
+                        let file = match OpenOptions::new()
+                            .read(false)
+                            .append(false)
+                            .write(true)
+                            .create(true)
+                            .open(path) {
+                            Err(reason) => {
+                                panic!("Unable to open durable log file {}, reason: {}",
+                                       path.display(), reason)
+                            }
+                            Ok(file) => file,
+                        };
+
+                        self.durable_log = Some(BufWriter::with_capacity_and_strategy(
+                            LOG_BUFFER_CAPACITY, file, WhenFull))
+                    }
                 }
             }
         }
@@ -197,7 +205,6 @@ impl Clone for Base {
             durability: self.durability,
             durable_log: None,
             durable_log_path: None,
-            global_address: self.global_address,
             last_flushed_at: self.last_flushed_at,
             primary_key: self.primary_key.clone(),
             should_delete_log_on_drop: self.should_delete_log_on_drop,
@@ -214,7 +221,6 @@ impl Default for Base {
             durability: None,
             durable_log: None,
             durable_log_path: None,
-            global_address: None,
             last_flushed_at: Some(Instant::now()),
             primary_key: None,
             should_delete_log_on_drop: false,

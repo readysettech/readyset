@@ -74,9 +74,6 @@ pub enum Packet {
         parents: Vec<LocalNodeIndex>,
     },
 
-    /// Instruct base nodes to flush any buffered writes.
-    //FlushBufferedWrites,
-
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
