@@ -325,7 +325,7 @@ impl SqlIncorporator {
                              -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut new_query_mir = self.mir_converter
+        let new_query_mir = self.mir_converter
             .named_query_to_mir(query_name, query, &qg);
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();

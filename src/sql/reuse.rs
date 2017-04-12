@@ -265,7 +265,7 @@ pub fn choose_best_option(options: Vec<(ReuseType, &QueryGraph)>) -> (ReuseType,
             ReuseType::DirectExtension => {
                 score += 2 * qg.relations.len() + 4 * qg.edges.len() + 10;
             }
-            ReuseType::BackjoinRequired(ref tables) => {
+            ReuseType::BackjoinRequired(_) => {
                 score += qg.relations.len() + 3 * qg.edges.len();
             }
         }
@@ -281,7 +281,7 @@ pub fn choose_best_option(options: Vec<(ReuseType, &QueryGraph)>) -> (ReuseType,
     best_choice.unwrap()
 }
 
-pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> MirQuery {
+pub fn merge_mir_for_queries(new_query: &MirQuery, _old_query: &MirQuery) -> MirQuery {
     // XXX(malte): topologically traverse both MIR graphs and convert new nodes into Reuse nodes
     // for those that match
     new_query.clone()
