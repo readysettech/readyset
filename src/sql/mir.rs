@@ -82,9 +82,6 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
 
-        let num_columns = columns.len();
-        let mut filters = vec![None; num_columns];
-
         let f = Some((ct.operator.clone(), DataType::from(r)));
         match n.borrow()
                   .columns()
