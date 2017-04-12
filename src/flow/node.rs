@@ -203,13 +203,14 @@ pub struct Node {
     name: String,
     domain: Option<domain::Index>,
     addr: Option<NodeAddress>,
+    transactional: bool,
 
     fields: Vec<String>,
     inner: NodeHandle,
 }
 
 impl Node {
-    pub fn new<S1, FS, S2>(name: S1, fields: FS, inner: Type) -> Node
+    pub fn new<S1, FS, S2>(name: S1, fields: FS, inner: Type, transactional: bool) -> Node
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>
@@ -218,6 +219,7 @@ impl Node {
             name: name.to_string(),
             domain: None,
             addr: None,
+            transactional: transactional,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
             inner: NodeHandle::Owned(inner),
@@ -225,7 +227,7 @@ impl Node {
     }
 
     pub fn mirror(&self, n: Type) -> Node {
-        let mut n = Self::new(&*self.name, &self.fields, n);
+        let mut n = Self::new(&*self.name, &self.fields, n, self.transactional);
         n.domain = self.domain;
         n
     }
@@ -398,6 +400,10 @@ impl Node {
             Type::Hook(..) => true,
             _ => false,
         }
+    }
+
+    pub fn is_transactional(&self) -> bool {
+        self.transactional
     }
 }
 

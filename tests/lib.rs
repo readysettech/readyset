@@ -353,8 +353,8 @@ fn transactional_vote() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 = mig.add_ingredient("article1", &["id", "title"], Base::default());
-        let article2 = mig.add_ingredient("article1", &["id", "title"], Base::default());
+        let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -365,7 +365,7 @@ fn transactional_vote() {
         mig.transactional_maintain(article, 0);
 
         // add vote base table
-        let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+        let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -580,7 +580,7 @@ fn transactional_migration() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
+        let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
         mig.transactional_maintain(a, 0);
         mig.commit();
         a
@@ -601,7 +601,7 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let b = {
         let mut mig = g.start_migration();
-        let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
+        let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
         mig.transactional_maintain(b, 0);
         mig.commit();
         b
@@ -1065,13 +1065,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-                               let user: DataType = 0.into();
-                               for _ in 0..votes {
-                                   for i in 0..ids {
-                                       add.put(vec![user.clone(), i.into()]);
-                                   }
-                               }
-                           });
+        let user: DataType = 0.into();
+        for _ in 0..votes {
+            for i in 0..ids {
+                add.put(vec![user.clone(), i.into()]);
+            }
+        }
+    });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));

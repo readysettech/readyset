@@ -1,6 +1,7 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
+use ops::base::Base;
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -175,8 +176,10 @@ pub struct Blender {
 impl Default for Blender {
     fn default() -> Self {
         let mut g = petgraph::Graph::new();
-        let source =
-            g.add_node(node::Node::new("source", &["because-type-inference"], node::Type::Source));
+        let source = g.add_node(node::Node::new("source",
+                                                &["because-type-inference"],
+                                                node::Type::Source,
+                                                true));
         Blender {
             ingredients: g,
             source: source,
@@ -451,8 +454,11 @@ impl<'a> Migration<'a> {
 
         let parents = i.ancestors();
 
+        let transactional = !parents.is_empty() &&
+            parents.iter().all(|p| self.mainline.ingredients[*p.as_global()].is_transactional());
+
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i));
+        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i, transactional));
         info!(self.log, "adding new node"; "node" => ni.index(), "type" => format!("{:?}", *self.mainline.ingredients[ni]));
 
         // keep track of the fact that it's new
@@ -465,6 +471,26 @@ impl<'a> Migration<'a> {
                 self.mainline.ingredients.add_edge(*parent.as_global(), ni, false);
             }
         }
+        // and tell the caller its id
+        ni.into()
+    }
+
+    /// Add a transactional base node to the graph
+    pub fn add_transactional_base<S1, FS, S2>(&mut self, name: S1, fields: FS, b: Base) -> core::NodeAddress
+        where S1: ToString,
+              S2: ToString,
+              FS: IntoIterator<Item = S2> {
+        let mut i:node::Type = b.into();
+        i.on_connected(&self.mainline.ingredients);
+
+        // add to the graph
+        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i, true));
+        info!(self.log, "adding new node"; "node" => ni.index(), "type" => format!("{:?}", *self.mainline.ingredients[ni]));
+
+        // keep track of the fact that it's new
+        self.added.insert(ni, None);
+        // insert it into the graph
+        self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
         // and tell the caller its id
         ni.into()
     }
@@ -607,6 +633,8 @@ impl<'a> Migration<'a> {
         self.ensure_reader_for(n);
         self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];
+
+        assert!(self.mainline.ingredients[ri].is_transactional());
 
         // we need to do these here because we'll mutably borrow self.mainline in the if let
         let cols = self.mainline.ingredients[ri].fields().len();

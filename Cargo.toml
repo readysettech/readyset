@@ -27,6 +27,7 @@ slog-term = "1.5.0"
 
 evmap = "0.6.0"
 arccstr = "0.3.2"
+vec_map = "0.7.0"
 
 spmc = "0.2.1"
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b6006205807b18657724d20453eb720f59653d9d" }
@@ -51,8 +52,8 @@ memcached-rs = { version = "0.1.2", optional = true }
 # netsoup
 futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
-tarpc = {git="https://github.com/google/tarpc.git", optional = true}
-tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
+tarpc = {git="https://github.com/ms705/tarpc.git", branch = "hack", optional = true}
+tarpc-plugins = { git = "https://github.com/ms705/tarpc", branch = "hack", optional = true }
 serde = { version = "0.9", optional = true }
 serde_derive = { version = "0.9", optional = true }
 
