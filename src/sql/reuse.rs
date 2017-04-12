@@ -174,9 +174,9 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
             QueryGraphEdge::GroupBy(ref ex_columns) => {
                 match *new_qge {
                     QueryGraphEdge::GroupBy(ref new_columns) => {
-                        // GroupBy implication holds if the new QG groups by the same columns as the
-                        // original one, or by a *superset* (as we can always apply more grouped operatinos
-                        // on top of earlier ones)
+                        // GroupBy implication holds if the new QG groups by the same columns as
+                        // the original one, or by a *superset* (as we can always apply more
+                        // grouped operatinos on top of earlier ones)
                         if new_columns.len() < ex_columns.len() {
                             // more columns in existing QG's GroupBy, so we're done
                             return None;

@@ -37,7 +37,8 @@ impl Base {
     /// Add a new column to this base node.
     pub fn add_column(&mut self, default: DataType) -> usize {
         assert!(!self.defaults.is_empty(),
-                "cannot add columns to base nodes without setting default values for initial columns");
+                "cannot add columns to base nodes without\
+                setting default values for initial columns");
         self.defaults.push(default);
         self.unmodified = false;
         self.defaults.len() - 1
@@ -92,32 +93,33 @@ impl Ingredient for Base {
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        let rs = rs.into_iter().map(|r| {
-            //rustfmt
-            match r {
-                Record::Positive(u) => Record::Positive(u),
-                Record::Negative(u) => Record::Negative(u),
-                Record::DeleteRequest(key) => {
-                    let cols = self.primary_key
-                        .as_ref()
-                        .expect("base must have a primary key to support deletions");
-                    let db =
+        let rs = rs.into_iter()
+            .map(|r| {
+                //rustfmt
+                match r {
+                    Record::Positive(u) => Record::Positive(u),
+                    Record::Negative(u) => Record::Negative(u),
+                    Record::DeleteRequest(key) => {
+                        let cols = self.primary_key
+                            .as_ref()
+                            .expect("base must have a primary key to support deletions");
+                        let db =
                     state.get(self.us
                                   .as_ref()
                                   .unwrap()
                                   .as_local())
                         .expect("base must have its own state materialized to support deletions");
 
-                    match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
-                        LookupResult::Some(rows) => {
-                            assert_eq!(rows.len(), 1);
-                            Record::Negative(rows[0].clone())
+                        match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                            LookupResult::Some(rows) => {
+                                assert_eq!(rows.len(), 1);
+                                Record::Negative(rows[0].clone())
+                            }
+                            LookupResult::Missing => unreachable!(),
                         }
-                        LookupResult::Missing => unreachable!(),
                     }
                 }
-            }
-        });
+            });
 
         let rs = if self.unmodified {
             rs.collect()
@@ -130,20 +132,14 @@ impl Ingredient for Base {
 
                         use std::sync::Arc;
                         if let Some(mut v) = Arc::get_mut(&mut v) {
-                            v.extend(self.defaults
-                                         .iter()
-                                         .skip(rlen)
-                                         .cloned());
+                            v.extend(self.defaults.iter().skip(rlen).cloned());
                         }
 
                         // the trick above failed, probably because we're doing a replay
                         if v.len() == rlen {
                             let newv = v.iter()
                                 .cloned()
-                                .chain(self.defaults
-                                           .iter()
-                                           .skip(rlen)
-                                           .cloned())
+                                .chain(self.defaults.iter().skip(rlen).cloned())
                                 .collect();
                             v = Arc::new(newv)
                         }
@@ -164,13 +160,9 @@ impl Ingredient for Base {
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n,
-                  self.primary_key
-                      .as_ref()
-                      .unwrap()
-                      .clone()))
-                    .into_iter()
-                    .collect()
+            Some((n, self.primary_key.as_ref().unwrap().clone()))
+                .into_iter()
+                .collect()
         } else {
             HashMap::new()
         }

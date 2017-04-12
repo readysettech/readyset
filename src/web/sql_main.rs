@@ -16,7 +16,8 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let _article = inc.add_query("INSERT INTO article (id, user, title, url) VALUES (?, ?, ?, ?);",
+        let _article = inc.add_query("INSERT INTO article (id, user, title, url) \
+                                     VALUES (?, ?, ?, ?);",
                                      None,
                                      &mut mig)
             .unwrap();

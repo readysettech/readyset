@@ -41,26 +41,20 @@ pub mod ext {
         let ins = soup.inputs()
             .into_iter()
             .map(|(ni, n)| {
-                (ni.as_global().index(),
-                 (n.name().to_owned(),
-                  n.fields()
-                      .iter()
-                      .cloned()
-                      .collect(),
-                  Mutex::new(soup.get_mutator(ni))))
-            })
+                     (ni.as_global().index(),
+                      (n.name().to_owned(),
+                       n.fields().iter().cloned().collect(),
+                       Mutex::new(soup.get_mutator(ni))))
+                 })
             .collect();
         let outs = soup.outputs()
             .into_iter()
             .map(|(ni, n, r)| {
-                (ni.as_global().index(),
-                 (n.name().to_owned(),
-                  n.fields()
-                      .iter()
-                      .cloned()
-                      .collect(),
-                  r.get_reader().unwrap()))
-            })
+                     (ni.as_global().index(),
+                      (n.name().to_owned(),
+                       n.fields().iter().cloned().collect(),
+                       r.get_reader().unwrap()))
+                 })
             .collect();
 
         Server {
@@ -106,11 +100,7 @@ impl ext::FutureService for Rc<ext::Server> {
 
     type InsertFut = futures::Finished<i64, Never>;
     fn insert(&self, view: usize, args: Vec<DataType>) -> Self::InsertFut {
-        self.put[view]
-            .2
-            .lock()
-            .unwrap()
-            .put(args);
+        self.put[view].2.lock().unwrap().put(args);
         futures::finished(0)
     }
 
@@ -119,9 +109,11 @@ impl ext::FutureService for Rc<ext::Server> {
         futures::finished(self.get
                               .iter()
                               .map(|(ni, &(ref n, _, _))| (n.clone(), (ni.into(), false)))
-                              .chain(self.put.iter().map(|(ni, &(ref n, _, _))| {
-                                                             (n.clone(), (ni.into(), true))
-                                                         }))
+                              .chain(self.put
+                                         .iter()
+                                         .map(|(ni, &(ref n, _, _))| {
+                                                  (n.clone(), (ni.into(), true))
+                                              }))
                               .collect())
     }
 }

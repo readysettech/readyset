@@ -13,18 +13,20 @@ impl CountStarRewrite for SqlQuery {
         let rewrite_count_star = |c: &mut Column, tables: &Vec<Table>| {
             assert!(tables.len() > 0);
             let bogo_table = tables.get(0).unwrap();
-            let bogo_column = write_schemas.get(&bogo_table.name)
+            let bogo_column = write_schemas
+                .get(&bogo_table.name)
                 .unwrap()
                 .last()
                 .unwrap();
 
             if let Some(box CountStar) = c.function {
-                c.function = Some(Box::new(Count(Column{
-                    name: bogo_column.clone(),
-                    alias: None,
-                    table: Some(bogo_table.name.clone()),
-                    function: None,
-                }, false)));
+                c.function = Some(Box::new(Count(Column {
+                                                     name: bogo_column.clone(),
+                                                     alias: None,
+                                                     table: Some(bogo_table.name.clone()),
+                                                     function: None,
+                                                 },
+                                                 false)));
             }
         };
 

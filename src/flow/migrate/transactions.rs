@@ -15,20 +15,24 @@ fn count_base_ingress(graph: &Graph,
                       nodes: &[(NodeIndex, bool)])
                       -> HashMap<NodeIndex, usize> {
 
-    let ingress_nodes: Vec<_> = nodes.into_iter()
+    let ingress_nodes: Vec<_> = nodes
+        .into_iter()
         .map(|&(ni, _)| ni)
         .filter(|&ni| graph[ni].borrow().is_ingress())
         .filter(|&ni| graph[ni].borrow().is_transactional())
         .collect();
 
-    graph.neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
+    graph
+        .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
         .map(|ingress| {
-                 graph.neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+                 graph
+                     .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
                      .next()
                      .expect("source ingress must have a base child")
              })
         .map(|base| {
-            let num_paths = ingress_nodes.iter()
+            let num_paths = ingress_nodes
+                .iter()
                 .filter(|&&ingress| {
                             petgraph::algo::has_path_connecting(graph, base, ingress, None) ||
                             petgraph::algo::has_path_connecting(graph, ingress, base, None)
@@ -43,7 +47,8 @@ pub fn analyze_graph(graph: &Graph,
                      source: NodeIndex,
                      domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>)
                      -> (HashMap<domain::Index, HashMap<NodeIndex, usize>>) {
-    domain_nodes.into_iter()
+    domain_nodes
+        .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
                  (domain, count_base_ingress(graph, source, &nodes[..]))
              })

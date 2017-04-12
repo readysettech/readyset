@@ -334,12 +334,14 @@ fn votes() {
 
     // query vote count to see that the count was updated
     let res = vcq(&a1).unwrap();
-    assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
+    assert!(res.iter()
+                .all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap();
-    assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
+    assert!(res.iter()
+                .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
     assert_eq!(res.len(), 1);
@@ -417,7 +419,8 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // make one article
-    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token).is_ok());
+    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token)
+                .is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -432,7 +435,8 @@ fn transactional_vote() {
     assert!(!validate(&endq_votes_token));
 
     // make another article
-    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token).is_ok());
+    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token)
+                .is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -457,7 +461,8 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
-    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token).is_ok());
+    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token)
+                .is_ok());
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -469,12 +474,14 @@ fn transactional_vote() {
 
     // query vote count to see that the count was updated
     let res = vcq(&a1).unwrap();
-    assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
+    assert!(res.iter()
+                .all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap().0;
-    assert!(res.iter().any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
+    assert!(res.iter()
+                .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
     assert_eq!(res.len(), 1);
@@ -691,7 +698,8 @@ fn transactional_migration() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty()).unwrap();
+    muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty())
+        .unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -712,7 +720,8 @@ fn transactional_migration() {
     let mutb = g.get_mutator(b);
 
     // send a value on b
-    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty()).unwrap();
+    mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty())
+        .unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -739,8 +748,10 @@ fn transactional_migration() {
     assert_eq!(bq(&2.into()).unwrap().0, vec![vec![2.into(), 4.into()]]);
 
     // send a value on a and b
-    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty()).unwrap();
-    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty()).unwrap();
+    muta.transactional_put(vec![3.into(), 5.into()], distributary::Token::empty())
+        .unwrap();
+    mutb.transactional_put(vec![3.into(), 6.into()], distributary::Token::empty())
+        .unwrap();
 
     // give them some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -942,8 +953,10 @@ fn state_replay_migration_stream() {
     mutb.put(vec![1.into(), "n".into()]);
     // they may arrive in any order
     let res = out.recv().unwrap();
-    assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()].into()));
-    assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
+    assert!(res.iter()
+                .any(|r| r == &vec![1.into(), "a".into(), "n".into()].into()));
+    assert!(res.iter()
+                .any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
 
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]);
@@ -1166,13 +1179,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-        let user: DataType = 0.into();
-        for _ in 0..votes {
-            for i in 0..ids {
-                add.put(vec![user.clone(), i.into()]);
-            }
-        }
-    });
+                               let user: DataType = 0.into();
+                               for _ in 0..votes {
+                                   for i in 0..ids {
+                                       add.put(vec![user.clone(), i.into()]);
+                                   }
+                               }
+                           });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
@@ -1259,8 +1272,10 @@ fn state_replay_migration_query() {
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
     let res = out(&1.into()).unwrap();
-    assert!(res.iter().any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
-    assert!(res.iter().any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
+    assert!(res.iter()
+                .any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
+    assert!(res.iter()
+                .any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(out(&2.into()),

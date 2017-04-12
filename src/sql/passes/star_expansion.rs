@@ -10,7 +10,8 @@ pub trait StarExpansion {
 impl StarExpansion for SqlQuery {
     fn expand_stars(mut self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery {
         let expand_table = |table_name: String| {
-            write_schemas.get(&table_name)
+            write_schemas
+                .get(&table_name)
                 .unwrap()
                 .clone()
                 .into_iter()
@@ -22,7 +23,8 @@ impl StarExpansion for SqlQuery {
 
         if let SqlQuery::Select(ref mut sq) = self {
             let old_fields = mem::replace(&mut sq.fields, vec![]);
-            sq.fields = old_fields.into_iter()
+            sq.fields = old_fields
+                .into_iter()
                 .flat_map(|field| match field {
                               FieldExpression::All => {
                     let v: Vec<_> = sq.tables
@@ -116,7 +118,8 @@ mod tests {
         // SELECT uid, name, paper_id, tag_id, uid, name FROM PaperTag, Users [...]
         let q = SelectStatement {
             tables: vec![Table::from("PaperTag"), Table::from("Users")],
-            fields: vec![FieldExpression::AllInTable("Users".into()), FieldExpression::All],
+            fields: vec![FieldExpression::AllInTable("Users".into()),
+                         FieldExpression::All],
             ..Default::default()
         };
         let mut schema = HashMap::new();

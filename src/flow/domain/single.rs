@@ -31,7 +31,8 @@ impl NodeDescriptor {
         use petgraph;
 
         let inner = graph.node_weight_mut(node).unwrap().take();
-        let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+        let children: Vec<_> = graph
+            .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
             .filter(|&c| graph[c].domain() == inner.domain())
             .map(|ni| graph[ni].addr())
             .collect();
@@ -176,13 +177,14 @@ impl NodeDescriptor {
                 // we need to find the ingress node following this egress according to the path
                 // with replay.tag, and then forward this message only on the channel corresponding
                 // to that ingress node.
-                let replay_to = m.tag().map(|tag| {
-                    tags.lock()
+                let replay_to = m.tag()
+                    .map(|tag| {
+                             tags.lock()
                         .unwrap()
                         .get(&tag)
                         .map(|n| *n)
                         .expect("egress node told about replay message, but not on replay path")
-                });
+                         });
 
                 use std::mem;
                 let mut m = Some(mem::replace(m, Packet::None)); // so we can use .take()
@@ -224,10 +226,12 @@ impl NodeDescriptor {
                 let from = m.link().src;
 
                 let replay = if let Packet::ReplayPiece {
-                    context: flow::payload::ReplayPieceContext::Partial {
-                        ref for_key, ignore
-                    }, ..
-                } = *m {
+                           context: flow::payload::ReplayPieceContext::Partial {
+                               ref for_key,
+                               ignore,
+                           },
+                           ..
+                       } = *m {
                     assert!(!ignore);
                     assert!(keyed_by.is_some());
                     assert_eq!(for_key.len(), 1);

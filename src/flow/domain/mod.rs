@@ -124,7 +124,10 @@ impl Domain {
                ts: i64)
                -> Self {
         // initially, all nodes are not ready
-        let not_ready = nodes.values().map(|n| *n.borrow().addr().as_local()).collect();
+        let not_ready = nodes
+            .values()
+            .map(|n| *n.borrow().addr().as_local())
+            .collect();
 
         Domain {
             _index: index,
@@ -169,18 +172,15 @@ impl Domain {
         }
 
         // how do we replay to miss?
-        let tags = self.replay_paths.iter_mut().filter(|&(_, ref info)| match info.trigger {
-                                                           TriggerEndpoint::End(..) |
-                                                           TriggerEndpoint::Local(..) => {
-                                                               info.path
-                                                                   .last()
-                                                                   .unwrap()
-                                                                   .0
-                                                                   .as_local() ==
-                                                               &miss
-                                                           }
-                                                           _ => false,
-                                                       });
+        let tags = self.replay_paths
+            .iter_mut()
+            .filter(|&(_, ref info)| match info.trigger {
+                        TriggerEndpoint::End(..) |
+                        TriggerEndpoint::Local(..) => {
+                            info.path.last().unwrap().0.as_local() == &miss
+                        }
+                        _ => false,
+                    });
 
         for (&tag, replay) in tags {
             // send a message to the source domain(s) responsible
@@ -191,7 +191,9 @@ impl Domain {
                     unimplemented!();
                 }
                 TriggerEndpoint::End(ref mut trigger) => {
-                    trigger.send(Packet::RequestPartialReplay { tag, key }).unwrap();
+                    trigger
+                        .send(Packet::RequestPartialReplay { tag, key })
+                        .unwrap();
                 }
                 TriggerEndpoint::Start(..) => unreachable!(),
                 TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
@@ -338,7 +340,10 @@ impl Domain {
             let new_messages = self.dispatch_(m, false);
 
             for (key, mut value) in new_messages {
-                egress_messages.entry(key).or_insert_with(Vec::new).append(&mut value);
+                egress_messages
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut value);
             }
         }
 
@@ -349,9 +354,10 @@ impl Domain {
             };
 
             let addr = n.borrow().addr();
+            // TODO: message should be from actual parent, not self.
             let mut m = if n.borrow().inner.is_transactional() {
                 Packet::Transaction {
-                    link: Link::new(addr, addr), // TODO: message should be from actual parent, not self.
+                    link: Link::new(addr, addr),
                     data: data,
                     state: ts.clone(),
                 }
@@ -370,11 +376,9 @@ impl Domain {
 
             self.process_times.start(*addr.as_local());
             self.process_ptimes.start(*addr.as_local());
-            self.nodes[addr.as_local()].borrow_mut().process(&mut m,
-                                                             None,
-                                                             &mut self.state,
-                                                             &self.nodes,
-                                                             true);
+            self.nodes[addr.as_local()]
+                .borrow_mut()
+                .process(&mut m, None, &mut self.state, &self.nodes, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().children.len(), 0);
@@ -387,7 +391,9 @@ impl Domain {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {}
                 transactions::Event::CompleteMigration => {}
-                transactions::Event::SeedReplay(tag, key, rts) => self.seed_replay(tag, &key[..], Some(rts)),
+                transactions::Event::SeedReplay(tag, key, rts) => {
+                    self.seed_replay(tag, &key[..], Some(rts))
+                }
                 transactions::Event::Replay(m) => self.handle_replay(m),
                 transactions::Event::None => break,
             }
@@ -491,21 +497,30 @@ impl Domain {
                 ack.send(()).unwrap();
 
                 if done_tx.is_some() {
-                    info!(self.log, "tag" => tag.id(); "told about terminating replay path {:?}", path);
+                    info!(self.log,
+                          "tag" => tag.id();
+                          "told about terminating replay path {:?}",
+                          path
+                    );
                     // NOTE: we set self.replaying_to when we first receive a replay with this tag
                 } else {
                     info!(self.log, "tag" => tag.id(); "told about replay path {:?}", path);
                 }
-                self.replay_paths.insert(tag,
-                                         ReplayPath {
-                                             source,
-                                             path,
-                                             done_tx,
-                                             trigger,
-                                         });
+                self.replay_paths
+                    .insert(tag,
+                            ReplayPath {
+                                source,
+                                path,
+                                done_tx,
+                                trigger,
+                            });
             }
             Packet::RequestPartialReplay { tag, key } => {
-                trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "got replay request");
+                trace!(self.log,
+                       "tag" => tag.id(),
+                       "key" => format!("{:?}", key);
+                       "got replay request"
+                );
                 self.seed_replay(tag, &key[..], None);
             }
             Packet::StartReplay { tag, from, ack } => {
@@ -529,7 +544,10 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .clone();
 
-                debug!(self.log, "current state cloned for replay"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
+                debug!(self.log,
+                       "current state cloned for replay";
+                       "μs" => dur_to_ns!(start.elapsed()) / 1000
+                );
 
                 let m = Packet::FullReplay {
                     link: Link::new(from, self.replay_paths[&tag].path[0].0),
@@ -616,15 +634,24 @@ impl Domain {
                 sender.send((domain_stats, node_stats)).unwrap();
             }
             Packet::None => unreachable!("None packets should never be sent around"),
-            Packet::RequestUnboundedTx(_) => unreachable!("Requests for unbounded tx channel are handled by event loop"),
+            Packet::RequestUnboundedTx(_) => {
+                //rustfmt
+                unreachable!("Requests for unbounded tx channel are handled by event loop")
+            }
             Packet::Quit => unreachable!("Quit messages are handled by event loop"),
         }
     }
 
-    fn seed_replay(&mut self, tag: Tag, key: &[DataType], transaction_state: Option<ReplayTransactionState>) {
+    fn seed_replay(&mut self,
+                   tag: Tag,
+                   key: &[DataType],
+                   transaction_state: Option<ReplayTransactionState>) {
         if transaction_state.is_none() {
-            if let ReplayPath { source: Some(source), trigger: TriggerEndpoint::Start(..), .. } =
-                self.replay_paths[&tag] {
+            if let ReplayPath {
+                       source: Some(source),
+                       trigger: TriggerEndpoint::Start(..),
+                       ..
+                   } = self.replay_paths[&tag] {
                 if self.nodes[source.as_local()].borrow().is_transactional() {
                     self.transaction_state.schedule_replay(tag, key.into());
                     self.process_transactions();
@@ -654,22 +681,28 @@ impl Domain {
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let m = Some(Packet::ReplayPiece {
-                             link: Link::new(source, path[0].0),
-                             tag: tag,
-                             context: ReplayPieceContext::Partial { for_key: Vec::from(key), ignore: false },
-                             data: Records::from_iter(rs.into_iter().cloned()),
-                             transaction_state: transaction_state,
-                    });
+                                     link: Link::new(source, path[0].0),
+                                     tag: tag,
+                                     context: ReplayPieceContext::Partial {
+                                         for_key: Vec::from(key),
+                                         ignore: false,
+                                     },
+                                     data: Records::from_iter(rs.into_iter().cloned()),
+                                     transaction_state: transaction_state,
+                                 });
                     (m, source, false)
                 } else if transaction_state.is_some() {
                     // we need to forward a ReplayPiece for the timestamp we claimed
                     let m = Some(Packet::ReplayPiece {
-                        link: Link::new(source, path[0].0),
-                        tag: tag,
-                        context: ReplayPieceContext::Partial { for_key: Vec::from(key), ignore: true },
-                        data: Records::default(),
-                        transaction_state: transaction_state,
-                    });
+                                     link: Link::new(source, path[0].0),
+                                     tag: tag,
+                                     context: ReplayPieceContext::Partial {
+                                         for_key: Vec::from(key),
+                                         ignore: true,
+                                     },
+                                     data: Records::default(),
+                                     transaction_state: transaction_state,
+                                 });
                     (m, source, true)
                 } else {
                     (None, source, true)
@@ -682,9 +715,17 @@ impl Domain {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
             self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
-            trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "missed during replay request");
+            trace!(self.log,
+                   "tag" => tag.id(),
+                   "key" => format!("{:?}", key);
+                   "missed during replay request"
+                   );
         } else {
-            trace!(self.log, "tag" => tag.id(), "key" => format!("{:?}", key); "satisfied replay request");
+            trace!(self.log,
+                   "tag" => tag.id(),
+                   "key" => format!("{:?}", key);
+                   "satisfied replay request"
+            );
         }
 
         if let Some(m) = m {
@@ -708,18 +749,16 @@ impl Domain {
 
             match self.mode {
                 DomainMode::Forwarding if done_tx.is_some() => {
-                    // this is the first message we receive for this tagged replay path. only at this
-                    // point should we start buffering messages for the target node. since the node is
-                    // not yet marked ready, all previous messages for this node will automatically be
-                    // discarded by dispatch(). the reason we should ignore all messages preceeding the
-                    // first replay message is that those have already been accounted for in the state
-                    // we are being replayed. if we buffered them and applied them after all the state
-                    // has been replayed, we would double-apply those changes, which is bad.
+                    // this is the first message we receive for this tagged replay path. only at
+                    // this point should we start buffering messages for the target node. since the
+                    // node is not yet marked ready, all previous messages for this node will
+                    // automatically be discarded by dispatch(). the reason we should ignore all
+                    // messages preceeding the first replay message is that those have already been
+                    // accounted for in the state we are being replayed. if we buffered them and
+                    // applied them after all the state has been replayed, we would double-apply
+                    // those changes, which is bad.
                     self.mode = DomainMode::Replaying {
-                        to: *path.last()
-                                 .unwrap()
-                                 .0
-                                 .as_local(),
+                        to: *path.last().unwrap().0.as_local(),
                         buffered: VecDeque::new(),
                         passes: 0,
                     };
@@ -761,7 +800,8 @@ impl Domain {
                 if let Packet::FullReplay { ref state, .. } = m {
                     let local_pkey = self.state[path[0].0.as_local()].keys();
                     if local_pkey != state.keys() {
-                        debug!(self.log, "cannot use state directly, so falling back to regular replay";
+                        debug!(self.log,
+                           "cannot use state directly, so falling back to regular replay";
                            "node" => path[0].0.as_local().id(),
                            "src keys" => format!("{:?}", state.keys()),
                            "dst keys" => format!("{:?}", local_pkey));
@@ -779,9 +819,9 @@ impl Domain {
             match m {
                 Packet::FullReplay { tag, link, state } => {
                     if can_handle_directly && done_tx.is_some() {
-                        // oh boy, we're in luck! we're replaying into one of our nodes, and were just
-                        // given the entire state. no need to process or anything, just move in the
-                        // state and we're done.
+                        // oh boy, we're in luck! we're replaying into one of our nodes, and were
+                        // just given the entire state. no need to process or anything, just move
+                        // in the state and we're done.
                         let node = path[0].0;
                         debug!(self.log, "absorbing state clone"; "node" => node.as_local().id());
                         assert_eq!(self.state[node.as_local()].keys(), state.keys());
@@ -849,46 +889,56 @@ impl Domain {
                         let log = self.log.new(None);
                         let inject_tx = self.inject_tx.clone().unwrap();
                         thread::Builder::new()
-                        .name(format!("replay{}.{}",
-                                      self.nodes.values().next().unwrap().borrow().domain().index(),
-                                      link.src))
-                        .spawn(move || {
-                            use itertools::Itertools;
+                            .name(format!("replay{}.{}",
+                                          self.nodes
+                                              .values()
+                                              .next()
+                                              .unwrap()
+                                              .borrow()
+                                              .domain()
+                                              .index(),
+                                          link.src))
+                            .spawn(move || {
+                                use itertools::Itertools;
 
-                            let start = time::Instant::now();
-                            debug!(log, "starting state chunker"; "node" => link.dst.as_local().id());
+                                let start = time::Instant::now();
+                                debug!(log,
+                                   "starting state chunker";
+                                   "node" => link.dst.as_local().id()
+                            );
 
-                            let iter = state.into_iter()
-                                .flat_map(|rs| rs)
-                                .chunks(BATCH_SIZE);
-                            let mut iter = iter
-                                .into_iter()
-                                .enumerate()
-                                .peekable();
+                                let iter = state.into_iter().flat_map(|rs| rs).chunks(BATCH_SIZE);
+                                let mut iter = iter.into_iter().enumerate().peekable();
 
-                            // process all records in state to completion within domain
-                            // and then forward on tx (if there is one)
-                            while let Some((i, chunk)) = iter.next() {
-                                use std::iter::FromIterator;
-                                let chunk = Records::from_iter(chunk.into_iter());
-                                let len = chunk.len();
-                                let p = Packet::ReplayPiece {
-                                    tag: tag,
-                                    link: link.clone(), // to will be overwritten by receiver
-                                    context: ReplayPieceContext::Regular{last: iter.peek().is_none()},
-                                    data: chunk,
-                                    transaction_state: None,
-                                };
+                                // process all records in state to completion within domain
+                                // and then forward on tx (if there is one)
+                                while let Some((i, chunk)) = iter.next() {
+                                    use std::iter::FromIterator;
+                                    let chunk = Records::from_iter(chunk.into_iter());
+                                    let len = chunk.len();
+                                    let last = iter.peek().is_none();
+                                    let p = Packet::ReplayPiece {
+                                        tag: tag,
+                                        link: link.clone(), // to will be overwritten by receiver
+                                        context: ReplayPieceContext::Regular { last },
+                                        data: chunk,
+                                        transaction_state: None,
+                                    };
 
-                                trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                if inject_tx.send(p).is_err() {
-                                    warn!(log, "replayer noticed domain shutdown");
-                                    break;
+                                    trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                    if inject_tx.send(p).is_err() {
+                                        warn!(log, "replayer noticed domain shutdown");
+                                        break;
+                                    }
                                 }
-                            }
 
-                            debug!(log, "state chunker finished"; "node" => link.dst.as_local().id(), "μs" => dur_to_ns!(start.elapsed()) / 1000);
-                        }).unwrap();
+                                debug!(log,
+                                   "state chunker finished";
+                                   "node" => link.dst.as_local().id(),
+                                   "μs" => dur_to_ns!(start.elapsed()) / 1000
+                            );
+                            })
+                            .unwrap();
                     }
                 }
                 mut m @ Packet::ReplayPiece {
@@ -927,12 +977,12 @@ impl Domain {
                     };
 
                     // keep track of whether we're filling any partial holes
-                    let partial_key = if let ReplayPieceContext::Partial { ref for_key, .. } =
-                        context {
-                        Some(for_key)
-                    } else {
-                        None
-                    };
+                    let partial_key =
+                        if let ReplayPieceContext::Partial { ref for_key, .. } = context {
+                            Some(for_key)
+                        } else {
+                            None
+                        };
 
                     for (i, &(ref ni, keyed_by)) in path.iter().enumerate() {
                         use flow::node::Type;
@@ -1046,8 +1096,13 @@ impl Domain {
                                             },
                                             transaction_state,
                                         };
-                                        // No need to set link src/dst since the egress node will not use them.
-                                        n.process(&mut m, None, &mut self.state, &self.nodes, false);
+                                        // No need to set link src/dst since the egress node will
+                                        // not use them.
+                                        n.process(&mut m,
+                                                  None,
+                                                  &mut self.state,
+                                                  &self.nodes,
+                                                  false);
                                     }
                                 }
                             }
@@ -1059,10 +1114,12 @@ impl Domain {
                         // if we missed during replay, we need to do a replay
                         if partial_key.is_some() && !misses.is_empty() {
                             // replays are always for just one key
-                            assert!(misses.iter().all(|miss| {
-                                                          miss.node == misses[0].node &&
-                                                          miss.key == misses[0].key
-                                                      }));
+                            assert!(misses
+                                        .iter()
+                                        .all(|miss| {
+                                                 miss.node == misses[0].node &&
+                                                 miss.key == misses[0].key
+                                             }));
                             let miss = misses.swap_remove(0);
                             need_replay = Some((miss.node, miss.key, tag));
                             break 'outer;
@@ -1086,13 +1143,13 @@ impl Domain {
                         }
                     }
 
-                    let dst = *path.last()
-                                   .unwrap()
-                                   .0
-                                   .as_local();
+                    let dst = *path.last().unwrap().0.as_local();
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
-                            debug!(self.log, "last batch processed"; "terminal" => done_tx.is_some());
+                            debug!(self.log,
+                                   "last batch processed";
+                                   "terminal" => done_tx.is_some()
+                            );
                             if done_tx.is_some() {
                                 debug!(self.log, "last batch received"; "local" => dst.id());
                                 finished = Some((tag, dst, None));
@@ -1289,14 +1346,18 @@ impl Domain {
             // node is now ready, and should start accepting "real" updates
             if let DomainMode::Replaying { passes, .. } =
                 mem::replace(&mut self.mode, DomainMode::Forwarding) {
-                debug!(self.log, "node is fully up-to-date"; "local" => node.id(), "passes" => passes);
+                debug!(self.log,
+                       "node is fully up-to-date";
+                       "local" => node.id(),
+                       "passes" => passes
+                );
             } else {
                 unreachable!();
             }
 
-            if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(|p| {
-                                                                                p.done_tx.as_mut()
-                                                                            }) {
+            if let Some(done_tx) = self.replay_paths
+                   .get_mut(&tag)
+                   .and_then(|p| p.done_tx.as_mut()) {
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
                 done_tx.send(()).unwrap();
             } else {

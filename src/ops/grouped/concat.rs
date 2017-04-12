@@ -181,11 +181,13 @@ impl GroupedOperation for GroupConcat {
         }
 
         // WHY doesn't rust have an iterator joiner?
-        let mut new = current.into_iter().fold(String::with_capacity(2 * clen), |mut acc, s| {
-            acc.push_str(s);
-            acc.push_str(&self.separator);
-            acc
-        });
+        let mut new = current
+            .into_iter()
+            .fold(String::with_capacity(2 * clen), |mut acc, s| {
+                acc.push_str(s);
+                acc.push_str(&self.separator);
+                acc
+            });
         // we pushed one separator too many above
         let real_len = new.len() - self.separator.len();
         new.truncate(real_len);
@@ -205,7 +207,8 @@ impl GroupedOperation for GroupConcat {
         // Sort group by columns for consistent output.
         let mut group_cols = self.group.clone();
         group_cols.sort();
-        let group_cols = group_cols.iter()
+        let group_cols = group_cols
+            .iter()
             .map(|g| g.to_string())
             .collect::<Vec<_>>()
             .join(", ");
@@ -350,68 +353,74 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 6); // one - and one + for each group
         // group 1 had [2], now has [1,2]
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  if r[0] == 1.into() {
-                                      assert_eq!(r[1], ".2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 1.into() {
-                                      assert_eq!(r[1], ".1;#.2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             if r[0] == 1.into() {
+                                 assert_eq!(r[1], ".2;".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             if r[0] == 1.into() {
+                                 assert_eq!(r[1], ".1;#.2;".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
         // group 2 was [2], is now [1,2,3]
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  if r[0] == 2.into() {
-                                      assert_eq!(r[1], ".2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 2.into() {
-                                      assert_eq!(r[1], ".1;#.2;#.3;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             if r[0] == 2.into() {
+                                 assert_eq!(r[1], ".2;".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             if r[0] == 2.into() {
+                                 assert_eq!(r[1], ".1;#.2;#.3;".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
         // group 3 was [], is now [3]
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  if r[0] == 3.into() {
-                                      assert_eq!(r[1], "".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 3.into() {
-                                      assert_eq!(r[1], ".3;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             if r[0] == 3.into() {
+                                 assert_eq!(r[1], "".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             if r[0] == 3.into() {
+                                 assert_eq!(r[1], ".3;".into());
+                                 true
+                             } else {
+                                 false
+                             }
+                         } else {
+                             false
+                         }));
     }
 
     #[test]

@@ -74,10 +74,7 @@ impl Mutator {
             }
         };
 
-        self.tx
-            .clone()
-            .send(m)
-            .unwrap();
+        self.tx.clone().send(m).unwrap();
     }
 
     fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
@@ -89,10 +86,7 @@ impl Mutator {
             data: r,
             state: payload::TransactionState::Pending(t, send),
         };
-        self.tx
-            .clone()
-            .send(m)
-            .unwrap();
+        self.tx.clone().send(m).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
@@ -259,8 +253,8 @@ impl Blender {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .flat_map(|ingress| {
-                          self.ingredients.neighbors_directed(ingress,
-                                                              petgraph::EdgeDirection::Outgoing)
+                          self.ingredients
+                              .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
                       })
             .map(|n| (n, &self.ingredients[n]))
             .filter(|&(_, base)| base.is_internal() && base.get_base().is_some())
@@ -332,10 +326,7 @@ impl Blender {
             .next(); // there should be at most one
 
         reader.map(|inner| {
-            let arc = inner.state
-                .as_ref()
-                .unwrap()
-                .clone();
+            let arc = inner.state.as_ref().unwrap().clone();
             let generator = inner.token_generator.clone().unwrap();
             Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
                 arc.find_and(q,
@@ -381,7 +372,10 @@ impl Blender {
                 s.send(payload::Packet::GetStatistics(tx)).unwrap();
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
-                let node_map = node_stats.into_iter().map(|(ni, ns)| (ni.into(), ns)).collect();
+                let node_map = node_stats
+                    .into_iter()
+                    .map(|(ni, ns)| (ni.into(), ns))
+                    .collect();
 
                 (*di, (domain_stats, node_map))
             })
@@ -410,10 +404,7 @@ impl fmt::Display for Blender {
         }
 
         // Output edges.
-        for (_, edge) in self.ingredients
-                .raw_edges()
-                .iter()
-                .enumerate() {
+        for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
             indentln(f)?;
             write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
             if !edge.weight {
@@ -470,21 +461,34 @@ impl<'a> Migration<'a> {
 
         let parents = i.ancestors();
 
-        let transactional = !parents.is_empty() &&
-            parents.iter().all(|p| self.mainline.ingredients[*p.as_global()].is_transactional());
+        let transactional =
+            !parents.is_empty() &&
+            parents
+                .iter()
+                .all(|p| self.mainline.ingredients[*p.as_global()].is_transactional());
 
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i, transactional));
-        info!(self.log, "adding new node"; "node" => ni.index(), "type" => format!("{:?}", *self.mainline.ingredients[ni]));
+        let ni = self.mainline
+            .ingredients
+            .add_node(node::Node::new(name.to_string(), fields, i, transactional));
+        info!(self.log,
+              "adding new node";
+              "node" => ni.index(),
+              "type" => format!("{:?}", *self.mainline.ingredients[ni])
+        );
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
         // insert it into the graph
         if parents.is_empty() {
-            self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
+            self.mainline
+                .ingredients
+                .add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(*parent.as_global(), ni, false);
+                self.mainline
+                    .ingredients
+                    .add_edge(*parent.as_global(), ni, false);
             }
         }
         // and tell the caller its id
@@ -492,21 +496,34 @@ impl<'a> Migration<'a> {
     }
 
     /// Add a transactional base node to the graph
-    pub fn add_transactional_base<S1, FS, S2>(&mut self, name: S1, fields: FS, b: Base) -> core::NodeAddress
+    pub fn add_transactional_base<S1, FS, S2>(&mut self,
+                                              name: S1,
+                                              fields: FS,
+                                              b: Base)
+                                              -> core::NodeAddress
         where S1: ToString,
               S2: ToString,
-              FS: IntoIterator<Item = S2> {
-        let mut i:node::Type = b.into();
+              FS: IntoIterator<Item = S2>
+    {
+        let mut i: node::Type = b.into();
         i.on_connected(&self.mainline.ingredients);
 
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(name.to_string(), fields, i, true));
-        info!(self.log, "adding new node"; "node" => ni.index(), "type" => format!("{:?}", *self.mainline.ingredients[ni]));
+        let ni = self.mainline
+            .ingredients
+            .add_node(node::Node::new(name.to_string(), fields, i, true));
+        info!(self.log,
+              "adding new node";
+              "node" => ni.index(),
+              "type" => format!("{:?}", *self.mainline.ingredients[ni])
+        );
 
         // keep track of the fact that it's new
         self.added.insert(ni, None);
         // insert it into the graph
-        self.mainline.ingredients.add_edge(self.mainline.source, ni, false);
+        self.mainline
+            .ingredients
+            .add_edge(self.mainline.source, ni, false);
         // and tell the caller its id
         ni.into()
     }
@@ -566,16 +583,14 @@ impl<'a> Migration<'a> {
 
         debug!(self.log, "told to materialize"; "node" => src.as_global().index());
 
-        let mut e = self.mainline
-            .ingredients
-            .edge_weight_mut(e)
-            .unwrap();
+        let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
         if !*e {
             *e = true;
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
             // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
             // commit())
-            self.materialize.insert((*src.as_global(), *dst.as_global()));
+            self.materialize
+                .insert((*src.as_global(), *dst.as_global()));
         }
     }
 
@@ -584,7 +599,11 @@ impl<'a> Migration<'a> {
     /// `n` must be have been added in this migration.
     pub fn assign_domain(&mut self, n: core::NodeAddress, d: domain::Index) {
         // TODO: what if a node is added to an *existing* domain?
-        debug!(self.log, "node manually assigned to domain"; "node" => n.as_global().index(), "domain" => d.index());
+        debug!(self.log,
+               "node manually assigned to domain";
+               "node" => n.as_global().index(),
+               "domain" => d.index()
+        );
         assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
@@ -594,7 +613,9 @@ impl<'a> Migration<'a> {
             let r = node::Type::Reader(None, Default::default());
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
-            self.mainline.ingredients.add_edge(*n.as_global(), r, false);
+            self.mainline
+                .ingredients
+                .add_edge(*n.as_global(), r, false);
             self.readers.insert(*n.as_global(), r);
         }
     }
@@ -614,11 +635,13 @@ impl<'a> Migration<'a> {
                                                                    &self.mainline.ingredients,
                                                                    *n.as_global());
 
-        let coarse_parents = base_columns.iter()
+        let coarse_parents = base_columns
+            .iter()
             .filter_map(|&(ni, o)| if o.is_none() { Some(ni) } else { None })
             .collect();
 
-        let granular_parents = base_columns.into_iter()
+        let granular_parents = base_columns
+            .into_iter()
             .filter_map(|(ni, o)| if o.is_some() {
                             Some((ni, o.unwrap()))
                         } else {
@@ -708,11 +731,7 @@ impl<'a> Migration<'a> {
     pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
-        self.reader_for(n)
-            .streamers
-            .lock()
-            .unwrap()
-            .push(tx);
+        self.reader_for(n).streamers.lock().unwrap().push(tx);
         rx
     }
 
@@ -727,7 +746,9 @@ impl<'a> Migration<'a> {
         let h = node::Type::Hook(Some(h));
         let h = self.mainline.ingredients[*n.as_global()].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
-        self.mainline.ingredients.add_edge(*n.as_global(), h, false);
+        self.mainline
+            .ingredients
+            .add_edge(*n.as_global(), h, false);
         Ok(h.into())
     }
 
@@ -750,7 +771,11 @@ impl<'a> Migration<'a> {
                 // new node that doesn't belong to a domain
                 // create a new domain just for that node
                 // NOTE: this is the same code as in add_domain(), but we can't use self here
-                trace!(log, "node automatically added to domain"; "node" => node.index(), "domain" => mainline.ndomains);
+                trace!(log,
+                       "node automatically added to domain";
+                       "node" => node.index(),
+                       "domain" => mainline.ndomains
+                );
                 mainline.ndomains += 1;
                 (mainline.ndomains - 1).into()
 
@@ -772,9 +797,11 @@ impl<'a> Migration<'a> {
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
         // Find all nodes for domains that have changed
-        let changed_domains: HashSet<_> =
-            new.iter().map(|&ni| mainline.ingredients[ni].domain()).collect();
-        let mut domain_nodes = mainline.ingredients
+        let changed_domains: HashSet<_> = new.iter()
+            .map(|&ni| mainline.ingredients[ni].domain())
+            .collect();
+        let mut domain_nodes = mainline
+            .ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .map(|ni| {
@@ -812,7 +839,12 @@ impl<'a> Migration<'a> {
             // Give local addresses to every (new) node
             for &(ni, new) in nodes.iter() {
                 if new {
-                    debug!(log, "assigning local index"; "type" => format!("{:?}", *mainline.ingredients[ni]), "node" => ni.index(), "local" => nnodes);
+                    debug!(log,
+                           "assigning local index";
+                           "type" => format!("{:?}", *mainline.ingredients[ni]),
+                           "node" => ni.index(),
+                           "local" => nnodes
+                    );
                     mainline.ingredients[ni]
                         .set_addr(unsafe { prelude::NodeAddress::make_local(nnodes) });
                     nnodes += 1;
@@ -835,7 +867,8 @@ impl<'a> Migration<'a> {
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
                     trace!(log, "initializing new node"; "node" => ni.index());
-                    mainline.ingredients
+                    mainline
+                        .ingredients
                         .node_weight_mut(ni)
                         .unwrap()
                         .on_commit(&remap);
@@ -866,7 +899,8 @@ impl<'a> Migration<'a> {
         // Determine what nodes to materialize
         // NOTE: index will also contain the materialization information for *existing* domains
         debug!(log, "calculating materializations");
-        let index = domain_nodes.iter()
+        let index = domain_nodes
+            .iter()
             .map(|(domain, nodes)| {
                      use self::migrate::materialization::{pick, index};
                      debug!(log, "picking materializations"; "domain" => domain.index());
@@ -881,7 +915,8 @@ impl<'a> Migration<'a> {
         let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
                                                                        mainline.source,
                                                                        domain_nodes);
-        let (start_ts, end_ts, prevs) = mainline.checktable
+        let (start_ts, end_ts, prevs) = mainline
+            .checktable
             .lock()
             .unwrap()
             .perform_migration(&ingresses_from_base);
@@ -950,7 +985,8 @@ impl<'a> Migration<'a> {
         // Ideally this should happen as part of checktable::perform_migration(), but we don't know
         // the replay paths then. It is harmless to do now since we know the new replay paths won't
         // request timestamps until after the migration in finished.
-        mainline.checktable
+        mainline
+            .checktable
             .lock()
             .unwrap()
             .add_replay_paths(domains_on_path);

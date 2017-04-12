@@ -59,7 +59,8 @@ pub fn add(log: &Logger,
         let domain = graph[node].domain();
 
         // First, we add egress nodes for any of our cross-domain children
-        let children: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+        let children: Vec<_> = graph
+            .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
             .collect(); // collect so we can mutate graph
 
         // We then need to make sure that we're acting on up-to-date information about existing
@@ -77,7 +78,8 @@ pub fn add(log: &Logger,
                     // this egress already contains this node to the ingress' domain
                     egresses.insert(graph[ingress].domain(), *child);
                     // also keep track of the corresponding ingress node so we can re-use it
-                    ingresses.entry(graph[ingress].domain())
+                    ingresses
+                        .entry(graph[ingress].domain())
                         .or_insert_with(HashMap::new)
                         .insert(node, ingress);
                 }
@@ -101,9 +103,17 @@ pub fn add(log: &Logger,
                     new.insert(egress);
                     egresses.insert(cdomain, egress);
 
-                    trace!(log, "adding cross-domain egress to new node"; "node" => node.index(), "egress" => egress.index());
+                    trace!(log,
+                           "adding cross-domain egress to new node";
+                           "node" => node.index(),
+                           "egress" => egress.index()
+                    );
                 } else {
-                    trace!(log, "re-using cross-domain egress to new node"; "node" => node.index(), "egress" => egresses[&cdomain].index());
+                    trace!(log,
+                           "re-using cross-domain egress to new node";
+                           "node" => node.index(),
+                           "egress" => egresses[&cdomain].index()
+                    );
                 }
 
                 // we need to hook that node in between us and this child
@@ -112,7 +122,10 @@ pub fn add(log: &Logger,
                 let was_materialized = graph.remove_edge(old).unwrap();
                 graph.add_edge(egress, child, was_materialized);
                 // this ends up being re-executed, but that's okay
-                swaps.entry(cdomain).or_insert_with(HashMap::new).insert(node, egress);
+                swaps
+                    .entry(cdomain)
+                    .or_insert_with(HashMap::new)
+                    .insert(node, egress);
             }
         }
 
@@ -126,7 +139,8 @@ pub fn add(log: &Logger,
         // up as the parent of this node instead of the original internal foreign domain node.
         //
         // Note that same-domain parents are never interesting to us for this purpose.
-        let mut parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        let mut parents: Vec<_> = graph
+            .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .filter(|&ni| ni == source || graph[ni].domain() != domain)
             .collect(); // collect so we can mutate graph
 
@@ -144,18 +158,23 @@ pub fn add(log: &Logger,
             }
 
             // let's first see if this parent already has an egress we can use
-            let egress = graph.neighbors_directed(*parent, petgraph::EdgeDirection::Outgoing)
+            let egress = graph
+                .neighbors_directed(*parent, petgraph::EdgeDirection::Outgoing)
                 .find(|&ni| graph[ni].is_egress());
 
             let egress = egress.unwrap_or_else(|| {
                 // no, okay, so we need to add an egress for that other node,
-                let proxy = graph[*parent].mirror(node::Type::Egress{
-                    txs: Default::default(),
-                    tags: Default::default()
-                });
+                let proxy = graph[*parent].mirror(node::Type::Egress {
+                                                      txs: Default::default(),
+                                                      tags: Default::default(),
+                                                  });
                 let egress = graph.add_node(proxy);
 
-                trace!(log, "adding cross-domain egress to existing node"; "node" => parent.index(), "egress" => egress.index());
+                trace!(log,
+                       "adding cross-domain egress to existing node";
+                       "node" => parent.index(),
+                       "egress" => egress.index()
+                );
 
                 graph.add_edge(*parent, egress, false);
                 new.insert(egress);
@@ -167,7 +186,10 @@ pub fn add(log: &Logger,
             let was_materialized = graph.remove_edge(old).unwrap();
             graph.add_edge(egress, node, was_materialized);
             // all references to our original parent should now refer to the egress
-            swaps.entry(domain).or_insert_with(HashMap::new).insert(*parent, egress);
+            swaps
+                .entry(domain)
+                .or_insert_with(HashMap::new)
+                .insert(*parent, egress);
             // and we should now just consider the egress our parent instead
             *parent = egress;
         }
@@ -178,8 +200,10 @@ pub fn add(log: &Logger,
         for parent in parents {
 
             // is there already an ingress node we can re-use?
-            let mut ingress =
-                ingresses.get(&domain).and_then(|ingresses| ingresses.get(&parent)).map(|ni| *ni);
+            let mut ingress = ingresses
+                .get(&domain)
+                .and_then(|ingresses| ingresses.get(&parent))
+                .map(|ni| *ni);
 
             if ingress.is_none() {
                 // nope -- create our new ingress node
@@ -192,15 +216,32 @@ pub fn add(log: &Logger,
                 new.insert(i);
 
                 if parent == source {
-                    trace!(log, "adding source ingress"; "base" => node.index(), "ingress" => i.index());
+                    trace!(log,
+                           "adding source ingress";
+                           "base" => node.index(),
+                           "ingress" => i.index()
+                    );
                     // we don't re-use source ingress nodes
                 } else {
-                    trace!(log, "adding cross-domain ingress"; "to" => node.index(), "from" => parent.index(), "ingress" => i.index());
-                    ingresses.entry(domain).or_insert_with(HashMap::new).insert(parent, i);
+                    trace!(log,
+                           "adding cross-domain ingress";
+                           "to" => node.index(),
+                           "from" => parent.index(),
+                           "ingress" => i.index()
+                    );
+                    ingresses
+                        .entry(domain)
+                        .or_insert_with(HashMap::new)
+                        .insert(parent, i);
                 }
                 ingress = Some(i);
             } else {
-                trace!(log, "re-using cross-domain ingress"; "to" => node.index(), "from" => parent.index(), "ingress" => ingress.unwrap().index());
+                trace!(log,
+                       "re-using cross-domain ingress";
+                       "to" => node.index(),
+                       "from" => parent.index(),
+                       "ingress" => ingress.unwrap().index()
+                );
             }
             let ingress = ingress.unwrap();
 
@@ -246,10 +287,14 @@ pub fn connect(log: &Logger,
         for egress in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             match *graph[egress] {
                 node::Type::Egress { ref txs, .. } => {
-                    trace!(log, "connecting"; "egress" => egress.index(), "ingress" => node.index());
-                    txs.lock().unwrap().push((node.into(),
-                                              n.addr(),
-                                              main_txs[&n.domain()].clone()));
+                    trace!(log,
+                           "connecting";
+                           "egress" => egress.index(),
+                           "ingress" => node.index()
+                    );
+                    txs.lock()
+                        .unwrap()
+                        .push((node.into(), n.addr(), main_txs[&n.domain()].clone()));
                     continue;
                 }
                 node::Type::Source => continue,
