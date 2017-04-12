@@ -126,15 +126,28 @@ impl Ingredient for Base {
                     //rustfmt
                     if r.len() != self.defaults.len() {
                         let rlen = r.len();
-                        let (v, pos) = r.extract();
+                        let (mut v, pos) = r.extract();
 
                         use std::sync::Arc;
-                        let mut v =
-                            Arc::try_unwrap(v).expect("base nodes should be only initial owner");
-                        v.extend(self.defaults
-                                     .iter()
-                                     .skip(rlen)
-                                     .cloned());
+                        if let Some(mut v) = Arc::get_mut(&mut v) {
+                            v.extend(self.defaults
+                                         .iter()
+                                         .skip(rlen)
+                                         .cloned());
+                        }
+
+                        // the trick above failed, probably because we're doing a replay
+                        if v.len() == rlen {
+                            let newv = v.iter()
+                                .cloned()
+                                .chain(self.defaults
+                                           .iter()
+                                           .skip(rlen)
+                                           .cloned())
+                                .collect();
+                            v = Arc::new(newv)
+                        }
+
                         (v, pos).into()
                     } else {
                         r
