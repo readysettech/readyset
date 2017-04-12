@@ -645,7 +645,7 @@ pub fn reconstruct(log: &Logger,
                 segments.push((domain, Vec::new()));
                 last_domain = Some(domain);
 
-                if partial_ok {
+                if partial_ok && graph[node].is_transactional() {
                     domains_on_path
                         .entry(tag.clone())
                         .or_insert_with(Vec::new)

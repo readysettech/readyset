@@ -349,10 +349,17 @@ impl Domain {
             };
 
             let addr = n.borrow().addr();
-            let mut m = Packet::Transaction {
-                link: Link::new(addr, addr), // TODO: message should be from actual parent, not self.
-                data: data,
-                state: ts.clone(),
+            let mut m = if n.borrow().inner.is_transactional() {
+                Packet::Transaction {
+                    link: Link::new(addr, addr), // TODO: message should be from actual parent, not self.
+                    data: data,
+                    state: ts.clone(),
+                }
+            } else {
+                Packet::Message {
+                    link: Link::new(addr, addr),
+                    data: data,
+                }
             };
 
             if !self.not_ready.is_empty() && self.not_ready.contains(addr.as_local()) {
@@ -602,9 +609,14 @@ impl Domain {
 
     fn seed_replay(&mut self, tag: Tag, key: &[DataType], transaction_state: Option<ReplayTransactionState>) {
         if transaction_state.is_none() {
-            self.transaction_state.schedule_replay(tag, key.into());
-            self.process_transactions();
-            return;
+            if let ReplayPath { source: Some(source), trigger: TriggerEndpoint::Local(..), .. } =
+                self.replay_paths[&tag] {
+                if self.nodes[source.as_local()].borrow().is_transactional() {
+                    self.transaction_state.schedule_replay(tag, key.into());
+                    self.process_transactions();
+                    return;
+                }
+            }
         }
 
         let (m, source, is_miss) = match self.replay_paths[&tag] {
@@ -860,7 +872,7 @@ impl Domain {
                     context: ReplayPieceContext::Partial { ignore: true, .. }, ..
                 } => {
                     let mut n = self.nodes[&path.last().unwrap().0.as_local()].borrow_mut();
-                    if n.is_egress() {
+                    if n.is_egress() && n.is_transactional() {
                         // No need to set link src/dst since the egress node will not use them.
                         n.process(&mut m, None, &mut self.state, &self.nodes, false);
                     }
@@ -906,6 +918,14 @@ impl Domain {
                         } else {
                             false
                         };
+
+                        if !n.is_transactional() {
+                            if let Packet::ReplayPiece { ref mut transaction_state, .. } = m {
+                                transaction_state.take();
+                            } else {
+                                unreachable!();
+                            }
+                        }
 
                         // figure out if we're the target of a partial replay.
                         // this is the case either if the current node is waiting for a replay,
@@ -981,7 +1001,7 @@ impl Domain {
                                 let last_ni = path.last().unwrap().0;
                                 if last_ni != *ni {
                                     let mut n = self.nodes[&last_ni.as_local()].borrow_mut();
-                                    if n.is_egress() {
+                                    if n.is_egress() && n.is_transactional() {
                                         let mut m = Packet::ReplayPiece {
                                             link: link, // TODO: use dummy link instead
                                             tag,
