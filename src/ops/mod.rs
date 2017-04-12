@@ -198,14 +198,21 @@ pub mod test {
                                                  .1
                                                  .as_local()));
 
-            let u = self.nodes[self.nut
+
+            let rs = self.nodes[self.nut
                 .unwrap()
                 .1
                 .as_local()]
                     .borrow_mut()
                     .inner
-                    .on_input(src, u.into(), &self.nodes, &self.states)
-                    .unwrap();
+                    .on_input(src, u.into(), &self.nodes, &self.states);
+
+            let u;
+            if rs.is_some() {
+                u = rs.unwrap();
+            } else {
+                u = Records::default();
+            }
 
             if !remember ||
                !self.states.contains_key(self.nut

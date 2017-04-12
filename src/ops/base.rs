@@ -251,13 +251,12 @@ impl Ingredient for Base {
 
     fn on_input(&mut self,
                 _: NodeAddress,
-                rs: Records,
+                mut rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> Option<Records> {
         // Write incoming records to log before processing them if we are a durable node.
         let records_to_return;
-        let mut copy_rs = rs.clone();
         match self.durability {
             Some(BaseDurabilityLevel::Buffered) => {
                 // Perform a synchronous flush if one of the following conditions are met:
@@ -270,7 +269,7 @@ impl Ingredient for Base {
                 let has_reached_time_limit = elapsed >= Duration::from_millis(BUFFERED_WRITES_FLUSH_INTERVAL_MS);
 
                 if has_reached_capacity || has_reached_time_limit {
-                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
+                    self.buffered_writes.as_mut().unwrap().append(&mut rs);
 
                     let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
                     self.flush();
@@ -279,16 +278,17 @@ impl Ingredient for Base {
                     records_to_return = Some(copy_buffered_writes);
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
-                    self.buffered_writes.as_mut().unwrap().append(copy_rs.as_mut());
-                    return Some(Records::default())
+                    self.buffered_writes.as_mut().unwrap().append(&mut rs);
+
+                    return None
                 }
             },
             Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.persist_to_log(&rs);
-                records_to_return = Some(rs.clone());
+                records_to_return = Some(rs);
             },
             None => {
-                records_to_return = Some(rs.clone());
+                records_to_return = Some(rs);
             },
         }
 
