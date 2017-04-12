@@ -530,13 +530,16 @@ impl<'a> Migration<'a> {
         // we need to tell the base about its new column and its default, so that old writes the do
         // not have it get the additional value added to them.
         let col_i1 = base.add_column(&field);
-        let col_i2 = base.get_base_mut().unwrap().add_column(default.clone());
-        assert_eq!(col_i1, col_i2);
+        // we can't rely on DerefMut, since it disallows mutating Taken nodes
+        if let &mut node::NodeHandle::Taken(ref mut base) = base.inner_mut() {
+            let col_i2 = base.get_base_mut().unwrap().add_column(default.clone());
+            assert_eq!(col_i1, col_i2);
+        }
 
         // also eventually propagate to domain clone
         self.columns.push((*node.as_global(), field, default));
 
-        col_i2
+        col_i1
     }
 
     #[cfg(test)]

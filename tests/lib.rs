@@ -583,6 +583,51 @@ fn simple_migration() {
 }
 
 #[test]
+fn add_columns() {
+    let id: distributary::DataType = "x".into();
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, aq) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a",
+                                   &["a", "b"],
+                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        let aq = mig.stream(a);
+        mig.commit();
+        (a, aq)
+    };
+    let muta = g.get_mutator(a);
+
+    // send a value on a
+    muta.put(vec![id.clone(), "y".into()]);
+
+    // check that a got it
+    assert_eq!(aq.recv(), Ok(vec![vec![id.clone(), "y".into()].into()]));
+
+    // add a third column to a
+    {
+        let mut mig = g.start_migration();
+        mig.add_column(a, "c", 3.into());
+        mig.commit();
+    }
+
+    // send another (old) value on a
+    muta.put(vec![id.clone(), "z".into()]);
+
+    // check that a got it, and added the new, third column's default
+    assert_eq!(aq.recv(),
+               Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()]));
+
+    // send a new value on a
+    muta.put(vec![id.clone(), "a".into(), 10.into()]);
+
+    // check that a got it, and included the third column
+    assert_eq!(aq.recv(),
+               Ok(vec![vec![id.clone(), "a".into(), 10.into()].into()]));
+}
+
+#[test]
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
