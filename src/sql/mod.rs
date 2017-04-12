@@ -872,14 +872,14 @@ mod tests {
                  JOIN votes ON (votes.aid = articles.aid);";
         let q = inc.add_query(q, None, &mut mig);
         assert!(q.is_ok());
-        let qid = query_id_hash(&["articles", "users", "votes"],
-                                &[&Column::from("articles.aid"),
-                                  &Column::from("articles.author"),
-                                  &Column::from("users.id"),
-                                  &Column::from("votes.aid")],
-                                &[&Column::from("articles.title"),
-                                  &Column::from("users.name"),
-                                  &Column::from("votes.uid")]);
+        let _qid = query_id_hash(&["articles", "users", "votes"],
+                                 &[&Column::from("articles.aid"),
+                                   &Column::from("articles.author"),
+                                   &Column::from("users.id"),
+                                   &Column::from("votes.aid")],
+                                 &[&Column::from("articles.title"),
+                                   &Column::from("users.name"),
+                                   &Column::from("votes.uid")]);
         // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
         // views
         // leaf view
@@ -970,7 +970,7 @@ mod tests {
                 .collect();
 
             // Add them one by one
-            for (i, q) in lines.iter().enumerate() {
+            for q in lines.iter() {
                 assert!(inc.add_query(q, None, &mut mig).is_ok());
             }
             mig.commit();
