@@ -904,7 +904,7 @@ fn make_join_node(name: &str,
             .columns
             .iter()
             .position(|ref nc| *nc == col)
-            .expect(&format!("column {:?} not found!", col))
+            .expect(&format!("column {:?} not found on {:?}!", col, n))
     };
 
     let join_config = proj_cols.iter()
