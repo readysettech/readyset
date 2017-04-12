@@ -113,17 +113,16 @@ impl Ingredient for Base {
             rs.map(|r| {
                     //rustfmt
                     if r.len() != self.defaults.len() {
-                        // TODO: *technically* we know that we have the only copy of this Arc
-                        // so we could modify the vector in-place.
                         let rlen = r.len();
                         let (v, pos) = r.extract();
-                        let v: Vec<_> = v.iter()
-                            .cloned()
-                            .chain(self.defaults
-                                       .iter()
-                                       .skip(rlen)
-                                       .cloned())
-                            .collect();
+
+                        use std::sync::Arc;
+                        let mut v =
+                            Arc::try_unwrap(v).expect("base nodes should be only initial owner");
+                        v.extend(self.defaults
+                                     .iter()
+                                     .skip(rlen)
+                                     .cloned());
                         (v, pos).into()
                     } else {
                         r
