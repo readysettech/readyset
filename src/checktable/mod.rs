@@ -220,43 +220,50 @@ impl CheckTable {
                  .collect())
     }
 
-    pub fn claim_timestamp(&mut self,
-                           token: &Token,
-                           base: NodeIndex,
-                           rs: &Records)
-                           -> TransactionResult {
+    pub fn attempt_claim_timestamp(&mut self,
+                                   token: &Token,
+                                   base: NodeIndex,
+                                   rs: &Records)
+                                   -> TransactionResult {
         if self.validate_token(token) {
-            // Take timestamp
-            let ts = self.next_timestamp;
-            self.next_timestamp += 1;
-
-            // Compute the previous timestamp that each domain will see before getting this one
-            let prev_times = self.compute_previous_timestamps(Some(base));
-
-            // Update checktables
-            self.last_base = Some(base);
-            self.toplevel.insert(base, ts);
-            let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-            for record in rs.iter() {
-                for (i, value) in record.iter().enumerate() {
-                    let mut delete = false;
-                    if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
-                        if m.len() > 10000000 {
-                            delete = true;
-                        } else {
-                            *m.entry(value.clone()).or_insert(0) = ts;
-                        }
-                    }
-                    if delete {
-                        t.remove(&i);
-                    }
-                }
-            }
-
-            TransactionResult::Committed(ts, prev_times)
+            let (ts, prevs) = self.claim_timestamp(base, rs);
+            TransactionResult::Committed(ts, prevs)
         } else {
             TransactionResult::Aborted
         }
+    }
+
+    pub fn claim_timestamp(&mut self,
+                           base: NodeIndex,
+                           rs: &Records)
+                           -> (i64, Option<HashMap<domain::Index, i64>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prev_times = self.compute_previous_timestamps(Some(base));
+
+        // Update checktables
+        self.last_base = Some(base);
+        self.toplevel.insert(base, ts);
+        let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
+        for record in rs.iter() {
+            for (i, value) in record.iter().enumerate() {
+                let mut delete = false;
+                if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
+                    if m.len() > 10000000 {
+                        delete = true;
+                    } else {
+                        *m.entry(value.clone()).or_insert(0) = ts;
+                    }
+                }
+                if delete {
+                    t.remove(&i);
+                }
+            }
+        }
+        (ts, prev_times)
     }
 
     pub fn claim_replay_timestamp(&mut self,

@@ -54,6 +54,7 @@ pub enum ReplayPieceContext {
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
+    WillCommit,
 }
 
 #[derive(Clone)]
@@ -306,6 +307,7 @@ impl fmt::Debug for Packet {
                     TransactionState::Pending(..) => {
                         write!(f, "Packet::Transaction({:?}, pending)", link)
                     }
+                    TransactionState::WillCommit => write!(f, "Packet::Transaction({:?}, ?)", link),
                 }
             }
             Packet::ReplayPiece {

@@ -133,26 +133,35 @@ impl DomainState {
             } => {
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
-                if let TransactionState::Pending(token, send) = pending {
-                    let base_node = self.base_for_ingress[link.dst.as_local()];
-                    let result = self.checktable
-                        .lock()
-                        .unwrap()
-                        .claim_timestamp(&token, base_node, data);
-                    match result {
-                        checktable::TransactionResult::Committed(ts, prevs) => {
-                            let _ = send.send(Ok(ts));
-                            ::std::mem::replace(state,
-                                                TransactionState::Committed(ts, base_node, prevs));
-                            true
-                        }
-                        checktable::TransactionResult::Aborted => {
-                            let _ = send.send(Err(()));
-                            false
+                match pending {
+                    TransactionState::Pending(token, send) => {
+                        let base_node = self.base_for_ingress[link.dst.as_local()];
+                        let result = self.checktable
+                            .lock()
+                            .unwrap()
+                            .attempt_claim_timestamp(&token, base_node, data);
+                        match result {
+                            checktable::TransactionResult::Committed(ts, prevs) => {
+                                let _ = send.send(Ok(ts));
+                                ::std::mem::replace(state, TransactionState::Committed(ts, base_node, prevs));
+                                true
+                            }
+                            checktable::TransactionResult::Aborted => {
+                                let _ = send.send(Err(()));
+                                false
+                            }
                         }
                     }
-                } else {
-                    unreachable!();
+                    TransactionState::WillCommit => {
+                        let base_node = self.base_for_ingress[link.dst.as_local()];
+                        let (ts, prevs) = self.checktable
+                            .lock()
+                            .unwrap()
+                            .claim_timestamp(base_node, data);
+                        ::std::mem::replace(state, TransactionState::Committed(ts, base_node, prevs));
+                        true
+                    }
+                    TransactionState::Committed(..) => unreachable!(),
                 }
             }
             _ => true,

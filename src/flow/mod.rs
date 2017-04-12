@@ -43,6 +43,7 @@ pub struct Mutator {
     addr: core::NodeAddress,
     primary_key: Vec<usize>,
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
+    transactional: bool,
 }
 
 impl Clone for Mutator {
@@ -53,16 +54,26 @@ impl Clone for Mutator {
             addr: self.addr.clone(),
             primary_key: self.primary_key.clone(),
             tx_reply_channel: mpsc::channel(),
+            transactional: self.transactional,
         }
     }
 }
 
 impl Mutator {
     fn send(&self, r: prelude::Records) {
-        let m = payload::Packet::Message {
-            link: payload::Link::new(self.src, self.addr),
-            data: r,
+        let m = if self.transactional {
+            payload::Packet::Transaction {
+                link: payload::Link::new(self.src, self.addr),
+                data: r,
+                state: payload::TransactionState::WillCommit,
+            }
+        } else {
+            payload::Packet::Message {
+                link: payload::Link::new(self.src, self.addr),
+                data: r,
+            }
         };
+
         self.tx
             .clone()
             .send(m)
@@ -70,6 +81,8 @@ impl Mutator {
     }
 
     fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
+        assert!(self.transactional);
+
         let send = self.tx_reply_channel.0.clone();
         let m = payload::Packet::Transaction {
             link: payload::Link::new(self.src, self.addr),
@@ -353,6 +366,7 @@ impl Blender {
                 .remove(&base)
                 .unwrap_or_else(Vec::new),
             tx_reply_channel: mpsc::channel(),
+            transactional: self.ingredients[*base.as_global()].is_transactional(),
         }
     }
 
