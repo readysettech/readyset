@@ -77,10 +77,11 @@ impl SqlIncorporator {
         }
     }
 
-    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
-    /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
-    /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
-    /// queries, and a deterministic, unique name is generated and returned otherwise.
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
+    /// argument is a string that holds a parameterized SQL query, and the `name` argument supplies
+    /// an optional name for the query. If no `name` is specified, the table name is used in the
+    /// case of INSERT queries, and a deterministic, unique name is generated and returned
+    /// otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
@@ -92,10 +93,10 @@ impl SqlIncorporator {
         query.to_flow_parts(self, name, &mut mig)
     }
 
-    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
-    /// `SqlQuery` structure, and the `name` argument supplies an optional name for the query. If no
-    /// `name` is specified, the table name is used in the case of INSERT queries, and a deterministic,
-    /// unique name is generated and returned otherwise.
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
+    /// argument is a `SqlQuery` structure, and the `name` argument supplies an optional name for
+    /// the query. If no `name` is specified, the table name is used in the case of INSERT queries,
+    /// and a deterministic, unique name is generated and returned otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
@@ -156,7 +157,8 @@ impl SqlIncorporator {
                 } else if existing_qg.signature() == qg.signature() {
                     // QGs are identical, except for parameters (or their order)
                     info!(self.log,
-                          "Query \"{}\" has an exact match modulo parameters, so making a new reader",
+                          "Query '{}' has an exact match modulo parameters, \
+                          so making a new reader",
                           query_name);
 
                     let params = qg.parameters().into_iter().cloned().collect();
@@ -222,7 +224,8 @@ impl SqlIncorporator {
             .unwrap()
             .clone();
 
-        let mut mir = self.mir_converter.add_leaf_below(final_node_of_query, query_name, params);
+        let mut mir = self.mir_converter
+            .add_leaf_below(final_node_of_query, query_name, params);
 
         trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
 
@@ -240,7 +243,8 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR query
         //self.query_graphs.insert(qg.signature().hash, (qg, mir));
@@ -273,7 +277,8 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
         qfp
     }
@@ -286,7 +291,8 @@ impl SqlIncorporator {
                          -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_query_to_mir(query_name, query, &qg);
+        let mut mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -308,7 +314,8 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         self.query_graphs.insert(qg.signature().hash, (qg, mir));
@@ -378,11 +385,7 @@ impl SqlIncorporator {
                 let (qg, reuse) = self.consider_query_graph(&query_name, sq);
                 match reuse {
                     QueryGraphReuse::ExactMatch(mn) => {
-                        let flow_node = mn.borrow()
-                            .flow_node
-                            .as_ref()
-                            .unwrap()
-                            .address();
+                        let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                         QueryFlowParts {
                             name: query_name.clone(),
                             new_nodes: vec![],
@@ -405,7 +408,8 @@ impl SqlIncorporator {
 
         // record info about query
         self.num_queries += 1;
-        self.leaf_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
+        self.leaf_addresses
+            .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
         qfp
     }
@@ -478,8 +482,8 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.get_flow_node_address(name, 0).expect(&format!("No node named \"{}\" at v0",
-                                                                    name));
+        let na = inc.get_flow_node_address(name, 0)
+            .expect(&format!("No node named \"{}\" at v0", name));
         mig.graph().node_weight(na.as_global().clone()).unwrap()
     }
 
@@ -520,13 +524,17 @@ mod tests {
         assert_eq!(ncount, 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
-        assert!("SELECT users.id from users;".to_flow_parts(&mut inc, None, &mut mig).is_ok());
+        assert!("SELECT users.id from users;"
+                    .to_flow_parts(&mut inc, None, &mut mig)
+                    .is_ok());
         // Should now have source, "users", a leaf projection node for the new selection, and
         // a reader node
         assert_eq!(mig.graph().node_count(), ncount + 2);
 
         // Invalid query should fail parsing and add no nodes
-        assert!("foo bar from whatever;".to_flow_parts(&mut inc, None, &mut mig).is_err());
+        assert!("foo bar from whatever;"
+                    .to_flow_parts(&mut inc, None, &mut mig)
+                    .is_err());
         // Should still only have source, "users" and the two nodes for the above selection
         assert_eq!(mig.graph().node_count(), ncount + 2);
     }
@@ -640,7 +648,8 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
 
         // Try a simple COUNT function
-        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes FROM votes GROUP BY votes.aid;",
+        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes \
+                                FROM votes GROUP BY votes.aid;",
                                 None,
                                 &mut mig);
         assert!(res.is_ok());
@@ -648,15 +657,14 @@ mod tests {
         // added the aggregation and the edge view, and a reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
                                        name: String::from("votes"),
                                        alias: Some(String::from("votes")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.userid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
@@ -743,10 +751,7 @@ mod tests {
         assert_eq!(qfp.new_nodes.len(), 1);
         assert_eq!(get_node(&inc, &mig, &qfp.name).description(), "≡");
         // we should be based off the identity as our leaf
-        let id_node = qfp.new_nodes
-            .iter()
-            .next()
-            .unwrap();
+        let id_node = qfp.new_nodes.iter().next().unwrap();
         assert_eq!(qfp.query_leaf, *id_node);
     }
 
@@ -775,15 +780,14 @@ mod tests {
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 6);
         // check project helper node
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[],
                                 &[&Column {
                                        name: String::from("count"),
                                        alias: Some(String::from("count")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.userid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
@@ -824,15 +828,14 @@ mod tests {
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
                                        name: String::from("count"),
                                        alias: Some(String::from("count")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.aid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);

@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinRightSide, SqlQuery,
-              Table};
+use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinRightSide,
+              SqlQuery, Table};
 
 use std::collections::HashMap;
 
@@ -36,7 +36,11 @@ fn rewrite_conditional<F>(expand_columns: &F,
             };
             ComparisonOp(rewritten_ct)
         }
-        LogicalOp(ConditionTree { operator, box left, box right }) => {
+        LogicalOp(ConditionTree {
+                      operator,
+                      box left,
+                      box right,
+                  }) => {
             LogicalOp(ConditionTree {
                           operator: operator,
                           left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
@@ -57,7 +61,8 @@ impl ImpliedTableExpansion for SqlQuery {
         // passed as `write_schemas`; this is not something the parser or the expansion pass can
         // know on their own). Panics if no match is found or the match is ambiguous.
         let find_table = |f: &Column, tables_in_query: &Vec<Table>| -> Option<String> {
-            let mut matches = write_schemas.iter()
+            let mut matches = write_schemas
+                .iter()
                 .filter(|&(t, _)| if tables_in_query.len() > 0 {
                             for qt in tables_in_query {
                                 if qt.name == *t {
@@ -211,7 +216,10 @@ impl ImpliedTableExpansion for SqlQuery {
             SqlQuery::CreateTable(mut ctq) => {
                 let table = ctq.table.clone();
                 let transform_key = |key_cols: Vec<Column>| {
-                    key_cols.into_iter().map(|k| set_table(k, &table)).collect()
+                    key_cols
+                        .into_iter()
+                        .map(|k| set_table(k, &table))
+                        .collect()
                 };
                 // Expand within field list
                 ctq.fields = ctq.fields
@@ -282,7 +290,8 @@ mod tests {
                                 Column::from("address.addr_street1")]);
                 assert_eq!(tq.table, Table::from("address"));
             }
-            // if we get anything other than a table creation query back, something really weird is up
+            // if we get anything other than a table creation query back,
+            // something really weird is up
             _ => panic!(),
         }
     }

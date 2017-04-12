@@ -25,7 +25,8 @@ fn trace<F>(graph: &Graph,
     // figure out what node/column we're looking up
     let (node, column) = path.last().cloned().unwrap();
 
-    let parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+    let parents: Vec<_> = graph
+        .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
         .collect();
 
     if parents.is_empty() {
@@ -38,14 +39,16 @@ fn trace<F>(graph: &Graph,
     let mut local_to_global = HashMap::new();
     if n.is_localized() {
         let domain = n.domain();
-        local_to_global.extend(parents.iter().filter_map(|&ni| {
-                                                             let n = &graph[ni];
-                                                             if n.domain() == domain {
-                                                                 Some((n.addr(), ni))
-                                                             } else {
-                                                                 None
-                                                             }
-                                                         }));
+        local_to_global.extend(parents
+                                   .iter()
+                                   .filter_map(|&ni| {
+                                                   let n = &graph[ni];
+                                                   if n.domain() == domain {
+                                                       Some((n.addr(), ni))
+                                                   } else {
+                                                       None
+                                                   }
+                                               }));
     }
 
     // have we reached a base node?
@@ -140,7 +143,8 @@ fn trace<F>(graph: &Graph,
         return paths;
     }
 
-    let mut resolved: HashMap<_, _> = resolved.into_iter()
+    let mut resolved: HashMap<_, _> = resolved
+        .into_iter()
         .map(|(p, col)| {
             // we know joins don't generate values.
             let col = col.unwrap();

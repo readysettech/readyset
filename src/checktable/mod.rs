@@ -52,11 +52,7 @@ impl Token {
 
     /// Get the latest timestamp associated with this Token.
     pub fn get_timestamp(&self) -> i64 {
-        self.conflicts
-            .iter()
-            .map(|c| c.0)
-            .max()
-            .unwrap_or(-1)
+        self.conflicts.iter().map(|c| c.0).max().unwrap_or(-1)
     }
 
     /// Convert to a token that only relies on coarse checktables.
@@ -94,9 +90,12 @@ impl TokenGenerator {
                base_column_conflicts: Vec<(NodeIndex, usize)>)
                -> Self {
         TokenGenerator {
-            conflicts: base_table_conflicts.into_iter()
+            conflicts: base_table_conflicts
+                .into_iter()
                 .map(Conflict::BaseTable)
-                .chain(base_column_conflicts.into_iter().map(|(n, c)| Conflict::BaseColumn(n, c)))
+                .chain(base_column_conflicts
+                           .into_iter()
+                           .map(|(n, c)| Conflict::BaseColumn(n, c)))
                 .collect(),
         }
     }
@@ -190,9 +189,12 @@ impl CheckTable {
 
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
-        !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-                                        conflicts.iter().any(|c| self.check_conflict(ts, key, c))
-                                    })
+        !token
+             .conflicts
+             .iter()
+             .any(|&(ts, ref key, ref conflicts)| {
+                      conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+                  })
     }
 
     fn compute_previous_timestamps(&self,
@@ -208,10 +210,7 @@ impl CheckTable {
             let earliest: i64 = v.iter()
                 .filter_map(|b| self.toplevel.get(b))
                 .chain(self.last_migration.iter())
-                .chain(self.last_replay
-                           .get(d)
-                           .iter()
-                           .map(|t| *t))
+                .chain(self.last_replay.get(d).iter().map(|t| *t))
                 .max()
                 .cloned()
                 .unwrap_or(0);
@@ -297,14 +296,16 @@ impl CheckTable {
         self.last_base = None;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
-        self.domain_dependencies = ingresses_from_base.iter()
+        self.domain_dependencies = ingresses_from_base
+            .iter()
             .map(|(domain, ingress_from_base)| {
-                (*domain,
-                 ingress_from_base.iter()
-                     .filter(|&(_, n)| *n > 0)
-                     .map(|(k, _)| *k)
-                     .collect())
-            })
+                     (*domain,
+                      ingress_from_base
+                          .iter()
+                          .filter(|&(_, n)| *n > 0)
+                          .map(|(k, _)| *k)
+                          .collect())
+                 })
             .collect();
 
         (ts, ts + 1, prevs)
@@ -312,7 +313,8 @@ impl CheckTable {
 
     pub fn add_replay_paths(&mut self,
                             additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>) {
-        self.replay_paths.extend(additional_replay_paths.into_iter());
+        self.replay_paths
+            .extend(additional_replay_paths.into_iter());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {
@@ -321,7 +323,8 @@ impl CheckTable {
                 Conflict::BaseTable(..) => {}
                 Conflict::BaseColumn(base, col) => {
                     let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-                    t.entry(col).or_insert((HashMap::new(), self.next_timestamp - 1));
+                    t.entry(col)
+                        .or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
             }
         }

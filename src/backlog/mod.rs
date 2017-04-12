@@ -22,8 +22,10 @@ fn new_inner(cols: usize,
              key: usize,
              trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
              -> (ReadHandle, WriteHandle) {
-    let (r, w) =
-        evmap::Options::default().with_meta(-1).with_hasher(FnvBuildHasher::default()).construct();
+    let (r, w) = evmap::Options::default()
+        .with_meta(-1)
+        .with_hasher(FnvBuildHasher::default())
+        .construct();
     let r = ReadHandle {
         handle: r,
         trigger: trigger,

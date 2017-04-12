@@ -74,13 +74,11 @@ impl Ingredient for Base {
                      Record::Negative(u) => Record::Negative(u),
                      Record::DeleteRequest(key) => {
                 let cols = self.primary_key
-                        .as_ref()
-                        .expect("base must have a primary key to support deletions");
+                    .as_ref()
+                    .expect("base must have a primary key to support deletions");
                 let db =
-                    state.get(self.us
-                                  .as_ref()
-                                  .unwrap()
-                                  .as_local())
+                    state
+                        .get(self.us.as_ref().unwrap().as_local())
                         .expect("base must have its own state materialized to support deletions");
 
                 match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
@@ -101,13 +99,9 @@ impl Ingredient for Base {
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n,
-                  self.primary_key
-                      .as_ref()
-                      .unwrap()
-                      .clone()))
-                    .into_iter()
-                    .collect()
+            Some((n, self.primary_key.as_ref().unwrap().clone()))
+                .into_iter()
+                .collect()
         } else {
             HashMap::new()
         }

@@ -180,7 +180,7 @@ pub enum Packet {
 
     /// Request that a domain send usage statistics on the given sender.
     GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
-                                    HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
+                                     HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
 
     None,
 }

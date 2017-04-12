@@ -74,10 +74,8 @@ impl Ingredient for Latest {
         debug_assert_eq!(from, self.src);
 
         // find the current value for each group
-        let db = state.get(self.us
-                               .as_ref()
-                               .unwrap()
-                               .as_local())
+        let db = state
+            .get(self.us.as_ref().unwrap().as_local())
             .expect("latest must have its own state materialized");
 
         let mut misses = Vec::new();
@@ -238,27 +236,31 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 4); // one - and one + for each group
         // group 1 lost 2 and gained 3
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 3.into()
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             r[0] == 1.into() && r[1] == 2.into()
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             r[0] == 1.into() && r[1] == 3.into()
+                         } else {
+                             false
+                         }));
         // group 2 lost 2 and gained 4
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 4.into()
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             r[0] == 2.into() && r[1] == 2.into()
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             r[0] == 2.into() && r[1] == 4.into()
+                         } else {
+                             false
+                         }));
     }
 
     #[test]

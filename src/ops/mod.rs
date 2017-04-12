@@ -56,10 +56,7 @@ pub mod test {
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .set_addr(local);
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
             remap.insert(global, local);
             self.graph
                 .node_weight_mut(ni)
@@ -82,7 +79,8 @@ pub mod test {
             let parents = i.ancestors();
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
-            let ni = self.graph.add_node(node::Node::new(name, fields, i, false));
+            let ni = self.graph
+                .add_node(node::Node::new(name, fields, i, false));
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
             if materialized {
@@ -92,10 +90,7 @@ pub mod test {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .set_addr(local);
+            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
             self.graph
                 .node_weight_mut(ni)
                 .unwrap()
@@ -111,7 +106,11 @@ pub mod test {
             // and get rid of states we don't need
             let unused: Vec<_> = self.remap
                 .values()
-                .filter_map(|ni| self.states.get(ni.as_local()).map(move |s| (ni, !s.is_useful())))
+                .filter_map(|ni| {
+                                self.states
+                                    .get(ni.as_local())
+                                    .map(move |s| (ni, !s.is_useful()))
+                            })
                 .filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
@@ -132,7 +131,8 @@ pub mod test {
                 nodes.push((node, self.graph[node].take()));
             }
 
-            let nodes: Vec<_> = nodes.into_iter()
+            let nodes: Vec<_> = nodes
+                .into_iter()
                 .map(|(ni, n)| {
                          single::NodeDescriptor {
                              index: ni,
@@ -142,7 +142,8 @@ pub mod test {
                      })
                 .collect();
 
-            self.nodes = nodes.into_iter()
+            self.nodes = nodes
+                .into_iter()
                 .map(|n| {
                          use std::cell;
                          (*n.addr().as_local(), cell::RefCell::new(n))
@@ -185,45 +186,29 @@ pub mod test {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
 
             let local = self.to_local(base);
-            self.states
-                .get_mut(local.as_local())
-                .unwrap()
-                .clear();
+            self.states.get_mut(local.as_local()).unwrap().clear();
         }
 
         pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
-            assert!(!remember ||
-                    self.states.contains_key(self.nut
-                                                 .unwrap()
-                                                 .1
-                                                 .as_local()));
+            assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
 
             let mut u = {
                 let id = self.nut.unwrap().1;
                 let mut n = self.nodes[id.as_local()].borrow_mut();
-                let m = n.inner.on_input(src, u.into(), &self.nodes, &self.states);
+                let m = n.inner
+                    .on_input(src, u.into(), &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
 
-            if !remember ||
-               !self.states.contains_key(self.nut
-                                             .unwrap()
-                                             .1
-                                             .as_local()) {
+            if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
                 return u;
             }
 
             let misses = single::materialize(&mut u,
-                                             *self.nut
-                                                  .unwrap()
-                                                  .1
-                                                  .as_local(),
-                                             self.states.get_mut(self.nut
-                                                                     .unwrap()
-                                                                     .1
-                                                                     .as_local()));
+                                             *self.nut.unwrap().1.as_local(),
+                                             self.states.get_mut(self.nut.unwrap().1.as_local()));
             assert_eq!(misses, vec![]);
             u
         }
@@ -246,11 +231,7 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
-            self.nodes[self.nut
-                .unwrap()
-                .1
-                .as_local()]
-                    .borrow()
+            self.nodes[self.nut.unwrap().1.as_local()].borrow()
         }
 
         pub fn narrow_base_id(&self) -> NodeAddress {

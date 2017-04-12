@@ -42,9 +42,13 @@ impl Tag {
 }
 
 pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
-    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (ni, &graph[ni], new)).collect();
+    let nodes: Vec<_> = nodes
+        .iter()
+        .map(|&(ni, new)| (ni, &graph[ni], new))
+        .collect();
 
-    let mut materialize: HashSet<_> = nodes.iter()
+    let mut materialize: HashSet<_> = nodes
+        .iter()
         .filter_map(|&(ni, n, _)| {
             // materialized state for any nodes that need it
             // in particular, we keep state for
@@ -61,8 +65,9 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
             match **n {
                 flow::node::Type::Internal(ref i) => {
                     if i.should_materialize() ||
-                       graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                        .any(|e| *e.weight()) {
+                       graph
+                           .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                           .any(|e| *e.weight()) {
                         trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
                         Some(*n.addr().as_local())
                     } else {
@@ -106,8 +111,8 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 if n.will_query(materialize.contains(n.addr().as_local())) {
                     trace!(log, "found querying child"; "node" => format!("{}", ni.index()));
                     inquisitive_children.insert(ni);
-                    // track child back to an ingress, marking any unmaterialized nodes on the path as
-                    // inquisitive as long as we can query through them
+                    // track child back to an ingress, marking any unmaterialized nodes on the path
+                    // as inquisitive as long as we can query through them
                     let mut q = vec![ni];
                     while !q.is_empty() {
                         let ni = q.pop().unwrap();
@@ -129,8 +134,9 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
 
     for &(ni, n, _) in &nodes {
         if let flow::node::Type::Ingress = **n {
-            if graph.neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                .any(|child| inquisitive_children.contains(&child)) {
+            if graph
+                   .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                   .any(|child| inquisitive_children.contains(&child)) {
                 // we have children that may query us, so our output should be materialized
                 trace!(log,
                        format!("querying children force materialization of node {}",
@@ -153,7 +159,9 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 continue;
             }
 
-            if graph.edges_directed(ni, petgraph::EdgeDirection::Outgoing).any(|e| *e.weight()) {
+            if graph
+                   .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                   .any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
                 materialize.remove(n.addr().as_local());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
@@ -176,9 +184,14 @@ pub fn index(log: &Logger,
              materialize: HashSet<LocalNodeIndex>)
              -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
 
-    let map: HashMap<_, _> =
-        nodes.iter().map(|&(ni, _)| (*graph[ni].addr().as_local(), ni)).collect();
-    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
+    let map: HashMap<_, _> = nodes
+        .iter()
+        .map(|&(ni, _)| (*graph[ni].addr().as_local(), ni))
+        .collect();
+    let nodes: Vec<_> = nodes
+        .iter()
+        .map(|&(ni, new)| (&graph[ni], new))
+        .collect();
 
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
@@ -221,7 +234,11 @@ pub fn index(log: &Logger,
             for (v, idxs) in leftover_indices.drain() {
                 if let Some(mut state) = state.get_mut(v.as_local()) {
                     // this node is materialized! add the indices!
-                    info!(log, "adding indices"; "node" => map[v.as_local()].index(), "cols" => format!("{:?}", idxs));
+                    info!(log,
+                          "adding indices";
+                          "node" => map[v.as_local()].index(),
+                          "cols" => format!("{:?}", idxs)
+                      );
                     *state = Some(idxs.into_iter().collect());
                 } else if let Some(node) = nodes.get(&v) {
                     // this node is not materialized
@@ -247,8 +264,9 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node =
-                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
+                        let cols_to_index_per_node = real_cols
+                            .into_iter()
+                            .fold(HashMap::new(), |mut acc, nc| {
                                 if let Some(p_cols) = nc {
                                     for (pn, pc) in p_cols {
                                         acc.entry(pn).or_insert_with(Vec::new).push(pc);
@@ -258,10 +276,10 @@ pub fn index(log: &Logger,
                             });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
-                        // Note that this, and the semantics of node.resolve(), imply that each column
-                        // must resolve to one ore more *single* parent node columns. In other
-                        // words, we never install compound keys by pushing indices upwards; hence
-                        // the two nested loops are required here.
+                        // Note that this, and the semantics of node.resolve(), imply that each
+                        // column must resolve to one ore more *single* parent node columns. In
+                        // other words, we never install compound keys by pushing indices upwards;
+                        // hence the two nested loops are required here.
                         for (n, cols) in cols_to_index_per_node {
                             for col in cols {
                                 trace!(log,
@@ -270,7 +288,9 @@ pub fn index(log: &Logger,
                                        v,
                                        col,
                                        n);
-                                tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
+                                tmp.entry(n)
+                                    .or_insert_with(HashSet::new)
+                                    .insert(vec![col]);
                             }
                         }
                     }
@@ -282,7 +302,8 @@ pub fn index(log: &Logger,
         }
     }
 
-    state.into_iter()
+    state
+        .into_iter()
         .filter_map(|(n, col)| {
             if let Some(col) = col {
                 Some((n, col))
@@ -333,7 +354,8 @@ pub fn initialize(log: &Logger,
         let addr = graph[node].addr();
         let d = graph[node].domain();
 
-        let index_on = materialize.get_mut(&d)
+        let index_on = materialize
+            .get_mut(&d)
             .and_then(|ss| ss.get(addr.as_local()))
             .cloned()
             .map(|idxs| {
@@ -372,7 +394,8 @@ pub fn initialize(log: &Logger,
             trace!(log, "node ready"; "node" => node.index());
         };
 
-        if graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+        if graph
+               .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                .filter(|&ni| ni != source)
                .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
@@ -420,7 +443,8 @@ pub fn reconstruct(log: &Logger,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
                    node: NodeIndex,
-                   mut index_on: Vec<Vec<usize>>) -> HashMap<Tag, Vec<domain::Index>> {
+                   mut index_on: Vec<Vec<usize>>)
+                   -> HashMap<Tag, Vec<domain::Index>> {
 
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
@@ -461,7 +485,8 @@ pub fn reconstruct(log: &Logger,
     };
 
     // cut paths so they only reach to the the closest materialized node
-    let paths: Vec<_> = paths.into_iter()
+    let paths: Vec<_> = paths
+        .into_iter()
         .map(|path| -> Vec<_> {
             let mut found = false;
             path.into_iter()
@@ -480,7 +505,8 @@ pub fn reconstruct(log: &Logger,
                         return false;
                     }
 
-                    let is_materialized = materialized.get(&n.domain())
+                    let is_materialized = materialized
+                        .get(&n.domain())
                         .map(|dm| dm.contains_key(n.addr().as_local()))
                         .unwrap_or(false);
                     if is_materialized {
@@ -511,12 +537,7 @@ pub fn reconstruct(log: &Logger,
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
     let mut partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-                         paths.iter().all(|path| {
-                                              path.last()
-                                                  .unwrap()
-                                                  .1
-                                                  .is_some()
-                                          });
+                         paths.iter().all(|path| path.last().unwrap().1.is_some());
 
     // FIXME: if a reader has no materialized views between it and a union, we will end
     // up in this case. we *can* solve that case by requesting replays across all
@@ -621,11 +642,9 @@ pub fn reconstruct(log: &Logger,
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        let tag =
-            first_tag.take().unwrap_or_else(|| {
-                                                Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as
-                                                    u32)
-                                            });
+        let tag = first_tag
+            .take()
+            .unwrap_or_else(|| Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
         trace!(log, "tag" => tag.id(); "replaying along path {:?}", path);
 
         // partial materialization possible?
@@ -653,10 +672,7 @@ pub fn reconstruct(log: &Logger,
                 }
             }
 
-            segments.last_mut()
-                .unwrap()
-                .1
-                .push((node, key));
+            segments.last_mut().unwrap().1.push((node, key));
         }
 
         debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
@@ -742,7 +758,9 @@ pub fn reconstruct(log: &Logger,
                         Some(..) => {
                             // otherwise, should know what how to trigger partial replay
                             let (tx, rx) = mpsc::channel();
-                            txs[&segments[0].0].send(Packet::RequestUnboundedTx(tx)).unwrap();
+                            txs[&segments[0].0]
+                                .send(Packet::RequestUnboundedTx(tx))
+                                .unwrap();
                             let root_unbounded_tx = rx.recv().unwrap();
                             *trigger = TriggerEndpoint::End(root_unbounded_tx);
                         }
@@ -782,7 +800,10 @@ pub fn reconstruct(log: &Logger,
                 .unwrap();
 
             // and finally, wait for the last domain to finish the replay
-            trace!(log, "waiting for done message from target"; "domain" => segments.last().unwrap().0.index());
+            trace!(log,
+                   "waiting for done message from target";
+                   "domain" => segments.last().unwrap().0.index()
+            );
             done_rx.recv().unwrap();
         }
     }
@@ -802,7 +823,8 @@ fn cost_fn<'a, T>(log: &'a Logger,
 
         let in_materialized = |ni: NodeIndex| {
             let n = &graph[ni];
-            materialized.get(&n.domain())
+            materialized
+                .get(&n.domain())
                 .map(|dm| dm.contains_key(n.addr().as_local()))
                 .unwrap_or(false)
         };
@@ -814,12 +836,14 @@ fn cost_fn<'a, T>(log: &'a Logger,
         assert!(n.is_internal());
 
         // find empty parents
-        let empty: HashSet<_> = parents.iter()
+        let empty: HashSet<_> = parents
+            .iter()
             .filter(|ni| empty.contains(ni))
             .map(|ni| graph[*ni].addr())
             .collect();
 
-        let options = n.must_replay_among().expect("join did not have must replay preference");
+        let options = n.must_replay_among()
+            .expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
         parents.retain(|&parent| options.contains(&graph[parent].addr()));
@@ -840,7 +864,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
         // must indeed be), and therefore that we can just pick that parent and get a free full
         // materialization. *however*, this would cause the node to be marked as fully
         // materialized, which is *not* okay if it has partially a materialized ancestor!
-        if let Some(&parent) = parents.iter().find(|&&p| empty.contains(&graph[p].addr())) {
+        if let Some(&parent) = parents
+               .iter()
+               .find(|&&p| empty.contains(&graph[p].addr())) {
             if !parents.iter().any(|p| partial.contains(p)) {
                 // no partial ancestors!
                 return Some(parent);
@@ -888,7 +914,8 @@ fn cost_fn<'a, T>(log: &'a Logger,
         //
         // to compute this, we need to find |N| and n for each candidate node.
         // let's do that now
-        parents.into_iter()
+        parents
+            .into_iter()
             .map(|p| {
                 let mut intermediates = vec![];
                 let mut stateful = p;

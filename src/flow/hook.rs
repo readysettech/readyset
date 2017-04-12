@@ -60,7 +60,8 @@ impl Hook {
         }
 
         // Extract modified keys
-        let mut modified_keys: Vec<_> = records.into_iter()
+        let mut modified_keys: Vec<_> = records
+            .into_iter()
             .map(|rec| match rec {
                      Record::Positive(a) |
                      Record::Negative(a) => {
@@ -86,7 +87,8 @@ impl Hook {
 
         // Push to Memcached
         for key in modified_keys {
-            let rows = match self.state.lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
+            let rows = match self.state
+                      .lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
                 LookupResult::Some(rows) => rows,
                 LookupResult::Missing => {
                     unreachable!();
@@ -100,7 +102,9 @@ impl Hook {
                                     .collect())
                     .to_string();
             let flags = 0xdeadbeef;
-            (self.client.0).set(k.as_bytes(), v.as_bytes(), flags, 0).unwrap();
+            (self.client.0)
+                .set(k.as_bytes(), v.as_bytes(), flags, 0)
+                .unwrap();
         }
     }
 

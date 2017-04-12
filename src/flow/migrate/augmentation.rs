@@ -40,7 +40,8 @@ pub fn inform(log: &Logger,
         let _ = ready_rx.recv();
         trace!(log, "domain ready for migration");
 
-        let old_nodes: HashSet<_> = nodes.iter()
+        let old_nodes: HashSet<_> = nodes
+            .iter()
             .filter(|&&(_, new)| !new)
             .map(|&(ni, _)| ni)
             .collect();
@@ -57,7 +58,8 @@ pub fn inform(log: &Logger,
 
             let node = domain::single::NodeDescriptor::new(graph, ni);
             // new parents already have the right child list
-            let old_parents = graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+            let old_parents = graph
+                .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
                 .filter(|&ni| ni != source)
                 .filter(|ni| old_nodes.contains(ni))
                 .map(|ni| &graph[ni])

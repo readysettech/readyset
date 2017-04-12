@@ -176,7 +176,8 @@ impl Ingredient for Join {
                     // we got something from right, but that row's key is not in right??
                     unreachable!();
                 }
-                self.right_counts.insert(key.clone(), adjust(rc.unwrap().count()));
+                self.right_counts
+                    .insert(key.clone(), adjust(rc.unwrap().count()));
             }
         }
 
@@ -255,7 +256,9 @@ impl Ingredient for Join {
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])].into_iter().collect()
+        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])]
+            .into_iter()
+            .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

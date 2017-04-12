@@ -138,7 +138,8 @@ pub trait Ingredient
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
                   -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
-        states.get(parent.as_local())
+        states
+            .get(parent.as_local())
             .and_then(move |state| match state.lookup(columns, key) {
                           prelude::LookupResult::Some(rs) => {
                               Some(Some(Box::new(rs.iter()) as Box<_>))

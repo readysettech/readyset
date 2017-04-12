@@ -92,7 +92,8 @@ impl DomainState {
                -> Self {
 
         // Look through nodes to find all that have a child who is a base node.
-        let base_for_ingress = nodes.values()
+        let base_for_ingress = nodes
+            .values()
             .filter_map(|n| {
                 if n.borrow().children.is_empty() {
                     return None;
@@ -103,10 +104,7 @@ impl DomainState {
                     return None;
                 }
 
-                let ni = *n.borrow()
-                              .inner
-                              .addr()
-                              .as_local();
+                let ni = *n.borrow().inner.addr().as_local();
 
                 Some((ni, child.index))
             })
@@ -143,7 +141,10 @@ impl DomainState {
                         match result {
                             checktable::TransactionResult::Committed(ts, prevs) => {
                                 let _ = send.send(Ok(ts));
-                                ::std::mem::replace(state, TransactionState::Committed(ts, base_node, prevs));
+                                ::std::mem::replace(state,
+                                                    TransactionState::Committed(ts,
+                                                                                base_node,
+                                                                                prevs));
                                 true
                             }
                             checktable::TransactionResult::Aborted => {
@@ -158,7 +159,8 @@ impl DomainState {
                             .lock()
                             .unwrap()
                             .claim_timestamp(base_node, data);
-                        ::std::mem::replace(state, TransactionState::Committed(ts, base_node, prevs));
+                        ::std::mem::replace(state,
+                                            TransactionState::Committed(ts, base_node, prevs));
                         true
                     }
                     TransactionState::Committed(..) => unreachable!(),
@@ -176,7 +178,8 @@ impl DomainState {
                 if self.ts == ts - 1 {
                     (ts, Some(base), ts - 1)
                 } else {
-                    let prev_ts = prevs.as_ref()
+                    let prev_ts = prevs
+                        .as_ref()
                         .and_then(|p| p.get(&self.domain_index))
                         .cloned()
                         .unwrap_or(ts - 1);
@@ -186,11 +189,14 @@ impl DomainState {
             }
             Packet::StartMigration { at, prev_ts, .. } => (at, None, prev_ts),
             Packet::CompleteMigration { at, .. } => (at, None, at - 1),
-            Packet::ReplayPiece { transaction_state: Some(ReplayTransactionState { ts, ref prevs }), .. } => {
+            Packet::ReplayPiece {
+                transaction_state: Some(ReplayTransactionState { ts, ref prevs }), ..
+            } => {
                 if self.ts == ts - 1 {
                     (ts, None, ts - 1)
                 } else {
-                    let prev_ts = prevs.as_ref()
+                    let prev_ts = prevs
+                        .as_ref()
                         .and_then(|p| p.get(&self.domain_index))
                         .cloned()
                         .unwrap_or(ts - 1);
@@ -206,16 +212,15 @@ impl DomainState {
 
             match self.next_transaction {
                 Bundle::Empty => {
-                    let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
+                    let count = base.map(|b| self.ingress_from_base[b.index()])
+                        .unwrap_or(1);
                     let bundle = match m {
                         Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
                         Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
                         Packet::CompleteMigration { ingress_from_base, .. } => {
                             Bundle::MigrationEnd(ingress_from_base)
                         }
-                        Packet::ReplayPiece { .. } => {
-                            Bundle::Replay(m)
-                        },
+                        Packet::ReplayPiece { .. } => Bundle::Replay(m),
                         _ => unreachable!(),
                     };
 
@@ -231,9 +236,7 @@ impl DomainState {
                 Packet::CompleteMigration { ingress_from_base, .. } => {
                     BufferedTransaction::MigrationEnd(ingress_from_base)
                 }
-                Packet::ReplayPiece { .. } => {
-                    BufferedTransaction::Replay(m)
-                },
+                Packet::ReplayPiece { .. } => BufferedTransaction::Replay(m),
                 _ => unreachable!(),
             };
             let entry = BufferEntry {
@@ -264,10 +267,7 @@ impl DomainState {
             match entry.transaction {
                 BufferedTransaction::Transaction(base, p) => {
                     let mut messages = vec![p];
-                    while self.buffer
-                              .peek()
-                              .map(|e| e.ts == ts)
-                              .unwrap_or(false) {
+                    while self.buffer.peek().map(|e| e.ts == ts).unwrap_or(false) {
                         let e = self.buffer.pop().unwrap();
                         if let BufferedTransaction::Transaction(_, p) = e.transaction {
                             messages.push(p);
@@ -304,7 +304,8 @@ impl DomainState {
                 Event::StartMigration
             }
             Bundle::MigrationEnd(ingress_from_base) => {
-                let max_index = ingress_from_base.keys()
+                let max_index = ingress_from_base
+                    .keys()
                     .map(|ni| ni.index())
                     .max()
                     .unwrap_or(0);
@@ -341,33 +342,42 @@ impl DomainState {
     }
 
     pub fn schedule_replay(&mut self, tag: Tag, key: Vec<DataType>) {
-        let (ts, prevs) = self.checktable.lock().unwrap().claim_replay_timestamp(&tag);
+        let (ts, prevs) = self.checktable
+            .lock()
+            .unwrap()
+            .claim_replay_timestamp(&tag);
 
         let prev_ts = if self.ts == ts - 1 {
             ts - 1
         } else {
-            prevs.as_ref()
+            prevs
+                .as_ref()
                 .and_then(|p| p.get(&self.domain_index))
                 .cloned()
                 .unwrap_or(ts - 1)
         };
 
-        let rts = ReplayTransactionState{ts: ts, prevs: prevs};
+        let rts = ReplayTransactionState {
+            ts: ts,
+            prevs: prevs,
+        };
 
         if self.ts == prev_ts {
             self.ts = ts - 1;
 
             if let Bundle::Empty = self.next_transaction {
-                mem::replace(&mut self.next_transaction, Bundle::SeedReplay(tag, key, rts));
+                mem::replace(&mut self.next_transaction,
+                             Bundle::SeedReplay(tag, key, rts));
             } else {
                 unreachable!();
             }
         } else {
-            self.buffer.push(BufferEntry {
-                ts: ts,
-                prev_ts: prev_ts,
-                transaction: BufferedTransaction::SeedReplay(tag, key, rts),
-            });
+            self.buffer
+                .push(BufferEntry {
+                          ts: ts,
+                          prev_ts: prev_ts,
+                          transaction: BufferedTransaction::SeedReplay(tag, key, rts),
+                      });
         }
     }
 }

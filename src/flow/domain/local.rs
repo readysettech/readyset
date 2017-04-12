@@ -74,7 +74,8 @@ impl<T> Map<T> {
                      .iter()
                      .enumerate()
                      .filter_map(|(i, t)| {
-                                     t.as_ref().map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                     t.as_ref()
+                                         .map(|v| (unsafe { NodeAddress::make_local(i) }, v))
                                  }))
     }
 
@@ -286,15 +287,12 @@ impl<T: Hash + Eq + Clone> State<T> {
             unimplemented!();
         }
 
-        self.state.push((Vec::from(columns), columns.into(), partial));
+        self.state
+            .push((Vec::from(columns), columns.into(), partial));
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
-        self.state
-            .iter()
-            .map(|s| &s.0)
-            .cloned()
-            .collect()
+        self.state.iter().map(|s| &s.0).cloned().collect()
     }
 
     pub fn is_useful(&self) -> bool {
@@ -307,7 +305,9 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
-        rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
+        rclones.extend((0..(self.state.len() - 1))
+                           .into_iter()
+                           .map(|_| r.clone()));
         rclones.push(r);
 
         self.rows = self.rows.saturating_add(1);
@@ -529,7 +529,8 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
+        let state = &self.state[self.state_for(columns)
+                         .expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {

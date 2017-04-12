@@ -103,7 +103,9 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
                     // NULL terminated CStr
                     use std::ffi::CStr;
                     let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
-                    CStr::from_bytes_with_nul(&bts[0..null]).unwrap().to_string_lossy()
+                    CStr::from_bytes_with_nul(&bts[0..null])
+                        .unwrap()
+                        .to_string_lossy()
                 } else {
                     // String is exactly eight bytes
                     String::from_utf8_lossy(&bts[..])

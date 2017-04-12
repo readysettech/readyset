@@ -57,10 +57,7 @@ impl Ingredient for Union {
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
-        self.emit
-            .keys()
-            .cloned()
-            .collect()
+        self.emit.keys().cloned().collect()
     }
 
     fn should_materialize(&self) -> bool {
@@ -72,7 +69,10 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols.extend(self.emit.keys().map(|&n| (n, g[*n.as_global()].fields().len())));
+        self.cols
+            .extend(self.emit
+                        .keys()
+                        .map(|&n| (n, g[*n.as_global()].fields().len())));
     }
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
@@ -102,7 +102,10 @@ impl Ingredient for Union {
 
                 // yield selected columns for this source
                 // TODO: if emitting all in same order then avoid clone
-                let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
+                let res = self.emit[&from]
+                    .iter()
+                    .map(|&col| r[col].clone())
+                    .collect();
 
                 // return new row with appropriate sign
                 if pos {
@@ -136,7 +139,8 @@ impl Ingredient for Union {
                 // for. we need to take out any records that should be buffered (i.e., those that
                 // are for a replay piece that is still waiting for its other half).
                 let rs = rs.into_iter().filter_map(|r| {
-                    if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[self.replay_key.unwrap()]) {
+                    let k = self.replay_key.unwrap();
+                    if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
                         if let Some(ref mut rs) = pieces.get_mut(from.as_local()) {
                             // we've received a replay piece from this ancestor already, and are
                             // waiting for replay pieces from other ancestors. we need to
@@ -168,7 +172,9 @@ impl Ingredient for Union {
 
                 let finished = {
                     // store this replay piece
-                    let pieces = self.replay_pieces.entry(key_val.clone()).or_insert_with(Map::new);
+                    let pieces = self.replay_pieces
+                        .entry(key_val.clone())
+                        .or_insert_with(Map::new);
                     // there better be only one replay from each ancestor
                     assert!(!pieces.contains_key(from.as_local()));
                     pieces.insert(*from.as_local(), rs);

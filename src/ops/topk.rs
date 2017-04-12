@@ -94,8 +94,9 @@ impl TopK {
             .collect();
         output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
 
-        let src_db =
-            state.get(self.src.as_local()).expect("topk must have its parent's state materialized");
+        let src_db = state
+            .get(self.src.as_local())
+            .expect("topk must have its parent's state materialized");
         if output_rows.len() < self.k {
             let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
                 LookupResult::Some(rs) => rs,
@@ -108,10 +109,7 @@ impl TopK {
                     (self.cmp_rows)(&&r, &&min) == Ordering::Equal
                 };
 
-                let mut current_mins: Vec<_> = output_rows.iter()
-                    .filter(is_min)
-                    .cloned()
-                    .collect();
+                let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
 
                 output_rows = rs.iter()
                     .filter_map(|r| {
@@ -153,15 +151,17 @@ impl TopK {
 
             // Emit negatives for any elements in `bottom_rows` that were originally in
             // current_topk.
-            delta.extend(bottom_rows.into_iter()
-                .filter(|p| p.1)
-                .map(|p| Record::Negative(p.0.clone())));
+            delta.extend(bottom_rows
+                             .into_iter()
+                             .filter(|p| p.1)
+                             .map(|p| Record::Negative(p.0.clone())));
         }
 
         // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
-                                                                      Record::Positive(p.0.clone())
-                                                                  }));
+        delta.extend(output_rows
+                         .into_iter()
+                         .filter(|p| !p.1)
+                         .map(|p| Record::Positive(p.0.clone())));
         delta.into()
     }
 }
@@ -239,14 +239,15 @@ impl Ingredient for TopK {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            consolidate.entry(group).or_insert_with(Vec::new).push(rec.clone());
+            consolidate
+                .entry(group)
+                .or_insert_with(Vec::new)
+                .push(rec.clone());
         }
 
         // find the current value for each group
-        let db = state.get(self.us
-                               .as_ref()
-                               .unwrap()
-                               .as_local())
+        let db = state
+            .get(self.us.as_ref().unwrap().as_local())
             .expect("topk must have its own state materialized");
 
         let mut misses = Vec::new();
@@ -254,23 +255,26 @@ impl Ingredient for TopK {
         {
             let us = *self.us.unwrap().as_local();
             let group_by = &self.group_by[..];
-            let current = consolidate.into_iter().filter_map(|(group, diffs)| {
-                match db.lookup(group_by, &KeyType::from(&group[..])) {
-                    LookupResult::Some(rs) => Some((group, diffs, rs)),
-                    LookupResult::Missing => {
-                        misses.push(Miss {
-                                        node: us,
-                                        key: group.clone(),
-                                    });
-                        None
+            let current = consolidate
+                .into_iter()
+                .filter_map(|(group, diffs)| {
+                    match db.lookup(group_by, &KeyType::from(&group[..])) {
+                        LookupResult::Some(rs) => Some((group, diffs, rs)),
+                        LookupResult::Missing => {
+                            misses.push(Miss {
+                                            node: us,
+                                            key: group.clone(),
+                                        });
+                            None
+                        }
                     }
-                }
-            });
+                });
 
             for (group, mut diffs, old_rs) in current {
                 // Retrieve then update the number of times in this group
                 let count: i64 = *self.counts.get(&group).unwrap_or(&0) as i64;
-                let count_diff: i64 = diffs.iter()
+                let count_diff: i64 = diffs
+                    .iter()
                     .map(|r| match r {
                              &Record::Positive(..) => 1,
                              &Record::Negative(..) => -1,
@@ -283,7 +287,8 @@ impl Ingredient for TopK {
                 } else {
                     assert!(count as usize >= old_rs.len());
 
-                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..]).into());
+                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..])
+                                        .into());
                 }
                 self.counts.insert(group, (count + count_diff) as usize);
             }
@@ -296,7 +301,10 @@ impl Ingredient for TopK {
     }
 
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        vec![(this, self.group_by.clone()), (self.src, self.group_by.clone())].into_iter().collect()
+        vec![(this, self.group_by.clone()),
+             (self.src, self.group_by.clone())]
+                .into_iter()
+                .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
@@ -446,17 +454,8 @@ mod tests {
         let me = NodeAddress::mock_global(1.into());
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
-        assert_eq!(*idx.iter()
-                        .next()
-                        .unwrap()
-                        .1,
-                   vec![1]);
-        assert_eq!(*idx.iter()
-                        .skip(1)
-                        .next()
-                        .unwrap()
-                        .1,
-                   vec![1]);
+        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
+        assert_eq!(*idx.iter().skip(1).next().unwrap().1, vec![1]);
     }
 
     #[test]

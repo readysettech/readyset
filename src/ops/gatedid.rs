@@ -64,11 +64,7 @@ impl Ingredient for GatedIdentity {
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
-        self.rx
-            .lock()
-            .unwrap()
-            .recv()
-            .unwrap();
+        self.rx.lock().unwrap().recv().unwrap();
         ProcessingResult {
             results: rs,
             misses: Vec::new(),

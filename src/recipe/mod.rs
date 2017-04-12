@@ -62,10 +62,7 @@ fn hash_query(q: &SqlQuery) -> QueryID {
 impl Recipe {
     /// Return active aliases for expressions
     pub fn aliases(&self) -> Vec<&str> {
-        self.aliases
-            .keys()
-            .map(String::as_str)
-            .collect()
+        self.aliases.keys().map(String::as_str).collect()
     }
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
@@ -126,7 +123,8 @@ impl Recipe {
     /// it.
     pub fn from_str(recipe_text: &str, log: Option<slog::Logger>) -> Result<Recipe, String> {
         // remove comment lines
-        let lines: Vec<String> = recipe_text.lines()
+        let lines: Vec<String> = recipe_text
+            .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
             .map(String::from)
@@ -212,10 +210,7 @@ impl Recipe {
         // tagged with the new version. If this recipe was just created, there is no need to
         // upgrade the schema version, as the SqlIncorporator's version will still be at zero.
         if self.version > 0 {
-            self.inc
-                .as_mut()
-                .unwrap()
-                .upgrade_schema(self.version);
+            self.inc.as_mut().unwrap().upgrade_schema(self.version);
         }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
@@ -240,7 +235,7 @@ impl Recipe {
 
         // TODO(malte): deal with removal.
         for qid in removed {
-            error!(self.log, format!("Unhandled query removal of {:?}", qid); "version" => self.version);
+            error!(self.log,  "version" => self.version; "Unhandled query removal of {:?}", qid);
             //unimplemented!()
         }
 
@@ -312,15 +307,16 @@ impl Recipe {
     }
 
     fn parse(recipe_text: &str) -> Result<Vec<(Option<String>, SqlQuery)>, String> {
-        let lines: Vec<&str> = recipe_text.lines()
+        let lines: Vec<&str> = recipe_text
+            .lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| {
-                // remove inline comments, too
-                match l.find("#") {
-                    None => l.trim(),
-                    Some(pos) => &l[0..pos - 1].trim(),
-                }
-            })
+                     // remove inline comments, too
+                     match l.find("#") {
+                         None => l.trim(),
+                         Some(pos) => &l[0..pos - 1].trim(),
+                     }
+                 })
             .collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();
@@ -335,7 +331,8 @@ impl Recipe {
             }
         }
 
-        let parsed_queries = query_strings.iter()
+        let parsed_queries = query_strings
+            .iter()
             .map(|ref q| {
                 let r: Vec<&str> = q.splitn(2, ":").map(|s| s.trim()).collect();
                 if r.len() == 2 {
@@ -361,7 +358,10 @@ impl Recipe {
             return Err(format!("Failed to parse recipe!"));
         }
 
-        Ok(parsed_queries.into_iter().map(|t| (t.0, t.2.unwrap())).collect::<Vec<_>>())
+        Ok(parsed_queries
+               .into_iter()
+               .map(|t| (t.0, t.2.unwrap()))
+               .collect::<Vec<_>>())
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.
