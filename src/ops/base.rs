@@ -171,16 +171,3 @@ impl Ingredient for Base {
         unreachable!();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        // Base gets dropped as expected here.
-        let b = Base::default();
-        assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
-    }
-}

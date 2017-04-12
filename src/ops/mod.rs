@@ -48,8 +48,16 @@ pub mod test {
         }
 
         pub fn add_base(&mut self, name: &str, fields: &[&str]) -> NodeAddress {
+            self.add_base_defaults(name, fields, vec![])
+        }
+
+        pub fn add_base_defaults(&mut self,
+                                 name: &str,
+                                 fields: &[&str],
+                                 defaults: Vec<DataType>)
+                                 -> NodeAddress {
             use ops::base::Base;
-            let mut i: node::Type = Base::default().into();
+            let mut i: node::Type = Base::new(defaults).into();
             i.on_connected(&self.graph);
             let ni = self.graph.add_node(Node::new(name, fields, i, false));
             self.graph.add_edge(self.source, ni, false);
