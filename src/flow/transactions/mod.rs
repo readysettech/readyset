@@ -205,7 +205,6 @@ impl DomainState {
                             Bundle::MigrationEnd(ingress_from_base)
                         }
                         Packet::ReplayPiece { .. } => {
-                            println!("[{:?} @ {}] next_transaction ← ReplayPiece({})", self.domain_index, self.ts, ts);
                             Bundle::Replay(m)
                         },
                         _ => unreachable!(),
@@ -224,7 +223,6 @@ impl DomainState {
                     BufferedTransaction::MigrationEnd(ingress_from_base)
                 }
                 Packet::ReplayPiece { .. } => {
-                    println!("[{:?} @ {}] buffer ← ReplayPiece({}), prev_ts={}", self.domain_index, self.ts, ts, prev_ts);
                     BufferedTransaction::Replay(m)
                 },
                 _ => unreachable!(),
@@ -322,13 +320,11 @@ impl DomainState {
             Bundle::Replay(packet) => {
                 self.ts += 1;
                 self.update_next_transaction();
-                println!("[{:?} @ {}] Replay({})", self.domain_index, self.ts, self.ts);
                 Event::Replay(packet)
             }
             Bundle::SeedReplay(tag, key, rts) => {
                 self.ts += 1;
                 self.update_next_transaction();
-                println!("[{:?} @ {}] SeedReplay({})", self.domain_index, self.ts, self.ts);
                 Event::SeedReplay(tag, key, rts)
             }
             Bundle::Empty => Event::None,
@@ -354,7 +350,6 @@ impl DomainState {
 
             if let Bundle::Empty = self.next_transaction {
                 mem::replace(&mut self.next_transaction, Bundle::SeedReplay(tag, key, rts));
-                println!("[{:?} @ {}] next_transaction ← SeedReplay({})", self.domain_index, self.ts, ts);
             } else {
                 unreachable!();
             }
@@ -364,7 +359,6 @@ impl DomainState {
                 prev_ts: prev_ts,
                 transaction: BufferedTransaction::SeedReplay(tag, key, rts),
             });
-            println!("[{:?} @ {}] buffer ← SeedReplay({}), prev_ts={}", self.domain_index, self.ts, ts, prev_ts);
         }
     }
 }
