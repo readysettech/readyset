@@ -36,6 +36,8 @@ impl Base {
 
     /// Add a new column to this base node.
     pub fn add_column(&mut self, default: DataType) -> usize {
+        assert!(!self.defaults.is_empty(),
+                "cannot add columns to base nodes without setting default values for initial columns");
         self.defaults.push(default);
         self.unmodified = false;
         self.defaults.len() - 1

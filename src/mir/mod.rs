@@ -772,9 +772,9 @@ fn make_base_node(name: &str,
             .collect();
         mig.add_ingredient(name,
                            column_names.as_slice(),
-                           ops::base::Base::with_key(pkey_column_ids, unimplemented!()))
+                           ops::base::Base::with_key(pkey_column_ids, vec![]))
     } else {
-        mig.add_ingredient(name, column_names.as_slice(), ops::base::Base::new(unimplemented!()))
+        mig.add_ingredient(name, column_names.as_slice(), ops::base::Base::new(vec![]))
     };
     FlowNode::New(node)
 }
