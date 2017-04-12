@@ -747,7 +747,7 @@ impl Domain {
 
             if can_handle_directly {
                 let n = self.nodes[path[0].0.as_local()].borrow();
-                if n.inner.get_base().map(|b| b.is_unmodified()) == Some(false) {
+                if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
                     // also need to include defaults for new columns
                     can_handle_directly = false;
                 }
