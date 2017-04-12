@@ -65,32 +65,16 @@ pub enum BaseDurabilityLevel {
 impl Base {
     /// Create a non-durable base node operator.
     pub fn new(primary_key: Vec<usize>) -> Self {
-        Base {
-            buffered_writes: Some(Records::default()),
-            durability: None,
-            durable_log: None,
-            durable_log_path: None,
-            last_flushed_at: Some(Instant::now()),
-            primary_key: Some(primary_key),
-            should_delete_log_on_drop: false,
-            unique_id: ProcessUniqueId::new(),
-            us: None,
-        }
+        let mut base = Base::default();
+        base.primary_key = Some(primary_key);
+        base
     }
 
     /// Create durable base node operator.
     pub fn new_durable(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
-        Base {
-            buffered_writes: Some(Records::default()),
-            durability: Some(durability),
-            durable_log: None,
-            durable_log_path: None,
-            last_flushed_at: Some(Instant::now()),
-            primary_key: Some(primary_key),
-            should_delete_log_on_drop: false,
-            unique_id: ProcessUniqueId::new(),
-            us: None,
-        }
+        let mut base = Base::new(primary_key);
+        base.durability = Some(durability);
+        base
     }
 
     /// Whether this base node should delete its durable log on drop.  Used when durable log is not
@@ -109,6 +93,7 @@ impl Base {
                 self.ensure_log_writer();
                 serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
                     .unwrap();
+
                 // XXX(malte): we must deconstruct the BufWriter in order to get at the contained
                 // File (on which we can invoke sync_data(), only to then reassemble it
                 // immediately. I suspect this will work best if we flush after accumulating
@@ -116,6 +101,7 @@ impl Base {
                 let file = self.durable_log.take().unwrap().into_inner().unwrap();
                 // need to drop as sync_data returns Result<()> and forces use
                 drop(file.sync_data());
+
                 self.durable_log = Some(BufWriter::with_capacity_and_strategy(
                     LOG_BUFFER_CAPACITY, file, WhenFull));
             }
