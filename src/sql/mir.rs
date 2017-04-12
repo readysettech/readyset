@@ -60,13 +60,15 @@ impl SqlToMirConverter {
         SqlToMirConverter { log: log, ..Default::default() }
     }
 
-    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
-    /// vector of conditions that `shortcut` understands.
-    fn to_conditions(&self,
+    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
+    /// and adds its to a vector of conditions that `shortcut` understands.
+    /// Returns true if condition is sucessfully added.
+    fn add_conditions(&self,
+                     mut filter: &mut Vec<Option<(Operator, DataType)>>,
                      ct: &ConditionTree,
                      mut columns: &mut Vec<Column>,
                      n: &MirNodeRef)
-                     -> Vec<Option<(Operator, DataType)>> {
+                     -> bool {
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
@@ -77,9 +79,6 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
 
-        let num_columns = columns.len();
-        let mut filters = vec![None; num_columns];
-
         let f = Some((ct.operator.clone(), DataType::from(r)));
         match n.borrow()
                   .columns()
@@ -87,13 +86,18 @@ impl SqlToMirConverter {
                   .position(|c| *c == l) {
             None => {
                 columns.push(l);
-                filters.push(f);
+                filter.push(f);
             }
             Some(cid) => {
-                filters[cid] = f;
+                if filter[cid].is_some() {
+                  return false
+                }
+
+                filter[cid] = f;
             }
         }
-        filters
+
+        return true
     }
 
     pub fn add_leaf_below(&mut self,
@@ -332,16 +336,22 @@ impl SqlToMirConverter {
         let mut new_nodes = vec![];
 
         let mut prev_node = parent;
-        for (i, cond) in predicates.iter().enumerate() {
-            let mut fields = prev_node.borrow()
-                .columns()
-                .iter()
-                .cloned()
-                .collect();
+        let mut fields: Vec<Column>;
+        fields = prev_node.borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
+
+        let mut filter = vec![None; fields.len()];
+        for cond in predicates {
             // convert ConditionTree to a chain of Filter operators.
             // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
-            let filter = self.to_conditions(cond, &mut fields, &prev_node);
-            let f_name = format!("{}_f{}", name, i);
+            if self.add_conditions(&mut filter, cond, &mut fields, &prev_node) {
+              continue;
+            }
+
+            let f_name = format!("{}_f{}", name, new_nodes.len());
             let n = MirNode::new(&f_name,
                                  self.schema_version,
                                  fields,
@@ -350,7 +360,24 @@ impl SqlToMirConverter {
                                  vec![]);
             new_nodes.push(n.clone());
             prev_node = n;
+            fields = prev_node.borrow()
+                              .columns()
+                              .iter()
+                              .cloned()
+                              .collect();
+            filter = vec![None; fields.len()];
+            self.add_conditions(&mut filter, cond, &mut fields, &prev_node);
         }
+
+        assert!(!filter.is_empty(), "filter vector is empty");
+        let f_name = format!("{}_f{}", name, new_nodes.len());
+        let n = MirNode::new(&f_name,
+                             self.schema_version,
+                             fields,
+                             MirNodeType::Filter { conditions: filter },
+                             vec![prev_node.clone()],
+                             vec![]);
+        new_nodes.push(n.clone());
 
         new_nodes
     }
