@@ -519,8 +519,8 @@ impl Domain {
 
                 {
                     let n = self.nodes[from.as_local()].borrow();
-                    if n.is_internal() && n.get_base().is_some() {
-                        // FIXME: may need to also include defaults for new columns
+                    if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
+                        // also need to include defaults for new columns
                         unimplemented!();
                     }
                     drop(n);

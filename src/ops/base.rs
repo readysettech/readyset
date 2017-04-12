@@ -40,6 +40,10 @@ impl Base {
         self.unmodified = false;
         self.defaults.len() - 1
     }
+
+    pub(crate) fn is_unmodified(&self) -> bool {
+        self.unmodified
+    }
 }
 
 #[cfg(test)]
