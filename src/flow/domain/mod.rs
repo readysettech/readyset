@@ -529,15 +529,6 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .clone();
 
-                {
-                    let n = self.nodes[from.as_local()].borrow();
-                    if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
-                        // also need to include defaults for new columns
-                        unimplemented!();
-                    }
-                    drop(n);
-                }
-
                 debug!(self.log, "current state cloned for replay"; "μs" => dur_to_ns!(start.elapsed()) / 1000);
 
                 let m = Packet::FullReplay {
@@ -750,6 +741,14 @@ impl Domain {
                 use flow::node::Type;
                 let n = self.nodes[path[0].0.as_local()].borrow();
                 if let Type::Reader(..) = *n.inner {
+                    can_handle_directly = false;
+                }
+            }
+
+            if can_handle_directly {
+                let n = self.nodes[path[0].0.as_local()].borrow();
+                if n.inner.get_base().map(|b| b.is_unmodified()) == Some(false) {
+                    // also need to include defaults for new columns
                     can_handle_directly = false;
                 }
             }
