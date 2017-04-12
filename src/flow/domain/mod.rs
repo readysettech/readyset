@@ -187,7 +187,7 @@ impl Domain {
             // for the chosen tag so they'll start replay.
             let key = key.clone(); // :(
             match replay.trigger {
-                TriggerEndpoint::Local(ref key) => {
+                TriggerEndpoint::Local(..) => {
                     unimplemented!();
                 }
                 TriggerEndpoint::End(ref mut trigger) => {
