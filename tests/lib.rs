@@ -628,6 +628,54 @@ fn add_columns() {
 }
 
 #[test]
+fn migrate_added_columns() {
+    let id: distributary::DataType = "x".into();
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let a = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a",
+                                   &["a", "b"],
+                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        mig.commit();
+        a
+    };
+    let muta = g.get_mutator(a);
+
+    // send a value on a
+    muta.put(vec![id.clone(), "y".into()]);
+
+    // add a third column to a, and a view that uses it
+    let bq = {
+        let mut mig = g.start_migration();
+        mig.add_column(a, "c", 3.into());
+        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
+        let bq = mig.maintain(b, 0);
+        mig.commit();
+        bq
+    };
+
+    // send another (old) value on a
+    muta.put(vec![id.clone(), "z".into()]);
+    // and an entirely new value
+    muta.put(vec![id.clone(), "a".into(), 10.into()]);
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // we should now see the pre-migration write and the old post-migration write with the default
+    // value, and the new post-migration write with the value it contained.
+    let res = bq(&3.into()).unwrap();
+    assert_eq!(res.len(), 2);
+    assert!(res.iter().any(|r| r == &vec![3.into(), "y".into()]));
+    assert!(res.iter().any(|r| r == &vec![3.into(), "z".into()]));
+    let res = bq(&10.into()).unwrap();
+    assert_eq!(res.len(), 1);
+    assert!(res.iter().any(|r| r == &vec![10.into(), "a".into()]));
+}
+
+#[test]
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
