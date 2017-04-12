@@ -101,6 +101,13 @@ pub enum Packet {
         parents: Vec<LocalNodeIndex>,
     },
 
+    /// Add a new column to an existing `Base` node.
+    AddBaseColumn {
+        node: LocalNodeIndex,
+        field: String,
+        default: DataType,
+    },
+
     /// Request a handle to an unbounded channel to this domain.
     ///
     /// We need these channels to send replay requests, as using the bounded channels could easily

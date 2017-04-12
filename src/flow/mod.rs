@@ -228,6 +228,7 @@ impl Blender {
         Migration {
             mainline: self,
             added: Default::default(),
+            columns: Default::default(),
             materialize: Default::default(),
             readers: Default::default(),
 
@@ -437,6 +438,7 @@ impl fmt::Display for Blender {
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<domain::Index>>,
+    columns: Vec<(NodeIndex, String, prelude::DataType)>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
 
@@ -518,6 +520,9 @@ impl<'a> Migration<'a> {
                                    field: S,
                                    default: prelude::DataType)
                                    -> usize {
+        // not allowed to add columns to new nodes
+        assert!(!self.added.contains_key(node.as_global()));
+
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[*node.as_global()];
         assert!(base.is_internal() && base.get_base().is_some());
@@ -525,11 +530,11 @@ impl<'a> Migration<'a> {
         // we need to tell the base about its new column and its default, so that old writes the do
         // not have it get the additional value added to them.
         let col_i1 = base.add_column(&field);
-        let col_i2 = base.get_base_mut().unwrap().add_column(default);
+        let col_i2 = base.get_base_mut().unwrap().add_column(default.clone());
         assert_eq!(col_i1, col_i2);
 
-        // FIXME: also propagate to domain clone
-        unimplemented!();
+        // also eventually propagate to domain clone
+        self.columns.push((*node.as_global(), field, default));
 
         col_i2
     }
@@ -909,6 +914,18 @@ impl<'a> Migration<'a> {
                                       uninformed_domain_nodes,
                                       start_ts,
                                       prevs.unwrap());
+
+        // Tell all base nodes about newly added columns
+        for (ni, field, default) in self.columns {
+            let n = &mainline.ingredients[ni];
+            mainline.txs[&n.domain()]
+                .send(payload::Packet::AddBaseColumn {
+                          node: *n.addr().as_local(),
+                          field: field,
+                          default: default,
+                      })
+                .unwrap();
+        }
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!

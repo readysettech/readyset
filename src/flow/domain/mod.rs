@@ -426,6 +426,18 @@ impl Domain {
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
             }
+            Packet::AddBaseColumn {
+                node,
+                field,
+                default,
+            } => {
+                let mut n = self.nodes[&node].borrow_mut();
+                n.inner.add_column(&field);
+                n.inner
+                    .get_base_mut()
+                    .expect("told to add base column to non-base node")
+                    .add_column(default);
+            }
             Packet::StateSizeProbe { node, ack } => {
                 if let Some(state) = self.state.get(&node) {
                     ack.send(state.len()).unwrap();
