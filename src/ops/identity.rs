@@ -42,8 +42,8 @@ impl Ingredient for Identity {
     fn on_input(&mut self, _: NodeAddress,
                 rs: Records,
                 _: &DomainNodes,
-                _: &StateMap) -> Option<Records> {
-        Some(rs)
+                _: &StateMap) -> Records {
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

@@ -61,13 +61,13 @@ impl Ingredient for GatedIdentity {
     fn on_input(&mut self, _: NodeAddress,
                 rs: Records,
                 _: &DomainNodes,
-                _: &StateMap) -> Option<Records> {
+                _: &StateMap) -> Records {
         self.rx
             .lock()
             .unwrap()
             .recv()
             .unwrap();
-        Some(rs)
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

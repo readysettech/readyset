@@ -84,7 +84,7 @@ impl Ingredient for Project {
                 mut rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Option<Records> {
+                -> Records {
         debug_assert_eq!(from, self.src);
 
         if self.emit.is_some() {
@@ -105,7 +105,7 @@ impl Ingredient for Project {
                 **r = sync::Arc::new(new_r);
             }
         }
-        Some(rs)
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

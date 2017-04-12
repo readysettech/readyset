@@ -157,7 +157,7 @@ impl Ingredient for Join {
                 rs: Records,
                 nodes: &DomainNodes,
                 state: &StateMap)
-                -> Option<Records> {
+                -> Records {
         if from == self.right && self.kind == JoinType::Left {
             // If records are being received from the right, then populate self.right_counts with
             // the number of records that existed for each key *before* this batch of records was
@@ -241,7 +241,7 @@ impl Ingredient for Join {
         if from == self.right && self.kind == JoinType::Left {
             self.right_counts.clear();
         }
-        Some(ret.into())
+        ret.into()
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

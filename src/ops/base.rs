@@ -93,7 +93,6 @@ impl Base {
                 self.ensure_log_writer();
                 serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
                     .unwrap();
-
                 // XXX(malte): we must deconstruct the BufWriter in order to get at the contained
                 // File (on which we can invoke sync_data(), only to then reassemble it
                 // immediately. I suspect this will work best if we flush after accumulating
@@ -101,7 +100,6 @@ impl Base {
                 let file = self.durable_log.take().unwrap().into_inner().unwrap();
                 // need to drop as sync_data returns Result<()> and forces use
                 drop(file.sync_data());
-
                 self.durable_log = Some(BufWriter::with_capacity_and_strategy(
                     LOG_BUFFER_CAPACITY, file, WhenFull));
             }
@@ -254,7 +252,7 @@ impl Ingredient for Base {
                 mut rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Option<Records> {
+                -> Records {
         // Write incoming records to log before processing them if we are a durable node.
         let records_to_return;
         match self.durability {
@@ -275,25 +273,23 @@ impl Ingredient for Base {
                     self.flush();
 
                     // This returns everything that was buffered, plus the newly inserted records.
-                    records_to_return = Some(copy_buffered_writes);
+                    records_to_return = copy_buffered_writes;
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
-
-                    return None
+                    return Records::default()
                 }
             },
             Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.persist_to_log(&rs);
-                records_to_return = Some(rs);
+                records_to_return = rs;
             },
             None => {
-                records_to_return = Some(rs);
+                records_to_return = rs;
             },
         }
 
-        Some(records_to_return.unwrap()
-            .into_iter()
+        records_to_return.into_iter()
             .map(|r| match r {
                      Record::Positive(u) => Record::Positive(u),
                      Record::Negative(u) => Record::Negative(u),
@@ -313,7 +309,7 @@ impl Ingredient for Base {
                 Record::Negative(rows[0].clone())
             }
                  })
-            .collect())
+            .collect()
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
@@ -352,26 +348,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
+    fn it_works_default() {
         let b = Base::default();
-        assert_eq!(b.durability, None);
+        assert!(b.buffered_writes.is_some());
+        assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
+        assert!(b.durability.is_none());
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
+        assert!(b.primary_key.is_none());
+        assert_eq!(b.should_delete_log_on_drop, false);
+        assert!(b.us.is_none());
+    }
+
+    #[test]
+    fn it_works_new() {
+        let b = Base::new(vec![0]);
+        assert!(b.buffered_writes.is_some());
+        assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
+        assert!(b.durability.is_none());
+        assert!(b.durable_log.is_none());
+        assert!(b.durable_log_path.is_none());
+        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert_eq!(b.should_delete_log_on_drop, false);
+        assert!(b.us.is_none());
     }
 
     #[test]
     fn it_works_durability_buffered() {
         let b = Base::new_durable(vec![0], BaseDurabilityLevel::Buffered);
+        assert!(b.buffered_writes.is_some());
+        assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert_eq!(b.durability, Some(BaseDurabilityLevel::Buffered));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
+        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert_eq!(b.should_delete_log_on_drop, false);
+        assert!(b.us.is_none());
     }
 
     #[test]
     fn it_works_durability_sync_immediately() {
         let b = Base::new_durable(vec![0], BaseDurabilityLevel::SyncImmediately);
+        assert!(b.buffered_writes.is_some());
+        assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert_eq!(b.durability, Some(BaseDurabilityLevel::SyncImmediately));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
+        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert_eq!(b.should_delete_log_on_drop, false);
+        assert!(b.us.is_none());
     }
 }

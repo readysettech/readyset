@@ -84,7 +84,7 @@ pub trait Ingredient
                 data: prelude::Records,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
-                -> Option<prelude::Records>;
+                -> prelude::Records;
 
     fn can_query_through(&self) -> bool {
         false

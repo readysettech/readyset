@@ -54,7 +54,7 @@ impl Ingredient for Filter {
                 mut rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Option<Records> {
+                -> Records {
 
         rs.retain(|r| {
             let mut f = self.filter.iter();
@@ -79,7 +79,7 @@ impl Ingredient for Filter {
             })
         });
 
-        Some(rs)
+        rs
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
