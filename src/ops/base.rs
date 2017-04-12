@@ -48,6 +48,12 @@ impl Base {
     }
 }
 
+impl Default for Base {
+    fn default() -> Self {
+        Base::new(vec![])
+    }
+}
+
 #[cfg(test)]
 impl Drop for Base {
     fn drop(&mut self) {
