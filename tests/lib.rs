@@ -657,8 +657,8 @@ fn migrate_added_columns() {
     let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
-        mig.maintain(b, 0);
+        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 0]));
+        mig.maintain(b, 1);
         mig.commit();
         b
     };
@@ -675,13 +675,13 @@ fn migrate_added_columns() {
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
-    let res = bq(&3.into()).unwrap();
-    assert_eq!(res.len(), 2);
-    assert!(res.iter().any(|r| r == &vec![3.into(), "y".into()]));
-    assert!(res.iter().any(|r| r == &vec![3.into(), "z".into()]));
-    let res = bq(&10.into()).unwrap();
-    assert_eq!(res.len(), 1);
-    assert!(res.iter().any(|r| r == &vec![10.into(), "a".into()]));
+    let res = bq(&id).unwrap();
+    assert_eq!(res.len(), 3);
+    assert_eq!(res.iter()
+                   .filter(|&r| r == &vec![3.into(), id.clone()])
+                   .count(),
+               2);
+    assert!(res.iter().any(|r| r == &vec![10.into(), id.clone()]));
 }
 
 #[test]
