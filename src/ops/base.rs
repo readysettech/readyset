@@ -134,6 +134,7 @@ impl Base {
                     let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
                                                today, us, self.unique_id);
                     self.durable_log_path = Some(PathBuf::from(&log_filename));
+
                     if let Some(ref path) = self.durable_log_path {
                         // TODO(jmftrindade): Current semantics is to overwrite an existing log.
                         // Once we have recovery code, we obviously do not want to overwrite this
@@ -143,10 +144,10 @@ impl Base {
                             .append(false)
                             .write(true)
                             .create(true)
-                            .open(path) {
+                            .open(path.as_path()) {
                             Err(reason) => {
                                 panic!("Unable to open durable log file {}, reason: {}",
-                                       path.display(), reason)
+                                       path.as_path().display(), reason)
                             }
                             Ok(file) => file,
                         };
@@ -163,8 +164,8 @@ impl Base {
     /// needs to be available for integration tests, which get compiled against the regular build.
     pub fn delete_durable_log(&mut self) {
         // Cleanup any durable log files.
-        if self.durable_log_path.is_some() {
-            fs::remove_file(self.durable_log_path.as_ref().unwrap().as_path()).unwrap();
+        if let Some(ref path) = self.durable_log_path {
+            fs::remove_file(path.as_path()).unwrap();
         }
     }
 

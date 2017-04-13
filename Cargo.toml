@@ -75,7 +75,7 @@ optional = true
 version = "0.2.4"
 default-features = false
 # for Mac OS X build
-# git = "https://github.com/ms705/timekeeper"
+git = "https://github.com/ms705/timekeeper"
 
 [replace]
 # override for MAX_IN_FLIGHT = 4096
