@@ -685,6 +685,67 @@ fn migrate_added_columns() {
 }
 
 #[test]
+fn migrate_drop_columns() {
+    let id: distributary::DataType = "x".into();
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let (a, stream) = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a",
+                                   &["a", "b"],
+                                   distributary::Base::new(vec!["a".into(), "b".into()]));
+        let stream = mig.stream(a);
+        mig.commit();
+        (a, stream)
+    };
+    let muta1 = g.get_mutator(a);
+
+    // send a value on a
+    muta1.put(vec![id.clone(), "bx".into()]);
+
+    // drop a column
+    {
+        let mut mig = g.start_migration();
+        mig.drop_column(a, 1);
+        mig.commit();
+    }
+
+    // new mutator should only require one column
+    // and should inject default for a.b
+    let muta2 = g.get_mutator(a);
+    muta2.put(vec![id.clone()]);
+
+    // add a new column
+    {
+        let mut mig = g.start_migration();
+        mig.add_column(a, "c", "c".into());
+        mig.commit();
+    }
+
+    // new mutator allows putting two values, and injects default for a.b
+    let muta3 = g.get_mutator(a);
+    muta3.put(vec![id.clone(), "cy".into()]);
+
+    // using an old putter now should add default for c
+    muta1.put(vec![id.clone(), "bz".into()]);
+
+    // using putter that knows of neither b nor c should result in defaults for both
+    muta2.put(vec![id.clone()]);
+
+    assert_eq!(stream.recv(),
+               Ok(vec![vec![id.clone(), "bx".into()].into()]));
+    assert_eq!(stream.recv(), Ok(vec![vec![id.clone(), "b".into()].into()]));
+    assert_eq!(stream.recv(),
+               Ok(vec![vec![id.clone(), "b".into(), "cy".into()].into()]));
+    assert_eq!(stream.recv(),
+               Ok(vec![vec![id.clone(), "bz".into(), "c".into()].into()]));
+    assert_eq!(stream.recv(),
+               Ok(vec![vec![id.clone(), "b".into(), "c".into()].into()]));
+    assert_eq!(stream.try_recv(), Err(mpsc::TryRecvError::Empty));
+}
+
+#[test]
 #[ignore]
 fn key_on_added() {
     // set up graph
