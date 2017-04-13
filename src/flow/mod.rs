@@ -2,6 +2,7 @@ use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
 use ops::base::Base;
+use vec_map::VecMap;
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -44,6 +45,7 @@ pub struct Mutator {
     primary_key: Vec<usize>,
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     transactional: bool,
+    dropped: VecMap<prelude::DataType>,
 }
 
 impl Clone for Mutator {
@@ -55,35 +57,98 @@ impl Clone for Mutator {
             primary_key: self.primary_key.clone(),
             tx_reply_channel: mpsc::channel(),
             transactional: self.transactional,
+            dropped: self.dropped.clone(),
         }
     }
 }
 
 impl Mutator {
-    fn send(&self, r: prelude::Records) {
+    fn inject_dropped_cols(&self, rs: &mut prelude::Records) {
+        // NOTE: this is pretty expensive until https://github.com/contain-rs/vec-map/pull/33 lands
+        let ndropped = self.dropped.len();
+        if ndropped != 0 {
+            // inject defaults for dropped columns
+            let dropped = self.dropped.iter().rev();
+            for r in rs.iter_mut() {
+                // get a handle to the underlying data vector
+                use std::sync::Arc;
+                let v = match *r {
+                    prelude::Record::Positive(ref mut v) |
+                    prelude::Record::Negative(ref mut v) => v,
+                    _ => continue,
+                };
+                let r = Arc::get_mut(v).expect("send should have complete ownership of records");
+
+                // we want to iterate over all the dropped columns
+                let dropped = dropped.clone();
+
+                // we want to be a bit careful here to avoid shifting elements multiple times. we
+                // do this by moving from the back, and swapping the tail element to the end of the
+                // vector until we hit each index.
+
+                // make room in the record
+                r.reserve(ndropped);
+                let mut free = r.len() + ndropped;
+                let mut last_unmoved = r.len() - 1;
+                unsafe { r.set_len(free) };
+
+                // keep trying to insert the next dropped column
+                'next: for (next_insert, default) in dropped {
+                    // think of this being at the bottom of the loop
+                    // we just hoist it here to avoid underflow if we ever insert at 0
+                    free -= 1;
+
+                    // the next free slot is not one we want to insert into
+                    // keep shifting elements until it is
+                    while free > next_insert {
+                        // shift another element so we the free slot is at a lower index
+                        r.swap(last_unmoved, free);
+                        free -= 1;
+
+                        if last_unmoved == 0 {
+                            // avoid underflow
+                            debug_assert_eq!(next_insert, free);
+                            break;
+                        }
+                        last_unmoved -= 1;
+                    }
+
+                    // we're at the right index -- insert the dropped value
+                    *r.get_mut(next_insert).unwrap() = default.clone();
+
+                    // here, I'll help:
+                    // free -= 1;
+                }
+            }
+        }
+    }
+
+    fn send(&self, mut rs: prelude::Records) {
+        self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
             payload::Packet::Transaction {
                 link: payload::Link::new(self.src, self.addr),
-                data: r,
+                data: rs,
                 state: payload::TransactionState::WillCommit,
             }
         } else {
             payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
-                data: r,
+                data: rs,
             }
         };
 
         self.tx.clone().send(m).unwrap();
     }
 
-    fn tx_send(&self, r: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
+    fn tx_send(&self, mut rs: prelude::Records, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
+        self.inject_dropped_cols(&mut rs);
         let send = self.tx_reply_channel.0.clone();
         let m = payload::Packet::Transaction {
             link: payload::Link::new(self.src, self.addr),
-            data: r,
+            data: rs,
             state: payload::TransactionState::Pending(t, send),
         };
         self.tx.clone().send(m).unwrap();
@@ -349,6 +414,10 @@ impl Blender {
         let tx = self.txs[&node.domain()].clone();
 
         trace!(self.log, "creating mutator"; "for" => n.index());
+
+        let base_n = self.ingredients[*base.as_global()]
+            .get_base()
+            .expect("asked to get mutator for non-base node");
         Mutator {
             src: self.source.into(),
             tx: tx,
@@ -359,6 +428,7 @@ impl Blender {
                 .unwrap_or_else(Vec::new),
             tx_reply_channel: mpsc::channel(),
             transactional: self.ingredients[*base.as_global()].is_transactional(),
+            dropped: base_n.get_dropped(),
         }
     }
 
@@ -422,6 +492,11 @@ impl fmt::Display for Blender {
     }
 }
 
+enum ColumnChange {
+    Add(String, prelude::DataType),
+    Drop(usize),
+}
+
 /// A `Migration` encapsulates a number of changes to the Soup data flow graph.
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
@@ -429,7 +504,7 @@ impl fmt::Display for Blender {
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
     added: HashMap<NodeIndex, Option<domain::Index>>,
-    columns: Vec<(NodeIndex, String, prelude::DataType)>,
+    columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
 
@@ -544,8 +619,8 @@ impl<'a> Migration<'a> {
         let base = &mut self.mainline.ingredients[*node.as_global()];
         assert!(base.is_internal() && base.get_base().is_some());
 
-        // we need to tell the base about its new column and its default, so that old writes the do
-        // not have it get the additional value added to them.
+        // we need to tell the base about its new column and its default, so that old writes that
+        // do not have it get the additional value added to them.
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         if let &mut node::NodeHandle::Taken(ref mut base) = base.inner_mut() {
@@ -554,9 +629,30 @@ impl<'a> Migration<'a> {
         }
 
         // also eventually propagate to domain clone
-        self.columns.push((*node.as_global(), field, default));
+        self.columns
+            .push((*node.as_global(), ColumnChange::Add(field, default)));
 
         col_i1
+    }
+
+    /// Drop a column from a base node.
+    pub fn drop_column(&mut self, node: core::NodeAddress, column: usize) {
+        // not allowed to drop columns from new nodes
+        assert!(!self.added.contains_key(node.as_global()));
+
+        let base = &mut self.mainline.ingredients[*node.as_global()];
+        assert!(base.is_internal() && base.get_base().is_some());
+
+        // we need to tell the base about the dropped column, so that old writes that contain that
+        // column will have it filled in with default values (this is done in Mutator).
+        // we can't rely on DerefMut, since it disallows mutating Taken nodes
+        if let &mut node::NodeHandle::Taken(ref mut base) = base.inner_mut() {
+            base.get_base_mut().unwrap().drop_column(column);
+        }
+
+        // also eventually propagate to domain clone
+        self.columns
+            .push((*node.as_global(), ColumnChange::Drop(column)));
     }
 
     #[cfg(test)]
@@ -954,15 +1050,24 @@ impl<'a> Migration<'a> {
                                       prevs.unwrap());
 
         // Tell all base nodes about newly added columns
-        for (ni, field, default) in self.columns {
+        for (ni, change) in self.columns {
             let n = &mainline.ingredients[ni];
-            mainline.txs[&n.domain()]
-                .send(payload::Packet::AddBaseColumn {
-                          node: *n.addr().as_local(),
-                          field: field,
-                          default: default,
-                      })
-                .unwrap();
+            let m = match change {
+                ColumnChange::Add(field, default) => {
+                    payload::Packet::AddBaseColumn {
+                        node: *n.addr().as_local(),
+                        field: field,
+                        default: default,
+                    }
+                }
+                ColumnChange::Drop(column) => {
+                    payload::Packet::DropBaseColumn {
+                        node: *n.addr().as_local(),
+                        column: column,
+                    }
+                }
+            };
+            mainline.txs[&n.domain()].send(m).unwrap();
         }
 
         // Set up inter-domain connections

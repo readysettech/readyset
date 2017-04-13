@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use vec_map::VecMap;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 pub struct Base {
     primary_key: Option<Vec<usize>>,
     defaults: Vec<DataType>,
+    dropped: Vec<usize>,
     us: Option<NodeAddress>,
     unmodified: bool,
 }
@@ -18,8 +20,10 @@ impl Base {
     pub fn new(defaults: Vec<DataType>) -> Self {
         Base {
             primary_key: None,
-            defaults: defaults,
             us: None,
+
+            defaults: defaults,
+            dropped: Vec::new(),
             unmodified: true,
         }
     }
@@ -28,8 +32,10 @@ impl Base {
     pub fn with_key(primary_key: Vec<usize>, defaults: Vec<DataType>) -> Self {
         Base {
             primary_key: Some(primary_key),
-            defaults: defaults,
             us: None,
+
+            defaults: defaults,
+            dropped: Vec::new(),
             unmodified: true,
         }
     }
@@ -42,6 +48,26 @@ impl Base {
         self.defaults.push(default);
         self.unmodified = false;
         self.defaults.len() - 1
+    }
+
+    /// Drop a column from this base node.
+    pub fn drop_column(&mut self, column: usize) {
+        assert!(!self.defaults.is_empty(),
+                "cannot add columns to base nodes without setting default values for initial columns");
+        assert!(column < self.defaults.len());
+        self.unmodified = false;
+
+        // note that we don't need to *do* anything for dropped columns when we receive records.
+        // the only thing that matters is that new Mutators remember to inject default values for
+        // dropped columns.
+        self.dropped.push(column);
+    }
+
+    pub(crate) fn get_dropped(&self) -> VecMap<DataType> {
+        self.dropped
+            .iter()
+            .map(|&col| (col, self.defaults[col].clone()))
+            .collect()
     }
 
     pub(crate) fn is_unmodified(&self) -> bool {

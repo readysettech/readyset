@@ -108,6 +108,9 @@ pub enum Packet {
         default: DataType,
     },
 
+    /// Drops an existing column from a `Base` node.
+    DropBaseColumn { node: LocalNodeIndex, column: usize },
+
     /// Request a handle to an unbounded channel to this domain.
     ///
     /// We need these channels to send replay requests, as using the bounded channels could easily
