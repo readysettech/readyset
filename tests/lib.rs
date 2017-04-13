@@ -654,14 +654,16 @@ fn migrate_added_columns() {
     muta.put(vec![id.clone(), "y".into()]);
 
     // add a third column to a, and a view that uses it
-    let bq = {
+    let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
-        let bq = mig.maintain(b, 0);
+        mig.maintain(b, 0);
         mig.commit();
-        bq
+        b
     };
+
+    let bq = g.get_getter(b).unwrap();
 
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]);
