@@ -43,6 +43,16 @@ impl ToJson for DataType {
     }
 }
 
+impl DataType {
+    pub(crate) fn external_clone(&self) -> Self {
+        use std::convert::TryFrom;
+        match *self {
+            DataType::Text(ref cstr) => DataType::Text(ArcCStr::try_from(cstr.to_bytes()).unwrap()),
+            ref dt => dt.clone(),
+        }
+    }
+}
+
 impl PartialEq for DataType {
     fn eq(&self, other: &DataType) -> bool {
         match (self, other) {
