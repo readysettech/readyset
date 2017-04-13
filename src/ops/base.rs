@@ -144,10 +144,10 @@ impl Base {
                             .append(false)
                             .write(true)
                             .create(true)
-                            .open(path.as_path()) {
+                            .open(path) {
                             Err(reason) => {
                                 panic!("Unable to open durable log file {}, reason: {}",
-                                       path.as_path().display(), reason)
+                                       path.display(), reason)
                             }
                             Ok(file) => file,
                         };
@@ -165,7 +165,7 @@ impl Base {
     pub fn delete_durable_log(&mut self) {
         // Cleanup any durable log files.
         if let Some(ref path) = self.durable_log_path {
-            fs::remove_file(path.as_path()).unwrap();
+            fs::remove_file(path).unwrap();
         }
     }
 
