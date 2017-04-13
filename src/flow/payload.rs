@@ -106,10 +106,15 @@ pub enum Packet {
         node: LocalNodeIndex,
         field: String,
         default: DataType,
+        ack: mpsc::SyncSender<()>,
     },
 
     /// Drops an existing column from a `Base` node.
-    DropBaseColumn { node: LocalNodeIndex, column: usize },
+    DropBaseColumn {
+        node: LocalNodeIndex,
+        column: usize,
+        ack: mpsc::SyncSender<()>,
+    },
 
     /// Request a handle to an unbounded channel to this domain.
     ///

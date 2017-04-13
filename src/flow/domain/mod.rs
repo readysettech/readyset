@@ -436,6 +436,7 @@ impl Domain {
                 node,
                 field,
                 default,
+                ack,
             } => {
                 let mut n = self.nodes[&node].borrow_mut();
                 n.inner.add_column(&field);
@@ -443,13 +444,15 @@ impl Domain {
                     .get_base_mut()
                     .expect("told to add base column to non-base node")
                     .add_column(default);
+                drop(ack);
             }
-            Packet::DropBaseColumn { node, column } => {
+            Packet::DropBaseColumn { node, column, ack } => {
                 let mut n = self.nodes[&node].borrow_mut();
                 n.inner
                     .get_base_mut()
                     .expect("told to drop base column from non-base node")
                     .drop_column(column);
+                drop(ack);
             }
             Packet::StateSizeProbe { node, ack } => {
                 if let Some(state) = self.state.get(&node) {

@@ -1050,24 +1050,36 @@ impl<'a> Migration<'a> {
                                       prevs.unwrap());
 
         // Tell all base nodes about newly added columns
-        for (ni, change) in self.columns {
-            let n = &mainline.ingredients[ni];
-            let m = match change {
-                ColumnChange::Add(field, default) => {
-                    payload::Packet::AddBaseColumn {
-                        node: *n.addr().as_local(),
-                        field: field,
-                        default: default,
+        let acks: Vec<_> = self.columns
+            .into_iter()
+            .map(|(ni, change)| {
+                let (tx, rx) = mpsc::sync_channel(1);
+                let n = &mainline.ingredients[ni];
+                let m = match change {
+                    ColumnChange::Add(field, default) => {
+                        payload::Packet::AddBaseColumn {
+                            node: *n.addr().as_local(),
+                            field: field,
+                            default: default,
+                            ack: tx,
+                        }
                     }
-                }
-                ColumnChange::Drop(column) => {
-                    payload::Packet::DropBaseColumn {
-                        node: *n.addr().as_local(),
-                        column: column,
+                    ColumnChange::Drop(column) => {
+                        payload::Packet::DropBaseColumn {
+                            node: *n.addr().as_local(),
+                            column: column,
+                            ack: tx,
+                        }
                     }
-                }
-            };
-            mainline.txs[&n.domain()].send(m).unwrap();
+                };
+                mainline.txs[&n.domain()].send(m).unwrap();
+                rx
+            })
+            .collect();
+        // wait for all domains to ack. otherwise, we could have one domain request a replay from
+        // another before the source domain has heard about a new default column it needed to add.
+        for ack in acks {
+            ack.recv().is_err();
         }
 
         // Set up inter-domain connections
