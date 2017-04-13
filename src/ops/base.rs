@@ -168,14 +168,13 @@ impl Base {
         }
     }
 
-    /// Flush any buffered writes.
-    pub fn flush(&mut self) {
-        let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
-        self.persist_to_log(&copy_buffered_writes);
+    /// Flush any buffered writes, and clear the buffer, returning all flushed writes.
+    pub fn flush(&mut self) -> Records {
+        let flushed_writes = self.buffered_writes.as_mut().unwrap().drain(..).collect();
+        self.persist_to_log(&flushed_writes);
         self.last_flushed_at = Some(Instant::now());
 
-        // Clear buffer after we've persisted records to log.
-        self.buffered_writes.as_mut().unwrap().clear();
+        return flushed_writes
     }
 }
 
@@ -269,11 +268,8 @@ impl Ingredient for Base {
                 if has_reached_capacity || has_reached_time_limit {
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
 
-                    let copy_buffered_writes = self.buffered_writes.as_mut().unwrap().clone();
-                    self.flush();
-
                     // This returns everything that was buffered, plus the newly inserted records.
-                    records_to_return = copy_buffered_writes;
+                    records_to_return = self.flush();
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
