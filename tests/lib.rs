@@ -685,6 +685,38 @@ fn migrate_added_columns() {
 }
 
 #[test]
+#[ignore]
+fn key_on_added() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let a = {
+        let mut mig = g.start_migration();
+        let a = mig.add_ingredient("a",
+                                   &["a", "b"],
+                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        mig.commit();
+        a
+    };
+
+    // add a maintained view keyed on newly added column
+    let b = {
+        let mut mig = g.start_migration();
+        mig.add_column(a, "c", 3.into());
+        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
+        // interestingly, this *also* currently fails if s/0/1/. I *believe* this is because the
+        // code decides to do partial materialization, even though the key provenence does *not* go
+        // all the way back to the Base for 2 *or* 1 (since it is keyed on a[0]).
+        mig.maintain(b, 0);
+        mig.commit();
+        b
+    };
+
+    // make sure we can read (may trigger a replay)
+    let bq = g.get_getter(b).unwrap();
+    assert!(bq(&3.into()).unwrap().is_empty());
+}
+
+#[test]
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
