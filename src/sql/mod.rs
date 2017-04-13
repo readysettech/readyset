@@ -2,13 +2,15 @@ mod mir;
 mod passes;
 mod query_graph;
 mod query_signature;
+mod reuse;
 
 use nom_sql::parser as sql_parser;
 use flow::Migration;
 use flow::core::NodeAddress;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
-use self::mir::{MirNodeRef, SqlToMirConverter};
+use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
+use self::reuse::ReuseType;
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -31,6 +33,7 @@ pub struct QueryFlowParts {
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
+    ExtendExisting(MirQuery),
     ReaderOntoExisting(MirNodeRef, Vec<Column>),
     None,
 }
@@ -44,7 +47,7 @@ pub struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeAddress>,
     num_queries: usize,
-    query_graphs: HashMap<u64, (QueryGraph, MirNodeRef)>,
+    query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
 }
@@ -74,10 +77,11 @@ impl SqlIncorporator {
         }
     }
 
-    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
-    /// string that holds a parameterized SQL query, and the `name` argument supplies an optional
-    /// name for the query. If no `name` is specified, the table name is used in the case of INSERT
-    /// queries, and a deterministic, unique name is generated and returned otherwise.
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
+    /// argument is a string that holds a parameterized SQL query, and the `name` argument supplies
+    /// an optional name for the query. If no `name` is specified, the table name is used in the
+    /// case of INSERT queries, and a deterministic, unique name is generated and returned
+    /// otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
@@ -89,10 +93,10 @@ impl SqlIncorporator {
         query.to_flow_parts(self, name, &mut mig)
     }
 
-    /// Incorporates a single query into via the flow graph migration in `mig`. The `query` argument is a
-    /// `SqlQuery` structure, and the `name` argument supplies an optional name for the query. If no
-    /// `name` is specified, the table name is used in the case of INSERT queries, and a deterministic,
-    /// unique name is generated and returned otherwise.
+    /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
+    /// argument is a `SqlQuery` structure, and the `name` argument supplies an optional name for
+    /// the query. If no `name` is specified, the table name is used in the case of INSERT queries,
+    /// and a deterministic, unique name is generated and returned otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
@@ -139,7 +143,7 @@ impl SqlIncorporator {
         let qg_hash = qg.signature().hash;
         match self.query_graphs.get(&qg_hash) {
             None => (),
-            Some(&(ref existing_qg, ref leaf_mir_node)) => {
+            Some(&(ref existing_qg, ref mir_query)) => {
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature() &&
@@ -149,39 +153,57 @@ impl SqlIncorporator {
                     info!(self.log,
                           "An exact match for query \"{}\" already exists, reusing it",
                           query_name);
-                    return (qg, QueryGraphReuse::ExactMatch(leaf_mir_node.clone()));
+                    return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
                     // QGs are identical, except for parameters (or their order)
                     info!(self.log,
-                          "Query \"{}\" has an exact match modulo parameters, so making a new reader",
+                          "Query '{}' has an exact match modulo parameters, \
+                          so making a new reader",
                           query_name);
 
-                    let params = qg.parameters()
-                        .into_iter()
-                        .cloned()
-                        .collect();
-                    return (qg, QueryGraphReuse::ReaderOntoExisting(leaf_mir_node.clone(), params));
+                    let params = qg.parameters().into_iter().cloned().collect();
+                    return (qg,
+                            QueryGraphReuse::ReaderOntoExisting(mir_query.leaf.clone(), params));
                 }
             }
         }
 
-        let mut reuse_candidates = 0;
+        let mut reuse_candidates = Vec::new();
         for &(ref existing_qg, _) in self.query_graphs.values() {
             // queries are different, but one might be a generalization of the other
-            if existing_qg.signature().is_generalization_of(&qg.signature()) {
-                trace!(self.log,
-                       "this QG: {:#?}\ncandidate query graph for reuse: {:#?}",
-                       qg,
-                       existing_qg);
+            if existing_qg
+                   .signature()
+                   .is_generalization_of(&qg.signature()) {
+                match reuse::check_compatibility(&qg, existing_qg) {
+                    Some(reuse) => {
+                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
+                        reuse_candidates.push((reuse, existing_qg));
+                    }
+                    None => (),
+                }
             }
-            reuse_candidates += 1;
-            // TODO(malte): more QG-level reuse
-            // return QueryGraphReuse::ExtendExisting
         }
-        if reuse_candidates > 0 {
+        if reuse_candidates.len() > 0 {
             info!(self.log,
                   "Identified {} candidate QGs for reuse",
-                  reuse_candidates);
+                  reuse_candidates.len());
+            trace!(self.log,
+                   "This QG: {:#?}\nReuse candidates:\n{:#?}",
+                   qg,
+                   reuse_candidates);
+
+            // TODO(malte): score reuse candidates
+            let choice = reuse::choose_best_option(reuse_candidates);
+
+            match choice.0 {
+                ReuseType::DirectExtension => {
+                    let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
+                    return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
+                }
+                ReuseType::BackjoinRequired(_) => {
+                    error!(self.log, "Choose unsupported reuse via backjoin!");
+                }
+            }
         }
 
         (qg, QueryGraphReuse::None)
@@ -202,7 +224,8 @@ impl SqlIncorporator {
             .unwrap()
             .clone();
 
-        let mut mir = self.mir_converter.add_leaf_below(final_node_of_query, query_name, params);
+        let mut mir = self.mir_converter
+            .add_leaf_below(final_node_of_query, query_name, params);
 
         trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
 
@@ -220,10 +243,11 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
-        // We made a new query, so store the query graph and the corresponding leaf MIR node
-        //self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
+        // We made a new query, so store the query graph and the corresponding leaf MIR query
+        //self.query_graphs.insert(qg.signature().hash, (qg, mir));
 
         qfp
     }
@@ -253,7 +277,8 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
         qfp
     }
@@ -266,7 +291,8 @@ impl SqlIncorporator {
                          -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_query_to_mir(query_name, query, &qg);
+        let mut mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -288,10 +314,36 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas
+            .insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs.insert(qg.signature().hash, (qg, mir.leaf));
+        self.query_graphs.insert(qg.signature().hash, (qg, mir));
+
+        qfp
+    }
+
+    fn extend_existing_query(&mut self,
+                             query_name: &str,
+                             query: &SelectStatement,
+                             qg: QueryGraph,
+                             extend_mir: MirQuery,
+                             mut mig: &mut Migration)
+                             -> QueryFlowParts {
+        // no QG-level reuse possible, so we'll build a new query.
+        // first, compute the MIR representation of the SQL query
+        let new_query_mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
+        // TODO(malte): should we run the MIR-level optimizations here?
+        let new_opt_mir = new_query_mir.optimize();
+
+        // compare to existing query MIR and reuse prefix
+        let mut reused_mir = reuse::merge_mir_for_queries(&new_opt_mir, &extend_mir);
+        let qfp = reused_mir.into_flow_parts(&mut mig);
+
+        // We made a new query, so store the query graph and the corresponding leaf MIR node
+        self.query_graphs
+            .insert(qg.signature().hash, (qg, reused_mir));
 
         qfp
     }
@@ -333,17 +385,16 @@ impl SqlIncorporator {
                 let (qg, reuse) = self.consider_query_graph(&query_name, sq);
                 match reuse {
                     QueryGraphReuse::ExactMatch(mn) => {
-                        let flow_node = mn.borrow()
-                            .flow_node
-                            .as_ref()
-                            .unwrap()
-                            .address();
+                        let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                         QueryFlowParts {
                             name: query_name.clone(),
                             new_nodes: vec![],
                             reused_nodes: vec![flow_node],
                             query_leaf: flow_node,
                         }
+                    }
+                    QueryGraphReuse::ExtendExisting(mq) => {
+                        self.extend_existing_query(&query_name, sq, qg, mq, mig)
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
                         self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
@@ -357,7 +408,8 @@ impl SqlIncorporator {
 
         // record info about query
         self.num_queries += 1;
-        self.leaf_addresses.insert(String::from(query_name.as_str()), qfp.query_leaf);
+        self.leaf_addresses
+            .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
         qfp
     }
@@ -430,8 +482,8 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.get_flow_node_address(name, 0).expect(&format!("No node named \"{}\" at v0",
-                                                                    name));
+        let na = inc.get_flow_node_address(name, 0)
+            .expect(&format!("No node named \"{}\" at v0", name));
         mig.graph().node_weight(na.as_global().clone()).unwrap()
     }
 
@@ -472,13 +524,17 @@ mod tests {
         assert_eq!(ncount, 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
-        assert!("SELECT users.id from users;".to_flow_parts(&mut inc, None, &mut mig).is_ok());
+        assert!("SELECT users.id from users;"
+                    .to_flow_parts(&mut inc, None, &mut mig)
+                    .is_ok());
         // Should now have source, "users", a leaf projection node for the new selection, and
         // a reader node
         assert_eq!(mig.graph().node_count(), ncount + 2);
 
         // Invalid query should fail parsing and add no nodes
-        assert!("foo bar from whatever;".to_flow_parts(&mut inc, None, &mut mig).is_err());
+        assert!("foo bar from whatever;"
+                    .to_flow_parts(&mut inc, None, &mut mig)
+                    .is_err());
         // Should still only have source, "users" and the two nodes for the above selection
         assert_eq!(mig.graph().node_count(), ncount + 2);
     }
@@ -566,7 +622,7 @@ mod tests {
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
-        assert_eq!(filter.description(), format!("σ[f0 = \"42\"]"));
+        assert_eq!(filter.description(), format!("σ[f0 = 42]"));
         // leaf view node
         let edge = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge.fields(), &["name"]);
@@ -592,7 +648,8 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
 
         // Try a simple COUNT function
-        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes FROM votes GROUP BY votes.aid;",
+        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes \
+                                FROM votes GROUP BY votes.aid;",
                                 None,
                                 &mut mig);
         assert!(res.is_ok());
@@ -600,15 +657,14 @@ mod tests {
         // added the aggregation and the edge view, and a reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
                                        name: String::from("votes"),
                                        alias: Some(String::from("votes")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.userid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
@@ -695,10 +751,7 @@ mod tests {
         assert_eq!(qfp.new_nodes.len(), 1);
         assert_eq!(get_node(&inc, &mig, &qfp.name).description(), "≡");
         // we should be based off the identity as our leaf
-        let id_node = qfp.new_nodes
-            .iter()
-            .next()
-            .unwrap();
+        let id_node = qfp.new_nodes.iter().next().unwrap();
         assert_eq!(qfp.query_leaf, *id_node);
     }
 
@@ -727,15 +780,14 @@ mod tests {
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 6);
         // check project helper node
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[],
                                 &[&Column {
                                        name: String::from("count"),
                                        alias: Some(String::from("count")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.userid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
@@ -776,15 +828,14 @@ mod tests {
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
+        let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
                                        name: String::from("count"),
                                        alias: Some(String::from("count")),
                                        table: None,
-                                       function:
-                                           Some(Box::new(FunctionExpression::Count(Column::from("votes.aid"),
-                                                                                   false))),
+                                       function: Some(f),
                                    }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
@@ -824,14 +875,14 @@ mod tests {
                  JOIN votes ON (votes.aid = articles.aid);";
         let q = inc.add_query(q, None, &mut mig);
         assert!(q.is_ok());
-        let qid = query_id_hash(&["articles", "users", "votes"],
-                                &[&Column::from("articles.aid"),
-                                  &Column::from("articles.author"),
-                                  &Column::from("users.id"),
-                                  &Column::from("votes.aid")],
-                                &[&Column::from("articles.title"),
-                                  &Column::from("users.name"),
-                                  &Column::from("votes.uid")]);
+        let _qid = query_id_hash(&["articles", "users", "votes"],
+                                 &[&Column::from("articles.aid"),
+                                   &Column::from("articles.author"),
+                                   &Column::from("users.id"),
+                                   &Column::from("votes.aid")],
+                                 &[&Column::from("articles.title"),
+                                   &Column::from("users.name"),
+                                   &Column::from("votes.uid")]);
         // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
         // views
         // leaf view
@@ -897,7 +948,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn it_incorporates_finkelstein1982_naively() {
         use std::io::Read;
         use std::fs::File;
@@ -905,30 +955,30 @@ mod tests {
         // set up graph
         let mut g = Blender::new();
         let mut inc = SqlIncorporator::default();
-        let mut mig = g.start_migration();
+        {
+            let mut mig = g.start_migration();
 
-        let mut f = File::open("tests/finkelstein82.txt").unwrap();
-        let mut s = String::new();
+            let mut f = File::open("tests/finkelstein82.txt").unwrap();
+            let mut s = String::new();
 
-        // Load queries
-        f.read_to_string(&mut s).unwrap();
-        let lines: Vec<String> = s.lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("#"))
-            .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
-                     String::from(l) + "\n"
-                 } else {
-                     String::from(l)
-                 })
-            .collect();
+            // Load queries
+            f.read_to_string(&mut s).unwrap();
+            let lines: Vec<String> = s.lines()
+                .filter(|l| !l.is_empty() && !l.starts_with("#"))
+                .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
+                         String::from(l) + "\n"
+                     } else {
+                         String::from(l)
+                     })
+                .collect();
 
-        // Add them one by one
-        for (i, q) in lines.iter().enumerate() {
-            if let Ok(qfp) = inc.add_query(q, None, &mut mig) {
-                println!("{}: {} -- {}\n", qfp.name, i, q);
-            } else {
-                println!("Failed to parse: {}\n", q);
-            };
-            // println!("{}", inc.graph);
+            // Add them one by one
+            for q in lines.iter() {
+                assert!(inc.add_query(q, None, &mut mig).is_ok());
+            }
+            mig.commit();
         }
+
+        println!("{}", g);
     }
 }

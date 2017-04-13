@@ -4,12 +4,31 @@ use evmap;
 
 use std::sync::Arc;
 
-/// Allocate a new buffered `Store`.
+/// Allocate a new end-user facing result table.
 pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
-    let (r, w) =
-        evmap::Options::default().with_meta(-1).with_hasher(FnvBuildHasher::default()).construct();
+    new_inner(cols, key, None)
+}
+
+/// Allocate a new partially materialized end-user facing result table.
+///
+/// Misses in this table will call `trigger` to populate the entry, and retry until successful.
+pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (ReadHandle, WriteHandle)
+    where F: Fn(&DataType) + 'static + Send + Sync
+{
+    new_inner(cols, key, Some(Arc::new(trigger)))
+}
+
+fn new_inner(cols: usize,
+             key: usize,
+             trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
+             -> (ReadHandle, WriteHandle) {
+    let (r, w) = evmap::Options::default()
+        .with_meta(-1)
+        .with_hasher(FnvBuildHasher::default())
+        .construct();
     let r = ReadHandle {
         handle: r,
+        trigger: trigger,
         key: key,
     };
     let w = WriteHandle {
@@ -45,6 +64,9 @@ impl WriteHandle {
                     self.handle.insert(key, r);
                 }
                 Record::Negative(r) => {
+                    // TODO: evmap will remove the empty vec for a key if we remove the last
+                    // record. this means that future lookups will fail, and cause a replay, which
+                    // will produce an empty result. this will work, but is somewhat inefficient.
                     self.handle.remove(key, r);
                 }
                 Record::DeleteRequest(..) => unreachable!(),
@@ -55,11 +77,20 @@ impl WriteHandle {
     pub fn update_ts(&mut self, ts: i64) {
         self.handle.set_meta(ts);
     }
+
+    pub fn mark_filled(&mut self, key: &DataType) {
+        self.handle.clear(key.clone());
+    }
+
+    pub fn mark_hole(&mut self, key: &DataType) {
+        self.handle.empty(key.clone());
+    }
 }
 
 #[derive(Clone)]
 pub struct ReadHandle {
     handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
     key: usize,
 }
 
@@ -70,10 +101,50 @@ impl ReadHandle {
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
-    pub fn find_and<F, T>(&self, key: &DataType, then: F) -> Result<(Option<T>, i64), ()>
-        where F: FnOnce(&[Arc<Vec<DataType>>]) -> T
+    ///
+    /// This call will block if it encounters a hole in partially materialized state.
+    pub fn find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
-        self.handle.meta_get_and(key, then).ok_or(())
+        match self.try_find_and(key, &mut then) {
+            Ok((None, _)) if self.trigger.is_some() => {
+                if let Some(ref trigger) = self.trigger {
+                    use std::thread;
+
+                    // trigger a replay to populate
+                    (*trigger)(key);
+
+                    // wait for result to come through
+                    loop {
+                        thread::yield_now();
+                        match self.try_find_and(key, &mut then) {
+                            Ok((None, _)) => {}
+                            r => return r,
+                        }
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            r => r,
+        }
+    }
+
+    /// Find all entries that matched the given conditions.
+    ///
+    /// Returned records are passed to `then` before being returned.
+    ///
+    /// Note that not all writes will be included with this read -- only those that have been
+    /// swapped in by the writer.
+    pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    {
+        match self.handle.meta_get_and(key, &mut then) {
+            Some(val) => {
+                return Ok(val);
+            }
+            None => return Err(()),
+        }
     }
 
     pub fn key(&self) -> usize {
@@ -82,6 +153,10 @@ impl ReadHandle {
 
     pub fn len(&self) -> usize {
         self.handle.len()
+    }
+
+    pub fn is_partial(&self) -> bool {
+        self.trigger.is_some()
     }
 }
 

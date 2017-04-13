@@ -25,7 +25,8 @@ fn trace<F>(graph: &Graph,
     // figure out what node/column we're looking up
     let (node, column) = path.last().cloned().unwrap();
 
-    let parents: Vec<_> = graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+    let parents: Vec<_> = graph
+        .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
         .collect();
 
     if parents.is_empty() {
@@ -38,14 +39,16 @@ fn trace<F>(graph: &Graph,
     let mut local_to_global = HashMap::new();
     if n.is_localized() {
         let domain = n.domain();
-        local_to_global.extend(parents.iter().filter_map(|&ni| {
-            let n = &graph[ni];
-            if n.domain() == domain {
-                Some((n.addr(), ni))
-            } else {
-                None
-            }
-        }));
+        local_to_global.extend(parents
+                                   .iter()
+                                   .filter_map(|&ni| {
+                                                   let n = &graph[ni];
+                                                   if n.domain() == domain {
+                                                       Some((n.addr(), ni))
+                                                   } else {
+                                                       None
+                                                   }
+                                               }));
     }
 
     // have we reached a base node?
@@ -140,21 +143,25 @@ fn trace<F>(graph: &Graph,
         return paths;
     }
 
+    let mut resolved: HashMap<_, _> = resolved
+        .into_iter()
+        .map(|(p, col)| {
+            // we know joins don't generate values.
+            let col = col.unwrap();
+            if p.is_global() {
+                (*p.as_global(), col)
+            } else {
+                // we know join parents are all in the same domain as the join.
+                (local_to_global[&p], col)
+            }
+        })
+        .collect();
+
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
     // TODO: provide an early-termination mechanism?
     match on_join(node, &parents[..]) {
         None => {
-            let resolved: HashMap<_, _> = resolved.into_iter()
-                .map(|(parent, c)| {
-                    let parent = if parent.is_global() {
-                        *parent.as_global()
-                    } else {
-                        local_to_global[&parent]
-                    };
-                    (parent, c)
-                })
-                .collect();
             // our caller wants information about all our parents.
             // since the column we're chasing only follows a single path through a join (unless it
             // is a join key, which we don't yet handle), we need to produce (_, None) for all the
@@ -162,38 +169,16 @@ fn trace<F>(graph: &Graph,
             let mut paths = Vec::with_capacity(parents.len());
             for parent in parents {
                 let mut path = path.clone();
-                if let Some(&Some(column)) = resolved.get(&parent) {
-                    path.push((parent, Some(column)));
-                    paths.extend(trace(graph, on_join, path));
-                } else {
-                    path.push((parent, None));
-                    paths.extend(trace(graph, on_join, path));
-                }
+                path.push((parent, resolved.get(&parent).cloned()));
+                paths.extend(trace(graph, on_join, path));
             }
             paths
         }
         Some(parent) => {
-            let (specific_parent, column) = resolved.into_iter().next().unwrap();
-            // we know join parents are all in the same domain as the join.
-            let specific_parent = if specific_parent.is_global() {
-                *specific_parent.as_global()
-            } else {
-                local_to_global[&specific_parent]
-            };
-            // we know joins don't generate values.
-            let column = column.unwrap();
-
             // our caller only cares about *one* parent.
             // hopefully we can give key information about that parent
-            if parent == specific_parent {
-                // \o/
-                path.push((parent, Some(column)));
-                trace(graph, on_join, path)
-            } else {
-                // nope. we can't resolve any more for this column.
-                path.push((parent, None));
-                trace(graph, on_join, path)
-            }
+            path.push((parent, resolved.remove(&parent)));
+            trace(graph, on_join, path)
         }
     }
 }

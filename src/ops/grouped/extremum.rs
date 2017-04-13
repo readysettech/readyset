@@ -231,12 +231,14 @@ mod tests {
         check_new_max(1.into(), 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
-        let u = vec![(vec![1.into(), 22.into()], false), (vec![1.into(), 23.into()], true)];
+        let u = vec![(vec![1.into(), 22.into()], false),
+                     (vec![1.into(), 23.into()], true)];
         let out = c.narrow_one(u, true);
         check_new_max(1.into(), 22.into(), 23.into(), out);
 
         // Competing positive and negative should cancel out.
-        let u = vec![(vec![1.into(), 24.into()], true), (vec![1.into(), 24.into()], false)];
+        let u = vec![(vec![1.into(), 24.into()], true),
+                     (vec![1.into(), 24.into()], false)];
         let rs = c.narrow_one(u, true);
         assert!(rs.is_empty());
     }

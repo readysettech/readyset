@@ -91,8 +91,7 @@ impl Base {
             Some(BaseDurabilityLevel::Buffered) |
             Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.ensure_log_writer();
-                serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
-                    .unwrap();
+                serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records).unwrap();
                 // XXX(malte): we must deconstruct the BufWriter in order to get at the contained
                 // File (on which we can invoke sync_data(), only to then reassemble it
                 // immediately. I suspect this will work best if we flush after accumulating
@@ -100,8 +99,9 @@ impl Base {
                 let file = self.durable_log.take().unwrap().into_inner().unwrap();
                 // need to drop as sync_data returns Result<()> and forces use
                 drop(file.sync_data());
-                self.durable_log = Some(BufWriter::with_capacity_and_strategy(
-                    LOG_BUFFER_CAPACITY, file, WhenFull));
+                self.durable_log = Some(BufWriter::with_capacity_and_strategy(LOG_BUFFER_CAPACITY,
+                                                                              file,
+                                                                              WhenFull));
             }
         }
     }
@@ -128,8 +128,9 @@ impl Base {
                     // TODO(jmftrindade): Make a base node remember its own global address so that
                     // we can use that as unique_id for durable logs instead of process unique ids.
                     //
-                    // let log_filename = format!("/tmp/soup-log-{}-{:?}-{}.json",
-                    //                           today, self.global_address.unwrap(), self.unique_id);
+                    // let log_filename =
+                    //   format!("/tmp/soup-log-{}-{:?}-{}.json",
+                    //           today, self.global_address.unwrap(), self.unique_id);
 
                     let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
                                                today, us, self.unique_id);
@@ -171,11 +172,15 @@ impl Base {
 
     /// Flush any buffered writes, and clear the buffer, returning all flushed writes.
     pub fn flush(&mut self) -> Records {
-        let flushed_writes = self.buffered_writes.as_mut().unwrap().drain(..).collect();
+        let flushed_writes = self.buffered_writes
+            .as_mut()
+            .unwrap()
+            .drain(..)
+            .collect();
         self.persist_to_log(&flushed_writes);
         self.last_flushed_at = Some(Instant::now());
 
-        return flushed_writes
+        return flushed_writes;
     }
 }
 
@@ -252,7 +257,7 @@ impl Ingredient for Base {
                 mut rs: Records,
                 _: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> ProcessingResult {
         // Write incoming records to log before processing them if we are a durable node.
         let records_to_return;
         match self.durability {
@@ -262,9 +267,11 @@ impl Ingredient for Base {
                 // 1. Enough time has passed since the last time we flushed.
                 // 2. Our buffer of write records reaches capacity.
                 let num_buffered_writes = self.buffered_writes.as_ref().unwrap().len();
-                let has_reached_capacity = num_buffered_writes + rs.len() >= BUFFERED_WRITES_CAPACITY;
+                let has_reached_capacity = num_buffered_writes + rs.len() >=
+                                           BUFFERED_WRITES_CAPACITY;
                 let elapsed = self.last_flushed_at.unwrap().elapsed();
-                let has_reached_time_limit = elapsed >= Duration::from_millis(BUFFERED_WRITES_FLUSH_INTERVAL_MS);
+                let has_reached_time_limit =
+                    elapsed >= Duration::from_millis(BUFFERED_WRITES_FLUSH_INTERVAL_MS);
 
                 if has_reached_capacity || has_reached_time_limit {
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
@@ -274,50 +281,56 @@ impl Ingredient for Base {
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
-                    return Records::default()
+                    return ProcessingResult {
+                               results: Records::default(),
+                               misses: Vec::new(),
+                           };
                 }
-            },
+            }
             Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.persist_to_log(&rs);
                 records_to_return = rs;
-            },
+            }
             None => {
                 records_to_return = rs;
-            },
+            }
         }
 
-        records_to_return.into_iter()
+        let rs = records_to_return
+            .into_iter()
             .map(|r| match r {
                      Record::Positive(u) => Record::Positive(u),
                      Record::Negative(u) => Record::Negative(u),
                      Record::DeleteRequest(key) => {
                 let cols = self.primary_key
-                        .as_ref()
-                        .expect("base must have a primary key to support deletions");
+                    .as_ref()
+                    .expect("base must have a primary key to support deletions");
                 let db =
-                    state.get(self.us
-                                  .as_ref()
-                                  .unwrap()
-                                  .as_local())
+                    state
+                        .get(self.us.as_ref().unwrap().as_local())
                         .expect("base must have its own state materialized to support deletions");
-                let rows = db.lookup(cols.as_slice(), &KeyType::from(&key[..]));
-                assert_eq!(rows.len(), 1);
 
-                Record::Negative(rows[0].clone())
+                match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                    LookupResult::Some(rows) => {
+                        assert_eq!(rows.len(), 1);
+                        Record::Negative(rows[0].clone())
+                    }
+                    LookupResult::Missing => unreachable!(),
+                }
             }
                  })
-            .collect()
+            .collect();
+        ProcessingResult {
+            results: rs,
+            misses: Vec::new(),
+        }
     }
 
     fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         if self.primary_key.is_some() {
-            Some((n,
-                  self.primary_key
-                      .as_ref()
-                      .unwrap()
-                      .clone()))
-                    .into_iter()
-                    .collect()
+            Some((n, self.primary_key.as_ref().unwrap().clone()))
+                .into_iter()
+                .collect()
         } else {
             HashMap::new()
         }

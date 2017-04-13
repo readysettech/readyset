@@ -3,6 +3,23 @@ use std::sync::Arc;
 
 use flow::prelude;
 
+#[derive(PartialEq, Eq, Debug)]
+pub struct Miss {
+    pub node: prelude::LocalNodeIndex,
+    pub key: Vec<prelude::DataType>,
+}
+
+pub struct ProcessingResult {
+    pub results: prelude::Records,
+    pub misses: Vec<Miss>,
+}
+
+pub enum RawProcessingResult {
+    Regular(ProcessingResult),
+    ReplayPiece(prelude::Records),
+    Captured,
+}
+
 pub trait Ingredient
     where Self: Send
 {
@@ -15,9 +32,7 @@ pub trait Ingredient
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
-    fn must_replay_among(&self,
-                         &HashSet<prelude::NodeAddress>)
-                         -> Option<HashSet<prelude::NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<prelude::NodeAddress>> {
         None
     }
 
@@ -84,33 +99,53 @@ pub trait Ingredient
                 data: prelude::Records,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
-                -> prelude::Records;
+                -> ProcessingResult;
+
+    fn on_input_raw(&mut self,
+                    from: prelude::NodeAddress,
+                    data: prelude::Records,
+                    is_replay_of: Option<(usize, prelude::DataType)>,
+                    domain: &prelude::DomainNodes,
+                    states: &prelude::StateMap)
+                    -> RawProcessingResult {
+        let _ = is_replay_of;
+        RawProcessingResult::Regular(self.on_input(from, data, domain, states))
+    }
 
     fn can_query_through(&self) -> bool {
         false
     }
 
-    fn query_through<'a>(&self,
-                         _columns: &[usize],
-                         _key: &prelude::KeyType<prelude::DataType>,
-                         _states: &'a prelude::StateMap)
-                         -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
+    fn query_through<'a>
+        (&self,
+         _columns: &[usize],
+         _key: &prelude::KeyType<prelude::DataType>,
+         _states: &'a prelude::StateMap)
+         -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
         None
     }
 
-    /// Process a single incoming message, optionally producing an update to be propagated to
-    /// children.
+    /// Look up the given key in the given parent's state, falling back to query_through if
+    /// necessary. The return values signifies:
     ///
-    /// Only addresses of the type `prelude::NodeAddress::Local` may be used in this function.
+    ///  - `None` => no materialization of the parent state exists
+    ///  - `Some(None)` => materialization exists, but lookup got a miss
+    ///  - `Some(Some(rs))` => materialization exists, and got results rs
     fn lookup<'a>(&self,
                   parent: prelude::NodeAddress,
                   columns: &[usize],
                   key: &prelude::KeyType<prelude::DataType>,
                   domain: &prelude::DomainNodes,
                   states: &'a prelude::StateMap)
-                  -> Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>> {
-        states.get(parent.as_local())
-            .map(move |state| Box::new(state.lookup(columns, key).iter()) as Box<_>)
+                  -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
+        states
+            .get(parent.as_local())
+            .and_then(move |state| match state.lookup(columns, key) {
+                          prelude::LookupResult::Some(rs) => {
+                              Some(Some(Box::new(rs.iter()) as Box<_>))
+                          }
+                          prelude::LookupResult::Missing => Some(None),
+                      })
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead

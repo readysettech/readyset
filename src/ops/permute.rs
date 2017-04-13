@@ -56,15 +56,17 @@ impl Ingredient for Permute {
         // Eliminate emit specifications which require no permutation of
         // the inputs, so we don't needlessly perform extra work on each
         // update.
-        self.emit = self.emit.take().and_then(|emit| {
-            let complete = emit.len() == self.cols;
-            let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
-            if complete && sequential {
-                None
-            } else {
-                Some(emit)
-            }
-        });
+        self.emit = self.emit
+            .take()
+            .and_then(|emit| {
+                let complete = emit.len() == self.cols;
+                let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
+                if complete && sequential {
+                    None
+                } else {
+                    Some(emit)
+                }
+            });
     }
 
     fn on_input(&mut self,
@@ -72,7 +74,7 @@ impl Ingredient for Permute {
                 mut rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Records {
+                -> ProcessingResult {
         debug_assert_eq!(from, self.src);
 
         if self.emit.is_some() {
@@ -89,7 +91,10 @@ impl Ingredient for Permute {
                 **r = sync::Arc::new(new_r);
             }
         }
-        rs
+        ProcessingResult {
+            results: rs,
+            misses: Vec::new(),
+        }
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {

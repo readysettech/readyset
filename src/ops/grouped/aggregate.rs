@@ -259,38 +259,44 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 6); // one - and one + for each group
         // group 1 lost 1 and gained 2
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             r[0] == 1.into() && r[1] == 1.into()
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             r[0] == 1.into() && r[1] == 2.into()
+                         } else {
+                             false
+                         }));
         // group 2 lost 1 and gained 3
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 3.into()
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             r[0] == 2.into() && r[1] == 1.into()
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             r[0] == 2.into() && r[1] == 3.into()
+                         } else {
+                             false
+                         }));
         // group 3 lost 1 (well, 0) and gained 1
-        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 3.into() && r[1] == 0.into()
-                              } else {
-                                  false
-                              }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 3.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Negative(ref r) = *r {
+                             r[0] == 3.into() && r[1] == 0.into()
+                         } else {
+                             false
+                         }));
+        assert!(rs.iter()
+                    .any(|r| if let Record::Positive(ref r) = *r {
+                             r[0] == 3.into() && r[1] == 1.into()
+                         } else {
+                             false
+                         }));
     }
 
     #[test]

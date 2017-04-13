@@ -29,9 +29,10 @@ slog-term = "1.5.0"
 
 evmap = "0.6.0"
 arccstr = "0.3.2"
+vec_map = "0.7.0"
 
 spmc = "0.2.1"
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "b6006205807b18657724d20453eb720f59653d9d" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "e57d50300e104fee4ed5b1650563782bda875a33" }
 
 # for benchmarks
 # cli
@@ -49,12 +50,12 @@ tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
 # mysql
 mysql = { version = "10.0", optional = true }
 # memcached
-memcached-rs = { version = "0.1.2", optional = true }
+memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi", optional = true }
 # netsoup
 futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
-tarpc = {git="https://github.com/google/tarpc.git", optional = true}
-tarpc-plugins = { git = "https://github.com/google/tarpc", optional = true }
+tarpc = {git="https://github.com/ms705/tarpc.git", branch = "hack", optional = true}
+tarpc-plugins = { git = "https://github.com/ms705/tarpc", branch = "hack", optional = true }
 
 # for web
 rustc-serialize = { version = "0.3", optional = true }
@@ -76,6 +77,12 @@ version = "0.2.4"
 default-features = false
 # for Mac OS X build
 # git = "https://github.com/ms705/timekeeper"
+
+[profile.dev]
+codegen-units = 1
+
+[profile.test]
+codegen-units = 1
 
 [replace]
 # override for MAX_IN_FLIGHT = 4096

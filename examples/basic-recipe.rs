@@ -58,7 +58,9 @@ fn main() {
     let title = "test title";
     let url = "http://pdos.csail.mit.edu";
     let uid = 42;
-    backend.put("Article", &[aid.into(), title.into(), url.into()]).unwrap();
+    backend
+        .put("Article", &[aid.into(), title.into(), url.into()])
+        .unwrap();
     backend.put("Vote", &[aid.into(), uid.into()]).unwrap();
 
     println!("Finished writing! Let's wait for things to propagate...");

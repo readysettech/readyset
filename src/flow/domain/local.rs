@@ -1,14 +1,19 @@
 use flow::prelude::*;
 use std::ops::Index;
 use std::iter::FromIterator;
+use std::collections::hash_map::Entry;
 
 pub struct Map<T> {
+    n: usize,
     things: Vec<Option<T>>,
 }
 
 impl<T> Default for Map<T> {
     fn default() -> Self {
-        Map { things: Vec::default() }
+        Map {
+            n: 0,
+            things: Vec::default(),
+        }
     }
 }
 
@@ -30,6 +35,9 @@ impl<T> Map<T> {
 
         let old = self.things[i].take();
         self.things[i] = Some(value);
+        if old.is_none() {
+            self.n += 1;
+        }
         old
     }
 
@@ -54,11 +62,38 @@ impl<T> Map<T> {
             return None;
         }
 
-        self.things[i].take()
+        let ret = self.things[i].take();
+        if ret.is_some() {
+            self.n -= 1;
+        }
+        ret
     }
 
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (NodeAddress, &'a T)> + 'a> {
+        Box::new(self.things
+                     .iter()
+                     .enumerate()
+                     .filter_map(|(i, t)| {
+                                     t.as_ref()
+                                         .map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                 }))
+    }
+
+    pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
         Box::new(self.things.iter().filter_map(|t| t.as_ref()))
+    }
+
+    pub fn len(&self) -> usize {
+        self.n
+    }
+}
+
+use std::fmt;
+impl<T> fmt::Debug for Map<T>
+    where T: fmt::Debug
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
@@ -84,6 +119,7 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
             return Map::default();
         }
 
+        let n = sorted.len();
         let end = sorted.keys().last().unwrap() + 1;
         let mut vs = Vec::with_capacity(end);
         for (i, v) in sorted {
@@ -93,7 +129,20 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
             vs.push(Some(v));
         }
 
-        Map { things: vs }
+        Map { n: n, things: vs }
+    }
+}
+
+impl<T: 'static> IntoIterator for Map<T> {
+    type Item = (NodeAddress, T);
+    type IntoIter = Box<Iterator<Item = Self::Item>>;
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.things
+                     .into_iter()
+                     .enumerate()
+                     .filter_map(|(i, v)| {
+                                     v.map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                 }))
     }
 }
 
@@ -173,7 +222,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup(&self, key: &KeyType<T>) -> Option<&Vec<Arc<Vec<T>>>> {
+    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Arc<Vec<T>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -197,9 +246,14 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
     }
 }
 
+pub enum LookupResult<'a, T: 'a> {
+    Some(&'a [Arc<Vec<T>>]),
+    Missing,
+}
+
 #[derive(Clone)]
 pub struct State<T: Hash + Eq + Clone> {
-    state: Vec<(Vec<usize>, KeyedState<T>)>,
+    state: Vec<(Vec<usize>, KeyedState<T>, bool)>,
     rows: usize,
 }
 
@@ -222,7 +276,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.iter().position(|s| &s.0[..] == cols)
     }
 
-    pub fn add_key(&mut self, columns: &[usize]) {
+    pub fn add_key(&mut self, columns: &[usize], partial: bool) {
         if self.state_for(columns).is_some() {
             // already keyed
             return;
@@ -233,29 +287,33 @@ impl<T: Hash + Eq + Clone> State<T> {
             unimplemented!();
         }
 
-        self.state.push((Vec::from(columns), columns.into()));
+        self.state
+            .push((Vec::from(columns), columns.into(), partial));
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
-        self.state
-            .iter()
-            .map(|s| &s.0)
-            .cloned()
-            .collect()
+        self.state.iter().map(|s| &s.0).cloned().collect()
     }
 
     pub fn is_useful(&self) -> bool {
         !self.state.is_empty()
     }
 
+    pub fn is_partial(&self) -> bool {
+        self.state.iter().any(|s| s.2)
+    }
+
     pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
-        rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
+        rclones.extend((0..(self.state.len() - 1))
+                           .into_iter()
+                           .map(|_| r.clone()));
         rclones.push(r);
 
         self.rows = self.rows.saturating_add(1);
         for s in &mut self.state {
             let r = rclones.swap_remove(0);
+
             match s.1 {
                 KeyedState::Single(ref mut map) => {
                     // treat this specially to avoid the extra Vec
@@ -265,6 +323,9 @@ impl<T: Hash + Eq + Clone> State<T> {
                     if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
                         rs.push(r);
                         return;
+                    } else if s.2 {
+                        // trying to insert a record into partial materialization hole!
+                        unimplemented!();
                     }
                     map.insert(r[s.0[0]].clone(), vec![r]);
                 }
@@ -272,18 +333,30 @@ impl<T: Hash + Eq + Clone> State<T> {
                     match s.1 {
                         KeyedState::Double(ref mut map) => {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Tri(ref mut map) => {
                             let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Quad(ref mut map) => {
                             let key = (r[s.0[0]].clone(),
                                        r[s.0[1]].clone(),
                                        r[s.0[2]].clone(),
                                        r[s.0[3]].clone());
-                            map.entry(key).or_insert_with(Vec::new).push(r)
+                            match map.entry(key) {
+                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                                Entry::Vacant(..) if s.2 => unimplemented!(),
+                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                            }
                         }
                         KeyedState::Single(..) => unreachable!(),
                     }
@@ -342,8 +415,11 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 
     pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
-        for &(_, ref state) in &self.state {
+        for &(_, ref state, partial) in &self.state {
             if let KeyedState::Single(ref map) = *state {
+                if partial {
+                    unimplemented!();
+                }
                 return map.values();
             }
         }
@@ -367,13 +443,103 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
-    pub fn lookup(&self, columns: &[usize], key: &KeyType<T>) -> &[Arc<Vec<T>>] {
+    pub fn mark_filled(&mut self, key: Vec<T>) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        assert!(self.state.len() == 1,
+                "partially materializing to multi-index materialization");
+        let state = &mut self.state[0];
+        let mut key = key.into_iter();
+        let replaced = match state.1 {
+            KeyedState::Single(ref mut map) => map.insert(key.next().unwrap(), Vec::new()),
+            KeyedState::Double(ref mut map) => {
+                map.insert((key.next().unwrap(), key.next().unwrap()), Vec::new())
+            }
+            KeyedState::Tri(ref mut map) => {
+                map.insert((key.next().unwrap(), key.next().unwrap(), key.next().unwrap()),
+                           Vec::new())
+            }
+            KeyedState::Quad(ref mut map) => {
+                map.insert((key.next().unwrap(),
+                            key.next().unwrap(),
+                            key.next().unwrap(),
+                            key.next().unwrap()),
+                           Vec::new())
+            }
+        };
+        assert!(replaced.is_none());
+    }
+
+    pub fn mark_hole(&mut self, key: &[T]) {
+        debug_assert!(!self.state.is_empty(), "filling uninitialized index");
+        assert!(self.state.len() == 1,
+                "partially materializing to multi-index materialization");
+        let state = &mut self.state[0];
+        let removed = match state.1 {
+            KeyedState::Single(ref mut map) => map.remove(&key[0]),
+            KeyedState::Double(ref mut map) => map.remove(&(key[0].clone(), key[1].clone())),
+            KeyedState::Tri(ref mut map) => {
+                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
+            }
+            KeyedState::Quad(ref mut map) => {
+                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone(), key[3].clone()))
+            }
+        };
+        assert!(removed.is_some());
+        assert!(removed.unwrap().is_empty());
+    }
+
+    pub fn hits_hole(&self, r: &[T]) -> Option<(&[usize])> {
+        for s in &self.state {
+            if !s.2 {
+                continue;
+            }
+
+            match s.1 {
+                KeyedState::Single(ref map) => {
+                    if !map.contains_key(&r[s.0[0]]) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Double(ref map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Tri(ref map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+                KeyedState::Quad(ref map) => {
+                    let key = (r[s.0[0]].clone(),
+                               r[s.0[1]].clone(),
+                               r[s.0[2]].clone(),
+                               r[s.0[3]].clone());
+                    if !map.contains_key(&key) {
+                        return Some(&s.0[..]);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let state = &self.state[self.state_for(columns).expect("lookup on non-indexed column set")];
+        let state = &self.state[self.state_for(columns)
+                         .expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {
-            &rs[..]
+            LookupResult::Some(&rs[..])
         } else {
-            &[]
+            if state.2 {
+                // partially materialized, so this is a hole (empty results would be vec![])
+                LookupResult::Missing
+            } else {
+                LookupResult::Some(&[])
+            }
         }
     }
 
@@ -393,13 +559,18 @@ impl<T: Hash + Eq + Clone> State<T> {
 impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
     type Item = Vec<Arc<Vec<T>>>;
     type IntoIter = Box<Iterator<Item = Self::Item>>;
-    fn into_iter(mut self) -> Self::IntoIter {
-        match self.state.pop() {
-            Some((_, KeyedState::Single(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
-            Some((_, KeyedState::Double(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
-            Some((_, KeyedState::Tri(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
-            Some((_, KeyedState::Quad(map))) => Box::new(map.into_iter().map(|(_, v)| v)),
-            None => unreachable!(),
-        }
+    fn into_iter(self) -> Self::IntoIter {
+        self.state
+            .into_iter()
+            .find(|&(_, _, partial)| !partial)
+            .map(|(_, state, _)| -> Self::IntoIter {
+                     match state {
+                         KeyedState::Single(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Double(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Tri(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                         KeyedState::Quad(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                     }
+                 })
+            .unwrap()
     }
 }

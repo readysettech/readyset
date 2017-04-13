@@ -121,18 +121,10 @@ impl Ingredient for Join {
         true
     }
 
-    fn must_replay_among(&self, empty: &HashSet<NodeAddress>) -> Option<HashSet<NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<NodeAddress>> {
         match self.kind {
             JoinType::Left => Some(Some(self.left).into_iter().collect()),
-            JoinType::Inner => {
-                if empty.contains(&self.left) {
-                    Some(Some(self.left).into_iter().collect())
-                } else if empty.contains(&self.right) {
-                    Some(Some(self.right).into_iter().collect())
-                } else {
-                    Some(vec![self.left, self.right].into_iter().collect())
-                }
-            }
+            JoinType::Inner => Some(vec![self.left, self.right].into_iter().collect()),
         }
     }
 
@@ -157,11 +149,14 @@ impl Ingredient for Join {
                 rs: Records,
                 nodes: &DomainNodes,
                 state: &StateMap)
-                -> Records {
+                -> ProcessingResult {
+        let mut misses = Vec::new();
+
         if from == self.right && self.kind == JoinType::Left {
-            // If records are being received from the right, then populate self.right_counts with
-            // the number of records that existed for each key *before* this batch of records was
-            // processed.
+            // If records are being received from the right, then populate self.right_counts
+            // with the number of records that existed for each key *before* this batch of
+            // records was processed.
+            self.right_counts.clear();
             for r in rs.iter() {
                 let ref key = r.rec()[self.on.1];
                 let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
@@ -171,14 +166,18 @@ impl Ingredient for Join {
                     continue;
                 }
 
-                let rc = adjust(self.lookup(self.right,
-                                            &[self.on.0],
-                                            &KeyType::Single(&key),
-                                            nodes,
-                                            state)
-                                    .unwrap()
-                                    .count());
-                self.right_counts.insert(key.clone(), rc);
+                let rc = self.lookup(self.right,
+                                     &[self.on.0],
+                                     &KeyType::Single(&key),
+                                     nodes,
+                                     state)
+                    .unwrap();
+                if rc.is_none() {
+                    // we got something from right, but that row's key is not in right??
+                    unreachable!();
+                }
+                self.right_counts
+                    .insert(key.clone(), adjust(rc.unwrap().count()));
             }
         }
 
@@ -193,15 +192,27 @@ impl Ingredient for Join {
         // other side(s) for records matching the incoming records on that side's join
         // fields.
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
-        for rec in rs {
-            let (row, positive) = rec.extract();
-            let mut other_rows = self.lookup(other,
-                                             &[other_key],
-                                             &KeyType::Single(&row[from_key]),
-                                             nodes,
-                                             state)
-                .unwrap()
-                .peekable();
+        for rec in rs.iter() {
+            let (row, positive) = match *rec {
+                Record::Positive(ref row) => (row, true),
+                Record::Negative(ref row) => (row, false),
+                _ => unreachable!(),
+            };
+
+            let other_rows = self.lookup(other,
+                                         &[other_key],
+                                         &KeyType::Single(&row[from_key]),
+                                         nodes,
+                                         state)
+                .unwrap();
+            if other_rows.is_none() {
+                misses.push(Miss {
+                                node: *other.as_local(),
+                                key: vec![row[from_key].clone()],
+                            });
+                continue;
+            }
+            let mut other_rows = other_rows.unwrap().peekable();
 
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
@@ -219,9 +230,9 @@ impl Ingredient for Join {
                     if (positive && rc == 1) || (!positive && rc == 0) {
                         ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
                                                            let foo: Records = vec![
-                            (self.generate_null(r), !positive),
-                            (self.generate_row(r, &row), positive)
-                        ].into();
+                                    (self.generate_null(r), !positive),
+                                    (self.generate_row(r, &row), positive)
+                                ].into();
                                                            foo.into()
                                                        }));
                         continue;
@@ -238,14 +249,16 @@ impl Ingredient for Join {
             }
         }
 
-        if from == self.right && self.kind == JoinType::Left {
-            self.right_counts.clear();
+        ProcessingResult {
+            results: ret.into(),
+            misses: misses,
         }
-        ret.into()
     }
 
     fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])].into_iter().collect()
+        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])]
+            .into_iter()
+            .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

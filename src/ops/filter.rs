@@ -54,32 +54,37 @@ impl Ingredient for Filter {
                 mut rs: Records,
                 _: &DomainNodes,
                 _: &StateMap)
-                -> Records {
+                -> ProcessingResult {
 
         rs.retain(|r| {
             let mut f = self.filter.iter();
-            r.iter().all(|d| {
-                // check if this filter matches
-                let fi =
-                    f.next().expect("should have as many filters as there are columns in ancestor");
-                if let Some((ref op, ref f)) = *fi {
-                    match *op {
-                        Operator::Equal => d == f,
-                        Operator::NotEqual => d != f,
-                        Operator::Greater => d > f,
-                        Operator::GreaterOrEqual => d >= f,
-                        Operator::Less => d < f,
-                        Operator::LessOrEqual => d <= f,
-                        _ => unimplemented!(),
+            r.iter()
+                .all(|d| {
+                    // check if this filter matches
+                    let fi =
+                        f.next()
+                            .expect("should have as many filters as there are columns in ancestor");
+                    if let Some((ref op, ref f)) = *fi {
+                        match *op {
+                            Operator::Equal => d == f,
+                            Operator::NotEqual => d != f,
+                            Operator::Greater => d > f,
+                            Operator::GreaterOrEqual => d >= f,
+                            Operator::Less => d < f,
+                            Operator::LessOrEqual => d <= f,
+                            _ => unimplemented!(),
+                        }
+                    } else {
+                        // everything matches no condition
+                        true
                     }
-                } else {
-                    // everything matches no condition
-                    true
-                }
-            })
+                })
         });
 
-        rs
+        ProcessingResult {
+            results: rs,
+            misses: Vec::new(),
+        }
     }
 
     fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
@@ -114,33 +119,45 @@ impl Ingredient for Filter {
         true
     }
 
-    fn query_through<'a>(&self,
-                         columns: &[usize],
-                         key: &KeyType<DataType>,
-                         states: &'a StateMap)
-                         -> Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>> {
-        states.get(self.src.as_local()).map(|state| {
-            let f = self.filter.clone();
-            Box::new(state.lookup(columns, key).iter().filter(move |r| {
-                r.iter().enumerate().all(|(i, d)| {
-                    // check if this filter matches
-                    if let Some((ref op, ref f)) = f[i] {
-                        match *op {
-                            Operator::Equal => d == f,
-                            Operator::NotEqual => d != f,
-                            Operator::Greater => d > f,
-                            Operator::GreaterOrEqual => d >= f,
-                            Operator::Less => d < f,
-                            Operator::LessOrEqual => d <= f,
-                            _ => unimplemented!(),
-                        }
-                    } else {
-                        // everything matches no condition
-                        true
+    fn query_through<'a>
+        (&self,
+         columns: &[usize],
+         key: &KeyType<DataType>,
+         states: &'a StateMap)
+         -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
+        states
+            .get(self.src.as_local())
+            .and_then(|state| {
+                let f = self.filter.clone();
+                match state.lookup(columns, key) {
+                    LookupResult::Some(rs) => {
+                        let r = Box::new(rs.iter()
+                                             .filter(move |r| {
+                            r.iter()
+                                .enumerate()
+                                .all(|(i, d)| {
+                                    // check if this filter matches
+                                    if let Some((ref op, ref f)) = f[i] {
+                                        match *op {
+                                            Operator::Equal => d == f,
+                                            Operator::NotEqual => d != f,
+                                            Operator::Greater => d > f,
+                                            Operator::GreaterOrEqual => d >= f,
+                                            Operator::Less => d < f,
+                                            Operator::LessOrEqual => d <= f,
+                                            _ => unimplemented!(),
+                                        }
+                                    } else {
+                                        // everything matches no condition
+                                        true
+                                    }
+                                })
+                        })) as Box<_>;
+                        Some(Some(r))
                     }
-                })
-            })) as Box<_>
-        })
+                    LookupResult::Missing => Some(None),
+                }
+            })
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {

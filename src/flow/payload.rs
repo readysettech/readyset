@@ -1,5 +1,6 @@
 use petgraph;
 
+use backlog;
 use checktable;
 use flow::domain;
 use flow::statistics;
@@ -17,10 +18,7 @@ pub struct Link {
 
 impl Link {
     pub fn new(src: NodeAddress, dst: NodeAddress) -> Self {
-        Link {
-            src: src,
-            dst: dst,
-        }
+        Link { src: src, dst: dst }
     }
 }
 
@@ -29,15 +27,40 @@ impl fmt::Debug for Link {
         write!(f, "{:?} -> {:?}", self.src, self.dst)
     }
 }
-pub enum ReplayData {
-    Records(Records),
-    StateCopy(State),
+pub enum TriggerEndpoint {
+    None,
+    Start(Vec<usize>),
+    End(mpsc::Sender<Packet>),
+    Local(Vec<usize>),
+}
+
+pub enum InitialState {
+    PartialLocal(usize),
+    IndexedLocal(Vec<Vec<usize>>),
+    PartialGlobal(backlog::WriteHandle, backlog::ReadHandle),
+    Global,
+}
+
+#[derive(Clone)]
+pub enum ReplayPieceContext {
+    Partial {
+        for_key: Vec<DataType>,
+        ignore: bool,
+    },
+    Regular { last: bool },
 }
 
 #[derive(Clone)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
+    WillCommit,
+}
+
+#[derive(Clone)]
+pub struct ReplayTransactionState {
+    pub ts: i64,
+    pub prevs: Option<HashMap<domain::Index, i64>>,
 }
 
 pub enum Packet {
@@ -54,11 +77,15 @@ pub enum Packet {
     },
 
     /// Update that is part of a tagged data-flow replay path.
-    Replay {
+    FullReplay { link: Link, tag: Tag, state: State },
+
+    /// Update that is part of a tagged data-flow replay path.
+    ReplayPiece {
         link: Link,
         tag: Tag,
-        last: bool,
-        data: ReplayData,
+        data: Records,
+        context: ReplayPieceContext,
+        transaction_state: Option<ReplayTransactionState>,
     },
 
     //
@@ -74,12 +101,19 @@ pub enum Packet {
         parents: Vec<LocalNodeIndex>,
     },
 
+    /// Request a handle to an unbounded channel to this domain.
+    ///
+    /// We need these channels to send replay requests, as using the bounded channels could easily
+    /// result in a deadlock. Since the unbounded channel is only used for requests as a result of
+    /// processing, it is essentially self-clocking.
+    RequestUnboundedTx(mpsc::Sender<mpsc::Sender<Packet>>),
+
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
     PrepareState {
         node: LocalNodeIndex,
-        index: Vec<Vec<usize>>,
+        state: InitialState,
     },
 
     /// Probe for the number of records in the given node's state
@@ -91,10 +125,15 @@ pub enum Packet {
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,
-        path: Vec<NodeAddress>,
+        source: Option<NodeAddress>,
+        path: Vec<(NodeAddress, Option<usize>)>,
         done_tx: Option<mpsc::SyncSender<()>>,
+        trigger: TriggerEndpoint,
         ack: mpsc::SyncSender<()>,
     },
+
+    /// Ask domain (nicely) to replay a particular key.
+    RequestPartialReplay { tag: Tag, key: Vec<DataType> },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
     StartReplay {
@@ -141,7 +180,7 @@ pub enum Packet {
 
     /// Request that a domain send usage statistics on the given sender.
     GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
-                                    HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
+                                     HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
 
     None,
 }
@@ -151,7 +190,8 @@ impl Packet {
         match *self {
             Packet::Message { ref link, .. } => link,
             Packet::Transaction { ref link, .. } => link,
-            Packet::Replay { ref link, .. } => link,
+            Packet::FullReplay { ref link, .. } => link,
+            Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -160,7 +200,8 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
-            Packet::Replay { ref mut link, .. } => link,
+            Packet::FullReplay { ref mut link, .. } => link,
+            Packet::ReplayPiece { ref mut link, .. } => link,
             _ => unreachable!(),
         }
     }
@@ -169,64 +210,59 @@ impl Packet {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
             Packet::Transaction { ref data, .. } => data.is_empty(),
-            Packet::Replay { ref data, .. } => {
-                match *data {
-                    ReplayData::StateCopy(..) => false,
-                    ReplayData::Records(ref data) => data.is_empty(),
-                }
-            }
+            Packet::FullReplay { .. } => false,
+            Packet::ReplayPiece { ref data, .. } => data.is_empty(),
             Packet::None => true,
             _ => unreachable!(),
         }
     }
 
     pub fn map_data<F>(&mut self, map: F)
-        where F: FnOnce(Records) -> Records
+        where F: FnOnce(&mut Records)
     {
-        use std::mem;
-        let m = match mem::replace(self, Packet::None) {
-            Packet::Message { link, data } => {
-                Packet::Message {
-                    link: link,
-                    data: map(data),
-                }
-            }
-            Packet::Transaction { link, data, state } => {
-                Packet::Transaction {
-                    link: link,
-                    data: map(data),
-                    state: state,
-                }
-            }
-            Packet::Replay { link, tag, last, data: ReplayData::Records(data) } => {
-                Packet::Replay {
-                    link: link,
-                    tag: tag,
-                    last: last,
-                    data: ReplayData::Records(map(data)),
-                }
+        match *self {
+            Packet::Message { ref mut data, .. } |
+            Packet::Transaction { ref mut data, .. } |
+            Packet::ReplayPiece { ref mut data, .. } => {
+                map(data);
             }
             _ => {
                 unreachable!();
             }
-        };
-        mem::replace(self, m);
+        }
+    }
+
+    pub fn is_regular(&self) -> bool {
+        match *self {
+            Packet::Message { .. } => true,
+            Packet::Transaction { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn tag(&self) -> Option<Tag> {
+        match *self {
+            Packet::FullReplay { tag, .. } => Some(tag),
+            Packet::ReplayPiece { tag, .. } => Some(tag),
+            _ => None,
+        }
     }
 
     pub fn data(&self) -> &Records {
         match *self {
             Packet::Message { ref data, .. } => data,
             Packet::Transaction { ref data, .. } => data,
-            Packet::Replay { data: ReplayData::Records(ref data), .. } => data,
+            Packet::ReplayPiece { ref data, .. } => data,
             _ => unreachable!(),
         }
     }
 
-    pub fn take_data(self) -> Records {
-        match self {
+    pub fn take_data(&mut self) -> Records {
+        use std::mem;
+        match mem::replace(self, Packet::None) {
             Packet::Message { data, .. } => data,
             Packet::Transaction { data, .. } => data,
-            Packet::Replay { data: ReplayData::Records(data), .. } => data,
+            Packet::ReplayPiece { data, .. } => data,
             _ => unreachable!(),
         }
     }
@@ -239,7 +275,11 @@ impl Packet {
                     data: data.clone(),
                 }
             }
-            Packet::Transaction { ref link, ref data, ref state } => {
+            Packet::Transaction {
+                ref link,
+                ref data,
+                ref state,
+            } => {
                 Packet::Transaction {
                     link: link.clone(),
                     data: data.clone(),
@@ -255,7 +295,11 @@ impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Packet::Message { ref link, .. } => write!(f, "Packet::Message({:?})", link),
-            Packet::Transaction { ref link, ref state, .. } => {
+            Packet::Transaction {
+                ref link,
+                ref state,
+                ..
+            } => {
                 match *state {
                     TransactionState::Committed(ts, ..) => {
                         write!(f, "Packet::Transaction({:?}, {})", link, ts)
@@ -263,25 +307,31 @@ impl fmt::Debug for Packet {
                     TransactionState::Pending(..) => {
                         write!(f, "Packet::Transaction({:?}, pending)", link)
                     }
+                    TransactionState::WillCommit => write!(f, "Packet::Transaction({:?}, ?)", link),
                 }
             }
-            Packet::Replay { ref link, ref tag, ref data, .. } => {
-                match *data {
-                    ReplayData::Records(ref data) => {
-                        write!(f,
-                               "Packet::Replay({:?}, {}, {} records)",
-                               link,
-                               tag.id(),
-                               data.len())
-                    }
-                    ReplayData::StateCopy(ref data) => {
-                        write!(f,
-                               "Packet::Replay({:?}, {}, {}r state)",
-                               link,
-                               tag.id(),
-                               data.len())
-                    }
-                }
+            Packet::ReplayPiece {
+                ref link,
+                ref tag,
+                ref data,
+                ..
+            } => {
+                write!(f,
+                       "Packet::ReplayPiece({:?}, {}, {} records)",
+                       link,
+                       tag.id(),
+                       data.len())
+            }
+            Packet::FullReplay {
+                ref link,
+                ref tag,
+                ref state,
+            } => {
+                write!(f,
+                       "Packet::FullReplay({:?}, {}, {} row state)",
+                       link,
+                       tag.id(),
+                       state.len())
             }
             Packet::None => write!(f, "Packet::Node"),
             _ => write!(f, "Packet::Control"),

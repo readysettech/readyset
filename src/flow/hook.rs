@@ -36,7 +36,7 @@ impl Hook {
         let client = try!(memcached::Client::connect(&servers, ProtoType::Binary));
 
         let mut s = State::default();
-        s.add_key(&key_columns[..]);
+        s.add_key(&key_columns[..], false);
 
         Ok(Self {
                client: Memcache(client),
@@ -48,6 +48,8 @@ impl Hook {
 
     /// Push the relevant record updates to Memcached.
     pub fn on_input(&mut self, records: Records) {
+        // TODO: detect need for partial replay
+
         // Update materialized state
         for rec in records.iter() {
             match rec {
@@ -58,7 +60,8 @@ impl Hook {
         }
 
         // Extract modified keys
-        let mut modified_keys: Vec<_> = records.into_iter()
+        let mut modified_keys: Vec<_> = records
+            .into_iter()
             .map(|rec| match rec {
                      Record::Positive(a) |
                      Record::Negative(a) => {
@@ -84,7 +87,13 @@ impl Hook {
 
         // Push to Memcached
         for key in modified_keys {
-            let rows = self.state.lookup(&self.key_columns[..], &KeyType::from(&key[..]));
+            let rows = match self.state
+                      .lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
+                LookupResult::Some(rows) => rows,
+                LookupResult::Missing => {
+                    unreachable!();
+                }
+            };
             let k = Json::Array(vec![self.name.clone(), key.to_json()]).to_string();
             let v = Json::Array(rows.into_iter()
                                     .map(|row| {
@@ -93,7 +102,9 @@ impl Hook {
                                     .collect())
                     .to_string();
             let flags = 0xdeadbeef;
-            (self.client.0).set(k.as_bytes(), v.as_bytes(), flags, 0).unwrap();
+            (self.client.0)
+                .set(k.as_bytes(), v.as_bytes(), flags, 0)
+                .unwrap();
         }
     }
 

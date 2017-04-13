@@ -41,10 +41,12 @@ impl QueryGraph {
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations.values().fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
-            acc.extend(qgn.parameters.iter());
-            acc
-        })
+        self.relations
+            .values()
+            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+                acc.extend(qgn.parameters.iter());
+                acc
+            })
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -60,10 +62,7 @@ impl QueryGraph {
             .collect();
 
         // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations
-            .keys()
-            .map(String::as_str)
-            .collect();
+        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
         r_vec.sort();
         for r in &r_vec {
             r.hash(&mut hasher);
@@ -180,12 +179,14 @@ fn classify_conditionals(ce: &ConditionExpression,
                             }
                         }
                         // right-hand side is a literal, so this is a predicate
-                        ConditionBase::Literal(_) => {
+                        ConditionBase::StringLiteral(_) |
+                        ConditionBase::IntegerLiteral(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 // we assume that implied table names have previously been expanded
                                 // and thus all columns carry table names
                                 assert!(lf.table.is_some());
-                                let mut e = local.entry(lf.table.clone().unwrap())
+                                let mut e = local
+                                    .entry(lf.table.clone().unwrap())
                                     .or_insert(Vec::new());
                                 e.push(ct.clone());
                             }
@@ -277,15 +278,17 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table in &st.tables {
-        qg.relations.insert(table.name.clone(),
-                            new_node(table.name.clone(), Vec::new(), st));
+        qg.relations
+            .insert(table.name.clone(),
+                    new_node(table.name.clone(), Vec::new(), st));
     }
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
                 if !qg.relations.contains_key(&table.name) {
-                    qg.relations.insert(table.name.clone(),
-                                        new_node(table.name.clone(), Vec::new(), st));
+                    qg.relations
+                        .insert(table.name.clone(),
+                                new_node(table.name.clone(), Vec::new(), st));
                 }
             }
             _ => unimplemented!(),
@@ -301,12 +304,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     };
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
-    let prev_table = Some(st.tables
-                              .last()
-                              .as_ref()
-                              .unwrap()
-                              .name
-                              .clone());
+    let prev_table = Some(st.tables.last().as_ref().unwrap().name.clone());
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
@@ -430,38 +428,28 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // strictly required, and eagerly pushes more columns than needed, but makes a
                     // naive version of the graph construction work.
                     {
-                        let left = &mut qg.relations
-                                            .entry(l.table
-                                                       .as_ref()
-                                                       .unwrap()
-                                                       .clone())
-                                            .or_insert_with(|| {
-                            new_node(l.table
-                                         .as_ref()
-                                         .unwrap()
-                                         .clone(),
-                                     vec![],
-                                     st)
-                        });
+                        let left =
+                            &mut qg.relations
+                                     .entry(l.table.as_ref().unwrap().clone())
+                                     .or_insert_with(|| {
+                                                         new_node(l.table.as_ref().unwrap().clone(),
+                                                                  vec![],
+                                                                  st)
+                                                     });
                         if !left.columns.iter().any(|c| c.name == l.name) {
                             left.columns.push(l.clone());
                         }
                     }
 
                     {
-                        let right = &mut qg.relations
-                                             .entry(r.table
-                                                        .as_ref()
-                                                        .unwrap()
-                                                        .clone())
-                                             .or_insert_with(|| {
-                            new_node(r.table
-                                         .as_ref()
-                                         .unwrap()
-                                         .clone(),
-                                     vec![],
-                                     st)
-                        });
+                        let right =
+                            &mut qg.relations
+                                     .entry(r.table.as_ref().unwrap().clone())
+                                     .or_insert_with(|| {
+                                                         new_node(r.table.as_ref().unwrap().clone(),
+                                                                  vec![],
+                                                                  st)
+                                                     });
                         if !right.columns.iter().any(|c| c.name == r.name) {
                             right.columns.push(r.clone());
                         }
@@ -524,10 +512,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
                 let mut e = qg.edges
                     .entry((String::from("computed_columns"),
-                            column.table
-                                .as_ref()
-                                .unwrap()
-                                .clone()))
+                            column.table.as_ref().unwrap().clone()))
                     .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),

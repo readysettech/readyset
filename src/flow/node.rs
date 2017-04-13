@@ -54,14 +54,16 @@ pub struct Reader {
 impl Reader {
     pub fn get_reader(&self)
                       -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
-        self.state.clone().map(|arc| {
-                                   Box::new(move |q: &DataType| -> Result<Datas, ()> {
-                                                arc.find_and(q, |rs| {
-                        rs.into_iter().map(|v| (&**v).clone()).collect()
-                    })
-                                                    .map(|r| r.0.unwrap_or_else(Vec::new))
-                                            }) as Box<_>
-                               })
+        self.state
+            .clone()
+            .map(|arc| {
+                     Box::new(move |q: &DataType| -> Result<Datas, ()> {
+                                  arc.find_and(q, |rs| {
+                            rs.into_iter().map(|v| (&**v).clone()).collect()
+                        })
+                                      .map(|r| r.0.unwrap_or_else(Vec::new))
+                              }) as Box<_>
+                 })
     }
 
     pub fn key(&self) -> Result<usize, String> {
@@ -89,7 +91,7 @@ impl Default for Reader {
     }
 }
 
-enum NodeHandle {
+pub(crate) enum NodeHandle {
     Owned(Type),
     Taken(Type),
 }
@@ -203,13 +205,14 @@ pub struct Node {
     name: String,
     domain: Option<domain::Index>,
     addr: Option<NodeAddress>,
+    transactional: bool,
 
     fields: Vec<String>,
     inner: NodeHandle,
 }
 
 impl Node {
-    pub fn new<S1, FS, S2>(name: S1, fields: FS, inner: Type) -> Node
+    pub fn new<S1, FS, S2>(name: S1, fields: FS, inner: Type, transactional: bool) -> Node
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>
@@ -218,6 +221,7 @@ impl Node {
             name: name.to_string(),
             domain: None,
             addr: None,
+            transactional: transactional,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
             inner: NodeHandle::Owned(inner),
@@ -225,9 +229,13 @@ impl Node {
     }
 
     pub fn mirror(&self, n: Type) -> Node {
-        let mut n = Self::new(&*self.name, &self.fields, n);
+        let mut n = Self::new(&*self.name, &self.fields, n, self.transactional);
         n.domain = self.domain;
         n
+    }
+
+    pub(crate) fn inner_mut(&mut self) -> &mut NodeHandle {
+        &mut self.inner
     }
 
     pub fn name(&self) -> &str {
@@ -394,6 +402,10 @@ impl Node {
             Type::Hook(..) => true,
             _ => false,
         }
+    }
+
+    pub fn is_transactional(&self) -> bool {
+        self.transactional
     }
 }
 

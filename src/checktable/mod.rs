@@ -12,6 +12,7 @@ use std::fmt::Debug;
 
 use flow::domain;
 use flow::prelude::*;
+use flow::migrate::materialization::Tag as ReplayPath;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Conflict {
@@ -51,11 +52,7 @@ impl Token {
 
     /// Get the latest timestamp associated with this Token.
     pub fn get_timestamp(&self) -> i64 {
-        self.conflicts
-            .iter()
-            .map(|c| c.0)
-            .max()
-            .unwrap_or(-1)
+        self.conflicts.iter().map(|c| c.0).max().unwrap_or(-1)
     }
 
     /// Convert to a token that only relies on coarse checktables.
@@ -93,9 +90,12 @@ impl TokenGenerator {
                base_column_conflicts: Vec<(NodeIndex, usize)>)
                -> Self {
         TokenGenerator {
-            conflicts: base_table_conflicts.into_iter()
+            conflicts: base_table_conflicts
+                .into_iter()
                 .map(Conflict::BaseTable)
-                .chain(base_column_conflicts.into_iter().map(|(n, c)| Conflict::BaseColumn(n, c)))
+                .chain(base_column_conflicts
+                           .into_iter()
+                           .map(|(n, c)| Conflict::BaseColumn(n, c)))
                 .collect(),
         }
     }
@@ -139,6 +139,10 @@ pub struct CheckTable {
     // For each domain, stores the set of base nodes that it receives updates from.
     domain_dependencies: HashMap<domain::Index, Vec<NodeIndex>>,
 
+    // Domains impacted by each replay path.
+    replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
+
+    last_replay: HashMap<domain::Index, i64>,
     last_migration: Option<i64>,
     last_base: Option<NodeIndex>,
 }
@@ -150,6 +154,8 @@ impl CheckTable {
             toplevel: HashMap::new(),
             granular: HashMap::new(),
             domain_dependencies: HashMap::new(),
+            replay_paths: HashMap::new(),
+            last_replay: HashMap::new(),
             last_migration: None,
             last_base: None,
         }
@@ -183,9 +189,12 @@ impl CheckTable {
 
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
-        !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-                                        conflicts.iter().any(|c| self.check_conflict(ts, key, c))
-                                    })
+        !token
+             .conflicts
+             .iter()
+             .any(|&(ts, ref key, ref conflicts)| {
+                      conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+                  })
     }
 
     fn compute_previous_timestamps(&self,
@@ -201,6 +210,7 @@ impl CheckTable {
             let earliest: i64 = v.iter()
                 .filter_map(|b| self.toplevel.get(b))
                 .chain(self.last_migration.iter())
+                .chain(self.last_replay.get(d).iter().map(|t| *t))
                 .max()
                 .cloned()
                 .unwrap_or(0);
@@ -209,43 +219,69 @@ impl CheckTable {
                  .collect())
     }
 
-    pub fn claim_timestamp(&mut self,
-                           token: &Token,
-                           base: NodeIndex,
-                           rs: &Records)
-                           -> TransactionResult {
+    pub fn attempt_claim_timestamp(&mut self,
+                                   token: &Token,
+                                   base: NodeIndex,
+                                   rs: &Records)
+                                   -> TransactionResult {
         if self.validate_token(token) {
-            // Take timestamp
-            let ts = self.next_timestamp;
-            self.next_timestamp += 1;
-
-            // Compute the previous timestamp that each domain will see before getting this one
-            let prev_times = self.compute_previous_timestamps(Some(base));
-
-            // Update checktables
-            self.last_base = Some(base);
-            self.toplevel.insert(base, ts);
-            let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-            for record in rs.iter() {
-                for (i, value) in record.iter().enumerate() {
-                    let mut delete = false;
-                    if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
-                        if m.len() > 10000000 {
-                            delete = true;
-                        } else {
-                            *m.entry(value.clone()).or_insert(0) = ts;
-                        }
-                    }
-                    if delete {
-                        t.remove(&i);
-                    }
-                }
-            }
-
-            TransactionResult::Committed(ts, prev_times)
+            let (ts, prevs) = self.claim_timestamp(base, rs);
+            TransactionResult::Committed(ts, prevs)
         } else {
             TransactionResult::Aborted
         }
+    }
+
+    pub fn claim_timestamp(&mut self,
+                           base: NodeIndex,
+                           rs: &Records)
+                           -> (i64, Option<HashMap<domain::Index, i64>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prev_times = self.compute_previous_timestamps(Some(base));
+
+        // Update checktables
+        self.last_base = Some(base);
+        self.toplevel.insert(base, ts);
+        let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
+        for record in rs.iter() {
+            for (i, value) in record.iter().enumerate() {
+                let mut delete = false;
+                if let Some(&mut (ref mut m, _)) = t.get_mut(&i) {
+                    if m.len() > 10000000 {
+                        delete = true;
+                    } else {
+                        *m.entry(value.clone()).or_insert(0) = ts;
+                    }
+                }
+                if delete {
+                    t.remove(&i);
+                }
+            }
+        }
+        (ts, prev_times)
+    }
+
+    pub fn claim_replay_timestamp(&mut self,
+                                  path: &ReplayPath)
+                                  -> (i64, Option<HashMap<domain::Index, i64>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prevs = self.compute_previous_timestamps(None);
+
+        // Update checktable state
+        self.last_base = None;
+        for d in self.replay_paths.get(path).unwrap() {
+            self.last_replay.insert(d.clone(), ts);
+        }
+
+        (ts, prevs)
     }
 
     /// Transition to using `new_domain_dependencies`, and reserve a pair of
@@ -260,17 +296,25 @@ impl CheckTable {
         self.last_base = None;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
-        self.domain_dependencies = ingresses_from_base.iter()
+        self.domain_dependencies = ingresses_from_base
+            .iter()
             .map(|(domain, ingress_from_base)| {
-                (*domain,
-                 ingress_from_base.iter()
-                     .filter(|&(_, n)| *n > 0)
-                     .map(|(k, _)| *k)
-                     .collect())
-            })
+                     (*domain,
+                      ingress_from_base
+                          .iter()
+                          .filter(|&(_, n)| *n > 0)
+                          .map(|(k, _)| *k)
+                          .collect())
+                 })
             .collect();
 
         (ts, ts + 1, prevs)
+    }
+
+    pub fn add_replay_paths(&mut self,
+                            additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>) {
+        self.replay_paths
+            .extend(additional_replay_paths.into_iter());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {
@@ -279,7 +323,8 @@ impl CheckTable {
                 Conflict::BaseTable(..) => {}
                 Conflict::BaseColumn(base, col) => {
                     let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-                    t.entry(col).or_insert((HashMap::new(), self.next_timestamp - 1));
+                    t.entry(col)
+                        .or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
             }
         }

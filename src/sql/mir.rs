@@ -17,10 +17,7 @@ use std::vec::Vec;
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
 
-    match *computed_col.function
-               .as_ref()
-               .unwrap()
-               .deref() {
+    match *computed_col.function.as_ref().unwrap().deref() {
         Avg(ref col, _) |
         Count(ref col, _) |
         GroupConcat(ref col, _) |
@@ -57,43 +54,50 @@ impl Default for SqlToMirConverter {
 
 impl SqlToMirConverter {
     pub fn with_logger(log: slog::Logger) -> Self {
-        SqlToMirConverter { log: log, ..Default::default() }
+        SqlToMirConverter {
+            log: log,
+            ..Default::default()
+        }
     }
 
-    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser into a
-    /// vector of conditions that `shortcut` understands.
-    fn to_conditions(&self,
-                     ct: &ConditionTree,
-                     mut columns: &mut Vec<Column>,
-                     n: &MirNodeRef)
-                     -> Vec<Option<(Operator, DataType)>> {
+    /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
+    /// and adds its to a vector of conditions that `shortcut` understands.
+    /// Returns true if condition is sucessfully added.
+    fn add_conditions(&self,
+                      mut filter: &mut Vec<Option<(Operator, DataType)>>,
+                      ct: &ConditionTree,
+                      mut columns: &mut Vec<Column>,
+                      n: &MirNodeRef)
+                      -> bool {
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
         let r = match *ct.right.as_ref() {
-            ConditionExpression::Base(ConditionBase::Literal(ref l)) => l.clone(),
+            ConditionExpression::Base(ConditionBase::IntegerLiteral(ref i)) => DataType::from(*i),
+            ConditionExpression::Base(ConditionBase::StringLiteral(ref s)) => {
+                DataType::from(s.clone())
+            }
             _ => unimplemented!(),
         };
 
-        let num_columns = columns.len();
-        let mut filters = vec![None; num_columns];
-
         let f = Some((ct.operator.clone(), DataType::from(r)));
-        match n.borrow()
-                  .columns()
-                  .iter()
-                  .position(|c| *c == l) {
+        match n.borrow().columns().iter().position(|c| *c == l) {
             None => {
                 columns.push(l);
-                filters.push(f);
+                filter.push(f);
             }
             Some(cid) => {
-                filters[cid] = f;
+                if filter[cid].is_some() {
+                    return false;
+                }
+
+                filter[cid] = f;
             }
         }
-        filters
+
+        return true;
     }
 
     pub fn add_leaf_below(&mut self,
@@ -101,11 +105,7 @@ impl SqlToMirConverter {
                           name: &str,
                           params: &Vec<Column>)
                           -> MirQuery {
-        let columns: Vec<Column> = leaf.borrow()
-            .columns()
-            .iter()
-            .cloned()
-            .collect();
+        let columns: Vec<Column> = leaf.borrow().columns().iter().cloned().collect();
 
         // reuse the previous leaf node
         let parent = MirNode::reuse(leaf, self.schema_version);
@@ -129,8 +129,10 @@ impl SqlToMirConverter {
                                     vec![]);
 
         // always register lleaves
-        self.current.insert(String::from(name), self.schema_version);
-        self.nodes.insert((String::from(name), self.schema_version), new_leaf.clone());
+        self.current
+            .insert(String::from(name), self.schema_version);
+        self.nodes
+            .insert((String::from(name), self.schema_version), new_leaf.clone());
 
         // wrap in a (very short) query to return
         MirQuery {
@@ -167,21 +169,20 @@ impl SqlToMirConverter {
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
-                    self.current.insert(String::from(name), self.schema_version);
+                    self.current
+                        .insert(String::from(name), self.schema_version);
                 }
                 MirQuery::singleton(name, n)
             }
             SqlQuery::Insert(ref iq) => {
                 assert_eq!(name, iq.table.name);
-                let (cols, _): (Vec<Column>, Vec<String>) = iq.fields
-                    .iter()
-                    .cloned()
-                    .unzip();
+                let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
                 let n = self.make_base_node(&name, &cols, None);
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
-                    self.current.insert(String::from(name), self.schema_version);
+                    self.current
+                        .insert(String::from(name), self.schema_version);
                 }
                 MirQuery::singleton(name, n)
             }
@@ -226,7 +227,8 @@ impl SqlToMirConverter {
                    "expected just one leaf! leaves: {:?}",
                    leaves);
         let leaf = leaves.into_iter().next().unwrap();
-        self.current.insert(String::from(leaf.borrow().name()), self.schema_version);
+        self.current
+            .insert(String::from(leaf.borrow().name()), self.schema_version);
 
         MirQuery {
             name: String::from(name),
@@ -255,18 +257,20 @@ impl SqlToMirConverter {
                 if schema == cols {
                     // exact match, so reuse the existing base node
                     info!(self.log,
-                          "base table for {} already exists with identical schema in version {}; reusing it.",
+                          "base table for {} already exists with identical \
+                          schema in version {}; reusing it.",
                           name,
                           existing_sv);
                     let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
                     return MirNode::reuse(existing_node, self.schema_version);
                 } else {
                     // match, but schema is different, so we'll need to either:
-                    //  1) reuse the existing node, but add an upgrader for any changes in the column
-                    //     set, or
+                    //  1) reuse the existing node, but add an upgrader for any changes in the
+                    //     column set, or
                     //  2) give up and just make a new node
                     error!(self.log,
-                           "base table for {} already exists in version {}, but has a different schema!",
+                           "base table for {} already exists in version {}, \
+                           but has a different schema!",
                            name,
                            existing_sv);
                 }
@@ -291,7 +295,9 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let mut base_schemas = self.base_schemas.entry(String::from(name)).or_insert(Vec::new());
+        let mut base_schemas = self.base_schemas
+            .entry(String::from(name))
+            .or_insert(Vec::new());
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -300,7 +306,8 @@ impl SqlToMirConverter {
                 TableKey::PrimaryKey(ref key_cols) => {
                     debug!(self.log,
                            "Assigning primary key ({}) for base {}",
-                           key_cols.iter()
+                           key_cols
+                               .iter()
                                .map(|c| c.name.as_str())
                                .collect::<Vec<_>>()
                                .join(", "),
@@ -332,16 +339,18 @@ impl SqlToMirConverter {
         let mut new_nodes = vec![];
 
         let mut prev_node = parent;
-        for (i, cond) in predicates.iter().enumerate() {
-            let mut fields = prev_node.borrow()
-                .columns()
-                .iter()
-                .cloned()
-                .collect();
+        let mut fields: Vec<Column>;
+        fields = prev_node.borrow().columns().iter().cloned().collect();
+
+        let mut filter = vec![None; fields.len()];
+        for cond in predicates {
             // convert ConditionTree to a chain of Filter operators.
             // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
-            let filter = self.to_conditions(cond, &mut fields, &prev_node);
-            let f_name = format!("{}_f{}", name, i);
+            if self.add_conditions(&mut filter, cond, &mut fields, &prev_node) {
+                continue;
+            }
+
+            let f_name = format!("{}_f{}", name, new_nodes.len());
             let n = MirNode::new(&f_name,
                                  self.schema_version,
                                  fields,
@@ -350,7 +359,20 @@ impl SqlToMirConverter {
                                  vec![]);
             new_nodes.push(n.clone());
             prev_node = n;
+            fields = prev_node.borrow().columns().iter().cloned().collect();
+            filter = vec![None; fields.len()];
+            self.add_conditions(&mut filter, cond, &mut fields, &prev_node);
         }
+
+        assert!(!filter.is_empty(), "filter vector is empty");
+        let f_name = format!("{}_f{}", name, new_nodes.len());
+        let n = MirNode::new(&f_name,
+                             self.schema_version,
+                             fields,
+                             MirNodeType::Filter { conditions: filter },
+                             vec![prev_node.clone()],
+                             vec![]);
+        new_nodes.push(n.clone());
 
         new_nodes
     }
@@ -420,7 +442,10 @@ impl SqlToMirConverter {
 
         // The function node's set of output columns is the group columns plus the function
         // column
-        let mut combined_columns = group_by.iter().map(|c| (*c).clone()).collect::<Vec<Column>>();
+        let mut combined_columns = group_by
+            .iter()
+            .map(|c| (*c).clone())
+            .collect::<Vec<Column>>();
         combined_columns.push(computed_col.clone());
 
         // make the new operator
@@ -470,17 +495,20 @@ impl SqlToMirConverter {
                       right_node: MirNodeRef,
                       kind: JoinType)
                       -> MirNodeRef {
-        let projected_cols_left = left_node.borrow()
+        let projected_cols_left = left_node
+            .borrow()
             .columns()
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        let projected_cols_right = right_node.borrow()
+        let projected_cols_right = right_node
+            .borrow()
             .columns()
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        let fields = projected_cols_left.into_iter()
+        let fields = projected_cols_left
+            .into_iter()
             .chain(projected_cols_right.into_iter())
             .collect::<Vec<Column>>();
 
@@ -549,7 +577,8 @@ impl SqlToMirConverter {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
         let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
-        let fields = proj_cols.clone()
+        let fields = proj_cols
+            .clone()
             .into_iter()
             .map(|c| match c.alias {
                      Some(ref a) => {
@@ -562,28 +591,31 @@ impl SqlToMirConverter {
                      }
                      None => c.clone(),
                  })
-            .chain(literal_names.into_iter().map(|n| {
-                Column {
-                    name: n,
-                    alias: None,
-                    table: Some(String::from(name)),
-                    function: None,
-                }
-            }))
+            .chain(literal_names
+                       .into_iter()
+                       .map(|n| {
+                                Column {
+                                    name: n,
+                                    alias: None,
+                                    table: Some(String::from(name)),
+                                    function: None,
+                                }
+                            }))
             .collect();
 
         // remove aliases from emit columns because they are later compared to parent node columns
         // and need to be equal. Note that `fields`, which holds the column names applied,
         // preserves the aliases.
-        let emit_cols = proj_cols.into_iter()
+        let emit_cols = proj_cols
+            .into_iter()
             .cloned()
             .map(|mut c| {
-                match c.alias {
-                    Some(_) => c.alias = None,
-                    None => (),
-                };
-                c
-            })
+                     match c.alias {
+                         Some(_) => c.alias = None,
+                         None => (),
+                     };
+                     c
+                 })
             .collect();
 
         MirNode::new(name,
@@ -604,11 +636,7 @@ impl SqlToMirConverter {
                       order: &Option<OrderClause>,
                       limit: &LimitClause)
                       -> MirNodeRef {
-        let combined_columns = parent.borrow()
-            .columns()
-            .iter()
-            .cloned()
-            .collect();
+        let combined_columns = parent.borrow().columns().iter().cloned().collect();
 
         let order = match *order {
             Some(ref o) => Some(o.columns.clone()),
@@ -647,10 +675,7 @@ impl SqlToMirConverter {
         {
             // 0. Base nodes (always reused)
             let mut base_nodes: HashMap<&str, MirNodeRef> = HashMap::default();
-            let mut sorted_rels: Vec<&str> = qg.relations
-                .keys()
-                .map(String::as_str)
-                .collect();
+            let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
             sorted_rels.sort();
             for rel in &sorted_rels {
                 // the node holding computed columns doesn't have a base
@@ -770,17 +795,20 @@ impl SqlToMirConverter {
             sorted_rels.sort();
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
-                  continue;
+                    continue;
                 }
 
                 let qgn = &qg.relations[*rel];
                 for cond in &qgn.predicates {
-                  let col = match *cond.left.as_ref() {
-                      ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                      _ => unimplemented!(),
-                  };
+                    let col = match *cond.left.as_ref() {
+                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+                        _ => unimplemented!(),
+                    };
 
-                  filter_columns.entry(col).or_insert(Vec::new()).push(rel.to_string());
+                    filter_columns
+                        .entry(col)
+                        .or_insert(Vec::new())
+                        .push(rel.to_string());
                 }
             }
 
@@ -803,13 +831,16 @@ impl SqlToMirConverter {
                                 // the columns can come from different tables. In that case, we
                                 // would need to generate an Agg-Join-Agg sequence for each pair of
                                 // tables involved.
-                                let table = gb_cols.iter()
+                                let table = gb_cols
+                                    .iter()
                                     .next()
                                     .unwrap()
                                     .table
                                     .as_ref()
                                     .unwrap();
-                                assert!(gb_cols.iter().all(|c| c.table.as_ref().unwrap() == table));
+                                assert!(gb_cols
+                                            .iter()
+                                            .all(|c| c.table.as_ref().unwrap() == table));
 
                                 for fn_col in &computed_cols_cgn.columns {
                                     // we must also push parameter columns through the group by
@@ -817,35 +848,31 @@ impl SqlToMirConverter {
 
                                     // Check if filter reordering is needed
                                     if filter_columns.contains_key(over_col) {
-                                      let rels  = filter_columns.get(over_col).unwrap();
-                                      for rel in rels {
-                                        if !moved_filters.contains(rel) {
-                                          let qgn = &qg.relations[rel.as_str()];
-                                          let parent = match prev_node {
-                                              None => base_nodes[rel.as_str()].clone(),
-                                              Some(pn) => pn,
-                                          };
-                                          let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                                    qg.signature().hash,
-                                                                                    new_node_count),
+                                        let rels = filter_columns.get(over_col).unwrap();
+                                        for rel in rels {
+                                            if !moved_filters.contains(rel) {
+                                                let qgn = &qg.relations[rel.as_str()];
+                                                let parent = match prev_node {
+                                                    None => base_nodes[rel.as_str()].clone(),
+                                                    Some(pn) => pn,
+                                                };
+                                                let fns =
+                                                    self.make_filter_nodes(&format!("q_{:x}_n{}",
+                                                             qg.signature().hash,
+                                                             new_node_count),
                                                                            parent,
                                                                            &qgn.predicates);
-                                          assert!(fns.len() > 0);
-                                          new_node_count += fns.len();
-                                          prev_node = Some(fns.iter()
-                                                               .last()
-                                                               .unwrap()
-                                                               .clone());
-                                          filter_nodes.extend(fns);
-                                          moved_filters.push(rel.to_string());
+                                                assert!(fns.len() > 0);
+                                                new_node_count += fns.len();
+                                                prev_node =
+                                                    Some(fns.iter().last().unwrap().clone());
+                                                filter_nodes.extend(fns);
+                                                moved_filters.push(rel.to_string());
+                                            }
                                         }
-                                      }
                                     }
 
-                                    let over_table = over_col.table
-                                        .as_ref()
-                                        .unwrap()
-                                        .as_str();
+                                    let over_table = over_col.table.as_ref().unwrap().as_str();
                                     // get any parameter columns that aren't also in the group-by
                                     // column set
                                     let param_cols: Vec<_> = qg.relations
@@ -865,7 +892,8 @@ impl SqlToMirConverter {
                                         // If no explicit parent node is specified, we extract
                                         // the base node from the "over" column's specification
                                         None => base_nodes[over_table].clone(),
-                                        // We have an explicit parent node (likely a projection helper), so use that
+                                        // We have an explicit parent node (likely a projection
+                                        // helper), so use that
                                         Some(node) => node,
                                     };
 
@@ -884,7 +912,8 @@ impl SqlToMirConverter {
                         }
                     }
                     // Function columns without GROUP BY
-                    for computed_col in computed_cols_cgn.columns
+                    for computed_col in computed_cols_cgn
+                            .columns
                             .iter()
                             .filter(|c| !grouped_fn_columns.contains(c))
                             .collect::<Vec<_>>() {
@@ -896,41 +925,32 @@ impl SqlToMirConverter {
 
                         // Check if filter reordering is needed
                         if filter_columns.contains_key(over_col) {
-                          let rels  = filter_columns.get(over_col).unwrap();
-                          for rel in rels {
-                            if !moved_filters.contains(rel) {
-                              let qgn = &qg.relations[rel.as_str()];
-                              let parent = match prev_node {
-                                  None => base_nodes[rel.as_str()].clone(),
-                                  Some(pn) => pn,
-                              };
-                              let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                        qg.signature().hash,
-                                                                        new_node_count),
-                                                               parent,
-                                                               &qgn.predicates);
-                              assert!(fns.len() > 0);
-                              new_node_count += fns.len();
-                              prev_node = Some(fns.iter()
-                                                   .last()
-                                                   .unwrap()
-                                                   .clone());
-                              filter_nodes.extend(fns);
-                              moved_filters.push(rel.to_string());
+                            let rels = filter_columns.get(over_col).unwrap();
+                            for rel in rels {
+                                if !moved_filters.contains(rel) {
+                                    let qgn = &qg.relations[rel.as_str()];
+                                    let parent = match prev_node {
+                                        None => base_nodes[rel.as_str()].clone(),
+                                        Some(pn) => pn,
+                                    };
+                                    let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
+                                                                              qg.signature().hash,
+                                                                              new_node_count),
+                                                                     parent,
+                                                                     &qgn.predicates);
+                                    assert!(fns.len() > 0);
+                                    new_node_count += fns.len();
+                                    prev_node = Some(fns.iter().last().unwrap().clone());
+                                    filter_nodes.extend(fns);
+                                    moved_filters.push(rel.to_string());
+                                }
                             }
-                          }
                         }
 
-                        let over_table = over_col.table
-                            .as_ref()
-                            .unwrap()
-                            .as_str();
+                        let over_table = over_col.table.as_ref().unwrap().as_str();
 
-                        let ref proj_cols_from_target_table = qg.relations
-                            .get(over_table)
-                            .as_ref()
-                            .unwrap()
-                            .columns;
+                        let ref proj_cols_from_target_table =
+                            qg.relations.get(over_table).as_ref().unwrap().columns;
 
                         let parent_node = match prev_node {
                             Some(ref node) => node.clone(),
@@ -989,10 +1009,7 @@ impl SqlToMirConverter {
                                                          &qgn.predicates);
                         assert!(fns.len() > 0);
                         new_node_count += fns.len();
-                        prev_node = Some(fns.iter()
-                                             .last()
-                                             .unwrap()
-                                             .clone());
+                        prev_node = Some(fns.iter().last().unwrap().clone());
                         filter_nodes.extend(fns);
                     }
                 }
@@ -1027,7 +1044,8 @@ impl SqlToMirConverter {
             debug_assert_eq!(new_node_count,
                              join_nodes.len() + func_nodes.len() + filter_nodes.len());
             // we're now done with the query, so remember all the nodes we've added so far
-            nodes_added = base_nodes.into_iter()
+            nodes_added = base_nodes
+                .into_iter()
                 .map(|(_, n)| n)
                 .chain(join_nodes.into_iter())
                 .chain(func_nodes.into_iter())
@@ -1035,10 +1053,12 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
-                v.extend(qg.relations[*s].columns.iter());
-                v
-            });
+            let projected_columns: Vec<&Column> = sorted_rels
+                .iter()
+                .fold(Vec::new(), |mut v, s| {
+                    v.extend(qg.relations[*s].columns.iter());
+                    v
+                });
 
             let leaf_project_node =
                 self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
@@ -1050,7 +1070,8 @@ impl SqlToMirConverter {
             // We always materialize leaves of queries (at least currently), so add a
             // `MaterializedLeaf` node keyed on the query parameters.
             let query_params = qg.parameters();
-            let columns = leaf_project_node.borrow()
+            let columns = leaf_project_node
+                .borrow()
                 .columns()
                 .iter()
                 .cloned()

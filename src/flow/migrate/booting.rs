@@ -18,7 +18,8 @@ use std::thread;
 use slog::Logger;
 
 fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
-    nodes.into_iter()
+    nodes
+        .into_iter()
         .map(|(ni, _)| single::NodeDescriptor::new(graph, ni))
         .map(|nd| (*nd.addr().as_local(), cell::RefCell::new(nd)))
         .collect()

@@ -60,11 +60,7 @@ pub fn push_all_base_columns(q: &mut MirQuery) {
 
     while !queue.is_empty() {
         let mn = queue.pop().unwrap();
-        let columns: Vec<Column> = mn.borrow()
-            .columns()
-            .into_iter()
-            .cloned()
-            .collect();
+        let columns: Vec<Column> = mn.borrow().columns().into_iter().cloned().collect();
         for child in mn.borrow().children() {
             // N.B. this terminates before reaching the actual leaf, since the last node of the
             // query (before the MIR `Leaf` node) already carries the query name. (`Leaf` nodes are
