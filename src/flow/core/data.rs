@@ -251,6 +251,16 @@ impl From<Vec<DataType>> for Record {
     }
 }
 
+impl From<(sync::Arc<Vec<DataType>>, bool)> for Record {
+    fn from(other: (sync::Arc<Vec<DataType>>, bool)) -> Self {
+        if other.1 {
+            Record::Positive(other.0)
+        } else {
+            Record::Negative(other.0)
+        }
+    }
+}
+
 impl From<(Vec<DataType>, bool)> for Record {
     fn from(other: (Vec<DataType>, bool)) -> Self {
         if other.1 {

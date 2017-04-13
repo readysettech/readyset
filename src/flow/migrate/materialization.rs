@@ -312,7 +312,7 @@ pub fn index(log: &Logger,
                 // so we assume it's not in use.
 
                 let ref node = graph[map[&n]];
-                if node.is_internal() && node.is_base() {
+                if node.is_internal() && node.get_base().is_some() {
                     // but it's a base nodes!
                     // we must *always* materialize base nodes
                     // so, just make up some column to index on
@@ -678,12 +678,15 @@ pub fn reconstruct(log: &Logger,
         debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
 
         let locals = |i: usize| -> Vec<(NodeAddress, Option<usize>)> {
-            let skip = if i == 0 {
+            let mut skip = 0;
+            if i == 0 {
                 // we're not replaying through the starter node
-                1
-            } else {
-                0
-            };
+                // *unless* it's a Base (because it might need to add defaults)
+                let n = &graph[segments[0].1[0].0];
+                if !n.is_internal() || n.get_base().is_none() {
+                    skip = 1
+                }
+            }
 
             segments[i]
                 .1

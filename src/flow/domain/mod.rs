@@ -432,6 +432,28 @@ impl Domain {
                 self.nodes.insert(addr, cell::RefCell::new(node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
             }
+            Packet::AddBaseColumn {
+                node,
+                field,
+                default,
+                ack,
+            } => {
+                let mut n = self.nodes[&node].borrow_mut();
+                n.inner.add_column(&field);
+                n.inner
+                    .get_base_mut()
+                    .expect("told to add base column to non-base node")
+                    .add_column(default);
+                drop(ack);
+            }
+            Packet::DropBaseColumn { node, column, ack } => {
+                let mut n = self.nodes[&node].borrow_mut();
+                n.inner
+                    .get_base_mut()
+                    .expect("told to drop base column from non-base node")
+                    .drop_column(column);
+                drop(ack);
+            }
             Packet::StateSizeProbe { node, ack } => {
                 if let Some(state) = self.state.get(&node) {
                     ack.send(state.len()).unwrap();
@@ -558,7 +580,7 @@ impl Domain {
                 if !index.is_empty() {
                     let mut s = {
                         let n = self.nodes[&node].borrow();
-                        if n.is_internal() && n.is_base() {
+                        if n.is_internal() && n.get_base().is_some() {
                             State::base()
                         } else {
                             State::default()
@@ -768,6 +790,14 @@ impl Domain {
                 use flow::node::Type;
                 let n = self.nodes[path[0].0.as_local()].borrow();
                 if let Type::Reader(..) = *n.inner {
+                    can_handle_directly = false;
+                }
+            }
+
+            if can_handle_directly {
+                let n = self.nodes[path[0].0.as_local()].borrow();
+                if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
+                    // also need to include defaults for new columns
                     can_handle_directly = false;
                 }
             }

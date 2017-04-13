@@ -8,6 +8,7 @@ use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use time;
+use vec_map::VecMap;
 
 // 4k buffered log.
 const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
@@ -46,6 +47,10 @@ pub struct Base {
     unique_id: ProcessUniqueId,
 
     us: Option<NodeAddress>,
+
+    defaults: Vec<DataType>,
+    dropped: Vec<usize>,
+    unmodified: bool,
 }
 
 /// Specifies the level of durability that this base node should offer. Stronger guarantees imply a
@@ -64,17 +69,56 @@ pub enum BaseDurabilityLevel {
 
 impl Base {
     /// Create a non-durable base node operator.
-    pub fn new(primary_key: Vec<usize>) -> Self {
+    pub fn new(defaults: Vec<DataType>) -> Self {
         let mut base = Base::default();
-        base.primary_key = Some(primary_key);
+        base.defaults = defaults;
         base
     }
 
-    /// Create durable base node operator.
-    pub fn new_durable(primary_key: Vec<usize>, durability: BaseDurabilityLevel) -> Self {
-        let mut base = Base::new(primary_key);
-        base.durability = Some(durability);
-        base
+    /// Builder with a known primary key.
+    pub fn with_key(mut self, primary_key: Vec<usize>) -> Base {
+        self.primary_key = Some(primary_key);
+        self
+    }
+
+    /// Builder with a durability level.
+    pub fn with_durability(mut self, durability: BaseDurabilityLevel) -> Base {
+        self.durability = Some(durability);
+        self
+    }
+
+    /// Add a new column to this base node.
+    pub fn add_column(&mut self, default: DataType) -> usize {
+        assert!(!self.defaults.is_empty(),
+                "cannot add columns to base nodes without\
+                setting default values for initial columns");
+        self.defaults.push(default);
+        self.unmodified = false;
+        self.defaults.len() - 1
+    }
+
+    /// Drop a column from this base node.
+    pub fn drop_column(&mut self, column: usize) {
+        assert!(!self.defaults.is_empty(),
+                "cannot add columns to base nodes without setting default values for initial columns");
+        assert!(column < self.defaults.len());
+        self.unmodified = false;
+
+        // note that we don't need to *do* anything for dropped columns when we receive records.
+        // the only thing that matters is that new Mutators remember to inject default values for
+        // dropped columns.
+        self.dropped.push(column);
+    }
+
+    pub(crate) fn get_dropped(&self) -> VecMap<DataType> {
+        self.dropped
+            .iter()
+            .map(|&col| (col, self.defaults[col].clone()))
+            .collect()
+    }
+
+    pub(crate) fn is_unmodified(&self) -> bool {
+        self.unmodified
     }
 
     /// Whether this base node should delete its durable log on drop.  Used when durable log is not
@@ -199,6 +243,10 @@ impl Clone for Base {
             should_delete_log_on_drop: self.should_delete_log_on_drop,
             unique_id: ProcessUniqueId::new(),
             us: self.us,
+
+            defaults: self.defaults.clone(),
+            dropped: self.dropped.clone(),
+            unmodified: self.unmodified,
         }
     }
 }
@@ -215,6 +263,10 @@ impl Default for Base {
             should_delete_log_on_drop: false,
             unique_id: ProcessUniqueId::new(),
             us: None,
+
+            defaults: Vec::new(),
+            dropped: Vec::new(),
+            unmodified: true,
         }
     }
 }
@@ -281,6 +333,7 @@ impl Ingredient for Base {
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
+
                     return ProcessingResult {
                                results: Records::default(),
                                misses: Vec::new(),
@@ -296,30 +349,65 @@ impl Ingredient for Base {
             }
         }
 
-        let rs = records_to_return
-            .into_iter()
-            .map(|r| match r {
-                     Record::Positive(u) => Record::Positive(u),
-                     Record::Negative(u) => Record::Negative(u),
-                     Record::DeleteRequest(key) => {
-                let cols = self.primary_key
-                    .as_ref()
-                    .expect("base must have a primary key to support deletions");
-                let db =
-                    state
-                        .get(self.us.as_ref().unwrap().as_local())
+        let results = records_to_return.into_iter()
+            .map(|r| {
+                //rustfmt
+                match r {
+                    Record::Positive(u) => Record::Positive(u),
+                    Record::Negative(u) => Record::Negative(u),
+                    Record::DeleteRequest(key) => {
+                        let cols = self.primary_key
+                            .as_ref()
+                            .expect("base must have a primary key to support deletions");
+                        let db =
+                    state.get(self.us
+                                  .as_ref()
+                                  .unwrap()
+                                  .as_local())
                         .expect("base must have its own state materialized to support deletions");
 
-                match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
-                    LookupResult::Some(rows) => {
-                        assert_eq!(rows.len(), 1);
-                        Record::Negative(rows[0].clone())
+                        match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                            LookupResult::Some(rows) => {
+                                assert_eq!(rows.len(), 1);
+                                Record::Negative(rows[0].clone())
+                            }
+                            LookupResult::Missing => unreachable!(),
+                        }
                     }
-                    LookupResult::Missing => unreachable!(),
                 }
-            }
-                 })
-            .collect();
+            });
+
+        let rs = if self.unmodified {
+            results.collect()
+        } else {
+            results.map(|r| {
+                    //rustfmt
+                    if r.len() != self.defaults.len() {
+                        let rlen = r.len();
+                        let (mut v, pos) = r.extract();
+
+                        use std::sync::Arc;
+                        if let Some(mut v) = Arc::get_mut(&mut v) {
+                            v.extend(self.defaults.iter().skip(rlen).cloned());
+                        }
+
+                        // the trick above failed, probably because we're doing a replay
+                        if v.len() == rlen {
+                            let newv = v.iter()
+                                .cloned()
+                                .chain(self.defaults.iter().skip(rlen).cloned())
+                                .collect();
+                            v = Arc::new(newv)
+                        }
+
+                        (v, pos).into()
+                    } else {
+                        r
+                    }
+                })
+                .collect()
+        };
+
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
@@ -340,8 +428,12 @@ impl Ingredient for Base {
         None
     }
 
-    fn is_base(&self) -> bool {
-        true
+    fn get_base(&self) -> Option<&Base> {
+        Some(self)
+    }
+
+    fn get_base_mut(&mut self) -> Option<&mut Base> {
+        Some(self)
     }
 
     fn description(&self) -> String {
@@ -360,6 +452,7 @@ mod tests {
     #[test]
     fn it_works_default() {
         let b = Base::default();
+
         assert!(b.buffered_writes.is_some());
         assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert!(b.durability.is_none());
@@ -368,44 +461,63 @@ mod tests {
         assert!(b.primary_key.is_none());
         assert_eq!(b.should_delete_log_on_drop, false);
         assert!(b.us.is_none());
+
+        assert_eq!(b.defaults.len(), 0);
+        assert_eq!(b.dropped.len(), 0);
+        assert_eq!(b.unmodified, true);
     }
 
     #[test]
     fn it_works_new() {
-        let b = Base::new(vec![0]);
+        let b = Base::new(vec![]);
+
         assert!(b.buffered_writes.is_some());
         assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert!(b.durability.is_none());
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
-        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert!(b.primary_key.is_none());
         assert_eq!(b.should_delete_log_on_drop, false);
         assert!(b.us.is_none());
+
+        assert_eq!(b.defaults.len(), 0);
+        assert_eq!(b.dropped.len(), 0);
+        assert_eq!(b.unmodified, true);
     }
 
     #[test]
     fn it_works_durability_buffered() {
-        let b = Base::new_durable(vec![0], BaseDurabilityLevel::Buffered);
+        let b = Base::new(vec![]).with_durability(BaseDurabilityLevel::Buffered);
+
         assert!(b.buffered_writes.is_some());
         assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert_eq!(b.durability, Some(BaseDurabilityLevel::Buffered));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
-        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert!(b.primary_key.is_none());
         assert_eq!(b.should_delete_log_on_drop, false);
         assert!(b.us.is_none());
+
+        assert_eq!(b.defaults.len(), 0);
+        assert_eq!(b.dropped.len(), 0);
+        assert_eq!(b.unmodified, true);
     }
 
     #[test]
     fn it_works_durability_sync_immediately() {
-        let b = Base::new_durable(vec![0], BaseDurabilityLevel::SyncImmediately);
+        let b = Base::new(vec![]).with_durability(BaseDurabilityLevel::SyncImmediately);
+
         assert!(b.buffered_writes.is_some());
         assert_eq!(b.buffered_writes.as_ref().unwrap().len(), 0);
         assert_eq!(b.durability, Some(BaseDurabilityLevel::SyncImmediately));
         assert!(b.durable_log.is_none());
         assert!(b.durable_log_path.is_none());
-        assert_eq!(b.primary_key.as_ref().unwrap().len(), 1);
+        assert!(b.primary_key.is_none());
         assert_eq!(b.should_delete_log_on_drop, false);
         assert!(b.us.is_none());
+
+        assert_eq!(b.defaults.len(), 0);
+        assert_eq!(b.dropped.len(), 0);
+        assert_eq!(b.unmodified, true);
     }
 }

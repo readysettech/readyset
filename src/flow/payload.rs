@@ -101,6 +101,21 @@ pub enum Packet {
         parents: Vec<LocalNodeIndex>,
     },
 
+    /// Add a new column to an existing `Base` node.
+    AddBaseColumn {
+        node: LocalNodeIndex,
+        field: String,
+        default: DataType,
+        ack: mpsc::SyncSender<()>,
+    },
+
+    /// Drops an existing column from a `Base` node.
+    DropBaseColumn {
+        node: LocalNodeIndex,
+        column: usize,
+        ack: mpsc::SyncSender<()>,
+    },
+
     /// Request a handle to an unbounded channel to this domain.
     ///
     /// We need these channels to send replay requests, as using the bounded channels could easily
