@@ -914,7 +914,7 @@ impl<'a> Migration<'a> {
         // Set up input channels for new domains
         for domain in domain_nodes.keys() {
             if !mainline.txs.contains_key(domain) {
-                let (tx, rx) = mpsc::sync_channel(10);
+                let (tx, rx) = mpsc::sync_channel(256);
                 rxs.insert(*domain, rx);
                 mainline.txs.insert(*domain, tx);
             }
