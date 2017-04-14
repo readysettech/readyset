@@ -580,8 +580,8 @@ impl<'a> Migration<'a> {
               S2: ToString,
               FS: IntoIterator<Item = S2>
     {
-	// transactions require a base node with SyncImmediately durability
-	let d = BaseDurabilityLevel::SyncImmediately;
+        // transactions require a base node with SyncImmediately durability
+        let d = BaseDurabilityLevel::SyncImmediately;
         let mut i: node::Type = b.with_durability(d).into();
         i.on_connected(&self.mainline.ingredients);
 
