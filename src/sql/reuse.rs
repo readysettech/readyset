@@ -148,11 +148,12 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
             let mut matched = false;
             for np in &new_qgn.predicates {
                 if np.left == ep.left {
-                    println!("matching predicates --\nexisting: {:#?},\nnew: {:#?}",
-                             ep,
-                             np);
+                    // trace!(log,
+                    //        "matching predicates --\nexisting: {:#?},\nnew: {:#?}",
+                    //        ep,
+                    //        np);
                     if !predicate_implies(np, ep) {
-                        println!("Failed: {:?} does not imply {:?}", np, ep);
+                        // trace!(log, "Failed: {:?} does not imply {:?}", np, ep);
                         return None;
                     } else {
                         matched = true;
@@ -161,7 +162,7 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
             }
             if !matched {
                 // We found no matching predicate for np, so we give up now.
-                println!("Failed: no matching predicate for {:#?}", ep);
+                // trace!(log, "Failed: no matching predicate for {:#?}", ep);
                 return None;
             }
         }
