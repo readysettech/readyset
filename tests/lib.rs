@@ -652,6 +652,7 @@ fn migrate_added_columns() {
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a third column to a, and a view that uses it
     let b = {
@@ -703,6 +704,7 @@ fn migrate_drop_columns() {
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // drop a column
     {
@@ -715,6 +717,7 @@ fn migrate_drop_columns() {
     // and should inject default for a.b
     let muta2 = g.get_mutator(a);
     muta2.put(vec![id.clone()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a new column
     {
