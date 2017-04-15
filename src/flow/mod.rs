@@ -376,10 +376,16 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) transactional reader node.
-    pub fn get_transactional_getter
-        (&self,
-         node: core::NodeAddress)
--> Option<Box<Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()> + Send>>{
+    pub fn get_transactional_getter(&self,
+                                    node: core::NodeAddress)
+                                    -> Result<Box<Fn(&prelude::DataType)
+                                                     -> Result<(core::Datas, checktable::Token),
+                                                                ()> + Send>,
+                                              ()> {
+
+        if !self.ingredients[*node.as_global()].is_transactional() {
+            return Err(());
+        }
 
         // reader should be a child of the given node
         trace!(self.log, "creating transactional reader"; "for" => node.as_global().index());
@@ -392,17 +398,22 @@ impl Blender {
                         })
             .next(); // there should be at most one
 
-        reader.map(|inner| {
+        reader.map_or(Err(()), |inner| {
             let arc = inner.state.as_ref().unwrap().clone();
             let generator = inner.token_generator.clone().unwrap();
-            Box::new(move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
-                arc.find_and(q,
-                              |rs| rs.into_iter().map(|v| (&**v).clone()).collect::<Vec<_>>())
-                    .map(|(res, ts)| {
-                        let token = generator.generate(ts, q.clone());
-                        (res.unwrap_or_else(Vec::new), token)
-                    })
-            }) as Box<_>
+            let f =
+                move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
+                    arc.find_and(q, |rs| {
+                            rs.into_iter()
+                                .map(|v| (&**v).clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .map(|(res, ts)| {
+                                 let token = generator.generate(ts, q.clone());
+                                 (res.unwrap_or_else(Vec::new), token)
+                             })
+                };
+            Ok(Box::new(f) as Box<_>)
         })
     }
 
@@ -770,39 +781,15 @@ impl<'a> Migration<'a> {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `Blender::get_getter`.
+    /// To query into the maintained state, use `Blender::get_getter` or
+    /// `Blender::get_transactional_getter`
     pub fn maintain(&mut self, n: core::NodeAddress, key: usize) {
         self.ensure_reader_for(n);
-        let ri = self.readers[n.as_global()];
-
-        // we need to do these here because we'll mutably borrow self.mainline in the if let
-        let cols = self.mainline.ingredients[ri].fields().len();
-
-        if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
-            if let Some(ref s) = inner.state {
-                assert_eq!(s.key(), key);
-            } else {
-                use backlog;
-                let (r, w) = backlog::new(cols, key);
-                inner.state = Some(r);
-                *wh = Some(w);
-            }
-        } else {
-            unreachable!("tried to use non-reader node as a reader")
+        if self.mainline.ingredients[*n.as_global()].is_transactional() {
+            self.ensure_token_generator(n, key);
         }
-    }
 
-    /// Set up the given node such that its output can be efficiently queried, and the results can
-    /// be used in transactions.
-    ///
-    ///
-    /// To query into the maintained state, use `Blender::get_transactional_getter`.
-    pub fn transactional_maintain(&mut self, n: core::NodeAddress, key: usize) {
-        self.ensure_reader_for(n);
-        self.ensure_token_generator(n, key);
         let ri = self.readers[n.as_global()];
-
-        assert!(self.mainline.ingredients[ri].is_transactional());
 
         // we need to do these here because we'll mutably borrow self.mainline in the if let
         let cols = self.mainline.ingredients[ri].fields().len();

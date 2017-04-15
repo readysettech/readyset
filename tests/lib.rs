@@ -372,7 +372,7 @@ fn transactional_vote() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.transactional_maintain(article, 0);
+        mig.maintain(article, 0);
 
         // add vote base table
         let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
@@ -390,9 +390,9 @@ fn transactional_vote() {
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end_votes = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
 
-        mig.transactional_maintain(end, 0);
-        mig.transactional_maintain(end_title, 1);
-        mig.transactional_maintain(end_votes, 2);
+        mig.maintain(end, 0);
+        mig.maintain(end_title, 1);
+        mig.maintain(end_votes, 2);
 
         // start processing
         mig.commit();
@@ -787,7 +787,7 @@ fn transactional_migration() {
     let a = {
         let mut mig = g.start_migration();
         let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
-        mig.transactional_maintain(a, 0);
+        mig.maintain(a, 0);
         mig.commit();
         a
     };
@@ -809,7 +809,7 @@ fn transactional_migration() {
     let b = {
         let mut mig = g.start_migration();
         let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
-        mig.transactional_maintain(b, 0);
+        mig.maintain(b, 0);
         mig.commit();
         b
     };
@@ -834,7 +834,7 @@ fn transactional_migration() {
         emits.insert(b, vec![0, 1]);
         let u = distributary::Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.transactional_maintain(c, 0);
+        mig.maintain(c, 0);
         mig.commit();
         c
     };
