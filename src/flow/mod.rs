@@ -240,6 +240,7 @@ pub struct Blender {
     partial: HashSet<NodeIndex>,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
+    in_txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
     domains: Vec<thread::JoinHandle<()>>,
 
     log: slog::Logger,
@@ -260,6 +261,7 @@ impl Default for Blender {
             partial: Default::default(),
 
             txs: HashMap::default(),
+            in_txs: HashMap::default(),
             domains: Vec::new(),
 
             log: slog::Logger::root(slog::Discard, None),
@@ -914,9 +916,11 @@ impl<'a> Migration<'a> {
         // Set up input channels for new domains
         for domain in domain_nodes.keys() {
             if !mainline.txs.contains_key(domain) {
-                let (tx, rx) = mpsc::sync_channel(256);
-                rxs.insert(*domain, rx);
+                let (in_tx, in_rx) = mpsc::sync_channel(256);
+                let (tx, rx) = mpsc::sync_channel(10);
+                rxs.insert(*domain, (rx, in_rx));
                 mainline.txs.insert(*domain, tx);
+                mainline.in_txs.insert(*domain, in_tx);
             }
         }
 
@@ -1028,12 +1032,14 @@ impl<'a> Migration<'a> {
             }
 
             // Start up new domain
+            let (rx, in_rx) = rxs.remove(&domain).unwrap();
             let jh = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
                                                 domain.index().into(),
                                                 &mut mainline.ingredients,
                                                 uninformed_domain_nodes.remove(&domain).unwrap(),
                                                 mainline.checktable.clone(),
-                                                rxs.remove(&domain).unwrap(),
+                                                rx,
+                                                in_rx,
                                                 start_ts);
             mainline.domains.push(jh);
         }

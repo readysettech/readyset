@@ -1405,7 +1405,10 @@ impl Domain {
         }
     }
 
-    pub fn boot(mut self, rx: mpsc::Receiver<Packet>) -> thread::JoinHandle<()> {
+    pub fn boot(mut self,
+                rx: mpsc::Receiver<Packet>,
+                input_rx: mpsc::Receiver<Packet>)
+                -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes
             .values()
@@ -1425,6 +1428,7 @@ impl Domain {
                 let mut rx_handle = sel.handle(&rx);
                 let mut inject_rx_handle = sel.handle(&inject_rx);
                 let mut back_rx_handle = sel.handle(&back_rx);
+                let mut input_rx_handle = sel.handle(&input_rx);
 
                 unsafe {
                     // select is currently not fair, but tries in order
@@ -1432,8 +1436,10 @@ impl Domain {
                     inject_rx_handle.add();
                     // then see if there are outstanding replay requests
                     back_rx_handle.add();
-                    // and lastly, see if there's new data
+                    // then see if there's new data from our ancestors
                     rx_handle.add();
+                    // and *then* see if there's new base node input
+                    input_rx_handle.add();
                 }
 
                 self.inject_tx = Some(inject_tx);
@@ -1451,6 +1457,10 @@ impl Domain {
                         inject_rx_handle.recv()
                     } else if id == back_rx_handle.id() {
                         back_rx_handle.recv()
+                    } else if id == input_rx_handle.id() {
+                        let m = input_rx_handle.recv();
+                        debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
+                        m
                     } else {
                         unreachable!()
                     };
