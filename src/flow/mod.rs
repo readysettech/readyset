@@ -413,7 +413,7 @@ impl Blender {
             .next()
             .unwrap();
         let node = &self.ingredients[n];
-        let tx = self.txs[&node.domain()].clone();
+        let tx = self.in_txs[&node.domain()].clone();
 
         trace!(self.log, "creating mutator"; "for" => n.index());
 
