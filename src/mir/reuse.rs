@@ -91,9 +91,17 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
     let mut rewritten_leaf = new_query.leaf.clone();
 
     let mut q: VecDeque<MirNodeRef> = new_query.roots.iter().cloned().collect();
-    // XXX(malte): should be topological order traversal; currently ends up repeatedly
-    // visiting a bunch of nodes unnecessarily
+    let mut in_edge_counts = HashMap::new();
+    for n in &q {
+        in_edge_counts.insert(n.borrow().versioned_name(), 0);
+    }
+
+    let mut found_leaf = false;
+    // topological order traversal of new query, replacing each node with its reuse node if one
+    // exists (i.e., was created above)
     while let Some(n) = q.pop_front() {
+        assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
         let ancestors: Vec<_> = n.borrow()
             .ancestors()
             .iter()
@@ -122,6 +130,8 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
             rewritten_roots.push(real_n.clone());
         }
         if children.is_empty() {
+            assert!(!found_leaf); // should only find one leaf!
+            found_leaf = true;
             rewritten_leaf = real_n.clone();
         }
 
@@ -129,7 +139,18 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
         real_n.borrow_mut().children = children;
 
         for c in &n.borrow().children {
-            q.push_back(c.clone());
+            let cid = c.borrow().versioned_name();
+            let in_edges = if in_edge_counts.contains_key(&cid) {
+                in_edge_counts[&cid]
+            } else {
+                c.borrow().ancestors.len()
+            };
+            assert!(in_edges >= 1, format!("{} has no incoming edges!", cid));
+            if in_edges == 1 {
+                // last edge removed
+                q.push_back(c.clone());
+            }
+            in_edge_counts.insert(cid, in_edges - 1);
         }
     }
 

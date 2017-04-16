@@ -318,6 +318,14 @@ impl MirNode {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn is_reused(&self) -> bool {
+        match self.inner {
+            MirNodeType::Reuse { .. } => true,
+            _ => false,
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
