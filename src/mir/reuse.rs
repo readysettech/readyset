@@ -36,6 +36,10 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
         {
             let o_ref = old.clone();
             let o = old.borrow();
+            // Note that we manually build the `MirNode` here, rather than calling `MirNode::new()`
+            // because `new()` automatically registers the node as a child with its ancestors. We
+            // don't want to do this here because we later re-write the ancestors' child that this
+            // node replaces to point to this node.
             reuse_node = Rc::new(RefCell::new(MirNode {
                                                   name: o.name.clone(),
                                                   from_version: o.from_version,
