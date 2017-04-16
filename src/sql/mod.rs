@@ -174,6 +174,9 @@ impl SqlIncorporator {
             if existing_qg
                    .signature()
                    .is_generalization_of(&qg.signature()) {
+                trace!(self.log,
+                       "Checking reuse compatibility of {:#?}",
+                       existing_qg);
                 match reuse::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
@@ -394,6 +397,7 @@ impl SqlIncorporator {
                         }
                     }
                     QueryGraphReuse::ExtendExisting(mq) => {
+                        trace!(self.log, "Extending existing query!");
                         self.extend_existing_query(&query_name, sq, qg, mq, mig)
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
