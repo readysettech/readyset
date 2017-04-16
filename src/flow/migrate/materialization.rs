@@ -537,7 +537,24 @@ pub fn reconstruct(log: &Logger,
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
     let mut partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-                         paths.iter().all(|path| path.last().unwrap().1.is_some());
+                         paths
+                             .iter()
+                             .all(|path| {
+        let &(node, col) = path.last().unwrap();
+        if col.is_none() {
+            // doesn't trace back to a column
+            return false;
+        }
+
+        let n = &graph[node];
+        let col = col.unwrap();
+        // node must also have an *index* on col
+        materialized
+            .get(&n.domain())
+            .and_then(|d| d.get(n.addr().as_local()))
+            .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
+            .unwrap_or(false)
+    });
 
     // FIXME: if a reader has no materialized views between it and a union, we will end
     // up in this case. we *can* solve that case by requesting replays across all

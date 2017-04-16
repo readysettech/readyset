@@ -749,7 +749,6 @@ fn migrate_drop_columns() {
 }
 
 #[test]
-#[ignore]
 fn key_on_added() {
     // set up graph
     let mut g = distributary::Blender::new();
@@ -767,9 +766,6 @@ fn key_on_added() {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
-        // interestingly, this *also* currently fails if s/0/1/. I *believe* this is because the
-        // code decides to do partial materialization, even though the key provenence does *not* go
-        // all the way back to the Base for 2 *or* 1 (since it is keyed on a[0]).
         mig.maintain(b, 0);
         mig.commit();
         b
