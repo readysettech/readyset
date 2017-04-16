@@ -333,6 +333,8 @@ impl SqlIncorporator {
                              extend_mir: MirQuery,
                              mut mig: &mut Migration)
                              -> QueryFlowParts {
+        use super::mir::reuse::merge_mir_for_queries;
+
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let new_query_mir = self.mir_converter
@@ -341,7 +343,7 @@ impl SqlIncorporator {
         let new_opt_mir = new_query_mir.optimize();
 
         // compare to existing query MIR and reuse prefix
-        let mut reused_mir = reuse::merge_mir_for_queries(&new_opt_mir, &extend_mir);
+        let mut reused_mir = merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
         let qfp = reused_mir.into_flow_parts(&mut mig);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node

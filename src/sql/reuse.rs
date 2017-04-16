@@ -1,4 +1,3 @@
-use mir::MirQuery;
 use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, Table};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
@@ -280,12 +279,6 @@ pub fn choose_best_option(options: Vec<(ReuseType, &QueryGraph)>) -> (ReuseType,
     assert!(best_score > 0);
 
     best_choice.unwrap()
-}
-
-pub fn merge_mir_for_queries(new_query: &MirQuery, _old_query: &MirQuery) -> MirQuery {
-    // XXX(malte): topologically traverse both MIR graphs and convert new nodes into Reuse nodes
-    // for those that match
-    new_query.clone()
 }
 
 #[cfg(test)]
