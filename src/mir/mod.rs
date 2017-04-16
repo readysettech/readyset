@@ -746,6 +746,20 @@ impl MirNodeType {
                     _ => false,
                 }
             }
+            MirNodeType::Project {
+                ref emit,
+                ref literals,
+            } => {
+                let our_emit = emit;
+                let our_literals = literals;
+                match *other {
+                    MirNodeType::Project {
+                        ref emit,
+                        ref literals,
+                    } => our_emit == emit && our_literals == literals,
+                    _ => false,
+                }
+            }
             MirNodeType::Reuse { ref node } => {
                 let us = node;
                 match *other {
