@@ -66,14 +66,12 @@ impl MirQuery {
         let mut nodes = Vec::new();
 
         // starting at the roots, traverse in topological order
-        let mut node_queue = VecDeque::new();
-        node_queue.extend(self.roots.iter().cloned());
+        let mut node_queue: VecDeque<_> = self.roots.iter().cloned().collect();
         let mut in_edge_counts = HashMap::new();
         for n in &node_queue {
             in_edge_counts.insert(n.borrow().versioned_name(), 0);
         }
-        while !node_queue.is_empty() {
-            let n = node_queue.pop_front().unwrap();
+        while let Some(n) = node_queue.pop_front() {
             assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
 
             nodes.push(n.clone());
@@ -85,7 +83,7 @@ impl MirQuery {
                 } else {
                     child.borrow().ancestors.len()
                 };
-                assert!(in_edges >= 1);
+                assert!(in_edges >= 1, format!("{} has no incoming edges!", nd));
                 if in_edges == 1 {
                     // last edge removed
                     node_queue.push_back(child.clone());
