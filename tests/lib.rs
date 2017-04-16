@@ -984,7 +984,7 @@ fn transactional_migration() {
         let mut mig = g.start_migration();
         let a = mig.add_transactional_base("a", &["a", "b"],
                                            distributary::Base::default().delete_log_on_drop());
-        mig.transactional_maintain(a, 0);
+        mig.maintain(a, 0);
         mig.commit();
         a
     };
@@ -1007,7 +1007,7 @@ fn transactional_migration() {
         let mut mig = g.start_migration();
         let b = mig.add_transactional_base("b", &["a", "b"],
                                            distributary::Base::default().delete_log_on_drop());
-        mig.transactional_maintain(b, 0);
+        mig.maintain(b, 0);
         mig.commit();
         b
     };
