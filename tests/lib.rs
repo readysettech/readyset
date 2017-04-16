@@ -571,7 +571,7 @@ fn transactional_vote() {
         emits.insert(article2, vec![0, 1]);
         let u = Union::new(emits);
         let article = mig.add_ingredient("article", &["id", "title"], u);
-        mig.transactional_maintain(article, 0);
+        mig.maintain(article, 0);
 
         // add vote base table
         let vote = mig.add_transactional_base("vote", &["user", "id"],
@@ -590,9 +590,9 @@ fn transactional_vote() {
         let end_title = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
         let end_votes = mig.add_ingredient("end2", &["id", "title", "votes"], Identity::new(end));
 
-        mig.transactional_maintain(end, 0);
-        mig.transactional_maintain(end_title, 1);
-        mig.transactional_maintain(end_votes, 2);
+        mig.maintain(end, 0);
+        mig.maintain(end_title, 1);
+        mig.maintain(end_votes, 2);
 
         // start processing
         mig.commit();
@@ -852,6 +852,7 @@ fn migrate_added_columns() {
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a third column to a, and a view that uses it
     let b = {
@@ -903,6 +904,7 @@ fn migrate_drop_columns() {
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // drop a column
     {
@@ -915,6 +917,7 @@ fn migrate_drop_columns() {
     // and should inject default for a.b
     let muta2 = g.get_mutator(a);
     muta2.put(vec![id.clone()]);
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a new column
     {
@@ -946,7 +949,6 @@ fn migrate_drop_columns() {
 }
 
 #[test]
-#[ignore]
 fn key_on_added() {
     // set up graph
     let mut g = distributary::Blender::new();
@@ -964,9 +966,6 @@ fn key_on_added() {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
         let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
-        // interestingly, this *also* currently fails if s/0/1/. I *believe* this is because the
-        // code decides to do partial materialization, even though the key provenence does *not* go
-        // all the way back to the Base for 2 *or* 1 (since it is keyed on a[0]).
         mig.maintain(b, 0);
         mig.commit();
         b
@@ -1033,7 +1032,7 @@ fn transactional_migration() {
         emits.insert(b, vec![0, 1]);
         let u = distributary::Union::new(emits);
         let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.transactional_maintain(c, 0);
+        mig.maintain(c, 0);
         mig.commit();
         c
     };

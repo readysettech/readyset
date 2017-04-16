@@ -15,6 +15,7 @@ use ops::project::Project;
 use ops::permute::Permute;
 use sql::QueryFlowParts;
 
+pub mod reuse;
 mod rewrite;
 mod optimize;
 
@@ -56,6 +57,41 @@ impl MirQuery {
             roots: vec![node.clone()],
             leaf: node,
         }
+    }
+
+    #[cfg(test)]
+    pub fn topo_nodes(&self) -> Vec<MirNodeRef> {
+        use std::collections::VecDeque;
+
+        let mut nodes = Vec::new();
+
+        // starting at the roots, traverse in topological order
+        let mut node_queue: VecDeque<_> = self.roots.iter().cloned().collect();
+        let mut in_edge_counts = HashMap::new();
+        for n in &node_queue {
+            in_edge_counts.insert(n.borrow().versioned_name(), 0);
+        }
+        while let Some(n) = node_queue.pop_front() {
+            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+
+            nodes.push(n.clone());
+
+            for child in n.borrow().children.iter() {
+                let nd = child.borrow().versioned_name();
+                let in_edges = if in_edge_counts.contains_key(&nd) {
+                    in_edge_counts[&nd]
+                } else {
+                    child.borrow().ancestors.len()
+                };
+                assert!(in_edges >= 1, format!("{} has no incoming edges!", nd));
+                if in_edges == 1 {
+                    // last edge removed
+                    node_queue.push_back(child.clone());
+                }
+                in_edge_counts.insert(nd, in_edges - 1);
+            }
+        }
+        nodes
     }
 
     pub fn into_flow_parts(&mut self, mut mig: &mut Migration) -> QueryFlowParts {
@@ -209,6 +245,18 @@ impl MirNode {
         rc_mn
     }
 
+    pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
+        let mut have_all_columns = true;
+        for c in &for_node.columns {
+            if !self.columns.contains(c) {
+                have_all_columns = false;
+                break;
+            }
+        }
+
+        have_all_columns && self.inner.can_reuse_as(&for_node.inner)
+    }
+
     pub fn reuse(node: MirNodeRef, v: usize) -> MirNodeRef {
         let rcn = node.clone();
 
@@ -267,6 +315,14 @@ impl MirNode {
                 Err(format!("MIR node \"{}\" does not have an associated FlowNode",
                             self.versioned_name()))
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_reused(&self) -> bool {
+        match self.inner {
+            MirNodeType::Reuse { .. } => true,
+            _ => false,
         }
     }
 
@@ -615,6 +671,124 @@ impl MirNodeType {
                 group_by.push(c);
             }
             _ => (),
+        }
+    }
+
+    fn can_reuse_as(&self, other: &MirNodeType) -> bool {
+        match *self {
+            MirNodeType::Reuse { .. } => (),  // handled below
+            _ => {
+                // we're not a `Reuse` ourselves, but the other side might be
+                match *other {
+                    // it is, so dig deeper
+                    MirNodeType::Reuse { ref node } => {
+                        // this does not check the projected columns of the inner node for two reasons:
+                        // 1) our own projected columns aren't accessible on `MirNodeType`, but only on
+                        //    the outer `MirNode`, which isn't accessible here; but more importantly
+                        // 2) since this is already a node reuse, the inner, reused node must have *at
+                        //    least* a superset of our own (inaccessible) projected columns.
+                        // Hence, it is sufficient to check the projected columns on the parent
+                        // `MirNode`, and if that check passes, it also holds for the nodes reused
+                        // here.
+                        return self.can_reuse_as(&node.borrow().inner);
+                    }
+                    _ => (),  // handled below
+                }
+            }
+        }
+
+        match *self {
+            MirNodeType::Aggregation {
+                ref on,
+                ref group_by,
+                ref kind,
+            } => {
+                let our_on = on;
+                let our_group_by = group_by;
+                let our_kind = kind;
+                match *other {
+                    MirNodeType::Aggregation {
+                        ref on,
+                        ref group_by,
+                        ref kind,
+                    } => {
+                        // TODO(malte): this is stricter than it needs to be, as it could cover
+                        // COUNT-as-SUM-style relationships.
+                        our_on == on && our_group_by == group_by && our_kind == kind
+                    }
+                    _ => false,
+                }
+            }
+            MirNodeType::Base { ref keys } => {
+                let our_keys = keys;
+                match *other {
+                    MirNodeType::Base { ref keys } => our_keys == keys,
+                    _ => false,
+                }
+            }
+            MirNodeType::Filter { ref conditions } => {
+                let our_conditions = conditions;
+                match *other {
+                    MirNodeType::Filter { ref conditions } => our_conditions == conditions,
+                    _ => false,
+                }
+            }
+            MirNodeType::Join {
+                ref on_left,
+                ref on_right,
+                ref project,
+            } => {
+                let our_on_left = on_left;
+                let our_on_right = on_right;
+                let our_project = project;
+                match *other {
+                    MirNodeType::Join {
+                        ref on_left,
+                        ref on_right,
+                        ref project,
+                    } => {
+                        // TODO(malte): column order does not actually need to match, but this only
+                        // succeeds if it does.
+                        our_on_left == on_left && our_on_right == on_right && our_project == project
+                    }
+                    _ => false,
+                }
+            }
+            MirNodeType::Project {
+                ref emit,
+                ref literals,
+            } => {
+                let our_emit = emit;
+                let our_literals = literals;
+                match *other {
+                    MirNodeType::Project {
+                        ref emit,
+                        ref literals,
+                    } => our_emit == emit && our_literals == literals,
+                    _ => false,
+                }
+            }
+            MirNodeType::Reuse { ref node } => {
+                let us = node;
+                match *other {
+                    // both nodes are `Reuse` nodes, so we simply compare the both sides' reuse
+                    // target
+                    MirNodeType::Reuse { ref node } => us.borrow().can_reuse_as(&*node.borrow()),
+                    // we're a `Reuse`, the other side isn't, so see if our reuse target's `inner`
+                    // can be reused for the other side. It's sufficient to check the target's
+                    // `inner` because reuse implies that our target has at least a superset of our
+                    // projected columns (see earlier comment).
+                    _ => us.borrow().inner.can_reuse_as(other),
+                }
+            }
+            MirNodeType::Leaf { ref keys, .. } => {
+                let our_keys = keys;
+                match *other {
+                    MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
+                    _ => false,
+                }
+            }
+            _ => false,
         }
     }
 }

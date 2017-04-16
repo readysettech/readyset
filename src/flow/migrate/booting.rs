@@ -31,9 +31,10 @@ pub fn boot_new(log: Logger,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 rx: mpsc::Receiver<Packet>,
+                input_rx: mpsc::Receiver<Packet>,
                 ts: i64)
                 -> thread::JoinHandle<()> {
     let nodes = build_descriptors(graph, nodes);
     let domain = domain::Domain::new(log, index, nodes, checktable, ts);
-    domain.boot(rx)
+    domain.boot(rx, input_rx)
 }

@@ -4,7 +4,7 @@ use ops::grouped::GroupedOperator;
 use flow::prelude::*;
 
 /// Supported aggregation operators.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Aggregation {
     /// Count the number of records for each group. The value for the `over` column is ignored.
     COUNT,
