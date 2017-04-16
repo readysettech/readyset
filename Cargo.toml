@@ -6,7 +6,6 @@ authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 [features]
 web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcached-rs"]
-b_postgresql = ["postgres"]
 b_mysql = ["mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
 b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
@@ -40,8 +39,6 @@ rand = "0.3"
 zipf = "0.2.0"
 # sampling
 hdrsample = "2.1"
-# postgresql
-postgres = { version = "0.11", optional = true }
 # mssql
 futures-state-stream = { version = "0.1", optional = true }
 tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
