@@ -8,7 +8,7 @@ web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcached-rs"]
 b_mysql = ["mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
-b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins", "serde", "serde_derive"]
+b_netsoup = ["futures", "tokio-core", "tarpc", "tarpc-plugins"]
 b_hybrid = ["mysql", "memcached-rs"]
 default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
 profiling = ["timekeeper/default"]
@@ -20,6 +20,8 @@ itertools = "0.5"
 petgraph = "0.4"
 regex = "0.1"
 fnv = "1.0"
+serde = "0.9"
+serde_derive = "0.9"
 slog = "1.5.2"
 #slog = { version = "1.5.2", features = ["max_level_trace", "release_max_level_debug"] }
 slog-term = "1.5.0"
@@ -51,11 +53,15 @@ futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
 tarpc = {git="https://github.com/ms705/tarpc.git", branch = "hack", optional = true}
 tarpc-plugins = { git = "https://github.com/ms705/tarpc", branch = "hack", optional = true }
-serde = { version = "0.9", optional = true }
-serde_derive = { version = "0.9", optional = true }
 
 # for web
 rustc-serialize = { version = "0.3", optional = true }
+
+# durable log
+snowflake = "1.2.0"
+serde_json = "0.9.8"
+buf_redux = "0.6.1"
+time = "0.1"
 
 [dependencies.rustful]
 version = "0.9"

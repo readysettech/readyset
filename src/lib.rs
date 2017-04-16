@@ -358,6 +358,11 @@ extern crate vec_map;
 #[cfg(feature="b_netsoup")]
 extern crate tokio_core;
 
+extern crate buf_redux;
+extern crate serde_json;
+extern crate snowflake;
+extern crate time;
+
 mod backlog;
 mod checktable;
 mod flow;
@@ -371,7 +376,7 @@ pub use flow::{Blender, Migration, Mutator};
 pub use flow::core::{NodeAddress, DataType, Datas};
 pub use flow::node::StreamUpdate;
 pub use flow::domain::Index;
-pub use ops::base::Base;
+pub use ops::base::{Base, BaseDurabilityLevel};
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
 pub use ops::grouped::extremum::{Extremum, ExtremumOperator};

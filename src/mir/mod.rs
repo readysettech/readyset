@@ -998,7 +998,7 @@ fn make_base_node(name: &str,
             .collect();
         mig.add_ingredient(name,
                            column_names.as_slice(),
-                           ops::base::Base::with_key(pkey_column_ids, vec![]))
+                           ops::base::Base::new(vec![]).with_key(pkey_column_ids))
     } else {
         mig.add_ingredient(name, column_names.as_slice(), ops::base::Base::new(vec![]))
     };

@@ -1,7 +1,7 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
-use ops::base::Base;
+use ops::base::{Base, BaseDurabilityLevel};
 use vec_map::VecMap;
 
 use std::sync::mpsc;
@@ -593,7 +593,9 @@ impl<'a> Migration<'a> {
               S2: ToString,
               FS: IntoIterator<Item = S2>
     {
-        let mut i: node::Type = b.into();
+        // transactions require a base node with SyncImmediately durability
+        let d = BaseDurabilityLevel::SyncImmediately;
+        let mut i: node::Type = b.with_durability(d).into();
         i.on_connected(&self.mainline.ingredients);
 
         // add to the graph
@@ -1109,18 +1111,13 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
-        //println!("Blender started dropping.");
-
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
             drop(tx.send(payload::Packet::Quit));
         }
         for d in self.domains.drain(..) {
-            //println!("Waiting for domain thread to join.");
             d.join().unwrap();
         }
-
-        //println!("Blender is done dropping.")
     }
 }
 

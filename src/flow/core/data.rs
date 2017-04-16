@@ -11,8 +11,7 @@ use std::fmt;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
-#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone)]
-#[cfg_attr(feature="b_netsoup", derive(Serialize, Deserialize))]
+#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone, Serialize, Deserialize)]
 pub enum DataType {
     /// An empty value.
     None,
@@ -195,7 +194,7 @@ impl fmt::Display for DataType {
 }
 
 /// A record is a single positive or negative data record with an associated time stamp.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Record {
     Positive(sync::Arc<Vec<DataType>>),
     Negative(sync::Arc<Vec<DataType>>),
@@ -321,7 +320,7 @@ impl<'a> IntoIterator for &'a Records {
 /// Represents a set of records returned from a query.
 pub type Datas = Vec<Vec<DataType>>;
 
-#[derive(Clone, Default, PartialEq, Debug)]
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Records(Vec<Record>);
 
 impl Deref for Records {
