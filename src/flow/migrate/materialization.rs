@@ -731,42 +731,36 @@ pub fn reconstruct(log: &Logger,
                     *source = Some(graph[nodes[0].0].addr());
                 }
             }
-            if segments.len() == 1 {
-                // replay is entirely contained within one domain
-                if let Some(ref key) = partial {
-                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+
+
+            if let Some(ref key) = partial {
+                if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                    if segments.len() == 1 {
+                        // replay is entirely contained within one domain
                         *trigger = TriggerEndpoint::Local(vec![*key]);
-                    }
-                }
-            } else if i == 0 {
-                // first domain needs to be told about partial replay trigger (if we have one)
-                if let Some(ref key) = partial {
-                    if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                    } else if i == 0 {
+                        // first domain needs to be told about partial replay trigger
                         *trigger = TriggerEndpoint::Start(vec![*key]);
+                    } else if i == segments.len() - 1 {
+                        // otherwise, should know what how to trigger partial replay
+                        let (tx, rx) = mpsc::channel();
+                        txs[&segments[0].0]
+                            .send(Packet::RequestUnboundedTx(tx))
+                            .unwrap();
+                        let root_unbounded_tx = rx.recv().unwrap();
+                        *trigger = TriggerEndpoint::End(root_unbounded_tx);
                     }
+                } else {
+                    unreachable!();
                 }
-            } else if i == segments.len() - 1 {
-                // last domain
-                if let Packet::SetupReplayPath {
-                           ref mut done_tx,
-                           ref mut trigger,
-                           ..
-                       } = setup {
-                    match partial {
-                        None => {
-                            // should report when it's done if it is to be fully replayed
-                            assert!(main_done_tx.is_some());
-                            *done_tx = main_done_tx.take();
-                        }
-                        Some(..) => {
-                            // otherwise, should know what how to trigger partial replay
-                            let (tx, rx) = mpsc::channel();
-                            txs[&segments[0].0]
-                                .send(Packet::RequestUnboundedTx(tx))
-                                .unwrap();
-                            let root_unbounded_tx = rx.recv().unwrap();
-                            *trigger = TriggerEndpoint::End(root_unbounded_tx);
-                        }
+            } else {
+                if i == segments.len() - 1 {
+                    // last domain should report when it's done if it is to be fully replayed
+                    if let Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
+                        assert!(main_done_tx.is_some());
+                        *done_tx = main_done_tx.take();
+                    } else {
+                        unreachable!();
                     }
                 }
             }
