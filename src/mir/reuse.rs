@@ -142,7 +142,6 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
     rewritten_query
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,9 +209,6 @@ mod tests {
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
         let merged_reflexive = merge_mir_for_queries(&log, &mq1, &mq1);
-        for n in merged_reflexive.topo_nodes() {
-            trace!(log, "{:#?}", n);
-        }
         assert!(merged_reflexive
                     .topo_nodes()
                     .iter()
