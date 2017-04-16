@@ -238,12 +238,37 @@ mod tests {
                              _ => false,
                          }));
 
-        /*let mq2 = MirQuery {
-            name: String::from("q1"),
+        let (a, b, c, d) = make_nodes();
+        let e = MirNode::new("e",
+                             0,
+                             vec![Column::from("aa")],
+                             MirNodeType::Project {
+                                 emit: vec![Column::from("aa")],
+                                 literals: vec![],
+                             },
+                             vec![c.clone()],
+                             vec![d.clone()]);
+        a.borrow_mut().add_child(c.clone());
+        b.borrow_mut().add_child(c.clone());
+        c.borrow_mut().add_ancestor(a.clone());
+        c.borrow_mut().add_ancestor(b.clone());
+        d.borrow_mut().add_ancestor(e);
+
+        // let's merge with a test query that is a simple extension of q1
+        let mq2 = MirQuery {
+            name: String::from("q2"),
             roots: vec![a, b],
             leaf: d,
-        };*/
-
-        // let's merge with a test query that permits direct extension
+        };
+        let merged_extension = merge_mir_for_queries(&log, &mq2, &mq1);
+        for n in merged_extension.topo_nodes() {
+            match n.borrow().name() {
+                // first three nodes (2x base, 1x join) should have been reused
+                "a" | "b" | "c" => assert!(n.borrow().is_reused()),
+                // new projection (e) and leaf node (d) should NOT have been reused
+                "e" | "d" => assert!(!n.borrow().is_reused()),
+                _ => unreachable!(),
+            }
+        }
     }
 }
