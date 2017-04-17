@@ -208,12 +208,17 @@ impl SqlIncorporator {
             match choice.0 {
                 ReuseType::DirectExtension => {
                     let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
+                    info!(self.log,
+                          "Can reuse by directly extending existing query {}",
+                          mir_query.name);
                     return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
                 }
                 ReuseType::BackjoinRequired(_) => {
                     error!(self.log, "Choose unsupported reuse via backjoin!");
                 }
             }
+        } else {
+            info!(self.log, "No reuse opportunity, adding fresh query");
         }
 
         (qg, QueryGraphReuse::None)
@@ -351,8 +356,14 @@ impl SqlIncorporator {
         let new_opt_mir = new_query_mir.optimize();
 
         // compare to existing query MIR and reuse prefix
-        let mut reused_mir = merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
+        let (mut reused_mir, num_reused_nodes) =
+            merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
         let qfp = reused_mir.into_flow_parts(&mut mig);
+
+        info!(self.log,
+              "Reused {} nodes for {}",
+              num_reused_nodes,
+              query_name);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         self.query_graphs
@@ -407,7 +418,6 @@ impl SqlIncorporator {
                         }
                     }
                     QueryGraphReuse::ExtendExisting(mq) => {
-                        trace!(self.log, "Extending existing query!");
                         self.extend_existing_query(&query_name, sq, qg, mq, mig)
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {

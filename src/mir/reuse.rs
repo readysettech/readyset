@@ -4,7 +4,7 @@ use slog;
 pub fn merge_mir_for_queries(log: &slog::Logger,
                              new_query: &MirQuery,
                              old_query: &MirQuery)
-                             -> MirQuery {
+                             -> (MirQuery, usize) {
     use std::collections::{HashSet, HashMap, VecDeque};
     use std::rc::Rc;
     use std::cell::RefCell;
@@ -160,7 +160,7 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
         leaf: rewritten_leaf,
     };
 
-    rewritten_query
+    (rewritten_query, reuse.len())
 }
 
 #[cfg(test)]
