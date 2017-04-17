@@ -60,7 +60,7 @@ fn direct_elimination(op1: &Operator, op2: &Operator) -> Option<Operator> {
                 _ => unimplemented!(),
             }
         }
-        _ => unimplemented!(),
+        _ => None,
     }
 }
 
