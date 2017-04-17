@@ -35,7 +35,7 @@ fn load_recipe() -> Result<Backend, String> {
         // install recipe
         recipe = match Recipe::from_str(&sql, None) {
             Ok(mut recipe) => {
-                recipe.activate(&mut mig)?;
+                recipe.activate(&mut mig, false)?;
                 recipe
             }
             Err(e) => return Err(e),

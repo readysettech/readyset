@@ -161,11 +161,15 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn named_base_to_mir(&mut self, name: &str, query: &SqlQuery) -> MirQuery {
+    pub fn named_base_to_mir(&mut self,
+                             name: &str,
+                             query: &SqlQuery,
+                             transactional: bool)
+                             -> MirQuery {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
                 assert_eq!(name, ctq.table.name);
-                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref());
+                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref(), transactional);
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
@@ -177,7 +181,7 @@ impl SqlToMirConverter {
             SqlQuery::Insert(ref iq) => {
                 assert_eq!(name, iq.table.name);
                 let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let n = self.make_base_node(&name, &cols, None);
+                let n = self.make_base_node(&name, &cols, None, transactional);
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
@@ -245,7 +249,8 @@ impl SqlToMirConverter {
     fn make_base_node(&mut self,
                       name: &str,
                       cols: &Vec<Column>,
-                      keys: Option<&Vec<TableKey>>)
+                      keys: Option<&Vec<TableKey>>,
+                      transactional: bool)
                       -> MirNodeRef {
         // have we seen a base of this name before?
         if self.base_schemas.contains_key(name) {
@@ -315,7 +320,10 @@ impl SqlToMirConverter {
                     MirNode::new(name,
                                  self.schema_version,
                                  cols.clone(),
-                                 MirNodeType::Base { keys: key_cols.clone() },
+                                 MirNodeType::Base {
+                                     keys: key_cols.clone(),
+                                     transactional,
+                                 },
                                  vec![],
                                  vec![])
                 }
@@ -325,7 +333,10 @@ impl SqlToMirConverter {
             MirNode::new(name,
                          self.schema_version,
                          cols.clone(),
-                         MirNodeType::Base { keys: vec![] },
+                         MirNodeType::Base {
+                             keys: vec![],
+                             transactional,
+                         },
                          vec![],
                          vec![])
         }

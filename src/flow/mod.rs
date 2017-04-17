@@ -1,7 +1,7 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 use checktable;
-use ops::base::{Base, BaseDurabilityLevel};
+use ops::base::Base;
 use vec_map::VecMap;
 
 use std::sync::mpsc;
@@ -1143,7 +1143,7 @@ mod tests {
         let mut b = Blender::new();
         {
             let mut mig = b.start_migration();
-            assert!(r.activate(&mut mig).is_ok());
+            assert!(r.activate(&mut mig, false).is_ok());
             mig.commit();
         }
     }

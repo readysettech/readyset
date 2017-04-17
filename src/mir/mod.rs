@@ -405,8 +405,8 @@ impl MirNode {
                                           GroupedNodeType::Aggregation(kind.clone()),
                                           mig)
                     }
-                    MirNodeType::Base { ref keys } => {
-                        make_base_node(&name, self.columns.as_slice(), keys, mig)
+                    MirNodeType::Base { ref keys, transactional } => {
+                        make_base_node(&name, self.columns.as_slice(), keys, mig, transactional)
                     }
                     MirNodeType::Extremum {
                         ref on,
@@ -581,7 +581,7 @@ pub enum MirNodeType {
         kind: AggregationKind,
     },
     /// columns, keys (non-compound)
-    Base { keys: Vec<Column> },
+    Base { keys: Vec<Column>, transactional: bool },
     /// over column, group_by columns
     Extremum {
         on: Column,
@@ -699,13 +699,10 @@ impl MirNodeType {
 
         match *self {
             MirNodeType::Aggregation {
-                ref on,
-                ref group_by,
-                ref kind,
+                on: ref our_on,
+                group_by: ref our_group_by,
+                kind: ref our_kind,
             } => {
-                let our_on = on;
-                let our_group_by = group_by;
-                let our_kind = kind;
                 match *other {
                     MirNodeType::Aggregation {
                         ref on,
@@ -719,28 +716,26 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            MirNodeType::Base { ref keys } => {
-                let our_keys = keys;
+            MirNodeType::Base { keys: ref our_keys, transactional: our_transactional } => {
                 match *other {
-                    MirNodeType::Base { ref keys } => our_keys == keys,
+                    MirNodeType::Base { ref keys, transactional } => {
+                        assert_eq!(our_transactional, transactional);
+                        our_keys == keys
+                    },
                     _ => false,
                 }
             }
-            MirNodeType::Filter { ref conditions } => {
-                let our_conditions = conditions;
+            MirNodeType::Filter { conditions: ref our_conditions } => {
                 match *other {
                     MirNodeType::Filter { ref conditions } => our_conditions == conditions,
                     _ => false,
                 }
             }
             MirNodeType::Join {
-                ref on_left,
-                ref on_right,
-                ref project,
+                on_left: ref our_on_left,
+                on_right: ref our_on_right,
+                project: ref our_project,
             } => {
-                let our_on_left = on_left;
-                let our_on_right = on_right;
-                let our_project = project;
                 match *other {
                     MirNodeType::Join {
                         ref on_left,
@@ -755,11 +750,9 @@ impl MirNodeType {
                 }
             }
             MirNodeType::Project {
-                ref emit,
-                ref literals,
+                emit: ref our_emit,
+                literals: ref our_literals,
             } => {
-                let our_emit = emit;
-                let our_literals = literals;
                 match *other {
                     MirNodeType::Project {
                         ref emit,
@@ -768,8 +761,7 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            MirNodeType::Reuse { ref node } => {
-                let us = node;
+            MirNodeType::Reuse { node: ref us } => {
                 match *other {
                     // both nodes are `Reuse` nodes, so we simply compare the both sides' reuse
                     // target
@@ -781,8 +773,7 @@ impl MirNodeType {
                     _ => us.borrow().inner.can_reuse_as(other),
                 }
             }
-            MirNodeType::Leaf { ref keys, .. } => {
-                let our_keys = keys;
+            MirNodeType::Leaf { keys: ref our_keys, .. } => {
                 match *other {
                     MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
                     _ => false,
@@ -823,9 +814,10 @@ impl Debug for MirNodeType {
                 write!(f, "{} γ[{}]", op_string, group_cols)
 
             }
-            MirNodeType::Base { ref keys } => {
+            MirNodeType::Base { ref keys, transactional } => {
                 write!(f,
-                       "B [⚷: {}]",
+                       "B{} [⚷: {}]",
+                       if transactional {"*"} else {""},
                        keys.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
@@ -984,11 +976,12 @@ impl Debug for MirNodeType {
 fn make_base_node(name: &str,
                   columns: &[Column],
                   pkey_columns: &Vec<Column>,
-                  mut mig: &mut Migration)
+                  mut mig: &mut Migration,
+                  transactional: bool)
                   -> FlowNode {
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
-    let node = if pkey_columns.len() > 0 {
+    let base = if pkey_columns.len() > 0 {
         let pkey_column_ids = pkey_columns
             .iter()
             .map(|pkc| {
@@ -996,13 +989,16 @@ fn make_base_node(name: &str,
                      columns.iter().position(|c| c == pkc).unwrap()
                  })
             .collect();
-        mig.add_ingredient(name,
-                           column_names.as_slice(),
-                           ops::base::Base::new(vec![]).with_key(pkey_column_ids))
+        ops::base::Base::new(vec![]).with_key(pkey_column_ids)
     } else {
-        mig.add_ingredient(name, column_names.as_slice(), ops::base::Base::new(vec![]))
+        ops::base::Base::new(vec![])
     };
-    FlowNode::New(node)
+
+    if transactional {
+        FlowNode::New(mig.add_transactional_base(name, column_names.as_slice(), base))
+    } else {
+        FlowNode::New(mig.add_ingredient(name, column_names.as_slice(), base))
+    }
 }
 
 fn make_filter_node(name: &str,

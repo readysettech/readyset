@@ -1592,7 +1592,7 @@ fn recipe_activates() {
     let mut g = distributary::Blender::new();
     {
         let mut mig = g.start_migration();
-        assert!(r.activate(&mut mig).is_ok());
+        assert!(r.activate(&mut mig, false).is_ok());
         mig.commit();
     }
     // one base node
@@ -1610,7 +1610,7 @@ fn recipe_activates_and_migrates() {
     let mut g = distributary::Blender::new();
     {
         let mut mig = g.start_migration();
-        assert!(r.activate(&mut mig).is_ok());
+        assert!(r.activate(&mut mig, false).is_ok());
         mig.commit();
     }
     // one base node
@@ -1626,7 +1626,7 @@ fn recipe_activates_and_migrates() {
     assert_eq!(**r1.prior().unwrap(), r_copy);
     {
         let mut mig = g.start_migration();
-        assert!(r1.activate(&mut mig).is_ok());
+        assert!(r1.activate(&mut mig, false).is_ok());
         mig.commit();
     }
     // still one base node
@@ -1647,7 +1647,7 @@ fn recipe_activates_and_migrates_with_join() {
     let mut g = distributary::Blender::new();
     {
         let mut mig = g.start_migration();
-        assert!(r.activate(&mut mig).is_ok());
+        assert!(r.activate(&mut mig, false).is_ok());
         mig.commit();
     }
     // two base nodes
@@ -1662,7 +1662,7 @@ fn recipe_activates_and_migrates_with_join() {
     assert_eq!(**r1.prior().unwrap(), r_copy);
     {
         let mut mig = g.start_migration();
-        assert!(r1.activate(&mut mig).is_ok());
+        assert!(r1.activate(&mut mig, false).is_ok());
         mig.commit();
     }
     // still two base nodes
@@ -1702,7 +1702,7 @@ fn tpc_w() {
             let or = r.clone();
             r = match r.extend(q) {
                 Ok(mut nr) => {
-                    assert!(nr.activate(&mut mig).is_ok());
+                    assert!(nr.activate(&mut mig, false).is_ok());
                     nr
                 }
                 Err(e) => {

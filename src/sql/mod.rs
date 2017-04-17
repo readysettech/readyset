@@ -50,6 +50,7 @@ pub struct SqlIncorporator {
     query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
+    transactional: bool,
 }
 
 impl Default for SqlIncorporator {
@@ -62,6 +63,7 @@ impl Default for SqlIncorporator {
             query_graphs: HashMap::default(),
             schema_version: 0,
             view_schemas: HashMap::default(),
+            transactional: false,
         }
     }
 }
@@ -75,6 +77,11 @@ impl SqlIncorporator {
             mir_converter: SqlToMirConverter::with_logger(lc),
             ..Default::default()
         }
+    }
+
+    /// Make any future base nodes added be transactional.
+    pub fn set_transactional(&mut self, transactional: bool) {
+        self.transactional = transactional;
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -261,7 +268,8 @@ impl SqlIncorporator {
                         mut mig: &mut Migration)
                         -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(query_name, query);
+        let mut mir = self.mir_converter
+            .named_base_to_mir(query_name, query, self.transactional);
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
