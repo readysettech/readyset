@@ -779,7 +779,7 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            _ => false,
+            _ => unimplemented!(),
         }
     }
 }
