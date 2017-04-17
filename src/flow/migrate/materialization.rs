@@ -399,7 +399,7 @@ pub fn initialize(log: &Logger,
                .filter(|&ni| ni != source)
                .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
-            trace!(log, "no need to replay empty view"; "node" => node.index());
+            info!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
             ready(txs, index_on);
         } else {
@@ -407,7 +407,7 @@ pub fn initialize(log: &Logger,
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
-                trace!(log, "no need to replay non-materialized view"; "node" => node.index());
+                debug!(log, "no need to replay non-materialized view"; "node" => node.index());
                 ready(txs, index_on);
                 continue;
             }
