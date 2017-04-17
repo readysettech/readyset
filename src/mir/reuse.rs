@@ -235,7 +235,7 @@ mod tests {
         };
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
-        let merged_reflexive = merge_mir_for_queries(&log, &mq1, &mq1);
+        let (merged_reflexive, _) = merge_mir_for_queries(&log, &mq1, &mq1);
         assert!(merged_reflexive
                     .topo_nodes()
                     .iter()
@@ -266,7 +266,7 @@ mod tests {
             roots: vec![a, b],
             leaf: d,
         };
-        let merged_extension = merge_mir_for_queries(&log, &mq2, &mq1);
+        let (merged_extension, _) = merge_mir_for_queries(&log, &mq2, &mq1);
         for n in merged_extension.topo_nodes() {
             match n.borrow().name() {
                 // first three nodes (2x base, 1x join) should have been reused
