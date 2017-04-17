@@ -80,8 +80,8 @@ impl SqlIncorporator {
     }
 
     /// Make any future base nodes added be transactional.
-    pub fn make_transactional(&mut self) {
-        self.transactional = true;
+    pub fn set_transactional(&mut self, transactional: bool) {
+        self.transactional = transactional;
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`

@@ -216,9 +216,10 @@ impl Recipe {
             self.inc.as_mut().unwrap().upgrade_schema(self.version);
         }
 
-        if transactional_base_nodes {
-            self.inc.as_mut().unwrap().make_transactional();
-        }
+        self.inc
+            .as_mut()
+            .unwrap()
+            .set_transactional(transactional_base_nodes);
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
