@@ -382,6 +382,7 @@ pub use ops::grouped::concat::{GroupConcat, TextComponent};
 pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
 pub use ops::identity::Identity;
 pub use ops::permute::Permute;
+pub use ops::project::Project;
 pub use ops::join::{Join, JoinType, JoinSource};
 pub use ops::union::Union;
 pub use ops::latest::Latest;
