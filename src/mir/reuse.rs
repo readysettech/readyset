@@ -173,13 +173,19 @@ mod tests {
         let a = MirNode::new("a",
                              0,
                              vec![Column::from("aa"), Column::from("ab")],
-                             MirNodeType::Base { keys: vec![Column::from("aa")] },
+                             MirNodeType::Base {
+                                 keys: vec![Column::from("aa")],
+                                 transactional: false,
+                             },
                              vec![],
                              vec![]);
         let b = MirNode::new("b",
                              0,
                              vec![Column::from("ba"), Column::from("bb")],
-                             MirNodeType::Base { keys: vec![Column::from("ba")] },
+                             MirNodeType::Base {
+                                 keys: vec![Column::from("ba")],
+                                 transactional: false,
+                             },
                              vec![],
                              vec![]);
         let c = MirNode::new("c",
