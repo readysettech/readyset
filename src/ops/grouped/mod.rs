@@ -46,18 +46,11 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// All records with the same value for the returned columns are assigned to the same group.
     fn group_by(&self) -> &[usize];
 
-    /// The zero value for this operation, if there is one.
-    ///
-    /// If some, this is used to determine what zero-record to revoke when the first record for a
-    /// group arrives, as well as to initialize the fold value when a query is performed. Otherwise,
-    /// no record is revoked when the first record arrives for a group.
-    fn zero(&self) -> Option<DataType>;
-
     /// Extract the aggregation value from a single record.
     fn to_diff(&self, record: &[DataType], is_positive: bool) -> Self::Diff;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
-    /// updated group value. When the group is empty, current is set to the zero value.
+    /// updated group value.
     fn apply(&self, current: Option<&DataType>, diffs: Vec<Self::Diff>) -> DataType;
 
     fn description(&self) -> String;
@@ -212,8 +205,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
 
                 // current value is in the last output column
                 // or "" if there is no current group
-                let current = old.map(|r| Some(Cow::Borrowed(&r[r.len() - 1])))
-                    .unwrap_or_else(|| self.inner.zero().map(Cow::Owned));
+                let current = old.map(|r| Cow::Borrowed(&r[r.len() - 1]));
 
                 // new is the result of applying all diffs for the group to the current value
                 let new = self.inner.apply(current.as_ref().map(|v| &**v), diffs);
@@ -221,38 +213,22 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
             };
 
             match current {
-                None => {
+                Some(ref current) if new == **current => {
+                    // no change
+                }
+                _ => {
+                    if let Some(old) = old {
+                        // revoke old value
+                        debug_assert!(current.is_some());
+                        out.push(Record::Negative(old.clone()));
+                    }
+
                     // emit positive, which is group + new.
                     let rec: Vec<_> = group
                         .into_iter()
                         .cloned()
                         .chain(Some(new.into()).into_iter())
                         .collect();
-                    out.push(Record::Positive(sync::Arc::new(rec)));
-                }
-                Some(ref current) if new == **current => {
-                    // no change
-                }
-                Some(current) => {
-                    // construct prefix of output record used for both - and +
-                    let mut rec = Vec::with_capacity(group.len() + 1);
-                    rec.extend(group.into_iter().cloned());
-
-                    // revoke old value
-                    if old.is_none() {
-                        // we're generating a zero row
-                        // revoke old value
-                        rec.push(current.into_owned());
-                        out.push(Record::Negative(sync::Arc::new(rec.clone())));
-
-                        // remove the old value from the end of the record
-                        rec.pop();
-                    } else {
-                        out.push(Record::Negative(old.unwrap().clone()));
-                    }
-
-                    // emit new value
-                    rec.push(new.into());
                     out.push(Record::Positive(sync::Arc::new(rec)));
                 }
             }

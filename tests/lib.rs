@@ -1338,8 +1338,15 @@ fn do_full_vote_migration(old_puts_after: bool) {
 
             // add final join using first field from article and first from vc
             use distributary::JoinSource::*;
-            let j = Join::new(article, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
             end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
+
+            let ad = mig.add_domain();
+            mig.assign_domain(article, ad);
+            mig.assign_domain(end, ad);
+            let vd = mig.add_domain();
+            mig.assign_domain(vote, vd);
+            mig.assign_domain(vc, vd);
 
             mig.maintain(end, 0);
 
@@ -1362,6 +1369,20 @@ fn do_full_vote_migration(old_puts_after: bool) {
             mutv.put(vec![1.into(), i.into()]);
         }
 
+        let last = g.get_getter(end).unwrap();
+        thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+        for i in 0..n {
+            let rows = last(&i.into()).unwrap();
+            assert!(!rows.is_empty(), "every article should be voted for");
+            assert_eq!(rows.len(), 1, "every article should have only one entry");
+            let row = rows.into_iter().next().unwrap();
+            assert_eq!(row[0],
+                       i.into(),
+                       "each article result should have the right id");
+            assert_eq!(row[1], title, "all articles should have title 'foo'");
+            assert_eq!(row[2], 1.into(), "all articles should have one vote");
+        }
+
         // migrate
         let (rating, last) = {
             let mut mig = g.start_migration();
@@ -1378,7 +1399,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
 
             // join vote count and rsum (and in theory, sum them)
             use distributary::JoinSource::*;
-            let j = Join::new(rs, vc, JoinType::Inner, vec![B(0, 0), L(1), R(1)]);
+            let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
             let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
             mig.assign_domain(rating, domain);
@@ -1408,9 +1429,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
             mutr.put(vec![1.into(), i.into(), raten.clone()]);
         }
 
-        // system does about 10k/s = 10/ms
-        // wait for twice that before expecting to see results
-        thread::sleep(::std::time::Duration::from_millis(2 * n as u64 / 10));
+        thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
         for i in 0..n {
             let rows = last(&i.into()).unwrap();
             assert!(!rows.is_empty(), "every article should be voted for");

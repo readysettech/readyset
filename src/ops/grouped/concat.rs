@@ -136,10 +136,6 @@ impl GroupedOperation for GroupConcat {
         &self.group[..]
     }
 
-    fn zero(&self) -> Option<DataType> {
-        Some(DataType::from(""))
-    }
-
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
         let v = self.build(r);
         if pos {
@@ -163,6 +159,7 @@ impl GroupedOperation for GroupConcat {
         let current: Cow<str> = match current {
             Some(dt @ &DataType::Text(..)) |
             Some(dt @ &DataType::TinyText(..)) => dt.into(),
+            None => Cow::Borrowed(""),
             _ => unreachable!(),
         };
         let clen = current.len();
@@ -251,18 +248,11 @@ mod tests {
 
         let u: Record = vec![1.into(), 1.into()].into();
 
-        // first row for a group should emit -"" and +".1;" for that group
+        // first row for a group should emit +".1;" for that group
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 2);
+        assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
 
-        match rs.next().unwrap() {
-            Record::Negative(r) => {
-                assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "".into());
-            }
-            _ => unreachable!(),
-        }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
@@ -273,18 +263,11 @@ mod tests {
 
         let u: Record = vec![2.into(), 2.into()].into();
 
-        // first row for a second group should emit -"" and +".2;" for that new group
+        // first row for a second group should emit +".2;" for that new group
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 2);
+        assert_eq!(rs.len(), 1);
         let mut rs = rs.into_iter();
 
-        match rs.next().unwrap() {
-            Record::Negative(r) => {
-                assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], "".into());
-            }
-            _ => unreachable!(),
-        }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
@@ -347,11 +330,12 @@ mod tests {
                      (vec![2.into(), 3.into()], true),
                      (vec![2.into(), 2.into()], true),
                      (vec![2.into(), 1.into()], true),
+                     // new group
                      (vec![3.into(), 3.into()], true)];
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 6); // one - and one + for each group
+        assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
         // group 1 had [2], now has [1,2]
         assert!(rs.iter()
                     .any(|r| if let Record::Negative(ref r) = *r {
@@ -399,17 +383,6 @@ mod tests {
                              false
                          }));
         // group 3 was [], is now [3]
-        assert!(rs.iter()
-                    .any(|r| if let Record::Negative(ref r) = *r {
-                             if r[0] == 3.into() {
-                                 assert_eq!(r[1], "".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
         assert!(rs.iter()
                     .any(|r| if let Record::Positive(ref r) = *r {
                              if r[0] == 3.into() {

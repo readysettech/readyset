@@ -39,10 +39,6 @@ impl Extremum {
 ///
 /// `ExtremumOperator` nodes are constructed through `Extremum` variants using `Extremum::new`.
 ///
-/// Logically, the aggregated value for all groups start out as `0`. Thus, when the first record is
-/// received for a group, `ExtremumOperator` will output a negative for the *zero row*, followed by
-/// a positive for the newly aggregated value.
-///
 /// When a new record arrives, the aggregator will first query the currently aggregated value for
 /// the new record's group by doing a query into its own output. The aggregated column (`self.over`)
 /// of the incoming record is then added to the current aggregation value according to the operator
@@ -72,10 +68,6 @@ impl GroupedOperation for ExtremumOperator {
 
     fn group_by(&self) -> &[usize] {
         &self.group[..]
-    }
-
-    fn zero(&self) -> Option<DataType> {
-        None
     }
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> Self::Diff {
