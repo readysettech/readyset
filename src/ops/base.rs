@@ -173,10 +173,10 @@ impl Base {
                     // we can use that as unique_id for durable logs instead of process unique ids.
                     //
                     // let log_filename =
-                    //   format!("/tmp/soup-log-{}-{:?}-{}.json",
+                    //   format!("soup-log-{}-{:?}-{}.json",
                     //           today, self.global_address.unwrap(), self.unique_id);
 
-                    let log_filename = format!("/tmp/soup-log-{}-{}-{}.json",
+                    let log_filename = format!("soup-log-{}-{}-{}.json",
                                                today, us, self.unique_id);
                     self.durable_log_path = Some(PathBuf::from(&log_filename));
 
