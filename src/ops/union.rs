@@ -9,7 +9,7 @@ pub struct Union {
     emit: HashMap<NodeAddress, Vec<usize>>,
     cols: HashMap<NodeAddress, usize>,
 
-    replay_key: Option<usize>,
+    replay_key: Option<Map<usize>>,
     replay_pieces: HashMap<DataType, Map<Records>>,
 }
 
@@ -139,7 +139,7 @@ impl Ingredient for Union {
                 // for. we need to take out any records that should be buffered (i.e., those that
                 // are for a replay piece that is still waiting for its other half).
                 let rs = rs.into_iter().filter_map(|r| {
-                    let k = self.replay_key.unwrap();
+                    let k = self.replay_key.as_ref().unwrap()[from.as_local()];
                     if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
                         if let Some(ref mut rs) = pieces.get_mut(from.as_local()) {
                             // we've received a replay piece from this ancestor already, and are
@@ -164,10 +164,13 @@ impl Ingredient for Union {
             }
             Some((key_col, key_val)) => {
                 if self.replay_key.is_none() {
-                    self.replay_key = Some(key_col);
-                } else {
-                    // we can't buffer for multiple different replay keys at the same time
-                    assert_eq!(self.replay_key.unwrap(), key_col);
+                    // the replay key is for our *output* column
+                    // which might translate to different columns in our inputs
+                    self.replay_key =
+                        Some(self.emit
+                                 .iter()
+                                 .map(|(src, emit)| (*src.as_local(), emit[key_col]))
+                                 .collect());
                 }
 
                 let finished = {
