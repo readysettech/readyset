@@ -238,6 +238,7 @@ pub struct Blender {
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
     partial: HashSet<NodeIndex>,
+    partial_enabled: bool,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
     in_txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
@@ -259,6 +260,7 @@ impl Default for Blender {
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
             partial: Default::default(),
+            partial_enabled: true,
 
             txs: HashMap::default(),
             in_txs: HashMap::default(),
@@ -273,6 +275,11 @@ impl Blender {
     /// Construct a new, empty `Blender`
     pub fn new() -> Self {
         Blender::default()
+    }
+
+    /// Disable partial materialization for all subsequent migrations
+    pub fn disable_partial(&mut self) {
+        self.partial_enabled = false;
     }
 
     /// Set the `Logger` to use for internal log messages.
@@ -1090,6 +1097,7 @@ impl<'a> Migration<'a> {
                                                                    mainline.source,
                                                                    &new,
                                                                    &mut mainline.partial,
+                                                                   mainline.partial_enabled,
                                                                    index,
                                                                    &mut mainline.txs);
 

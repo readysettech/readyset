@@ -331,6 +331,7 @@ pub fn initialize(log: &Logger,
                   source: NodeIndex,
                   new: &HashSet<NodeIndex>,
                   partial: &mut HashSet<NodeIndex>,
+                  partial_ok: bool,
                   mut materialize: HashMap<domain::Index,
                                            HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
@@ -420,6 +421,7 @@ pub fn initialize(log: &Logger,
                                         graph,
                                         &empty,
                                         partial,
+                                        partial_ok,
                                         &materialize,
                                         txs,
                                         node,
@@ -439,6 +441,7 @@ pub fn reconstruct(log: &Logger,
                    graph: &mut Graph,
                    empty: &HashSet<NodeIndex>,
                    partial: &mut HashSet<NodeIndex>,
+                   mut partial_ok: bool,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
                    txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
@@ -536,25 +539,27 @@ pub fn reconstruct(log: &Logger,
     //
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
-    let mut partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-                         paths
-                             .iter()
-                             .all(|path| {
-        let &(node, col) = path.last().unwrap();
-        if col.is_none() {
-            // doesn't trace back to a column
-            return false;
-        }
+    if partial_ok {
+        partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
+                     paths
+                         .iter()
+                         .all(|path| {
+            let &(node, col) = path.last().unwrap();
+            if col.is_none() {
+                // doesn't trace back to a column
+                return false;
+            }
 
-        let n = &graph[node];
-        let col = col.unwrap();
-        // node must also have an *index* on col
-        materialized
-            .get(&n.domain())
-            .and_then(|d| d.get(n.addr().as_local()))
-            .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
-            .unwrap_or(false)
-    });
+            let n = &graph[node];
+            let col = col.unwrap();
+            // node must also have an *index* on col
+            materialized
+                .get(&n.domain())
+                .and_then(|d| d.get(n.addr().as_local()))
+                .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
+                .unwrap_or(false)
+        });
+    }
 
     // FIXME: if a reader has no materialized views between it and a union, we will end
     // up in this case. we *can* solve that case by requesting replays across all
