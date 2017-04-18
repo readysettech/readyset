@@ -150,3 +150,8 @@ required-features = ["binaries"]
 name = "piazza"
 path = "benchmarks/piazza/piazza.rs"
 required-features = ["binaries"]
+
+[[bin]]
+name = "vote-new-fraction"
+path = "benchmarks/vote/vote-new-fraction.rs"
+required-features = ["binaries"]
