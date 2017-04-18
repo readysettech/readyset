@@ -1344,7 +1344,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
             article = mig.add_ingredient("article", &["id", "title"], Base::default());
 
             // add vote base table
-            vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
+            vote = mig.add_ingredient("vote", &["user", "id"], Base::default().with_key(vec![1]));
 
             // add vote count
             vc = mig.add_ingredient("votecount",
