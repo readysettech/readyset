@@ -102,25 +102,34 @@ impl ReadHandle {
     /// Note that not all writes will be included with this read -- only those that have been
     /// swapped in by the writer.
     ///
-    /// This call will block if it encounters a hole in partially materialized state.
-    pub fn find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+    /// If `block` is set, this call will block if it encounters a hole in partially materialized
+    /// state.
+    pub fn find_and<F, T>(&self,
+                          key: &DataType,
+                          mut then: F,
+                          block: bool)
+                          -> Result<(Option<T>, i64), ()>
         where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
         match self.try_find_and(key, &mut then) {
-            Ok((None, _)) if self.trigger.is_some() => {
+            Ok((None, ts)) if self.trigger.is_some() => {
                 if let Some(ref trigger) = self.trigger {
                     use std::thread;
 
                     // trigger a replay to populate
                     (*trigger)(key);
 
-                    // wait for result to come through
-                    loop {
-                        thread::yield_now();
-                        match self.try_find_and(key, &mut then) {
-                            Ok((None, _)) => {}
-                            r => return r,
+                    if block {
+                        // wait for result to come through
+                        loop {
+                            thread::yield_now();
+                            match self.try_find_and(key, &mut then) {
+                                Ok((None, _)) => {}
+                                r => return r,
+                            }
                         }
+                    } else {
+                        Ok((None, ts))
                     }
                 } else {
                     unreachable!()
@@ -130,12 +139,6 @@ impl ReadHandle {
         }
     }
 
-    /// Find all entries that matched the given conditions.
-    ///
-    /// Returned records are passed to `then` before being returned.
-    ///
-    /// Note that not all writes will be included with this read -- only those that have been
-    /// swapped in by the writer.
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
         where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {

@@ -357,9 +357,10 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter(&self,
-                      node: core::NodeAddress)
-                      -> Option<Box<Fn(&prelude::DataType) -> Result<core::Datas, ()> + Send>> {
+    pub fn get_getter
+        (&self,
+         node: core::NodeAddress)
+         -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
         // reader should be a child of the given node
         trace!(self.log, "creating reader"; "for" => node.as_global().index());
@@ -403,11 +404,13 @@ impl Blender {
             let generator = inner.token_generator.clone().unwrap();
             let f =
                 move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
-                    arc.find_and(q, |rs| {
-                            rs.into_iter()
-                                .map(|v| (&**v).clone())
-                                .collect::<Vec<_>>()
-                        })
+                    arc.find_and(q,
+                                  |rs| {
+                                      rs.into_iter()
+                                          .map(|v| (&**v).clone())
+                                          .collect::<Vec<_>>()
+                                  },
+                                  true)
                         .map(|(res, ts)| {
                                  let token = generator.generate(ts, q.clone());
                                  (res.unwrap_or_else(Vec::new), token)

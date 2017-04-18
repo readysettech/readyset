@@ -93,7 +93,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                             key.into_owned().into()
                         };
 
-                        let data = get.lock().unwrap()(&key).into_iter().map(|row| {
+                        let data = get.lock().unwrap()(&key, true).into_iter().map(|row| {
                                 args
                                 .clone()
                                 .into_iter()

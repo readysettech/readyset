@@ -89,13 +89,13 @@ pub mod ext {
     }
 }
 
-type Get = Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>;
+type Get = Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>;
 
 impl ext::FutureService for Rc<ext::Server> {
     type QueryFut = futures::future::FutureResult<Vec<Vec<DataType>>, ()>;
     fn query(&self, view: usize, key: DataType) -> Self::QueryFut {
         let get = &self.get[view];
-        futures::future::result(get.2(&key))
+        futures::future::result(get.2(&key, true))
     }
 
     type InsertFut = futures::Finished<i64, Never>;

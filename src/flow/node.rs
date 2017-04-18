@@ -52,19 +52,22 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn get_reader(&self)
-                      -> Option<Box<Fn(&DataType) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
+    pub fn get_reader
+        (&self)
+         -> Option<Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
         self.state
             .clone()
             .map(|arc| {
-                Box::new(move |q: &DataType| -> Result<Datas, ()> {
-                             arc.find_and(q, |rs| {
+                Box::new(move |q: &DataType, block: bool| -> Result<Datas, ()> {
+                    arc.find_and(q,
+                                  |rs| {
                             rs.into_iter()
                                 .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
                                 .collect()
-                        })
-                                 .map(|r| r.0.unwrap_or_else(Vec::new))
-                         }) as Box<_>
+                        },
+                                  block)
+                        .map(|r| r.0.unwrap_or_else(Vec::new))
+                }) as Box<_>
             })
     }
 
