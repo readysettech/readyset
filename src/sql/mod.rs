@@ -356,9 +356,12 @@ impl SqlIncorporator {
         let new_opt_mir = new_query_mir.optimize();
 
         // compare to existing query MIR and reuse prefix
-        let (mut reused_mir, num_reused_nodes) =
+        let (reused_mir, num_reused_nodes) =
             merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
-        let qfp = reused_mir.into_flow_parts(&mut mig);
+
+        let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
+
+        let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
 
         info!(self.log,
               "Reused {} nodes for {}",
@@ -367,7 +370,7 @@ impl SqlIncorporator {
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         self.query_graphs
-            .insert(qg.signature().hash, (qg, reused_mir));
+            .insert(qg.signature().hash, (qg, post_reuse_opt_mir));
 
         qfp
     }

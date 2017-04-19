@@ -152,6 +152,11 @@ impl MirQuery {
         rewrite::pull_required_base_columns(&mut self);
         optimize::optimize(self)
     }
+
+    pub fn optimize_post_reuse(mut self) -> MirQuery {
+        optimize::optimize_post_reuse(&mut self);
+        self
+    }
 }
 
 impl Display for MirQuery {
