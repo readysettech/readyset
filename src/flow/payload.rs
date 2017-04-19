@@ -69,13 +69,13 @@ pub struct ReplayTransactionState {
 #[derive(Clone, Debug)]
 pub enum PacketEvent {
     /// The packet has been pulled off the input channel.
-    ExitInputChannel(time::Instant),
+    ExitInputChannel,
     /// The packet has been received by some domain, and is being handled.
-    Handle(time::Instant),
+    Handle,
     /// The packet is being processed at some node.
-    Process(time::Instant),
+    Process,
     /// The packet has reached some reader node.
-    ReachedReader(time::Instant),
+    ReachedReader,
 }
 
 pub enum Packet {
@@ -85,7 +85,7 @@ pub enum Packet {
     Message {
         link: Link,
         data: Records,
-        tracer: Option<mpsc::Sender<PacketEvent>>,
+        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
     },
 
     /// Transactional data-flow update.
@@ -93,7 +93,7 @@ pub enum Packet {
         link: Link,
         data: Records,
         state: TransactionState,
-        tracer: Option<mpsc::Sender<PacketEvent>>,
+        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -339,7 +339,7 @@ impl Packet {
         match *self {
             Packet::Message { tracer: Some(ref sender), .. } |
             Packet::Transaction { tracer: Some(ref sender), .. } => {
-                sender.send(event).unwrap();
+                sender.send((time::Instant::now(), event)).unwrap();
             }
             _ => {}
         }

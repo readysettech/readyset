@@ -409,7 +409,7 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet) {
-        m.trace(PacketEvent::Handle(time::Instant::now()));
+        m.trace(PacketEvent::Handle);
 
         match m {
             m @ Packet::Message { .. } => {
@@ -1526,7 +1526,7 @@ impl Domain {
                         let m = input_rx_handle.recv();
                         debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
                         if let Ok(ref p) = m {
-                            p.trace(PacketEvent::ExitInputChannel(time::Instant::now()));
+                            p.trace(PacketEvent::ExitInputChannel);
                         }
                         m
                     } else {

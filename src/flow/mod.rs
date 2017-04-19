@@ -46,7 +46,7 @@ pub struct Mutator {
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     transactional: bool,
     dropped: VecMap<prelude::DataType>,
-    tracer: Option<mpsc::Sender<prelude::PacketEvent>>,
+    tracer: Option<mpsc::Sender<(time::Instant, prelude::PacketEvent)>>,
 }
 
 impl Clone for Mutator {
@@ -233,7 +233,7 @@ impl Mutator {
     /// Attach a tracer to all packets sent until `stop_tracing` is called. The tracer will cause
     /// events to be sent to the returned Receiver indicating the progress of the packet through the
     /// graph.
-    pub fn start_tracing(&mut self) -> mpsc::Receiver<prelude::PacketEvent> {
+    pub fn start_tracing(&mut self) -> mpsc::Receiver<(time::Instant, prelude::PacketEvent)> {
         let (tx, rx) = mpsc::channel();
         self.tracer = Some(tx);
         rx

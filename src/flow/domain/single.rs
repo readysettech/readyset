@@ -1,5 +1,3 @@
-use std::time;
-
 use flow;
 use petgraph::graph::NodeIndex;
 use flow::prelude::*;
@@ -53,7 +51,7 @@ impl NodeDescriptor {
                    nodes: &DomainNodes,
                    swap: bool)
                    -> Vec<Miss> {
-        m.trace(PacketEvent::Process(time::Instant::now()));
+        m.trace(PacketEvent::Process);
 
         use flow::payload::TransactionState;
         let addr = self.addr();
@@ -137,7 +135,7 @@ impl NodeDescriptor {
 
                 // TODO: don't send replays to streams?
 
-                m.trace(PacketEvent::ReachedReader(time::Instant::now()));
+                m.trace(PacketEvent::ReachedReader);
 
                 let mut data = Some(m.take_data()); // so we can .take() for last tx
                 let mut txs = r.streamers.lock().unwrap();
