@@ -296,6 +296,12 @@ impl DomainState {
     }
 
     pub fn get_next_event(&mut self) -> Event {
+        if let Bundle::Messages(count, ref v) = self.next_transaction {
+            if v.len() < count {
+                return Event::None;
+            }
+        }
+
         match mem::replace(&mut self.next_transaction, Bundle::Empty) {
             Bundle::MigrationStart(channel) => {
                 channel.send(()).unwrap();
@@ -319,9 +325,7 @@ impl DomainState {
                 Event::CompleteMigration
             }
             Bundle::Messages(count, v) => {
-                if v.len() < count {
-                    return Event::None;
-                }
+                assert_eq!(v.len(), count);
 
                 self.ts += 1;
                 self.update_next_transaction();
