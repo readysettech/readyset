@@ -137,6 +137,8 @@ impl NodeDescriptor {
 
                 // TODO: don't send replays to streams?
 
+                m.trace(PacketEvent::ReachedReader(time::Instant::now()));
+
                 let mut data = Some(m.take_data()); // so we can .take() for last tx
                 let mut txs = r.streamers.lock().unwrap();
                 let mut left = txs.len();

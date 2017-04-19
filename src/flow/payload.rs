@@ -74,6 +74,8 @@ pub enum PacketEvent {
     Handle(time::Instant),
     /// The packet is being processed at some node.
     Process(time::Instant),
+    /// The packet has reached some reader node.
+    ReachedReader(time::Instant),
 }
 
 pub enum Packet {
