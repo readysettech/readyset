@@ -46,6 +46,7 @@ pub struct Mutator {
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     transactional: bool,
     dropped: VecMap<prelude::DataType>,
+    tracer: Option<mpsc::Sender<prelude::PacketEvent>>,
 }
 
 impl Clone for Mutator {
@@ -58,6 +59,7 @@ impl Clone for Mutator {
             tx_reply_channel: mpsc::channel(),
             transactional: self.transactional,
             dropped: self.dropped.clone(),
+            tracer: None,
         }
     }
 }
@@ -130,11 +132,13 @@ impl Mutator {
                 link: payload::Link::new(self.src, self.addr),
                 data: rs,
                 state: payload::TransactionState::WillCommit,
+                tracer: self.tracer.clone(),
             }
         } else {
             payload::Packet::Message {
                 link: payload::Link::new(self.src, self.addr),
                 data: rs,
+                tracer: self.tracer.clone(),
             }
         };
 
@@ -150,6 +154,7 @@ impl Mutator {
             link: payload::Link::new(self.src, self.addr),
             data: rs,
             state: payload::TransactionState::Pending(t, send),
+            tracer: self.tracer.clone(),
         };
         self.tx.clone().send(m).unwrap();
         loop {
@@ -223,6 +228,20 @@ impl Mutator {
                      u.into()]
                 .into();
         self.tx_send(m, t)
+    }
+
+    /// Attach a tracer to all packets sent until `stop_tracing` is called. The tracer will cause
+    /// events to be sent to the returned Receiver indicating the progress of the packet through the
+    /// graph.
+    pub fn start_tracing(&mut self) -> mpsc::Receiver<prelude::PacketEvent> {
+        let (tx, rx) = mpsc::channel();
+        self.tracer = Some(tx);
+        rx
+    }
+
+    /// Stop attaching the tracer to packets sent.
+    pub fn stop_tracing(&mut self) {
+        self.tracer = None;
     }
 }
 
@@ -452,6 +471,7 @@ impl Blender {
             tx_reply_channel: mpsc::channel(),
             transactional: self.ingredients[*base.as_global()].is_transactional(),
             dropped: base_n.get_dropped(),
+            tracer: None,
         }
     }
 

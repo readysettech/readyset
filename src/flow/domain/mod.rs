@@ -332,10 +332,12 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let ts = if let Some(&Packet::Transaction {
-                                  state: ref ts @ TransactionState::Committed(..), ..
-                              }) = messages.iter().next() {
-            ts.clone()
+        let (ts, tracer) = if let Some(&Packet::Transaction {
+                                            state: ref ts @ TransactionState::Committed(..),
+                                            ref tracer,
+                                            ..
+                                        }) = messages.iter().next() {
+            (ts.clone(), tracer.clone())
         } else {
             unreachable!();
         };
@@ -364,6 +366,7 @@ impl Domain {
                     link: Link::new(addr, addr),
                     data: data,
                     state: ts.clone(),
+                    tracer: tracer.clone(),
                 }
             } else {
                 // The packet is about to hit a non-transactional output node (which could be an
@@ -371,6 +374,7 @@ impl Domain {
                 Packet::Message {
                     link: Link::new(addr, addr),
                     data: data,
+                    tracer: tracer.clone(),
                 }
             };
 
@@ -405,6 +409,8 @@ impl Domain {
     }
 
     fn handle(&mut self, m: Packet) {
+        m.trace(PacketEvent::Handle(time::Instant::now()));
+
         match m {
             m @ Packet::Message { .. } => {
                 self.dispatch_(m, true);
@@ -1519,6 +1525,9 @@ impl Domain {
                     } else if id == input_rx_handle.id() {
                         let m = input_rx_handle.recv();
                         debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
+                        if let Ok(ref p) = m {
+                            p.trace(PacketEvent::ExitInputChannel(time::Instant::now()));
+                        }
                         m
                     } else {
                         unreachable!()

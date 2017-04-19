@@ -128,6 +128,7 @@ impl DomainState {
                 ref mut state,
                 ref link,
                 ref data,
+                ..
             } => {
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);

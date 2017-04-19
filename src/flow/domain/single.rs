@@ -1,3 +1,5 @@
+use std::time;
+
 use flow;
 use petgraph::graph::NodeIndex;
 use flow::prelude::*;
@@ -51,6 +53,7 @@ impl NodeDescriptor {
                    nodes: &DomainNodes,
                    swap: bool)
                    -> Vec<Miss> {
+        m.trace(PacketEvent::Process(time::Instant::now()));
 
         use flow::payload::TransactionState;
         let addr = self.addr();
