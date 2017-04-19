@@ -193,9 +193,11 @@ impl Domain {
                     unimplemented!();
                 }
                 TriggerEndpoint::End(ref mut trigger) => {
-                    trigger
-                        .send(Packet::RequestPartialReplay { tag, key })
-                        .unwrap();
+                    if trigger
+                           .send(Packet::RequestPartialReplay { tag, key })
+                           .is_err() {
+                        // we're shutting down -- it's fine.
+                    }
                 }
                 TriggerEndpoint::Start(..) => unreachable!(),
                 TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
