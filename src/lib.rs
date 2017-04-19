@@ -376,6 +376,7 @@ pub use flow::{Blender, Migration, Mutator};
 pub use flow::core::{NodeAddress, DataType, Datas};
 pub use flow::node::StreamUpdate;
 pub use flow::domain::Index;
+pub use flow::payload::PacketEvent;
 pub use ops::base::{Base, BaseDurabilityLevel};
 pub use ops::grouped::aggregate::{Aggregator, Aggregation};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};

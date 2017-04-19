@@ -10,6 +10,8 @@ use std::fmt;
 use std::sync::mpsc;
 use std::collections::HashMap;
 
+use std::time;
+
 #[derive(Clone)]
 pub struct Link {
     pub src: NodeAddress,
@@ -63,17 +65,35 @@ pub struct ReplayTransactionState {
     pub prevs: Option<HashMap<domain::Index, i64>>,
 }
 
+/// Different events that can occur as a packet is being processed.
+#[derive(Clone, Debug)]
+pub enum PacketEvent {
+    /// The packet has been pulled off the input channel.
+    ExitInputChannel,
+    /// The packet has been received by some domain, and is being handled.
+    Handle,
+    /// The packet is being processed at some node.
+    Process,
+    /// The packet has reached some reader node.
+    ReachedReader,
+}
+
 pub enum Packet {
     // Data messages
     //
     /// Regular data-flow update.
-    Message { link: Link, data: Records },
+    Message {
+        link: Link,
+        data: Records,
+        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
+    },
 
     /// Transactional data-flow update.
     Transaction {
         link: Link,
         data: Records,
         state: TransactionState,
+        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -287,24 +307,41 @@ impl Packet {
 
     pub fn clone_data(&self) -> Self {
         match *self {
-            Packet::Message { ref link, ref data } => {
+            Packet::Message {
+                ref link,
+                ref data,
+                ref tracer,
+            } => {
                 Packet::Message {
                     link: link.clone(),
                     data: data.clone(),
+                    tracer: tracer.clone(),
                 }
             }
             Packet::Transaction {
                 ref link,
                 ref data,
                 ref state,
+                ref tracer,
             } => {
                 Packet::Transaction {
                     link: link.clone(),
                     data: data.clone(),
                     state: state.clone(),
+                    tracer: tracer.clone(),
                 }
             }
             _ => unreachable!(),
+        }
+    }
+
+    pub fn trace(&self, event: PacketEvent) {
+        match *self {
+            Packet::Message { tracer: Some(ref sender), .. } |
+            Packet::Transaction { tracer: Some(ref sender), .. } => {
+                sender.send((time::Instant::now(), event)).unwrap();
+            }
+            _ => {}
         }
     }
 }
