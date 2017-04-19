@@ -219,7 +219,6 @@ impl NodeDescriptor {
                         break;
                     }
                 }
-                debug_assert!(m.is_none());
                 vec![]
             }
             flow::node::Type::Internal(ref mut i) => {
