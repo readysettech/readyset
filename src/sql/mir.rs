@@ -273,11 +273,39 @@ impl SqlToMirConverter {
                     //  1) reuse the existing node, but add an upgrader for any changes in the
                     //     column set, or
                     //  2) give up and just make a new node
-                    error!(self.log,
-                           "base table for {} already exists in version {}, \
+                    info!(self.log,
+                          "base table for {} already exists in version {}, \
                            but has a different schema!",
-                           name,
-                           existing_sv);
+                          name,
+                          existing_sv);
+
+                    // Find out if this is a simple case of adding or removing a column
+                    let mut columns_added = Vec::new();
+                    let mut columns_removed = Vec::new();
+                    let mut columns_unchanged = Vec::new();
+                    for c in cols {
+                        if !schema.contains(c) {
+                            // new column
+                            columns_added.push(c);
+                        } else {
+                            columns_unchanged.push(c);
+                        }
+                    }
+                    for c in schema {
+                        if !cols.contains(c) {
+                            // dropped column
+                            columns_removed.push(c);
+                        }
+                    }
+
+                    if columns_unchanged.len() > 0 &&
+                       (columns_added.len() > 0 || columns_removed.len() > 0) {
+                        error!(self.log,
+                               "base {} add {} columns, remove {} columns",
+                               name,
+                               columns_added.len(),
+                               columns_removed.len());
+                    }
                 }
             }
         }
