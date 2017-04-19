@@ -588,7 +588,7 @@ pub fn reconstruct(log: &Logger,
     use flow::node::{Type, Reader, NodeHandle};
 
     // if there's only one path
-    let root_domain = paths.get(0).map(|p| graph[p.last().unwrap().0].domain());
+    let last_domain = paths.get(0).map(|p| graph[p[0].0].domain());
     let mut first_tag = Some(Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
 
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
@@ -609,7 +609,7 @@ pub fn reconstruct(log: &Logger,
             // we need to give it a way to trigger replays.
             use backlog;
             let tag = first_tag.unwrap();
-            let tx = sync::Mutex::new(txs[&root_domain.unwrap()].clone());
+            let tx = sync::Mutex::new(txs[&last_domain.unwrap()].clone());
             let (r_part, w_part) = backlog::new_partial(cols, state.key(), move |key| {
                 tx.lock()
                     .unwrap()

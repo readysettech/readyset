@@ -106,6 +106,7 @@ pub struct Domain {
     mode: DomainMode,
     waiting: local::Map<Waiting>,
     replay_paths: HashMap<Tag, ReplayPath>,
+    reader_triggered: local::Map<HashSet<DataType>>,
 
     inject_tx: Option<mpsc::SyncSender<Packet>>,
 
@@ -138,6 +139,7 @@ impl Domain {
             not_ready: not_ready,
             mode: DomainMode::Forwarding,
             waiting: local::Map::new(),
+            reader_triggered: local::Map::new(),
             replay_paths: HashMap::new(),
 
             inject_tx: None,
@@ -526,11 +528,61 @@ impl Domain {
                             });
             }
             Packet::RequestPartialReplay { tag, key } => {
+                match self.replay_paths.get(&tag).unwrap() {
+                    &ReplayPath {
+                         trigger: TriggerEndpoint::End(..),
+                         ref path,
+                         ..
+                     } |
+                    &ReplayPath {
+                         trigger: TriggerEndpoint::Local(..),
+                         ref path,
+                         ..
+                     } => {
+                        // a miss in a reader! make sure we don't re-do work
+                        use flow::node::{Type, Reader};
+                        let addr = path.last().unwrap().0.as_local();
+                        let n = self.nodes[addr].borrow();
+                        if let Type::Reader(_, Reader { state: Some(ref r), .. }) = *n.inner {
+                            if r.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
+                                // key has already been replayed!
+                                return;
+                            }
+                        } else {
+                            unreachable!();
+                        }
+
+                        let mut had = false;
+                        if let Some(ref mut prev) = self.reader_triggered.get_mut(addr) {
+                            if prev.contains(&key[0]) {
+                                // we've already requested a replay of this key
+                                return;
+                            }
+                            prev.insert(key[0].clone());
+                            had = true;
+                        }
+
+                        if !had {
+                            self.reader_triggered.insert(*addr, HashSet::new());
+                        }
+                    }
+                    _ => {}
+                }
+
+                if let &mut ReplayPath {
+                                trigger: TriggerEndpoint::End(ref mut trigger), ..
+                            } = self.replay_paths.get_mut(&tag).unwrap() {
+                    trigger
+                        .send(Packet::RequestPartialReplay { tag, key })
+                        .unwrap();
+                    return;
+                }
+
                 trace!(self.log,
-                       "tag" => tag.id(),
-                       "key" => format!("{:?}", key);
-                       "got replay request"
-                );
+                           "tag" => tag.id(),
+                           "key" => format!("{:?}", key);
+                           "got replay request"
+                    );
                 self.seed_replay(tag, &key[..], None);
             }
             Packet::StartReplay { tag, from, ack } => {
@@ -1065,8 +1117,8 @@ impl Domain {
                                 misses.is_empty()
                             };
 
+                            let partial_key = partial_key.unwrap();
                             if !hole_filled {
-                                let partial_key = partial_key.unwrap();
                                 if let Some(state) = self.state.get_mut(ni.as_local()) {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
@@ -1079,6 +1131,11 @@ impl Domain {
                                 // we filled a hole! swap the reader.
                                 if let Type::Reader(Some(ref mut wh), _) = *n.inner {
                                     wh.swap();
+                                }
+                                // and also unmark the replay request
+                                if let Some(ref mut prev) =
+                                    self.reader_triggered.get_mut(ni.as_local()) {
+                                    prev.remove(&partial_key[0]);
                                 }
                             }
                         }
