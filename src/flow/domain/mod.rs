@@ -1175,7 +1175,7 @@ impl Domain {
                             }
                             // there is nothing more to do with this message
                             // it's either hit the end of a path, or it has been captured
-                            break;
+                            break 'outer;
                         }
 
                         // if we missed during replay, we need to do a replay
