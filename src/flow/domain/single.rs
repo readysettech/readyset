@@ -266,7 +266,7 @@ impl NodeDescriptor {
 
                 if captured {
                     use std::mem;
-                    mem::replace(m, Packet::None);
+                    mem::replace(m, Packet::Captured);
                     return misses;
                 }
 

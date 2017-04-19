@@ -696,6 +696,7 @@ impl Domain {
                 sender.send((domain_stats, node_stats)).unwrap();
             }
             Packet::None => unreachable!("None packets should never be sent around"),
+            Packet::Captured => unreachable!("captured packets should never be sent around"),
             Packet::RequestUnboundedTx(_) => {
                 //rustfmt
                 unreachable!("Requests for unbounded tx channel are handled by event loop")
@@ -1102,15 +1103,13 @@ impl Domain {
                             n.process(&mut m, keyed_by, &mut self.state, &self.nodes, false);
 
                         if target {
-                            let hole_filled = if let Packet::None = m {
-                                // this can happen for one of two reasons: either, we're a Reader,
-                                // which always consumes its input, or we're another node, in which
-                                // case the node captured our replay. in the former case, the hole
-                                // was filled correctly. in the latter case, there is nothing more
-                                // for us to do. it will eventually release, and then all the other
-                                // things will happen. for now though, we need to reset the hole we
-                                // opened up. crucially though, the hole was *not* filled.
-                                is_reader
+                            let hole_filled = if let Packet::Captured = m {
+                                // the node captured our replay. in the latter case, there is
+                                // nothing more for us to do. it will eventually release, and then
+                                // all the other things will happen. for now though, we need to
+                                // reset the hole we opened up. crucially though, the hole was
+                                // *not* filled.
+                                false
                             } else {
                                 // we produced some output, but did we also miss?
                                 // if we did, we don't want to consider the hole filled.
@@ -1143,8 +1142,8 @@ impl Domain {
                         // we're done with the node
                         drop(n);
 
-                        if let Packet::None = m {
-                            if !target && partial_key.is_some() && is_transactional {
+                        if let Packet::Captured = m {
+                            if partial_key.is_some() && is_transactional {
                                 let last_ni = path.last().unwrap().0;
                                 if last_ni != *ni {
                                     let mut n = self.nodes[&last_ni.as_local()].borrow_mut();
@@ -1173,8 +1172,9 @@ impl Domain {
                                     }
                                 }
                             }
-                            // there is nothing more to do with this message
-                            // it's either hit the end of a path, or it has been captured
+
+                            // it's been captured, so we need to *not* consider the replay finished
+                            // (which the logic below matching on context would do)
                             break 'outer;
                         }
 

@@ -197,6 +197,9 @@ pub enum Packet {
     GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
                                      HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
 
+    /// The packet was captured awaiting the receipt of other replays.
+    Captured,
+
     None,
 }
 
