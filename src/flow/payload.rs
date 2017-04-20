@@ -341,7 +341,7 @@ impl Packet {
         match *self {
             Packet::Message { tracer: Some(ref sender), .. } |
             Packet::Transaction { tracer: Some(ref sender), .. } => {
-                sender.send((time::Instant::now(), event)).unwrap();
+                let _ = sender.send((time::Instant::now(), event));
             }
             _ => {}
         }
