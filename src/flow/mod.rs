@@ -46,7 +46,7 @@ pub struct Mutator {
     tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     transactional: bool,
     dropped: VecMap<prelude::DataType>,
-    tracer: Option<mpsc::Sender<(time::Instant, prelude::PacketEvent)>>,
+    tracer: payload::Tracer,
 }
 
 impl Clone for Mutator {

@@ -205,7 +205,7 @@ pub mod test {
                 let id = self.nut.unwrap().1;
                 let mut n = self.nodes[id.as_local()].borrow_mut();
                 let m = n.inner
-                    .on_input(src, u.into(), &self.nodes, &self.states);
+                    .on_input(src, u.into(), &mut None, &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };

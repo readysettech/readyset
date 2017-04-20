@@ -79,6 +79,7 @@ impl Ingredient for Project {
     fn on_input(&mut self,
                 from: NodeAddress,
                 mut rs: Records,
+                _: &mut Tracer,
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {

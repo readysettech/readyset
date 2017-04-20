@@ -78,6 +78,8 @@ pub enum PacketEvent {
     ReachedReader,
 }
 
+pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
+
 pub enum Packet {
     // Data messages
     //
@@ -85,7 +87,7 @@ pub enum Packet {
     Message {
         link: Link,
         data: Records,
-        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
+        tracer: Tracer,
     },
 
     /// Transactional data-flow update.
@@ -93,7 +95,7 @@ pub enum Packet {
         link: Link,
         data: Records,
         state: TransactionState,
-        tracer: Option<mpsc::Sender<(time::Instant, PacketEvent)>>,
+        tracer: Tracer,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -342,6 +344,14 @@ impl Packet {
                 sender.send((time::Instant::now(), event)).unwrap();
             }
             _ => {}
+        }
+    }
+
+    pub fn tracer(&mut self) -> Option<&mut Tracer> {
+        match *self {
+            Packet::Message { ref mut tracer, .. } |
+            Packet::Transaction { ref mut tracer, .. } => Some(tracer),
+            _ => None,
         }
     }
 }

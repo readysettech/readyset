@@ -52,6 +52,7 @@ impl Ingredient for Filter {
     fn on_input(&mut self,
                 _: NodeAddress,
                 mut rs: Records,
+                _: &mut Tracer,
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {

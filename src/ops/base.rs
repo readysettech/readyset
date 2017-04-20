@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use time;
 use vec_map::VecMap;
+use flow::payload::Tracer;
 
 // 4k buffered log.
 const LOG_BUFFER_CAPACITY: usize = 4 * 1024;
@@ -27,6 +28,7 @@ const BUFFERED_WRITES_FLUSH_INTERVAL_MS: u64 = 1000;
 #[derive(Debug)]
 pub struct Base {
     buffered_writes: Option<Records>,
+    buffered_tracer: Tracer,
     durability: Option<BaseDurabilityLevel>,
     durable_log: Option<BufWriter<File, WhenFull>>,
     durable_log_path: Option<PathBuf>,
@@ -234,6 +236,7 @@ impl Base {
 impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
+            buffered_tracer: self.buffered_tracer.clone(),
             buffered_writes: self.buffered_writes.clone(),
             durability: self.durability,
             durable_log: None,
@@ -254,6 +257,7 @@ impl Clone for Base {
 impl Default for Base {
     fn default() -> Self {
         Base {
+            buffered_tracer: None,
             buffered_writes: Some(Records::default()),
             durability: None,
             durable_log: None,
@@ -307,6 +311,7 @@ impl Ingredient for Base {
     fn on_input(&mut self,
                 _: NodeAddress,
                 mut rs: Records,
+                tracer: &mut Tracer,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
@@ -314,6 +319,14 @@ impl Ingredient for Base {
         let records_to_return;
         match self.durability {
             Some(BaseDurabilityLevel::Buffered) => {
+                // keep track of tracer
+                if self.buffered_tracer.is_none() {
+                    self.buffered_tracer = tracer.take();
+                } else {
+                    // asked to trace *two* packets in the same batch, which is too hard.
+                    assert!(tracer.is_none());
+                }
+
                 // Perform a synchronous flush if one of the following conditions are met:
                 //
                 // 1. Enough time has passed since the last time we flushed.
@@ -330,6 +343,9 @@ impl Ingredient for Base {
 
                     // This returns everything that was buffered, plus the newly inserted records.
                     records_to_return = self.flush();
+
+                    // Also, pass along the tracer for the batch if there is one
+                    *tracer = self.buffered_tracer.take();
                 } else {
                     // Otherwise, buffer the records and don't send them downstream.
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
@@ -349,7 +365,8 @@ impl Ingredient for Base {
             }
         }
 
-        let results = records_to_return.into_iter()
+        let results = records_to_return
+            .into_iter()
             .map(|r| {
                 //rustfmt
                 match r {
@@ -380,7 +397,8 @@ impl Ingredient for Base {
         let rs = if self.unmodified {
             results.collect()
         } else {
-            results.map(|r| {
+            results
+                .map(|r| {
                     //rustfmt
                     if r.len() != self.defaults.len() {
                         let rlen = r.len();

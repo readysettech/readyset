@@ -93,6 +93,7 @@ impl Ingredient for Union {
     fn on_input(&mut self,
                 from: NodeAddress,
                 rs: Records,
+                _: &mut Tracer,
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
@@ -124,6 +125,7 @@ impl Ingredient for Union {
     fn on_input_raw(&mut self,
                     from: NodeAddress,
                     rs: Records,
+                    tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
                     n: &DomainNodes,
                     s: &StateMap)
@@ -132,7 +134,7 @@ impl Ingredient for Union {
             None => {
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(self.on_input(from, rs, n, s));
+                    return RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s));
                 }
 
                 // partial replays are flowing through us, and at least one piece is being waited
@@ -140,6 +142,7 @@ impl Ingredient for Union {
                 // are for a replay piece that is still waiting for its other half).
                 let rs = rs.into_iter().filter_map(|r| {
                     let k = self.replay_key.as_ref().unwrap()[from.as_local()];
+                    // TODO: should we steal the tracer if we take some records?
                     if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
                         if let Some(ref mut rs) = pieces.get_mut(from.as_local()) {
                             // we've received a replay piece from this ancestor already, and are
@@ -160,7 +163,7 @@ impl Ingredient for Union {
                     }
                 }).collect();
 
-                RawProcessingResult::Regular(self.on_input(from, rs, n, s))
+                RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s))
             }
             Some((key_col, key_val)) => {
                 if self.replay_key.is_none() {
@@ -187,11 +190,12 @@ impl Ingredient for Union {
 
                 if finished {
                     // yes! construct the final replay records.
+                    // TODO: should we use a stolen tracer if none is given?
                     let rs = self.replay_pieces
                         .remove(&key_val)
                         .unwrap()
                         .into_iter()
-                        .flat_map(|(from, rs)| self.on_input(from, rs, n, s).results)
+                        .flat_map(|(from, rs)| self.on_input(from, rs, tracer, n, s).results)
                         .collect();
 
                     RawProcessingResult::ReplayPiece(rs)

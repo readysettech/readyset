@@ -212,6 +212,7 @@ impl Ingredient for TopK {
     fn on_input(&mut self,
                 from: NodeAddress,
                 rs: Records,
+                _: &mut Tracer,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {

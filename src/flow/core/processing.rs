@@ -103,6 +103,7 @@ pub trait Ingredient
     fn on_input(&mut self,
                 from: prelude::NodeAddress,
                 data: prelude::Records,
+                tracer: &mut prelude::Tracer,
                 domain: &prelude::DomainNodes,
                 states: &prelude::StateMap)
                 -> ProcessingResult;
@@ -110,12 +111,13 @@ pub trait Ingredient
     fn on_input_raw(&mut self,
                     from: prelude::NodeAddress,
                     data: prelude::Records,
+                    tracer: &mut prelude::Tracer,
                     is_replay_of: Option<(usize, prelude::DataType)>,
                     domain: &prelude::DomainNodes,
                     states: &prelude::StateMap)
                     -> RawProcessingResult {
         let _ = is_replay_of;
-        RawProcessingResult::Regular(self.on_input(from, data, domain, states))
+        RawProcessingResult::Regular(self.on_input(from, data, tracer, domain, states))
     }
 
     fn can_query_through(&self) -> bool {

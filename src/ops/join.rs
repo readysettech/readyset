@@ -147,6 +147,7 @@ impl Ingredient for Join {
     fn on_input(&mut self,
                 from: NodeAddress,
                 rs: Records,
+                _: &mut Tracer,
                 nodes: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {

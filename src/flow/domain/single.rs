@@ -242,6 +242,7 @@ impl NodeDescriptor {
                     None
                 };
 
+                let mut tracer = m.tracer().and_then(|t| t.take());
                 let mut captured = false;
                 let mut misses = Vec::new();
                 m.map_data(|data| {
@@ -250,7 +251,7 @@ impl NodeDescriptor {
                     // we need to own the data
                     let old_data = mem::replace(data, Records::default());
 
-                    match i.on_input_raw(from, old_data, replay, nodes, state) {
+                    match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
                         RawProcessingResult::Regular(m) => {
                             mem::replace(data, m.results);
                             misses = m.misses;
@@ -270,6 +271,10 @@ impl NodeDescriptor {
                     use std::mem;
                     mem::replace(m, Packet::Captured);
                     return misses;
+                }
+
+                if let Some(t) = m.tracer() {
+                    *t = tracer.take();
                 }
 
                 m.map_data(|rs| {

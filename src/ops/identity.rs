@@ -42,6 +42,7 @@ impl Ingredient for Identity {
     fn on_input(&mut self,
                 _: NodeAddress,
                 rs: Records,
+                _: &mut Tracer,
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
