@@ -209,46 +209,49 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
         }
     }
 
+    // we don't need to check projected columsn to reuse a prefix of the query
+    return Some(ReuseType::DirectExtension);
+
     // 5. Consider projected columns
     //   5a. NQG projects a subset of EQG's edges --> can use directly
-    for (name, ex_qgn) in &existing_qg.relations {
-        let new_qgn = &new_qg.relations[name];
+    // for (name, ex_qgn) in &existing_qg.relations {
+    //     let new_qgn = &new_qg.relations[name];
 
-        // does EQG already have *all* the columns we project?
-        let all_projected = new_qgn
-            .columns
-            .iter()
-            .all(|nc| ex_qgn.columns.contains(nc));
-        if all_projected {
-            // if so, super -- we can extend directly
-            return Some(ReuseType::DirectExtension);
-        } else {
-            if name == "computed_columns" {
-                // NQG has some extra columns, and they're computed ones (i.e., grouped/function
-                // columns). We can recompute those, but not via a backjoin.
-                // TODO(malte): be cleverer about this situation
-                return None;
-            }
+    //     // does EQG already have *all* the columns we project?
+    //     let all_projected = new_qgn
+    //         .columns
+    //         .iter()
+    //         .all(|nc| ex_qgn.columns.contains(nc));
+    //     if all_projected {
+    //         // if so, super -- we can extend directly
+    //         return Some(ReuseType::DirectExtension);
+    //     } else {
+    //         if name == "computed_columns" {
+    //             // NQG has some extra columns, and they're computed ones (i.e., grouped/function
+    //             // columns). We can recompute those, but not via a backjoin.
+    //             // TODO(malte): be cleverer about this situation
+    //             return None;
+    //         }
 
-            // find the extra columns in the EQG to identify backjoins required
-            let backjoin_tables: Vec<_> = new_qgn
-                .columns
-                .iter()
-                .filter(|nc| !ex_qgn.columns.contains(nc) && nc.table.is_some())
-                .map(|c| Table::from(c.table.as_ref().unwrap().as_str()))
-                .collect();
+    //         // find the extra columns in the EQG to identify backjoins required
+    //         let backjoin_tables: Vec<_> = new_qgn
+    //             .columns
+    //             .iter()
+    //             .filter(|nc| !ex_qgn.columns.contains(nc) && nc.table.is_some())
+    //             .map(|c| Table::from(c.table.as_ref().unwrap().as_str()))
+    //             .collect();
 
-            if backjoin_tables.len() > 0 {
-                return Some(ReuseType::BackjoinRequired(backjoin_tables));
-            } else {
-                panic!("expected to find some backjoin tables!");
-            }
-        }
-    }
+    //         if backjoin_tables.len() > 0 {
+    //             return Some(ReuseType::BackjoinRequired(backjoin_tables));
+    //         } else {
+    //             panic!("expected to find some backjoin tables!");
+    //         }
+    //     }
+    // }
     // XXX(malte):  5b. NQG projects a superset of EQG's edges --> need backjoin
 
     // XXX(malte): should this be a positive? If so, what?
-    None
+    // None
 }
 
 pub fn choose_best_option(options: Vec<(ReuseType, &QueryGraph)>) -> (ReuseType, &QueryGraph) {
