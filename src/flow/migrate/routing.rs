@@ -64,19 +64,20 @@ pub fn add(log: &Logger,
             .collect(); // collect so we can mutate graph
 
         // We then need to make sure that we're acting on up-to-date information about existing
-        // egress/ingress pairs. In particular, we want to know about egresses this node already
-        // has (and to which domains). In the process we also populate the information about
-        // ingress nodes in other domains that point here (those shouldn't be re-created if new
-        // nodes are created in the corresponding domains).
-        let mut egresses = HashMap::new();
+        // egress/ingress pairs. In particular, we want to know if this node already has an egress
+        // (and to which domains). In the process we also populate the information about ingress
+        // nodes in other domains that point here (those shouldn't be re-created if new nodes are
+        // created in the corresponding domains).
+        let mut egress = None;
         for child in &children {
             if !new.contains(child) {
                 continue;
             }
             if let node::Type::Egress { .. } = *graph[*child] {
+                // we already have an egress for this node!
+                assert!(egress.is_none());
+                egress = Some(*child);
                 for ingress in graph.neighbors_directed(*child, petgraph::EdgeDirection::Outgoing) {
-                    // this egress already contains this node to the ingress' domain
-                    egresses.insert(graph[ingress].domain(), *child);
                     // also keep track of the corresponding ingress node so we can re-use it
                     ingresses
                         .entry(graph[ingress].domain())
@@ -90,42 +91,41 @@ pub fn add(log: &Logger,
             let cdomain = graph[child].domain();
             if domain != cdomain {
                 // child is in a different domain
-                if !egresses.contains_key(&cdomain) {
+                if egress.is_none() {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
                     let proxy = graph[node].mirror(node::Type::Egress {
                                                        tags: Default::default(),
                                                        txs: Default::default(),
                                                    });
-                    let egress = graph.add_node(proxy);
-                    graph.add_edge(node, egress, false);
+                    let eid = graph.add_node(proxy);
+                    graph.add_edge(node, eid, false);
 
-                    new.insert(egress);
-                    egresses.insert(cdomain, egress);
+                    new.insert(eid);
+                    egress = Some(eid);
 
                     trace!(log,
                            "adding cross-domain egress to new node";
                            "node" => node.index(),
-                           "egress" => egress.index()
+                           "egress" => eid.index()
                     );
                 } else {
                     trace!(log,
                            "re-using cross-domain egress to new node";
                            "node" => node.index(),
-                           "egress" => egresses[&cdomain].index()
+                           "egress" => egress.as_ref().unwrap().index()
                     );
                 }
 
                 // we need to hook that node in between us and this child
-                let egress = egresses[&cdomain];
                 let old = graph.find_edge(node, child).unwrap();
                 let was_materialized = graph.remove_edge(old).unwrap();
-                graph.add_edge(egress, child, was_materialized);
+                graph.add_edge(egress.unwrap(), child, was_materialized);
                 // this ends up being re-executed, but that's okay
                 swaps
                     .entry(cdomain)
                     .or_insert_with(HashMap::new)
-                    .insert(node, egress);
+                    .insert(node, egress.unwrap());
             }
         }
 
