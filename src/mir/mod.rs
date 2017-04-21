@@ -152,6 +152,11 @@ impl MirQuery {
         rewrite::pull_required_base_columns(&mut self);
         optimize::optimize(self)
     }
+
+    pub fn optimize_post_reuse(mut self) -> MirQuery {
+        optimize::optimize_post_reuse(&mut self);
+        self
+    }
 }
 
 impl Display for MirQuery {
@@ -286,9 +291,32 @@ impl MirNode {
         self.ancestors.push(a)
     }
 
+    pub fn remove_ancestor(&mut self, a: MirNodeRef) {
+        match self.ancestors
+                .iter()
+                .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
+                    None => (),
+                    Some(idx) => {
+                            self.ancestors.remove(idx);
+                    }
+                }
+    }
+
     pub fn add_child(&mut self, c: MirNodeRef) {
         self.children.push(c)
     }
+
+    pub fn remove_child(&mut self, a: MirNodeRef) {
+        match self.children
+                .iter()
+                .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
+                    None => (),
+                    Some(idx) => {
+                            self.children.remove(idx);
+                    }
+                }
+    }
+
 
     pub fn add_column(&mut self, c: Column) {
         self.columns.push(c.clone());
