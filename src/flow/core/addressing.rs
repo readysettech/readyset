@@ -1,8 +1,10 @@
 use std::fmt;
 use petgraph::graph::NodeIndex;
 
+use serde::{self, Serialize, Serializer, Deserialize, Deserializer};
+
 /// A domain-local node identifier.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct LocalNodeIndex {
     id: usize, // not a tuple struct so this field can be made private
 }
@@ -19,9 +21,41 @@ pub enum NodeAddress_ {
     Local(LocalNodeIndex), // XXX: maybe include domain here?
 }
 
+/// Variant of NodeAddress_ used for serialization
+#[derive(Serialize, Deserialize)]
+enum NodeAddressDef {
+    Global(usize),
+    Local(usize),
+}
+
+impl Serialize for NodeAddress_ {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        let def = match *self {
+            NodeAddress_::Global(i) => NodeAddressDef::Global(i.index()),
+            NodeAddress_::Local(i) => {
+                NodeAddressDef::Local(i.id())
+            }
+        };
+
+        def.serialize(serializer)
+    }
+}
+
+impl Deserialize for NodeAddress_ {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer
+    {
+        NodeAddressDef::deserialize(deserializer).map(|def|match def {
+            NodeAddressDef::Local(idx) => NodeAddress_::Local(LocalNodeIndex{id: idx}),
+            NodeAddressDef::Global(idx) => NodeAddress_::Global(NodeIndex::new(idx)),
+        })
+    }
+}
+
 /// `NodeAddress` is a unique identifier that can be used to refer to nodes in the graph across
 /// migrations.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Serialize, Deserialize)]
 pub struct NodeAddress {
     addr: NodeAddress_, // wrap the enum so people can't create these accidentally
 }

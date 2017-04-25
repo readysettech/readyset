@@ -31,7 +31,7 @@ macro_rules! dur_to_ns {
 }
 
 #[allow(missing_docs)]
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Index(usize);
 
 impl From<usize> for Index {
