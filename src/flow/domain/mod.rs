@@ -464,6 +464,20 @@ impl Domain {
                     .drop_column(column);
                 drop(ack);
             }
+            Packet::UpdateEgress { node, new_tx, new_tag } => {
+                use flow::node::{Type, Egress};
+                let mut n = self.nodes[&node].borrow_mut();
+                if let Type::Egress(Some(Egress {ref mut txs, ref mut tags })) = *n.inner {
+                    if let Some(new_tx) = new_tx {
+                        txs.push(new_tx);
+                    }
+                    if let Some(new_tag) = new_tag {
+                        tags.insert(new_tag.0, new_tag.1);
+                    }
+                } else {
+                    unreachable!();
+                }
+            }
             Packet::StateSizeProbe { node, ack } => {
                 if let Some(state) = self.state.get(&node) {
                     ack.send(state.len()).unwrap();

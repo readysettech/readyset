@@ -94,10 +94,11 @@ pub fn add(log: &Logger,
                 if egress.is_none() {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
-                    let proxy = graph[node].mirror(node::Type::Egress {
-                                                       tags: Default::default(),
-                                                       txs: Default::default(),
-                                                   });
+                    let proxy = graph[node]
+                        .mirror(node::Type::Egress(Some(node::Egress {
+                                                            tags: Default::default(),
+                                                            txs: Default::default(),
+                                                        })));
                     let eid = graph.add_node(proxy);
                     graph.add_edge(node, eid, false);
 
@@ -164,10 +165,11 @@ pub fn add(log: &Logger,
 
             let egress = egress.unwrap_or_else(|| {
                 // no, okay, so we need to add an egress for that other node,
-                let proxy = graph[*parent].mirror(node::Type::Egress {
-                                                      txs: Default::default(),
-                                                      tags: Default::default(),
-                                                  });
+                let proxy =
+                    graph[*parent].mirror(node::Type::Egress(Some(node::Egress {
+                                                                      txs: Default::default(),
+                                                                      tags: Default::default(),
+                                                                  })));
                 let egress = graph.add_node(proxy);
 
                 trace!(log,
@@ -285,19 +287,25 @@ pub fn connect(log: &Logger,
         }
 
         for egress in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
-            match *graph[egress] {
-                node::Type::Egress { ref txs, .. } => {
+            let egress_node = &graph[egress];
+            match **egress_node {
+                node::Type::Egress(..) => {
                     trace!(log,
                            "connecting";
                            "egress" => egress.index(),
                            "ingress" => node.index()
                     );
-                    txs.lock()
-                        .unwrap()
-                        .push((node.into(), n.addr(), main_txs[&n.domain()].clone()));
-                    continue;
+                    main_txs[&egress_node.domain()]
+                        .send(Packet::UpdateEgress {
+                                  node: egress_node.addr().as_local().clone(),
+                                  new_tx: Some((node.into(),
+                                                n.addr(),
+                                                main_txs[&n.domain()].clone())),
+                                  new_tag: None,
+                              })
+                        .unwrap();
                 }
-                node::Type::Source => continue,
+                node::Type::Source => {}
                 _ => unreachable!("ingress parent is not egress"),
             }
         }

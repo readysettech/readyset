@@ -138,6 +138,13 @@ pub enum Packet {
         ack: mpsc::SyncSender<()>,
     },
 
+    /// Update Egress node.
+    UpdateEgress {
+        node: LocalNodeIndex,
+        new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>,
+        new_tag: Option<(Tag, NodeAddress)>,
+    },
+
     /// Request a handle to an unbounded channel to this domain.
     ///
     /// We need these channels to send replay requests, as using the bounded channels could easily

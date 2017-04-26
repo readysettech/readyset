@@ -170,9 +170,9 @@ impl NodeDescriptor {
                 }
                 vec![]
             }
-            flow::node::Type::Egress { ref txs, ref tags } => {
+            flow::node::Type::Egress(None) => unreachable!(),
+            flow::node::Type::Egress(Some(flow::node::Egress { ref mut txs, ref tags })) => {
                 // send any queued updates to all external children
-                let mut txs = txs.lock().unwrap();
                 let txn = txs.len() - 1;
 
                 debug_assert!(self.children.is_empty());
@@ -182,8 +182,7 @@ impl NodeDescriptor {
                 // to that ingress node.
                 let replay_to = m.tag()
                     .map(|tag| {
-                             tags.lock()
-                        .unwrap()
+                             tags
                         .get(&tag)
                         .map(|n| *n)
                         .expect("egress node told about replay message, but not on replay path")

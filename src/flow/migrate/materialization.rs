@@ -789,12 +789,11 @@ pub fn reconstruct(log: &Logger,
 
             if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
-                if let flow::node::Type::Egress { ref tags, .. } = *graph[nodes.last().unwrap().0] {
-                    let mut tags = tags.lock().unwrap();
-                    tags.insert(tag, segments[i + 1].1[0].0.into());
-                } else {
-                    unreachable!();
-                }
+                txs[domain].send(Packet::UpdateEgress{
+                    node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
+                    new_tx: None,
+                    new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                }).unwrap();
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());

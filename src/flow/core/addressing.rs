@@ -1,7 +1,7 @@
 use std::fmt;
 use petgraph::graph::NodeIndex;
 
-use serde::{self, Serialize, Serializer, Deserialize, Deserializer};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]

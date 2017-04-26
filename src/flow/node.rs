@@ -96,6 +96,11 @@ impl Default for Reader {
     }
 }
 
+pub struct Egress {
+    pub txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>,
+    pub tags: HashMap<Tag, NodeAddress>,
+}
+
 pub(crate) enum NodeHandle {
     Owned(Type),
     Taken(Type),
@@ -137,10 +142,7 @@ impl DerefMut for NodeHandle {
 pub enum Type {
     Ingress,
     Internal(Box<Ingredient>),
-    Egress {
-        txs: sync::Arc<sync::Mutex<Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>>>,
-        tags: sync::Arc<sync::Mutex<HashMap<Tag, NodeAddress>>>,
-    },
+    Egress(Option<Egress>),
     Reader(Option<backlog::WriteHandle>, Reader),
     Hook(Option<hook::Hook>),
     Source,
@@ -159,7 +161,7 @@ impl Type {
         keys::provenance_of(graph, index, column, |_, _| None)
             .into_iter()
             .map(|path| {
-                     // we want the base node corresponding to each path
+        // we want the base node corresponding to each path
                      path.into_iter().last().unwrap()
                  })
             .collect()
@@ -280,14 +282,7 @@ impl Node {
 
     pub fn take(&mut self) -> Node {
         let inner = match *self.inner {
-            Type::Egress { ref tags, ref txs } => {
-                // egress nodes can still be modified externally if subgraphs are added
-                // so we just make a new one with a clone of the Mutex-protected Vec
-                Type::Egress {
-                    txs: txs.clone(),
-                    tags: tags.clone(),
-                }
-            }
+            Type::Egress(ref mut e) => Type::Egress(e.take()),
             Type::Reader(ref mut w, ref r) => {
                 // reader nodes can still be modified externally if txs are added
                 Type::Reader(w.take(), r.clone())
@@ -352,25 +347,25 @@ impl Node {
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
 
-                // Output node name and description. First row.
+        // Output node name and description. First row.
                 write!(f,
                        "{{ {} / {} | {} }}",
                        idx.index(),
                        escape(self.name()),
                        escape(&i.description()))?;
 
-                // Output node outputs. Second row.
+        // Output node outputs. Second row.
                 write!(f, " | {}", self.fields().join(", \\n"))?;
 
-                // Maybe output node's HAVING conditions. Optional third row.
-                // TODO
-                // if let Some(conds) = n.node().unwrap().having_conditions() {
-                //     let conds = conds.iter()
-                //         .map(|c| format!("{}", c))
-                //         .collect::<Vec<_>>()
-                //         .join(" ∧ ");
-                //     write!(f, " | σ({})", escape(&conds))?;
-                // }
+        // Maybe output node's HAVING conditions. Optional third row.
+        // TODO
+        // if let Some(conds) = n.node().unwrap().having_conditions() {
+        //     let conds = conds.iter()
+        //         .map(|c| format!("{}", c))
+        //         .collect::<Vec<_>>()
+        //         .join(" ∧ ");
+        //     write!(f, " | σ({})", escape(&conds))?;
+        // }
 
                 write!(f, " }}")
             }
