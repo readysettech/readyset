@@ -51,8 +51,8 @@ memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "e
 # netsoup
 futures = { version ="0.1.9", optional = true }
 tokio-core = { version = "0.1", optional = true }
-tarpc = {git="https://github.com/ms705/tarpc.git", branch = "hack", optional = true}
-tarpc-plugins = { git = "https://github.com/ms705/tarpc", branch = "hack", optional = true }
+tarpc = {git="https://github.com/jonhoo/tarpc.git", branch = "hack", optional = true}
+tarpc-plugins = { git = "https://github.com/jonhoo/tarpc", branch = "hack", optional = true }
 
 # for web
 rustc-serialize = { version = "0.3", optional = true }
