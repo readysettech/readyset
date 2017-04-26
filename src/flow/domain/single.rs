@@ -65,7 +65,7 @@ impl NodeDescriptor {
                            });
                 misses
             }
-            flow::node::Type::Reader(ref mut w, ref r) => {
+            flow::node::Type::Reader(ref mut w, ref mut r) => {
                 if let Some(ref mut state) = *w {
                     let r = r.state.as_ref().unwrap();
                     // make sure we don't fill a partial materialization
@@ -138,11 +138,10 @@ impl NodeDescriptor {
                 m.trace(PacketEvent::ReachedReader);
 
                 let mut data = Some(m.take_data()); // so we can .take() for last tx
-                let mut txs = r.streamers.lock().unwrap();
-                let mut left = txs.len();
+                let mut left = r.streamers.as_ref().unwrap().len();
 
                 // remove any channels where the receiver has hung up
-                txs.retain(|tx| {
+                r.streamers.as_mut().unwrap().retain(|tx| {
                     left -= 1;
                     if left == 0 {
                             tx.send(data.take()

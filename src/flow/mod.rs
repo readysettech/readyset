@@ -800,10 +800,10 @@ impl<'a> Migration<'a> {
         }
     }
 
-    fn reader_for(&self, n: core::NodeAddress) -> &node::Reader {
+    fn reader_for(&mut self, n: core::NodeAddress) -> &mut node::Reader {
         let ri = self.readers[n.as_global()];
-        if let node::Type::Reader(_, ref inner) = *self.mainline.ingredients[ri] {
-            &*inner
+        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
+            &mut *inner
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -846,7 +846,21 @@ impl<'a> Migration<'a> {
     pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
-        self.reader_for(n).streamers.lock().unwrap().push(tx);
+
+        // If the reader hasn't been incorporated into the graph yet, just add the streamer
+        // directly.
+        if let Some(ref mut streamers) = self.reader_for(n).streamers {
+            streamers.push(tx);
+            return rx;
+        }
+
+        // Otherwise, send a message to the reader's domain to have it add the streamer.
+        let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
+        self.mainline.txs[&reader.domain()].send(payload::Packet::AddStreamer{
+            node: reader.addr().as_local().clone(),
+            new_streamer: tx,
+        }).unwrap();
+
         rx
     }
 

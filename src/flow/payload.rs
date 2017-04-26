@@ -3,6 +3,7 @@ use petgraph;
 use backlog;
 use checktable;
 use flow::domain;
+use flow::node;
 use flow::statistics;
 use flow::prelude::*;
 
@@ -143,6 +144,12 @@ pub enum Packet {
         node: LocalNodeIndex,
         new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>,
         new_tag: Option<(Tag, NodeAddress)>,
+    },
+
+    /// Add a streamer to an existing reader node.
+    AddStreamer {
+        node: LocalNodeIndex,
+        new_streamer: mpsc::Sender<Vec<node::StreamUpdate>>,
     },
 
     /// Request a handle to an unbounded channel to this domain.

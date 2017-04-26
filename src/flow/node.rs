@@ -46,7 +46,7 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 #[derive(Clone)]
 pub struct Reader {
-    pub streamers: sync::Arc<sync::Mutex<Vec<mpsc::Sender<Vec<StreamUpdate>>>>>,
+    pub streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
     pub state: Option<backlog::ReadHandle>,
     pub token_generator: Option<checktable::TokenGenerator>,
 }
@@ -84,12 +84,20 @@ impl Reader {
             Some(ref s) => Ok(s.len()),
         }
     }
+
+    pub fn take(&mut self) -> Self {
+        Self {
+            streamers: self.streamers.take(),
+            state: self.state.clone(),
+            token_generator: self.token_generator.clone(),
+        }
+    }
 }
 
 impl Default for Reader {
     fn default() -> Self {
         Reader {
-            streamers: sync::Arc::default(),
+            streamers: Some(Vec::new()),
             state: None,
             token_generator: None,
         }
@@ -283,10 +291,7 @@ impl Node {
     pub fn take(&mut self) -> Node {
         let inner = match *self.inner {
             Type::Egress(ref mut e) => Type::Egress(e.take()),
-            Type::Reader(ref mut w, ref r) => {
-                // reader nodes can still be modified externally if txs are added
-                Type::Reader(w.take(), r.clone())
-            }
+            Type::Reader(ref mut w, ref mut r) => Type::Reader(w.take(), r.take()),
             Type::Ingress => Type::Ingress,
             Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
             Type::Hook(ref mut h) => Type::Hook(h.take()),

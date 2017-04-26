@@ -464,16 +464,32 @@ impl Domain {
                     .drop_column(column);
                 drop(ack);
             }
-            Packet::UpdateEgress { node, new_tx, new_tag } => {
+            Packet::UpdateEgress {
+                node,
+                new_tx,
+                new_tag,
+            } => {
                 use flow::node::{Type, Egress};
                 let mut n = self.nodes[&node].borrow_mut();
-                if let Type::Egress(Some(Egress {ref mut txs, ref mut tags })) = *n.inner {
+                if let Type::Egress(Some(Egress {
+                                             ref mut txs,
+                                             ref mut tags,
+                                         })) = *n.inner {
                     if let Some(new_tx) = new_tx {
                         txs.push(new_tx);
                     }
                     if let Some(new_tag) = new_tag {
                         tags.insert(new_tag.0, new_tag.1);
                     }
+                } else {
+                    unreachable!();
+                }
+            }
+            Packet::AddStreamer { node, new_streamer } => {
+                use flow::node::{Type, Reader};
+                let mut n = self.nodes[&node].borrow_mut();
+                if let Type::Reader(_, Reader { ref mut streamers, .. }) = *n.inner {
+                    streamers.as_mut().unwrap().push(new_streamer);
                 } else {
                     unreachable!();
                 }
