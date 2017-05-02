@@ -11,7 +11,7 @@ use table::Table;
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct CreateTableStatement {
     pub table: Table,
-    pub fields: Vec<Column>,
+    pub fields: Vec<(Column, SqlType)>,
     pub keys: Option<Vec<TableKey>>,
 }
 
@@ -213,14 +213,14 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
 );
 
 /// Parse rule for a comma-separated list.
-named!(pub field_specification_list<&[u8], Vec<Column> >,
+named!(pub field_specification_list<&[u8], Vec<(Column, SqlType)> >,
        many1!(
            complete!(chain!(
                fieldname: column_identifier_no_alias ~
-               _fieldtype: opt!(complete!(chain!(multispace ~
-                                      type_identifier ~
+               fieldtype: opt!(complete!(chain!(multispace ~
+                                      ti: type_identifier ~
                                       multispace?,
-                                      || {}
+                                      || { ti }
                                ))
                ) ~
                // XXX(malte): some of these are mutually exclusive...
@@ -260,7 +260,13 @@ named!(pub field_specification_list<&[u8], Vec<Column> >,
                        || {}
                    ))
                ),
-               || { fieldname }
+               || {
+                   let t = match fieldtype {
+                       None => SqlType::Text,
+                       Some(ref t) => t.clone(),
+                   };
+                   (fieldname, t)
+               }
            ))
        )
 );
@@ -339,6 +345,7 @@ named!(pub creation<&[u8], CreateTableStatement>,
         || {
             // "table AS alias" isn't legal in CREATE statements
             assert!(table.alias.is_none());
+
             CreateTableStatement {
                 table: table,
                 fields: fields,
@@ -373,7 +380,8 @@ mod tests {
 
         let res = field_specification_list(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
-                   vec![Column::from("id"), Column::from("name")]);
+                   vec![(Column::from("id"), SqlType::Bigint(20)),
+                        (Column::from("name"), SqlType::Varchar(255))]);
     }
 
     #[test]
@@ -384,9 +392,9 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![Column::from("id"),
-                                    Column::from("name"),
-                                    Column::from("email")],
+                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
+                                    (Column::from("name"), SqlType::Varchar(255)),
+                                    (Column::from("email"), SqlType::Varchar(255))],
                        ..Default::default()
                    });
     }
@@ -399,7 +407,8 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("user_newtalk"),
-                       fields: vec![Column::from("user_id"), Column::from("user_ip")],
+                       fields: vec![(Column::from("user_id"), SqlType::Int(5)),
+                                    (Column::from("user_ip"), SqlType::Varchar(40))],
                        ..Default::default()
                    });
     }
@@ -414,9 +423,9 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![Column::from("id"),
-                                    Column::from("name"),
-                                    Column::from("email")],
+                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
+                                    (Column::from("name"), SqlType::Varchar(255)),
+                                    (Column::from("email"), SqlType::Varchar(255))],
                        keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
                        ..Default::default()
                    });
@@ -429,9 +438,9 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![Column::from("id"),
-                                    Column::from("name"),
-                                    Column::from("email")],
+                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
+                                    (Column::from("name"), SqlType::Varchar(255)),
+                                    (Column::from("email"), SqlType::Varchar(255))],
                        keys: Some(vec![TableKey::UniqueKey(Some(String::from("id_k")),
                                                            vec![Column::from("id")])]),
                        ..Default::default()
