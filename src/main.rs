@@ -56,76 +56,76 @@ pub fn main() {
         .version("0.0.1")
         .about("Tastes GitHub commits.")
         .arg(Arg::with_name("listen_addr")
-            .short("l")
-            .long("listen_addr")
-            .takes_value(true)
-            .value_name("IP:PORT")
-            .default_value("0.0.0.0:4567")
-            .help("Listen address and port for webhook delivery"))
+                 .short("l")
+                 .long("listen_addr")
+                 .takes_value(true)
+                 .value_name("IP:PORT")
+                 .default_value("0.0.0.0:4567")
+                 .help("Listen address and port for webhook delivery"))
         .arg(Arg::with_name("github_repo")
-            .short("r")
-            .long("github_repo")
-            .takes_value(true)
-            .required(true)
-            .value_name("GH_REPO")
-            .default_value("https://github.com/ms705/taster")
-            .help("GitHub repository to taste"))
+                 .short("r")
+                 .long("github_repo")
+                 .takes_value(true)
+                 .required(true)
+                 .value_name("GH_REPO")
+                 .default_value("https://github.com/ms705/taster")
+                 .help("GitHub repository to taste"))
         .arg(Arg::with_name("email_addr")
-            .long("email_addr")
-            .takes_value(true)
-            .required(false)
-            .help("Email address to send notifications to"))
+                 .long("email_addr")
+                 .takes_value(true)
+                 .required(false)
+                 .help("Email address to send notifications to"))
         .arg(Arg::with_name("default_regression_reporting_threshold")
-            .long("default_regression_reporting_threshold")
-            .takes_value(true)
-            .default_value("0.1")
-            .help("Relative performance threshold below which a result is considered a \
+                 .long("default_regression_reporting_threshold")
+                 .takes_value(true)
+                 .default_value("0.1")
+                 .help("Relative performance threshold below which a result is considered a \
                    regression that needs reporting (0.1 = +/-10%)."))
         .arg(Arg::with_name("default_improvement_reporting_threshold")
-            .long("default_improvement_reporting_threshold")
-            .takes_value(true)
-            .default_value("0.1")
-            .help("Relative performance threshold above which a result is considered an \
+                 .long("default_improvement_reporting_threshold")
+                 .takes_value(true)
+                 .default_value("0.1")
+                 .help("Relative performance threshold above which a result is considered an \
                    improvement that needs reporting (0.1 = +/-10%)."))
         .arg(Arg::with_name("secret")
-            .short("s")
-            .long("secret")
-            .takes_value(true)
-            .required(false)
-            .help("GitHub webhook secret"))
+                 .short("s")
+                 .long("secret")
+                 .takes_value(true)
+                 .required(false)
+                 .help("GitHub webhook secret"))
         .arg(Arg::with_name("slack_hook_url")
-            .long("slack_hook_url")
-            .takes_value(true)
-            .required(false)
-            .help("Slack webhook URL to push notifications to"))
+                 .long("slack_hook_url")
+                 .takes_value(true)
+                 .required(false)
+                 .help("Slack webhook URL to push notifications to"))
         .arg(Arg::with_name("slack_channel")
-            .long("slack_channel")
-            .takes_value(true)
-            .required(false)
-            .default_value("#soup-test")
-            .help("Slack channel for notifications"))
+                 .long("slack_channel")
+                 .takes_value(true)
+                 .required(false)
+                 .default_value("#soup-test")
+                 .help("Slack channel for notifications"))
         .arg(Arg::with_name("taste_commit")
-            .long("taste_commit")
-            .short("t")
-            .takes_value(true)
-            .required(false)
-            .help("Do a one-off taste of a specific commit"))
+                 .long("taste_commit")
+                 .short("t")
+                 .takes_value(true)
+                 .required(false)
+                 .help("Do a one-off taste of a specific commit"))
         .arg(Arg::with_name("taste_head_only")
-            .long("taste_head_only")
-            .required(false)
-            .help("When multiple commits are pushed, taste the head commit only"))
+                 .long("taste_head_only")
+                 .required(false)
+                 .help("When multiple commits are pushed, taste the head commit only"))
         .arg(Arg::with_name("verbose_notifications")
-            .long("verbose_notifications")
-            .required(false)
-            .help("List all benchmarks in notifications even if the results have not changed \
+                 .long("verbose_notifications")
+                 .required(false)
+                 .help("List all benchmarks in notifications even if the results have not changed \
                    significantly"))
         .arg(Arg::with_name("workdir")
-            .short("w")
-            .long("workdir")
-            .takes_value(true)
-            .required(true)
-            .value_name("REPO_DIR")
-            .help("Directory holding the workspace repo"))
+                 .short("w")
+                 .long("workdir")
+                 .takes_value(true)
+                 .required(true)
+                 .value_name("REPO_DIR")
+                 .help("Directory holding the workspace repo"))
         .after_help(TASTER_USAGE)
         .get_matches();
 
@@ -189,11 +189,17 @@ pub fn main() {
                     Ok((cfg, tr)) => {
                         // email notification
                         if en.is_some() {
-                            en.as_ref().unwrap().notify(cfg.as_ref(), &tr, &push).unwrap();
+                            en.as_ref()
+                                .unwrap()
+                                .notify(cfg.as_ref(), &tr, &push)
+                                .unwrap();
                         }
                         // slack notification
                         if sn.is_some() {
-                            sn.as_ref().unwrap().notify(cfg.as_ref(), &tr, &push).unwrap();
+                            sn.as_ref()
+                                .unwrap()
+                                .notify(cfg.as_ref(), &tr, &push)
+                                .unwrap();
                         }
                         // We're done
                         return;
@@ -243,7 +249,13 @@ pub fn main() {
     let mut hub = Hub::new();
     hub.handle_authenticated("push", secret.unwrap(), move |delivery: &Delivery| {
         match delivery.payload {
-            Event::Push { ref _ref, ref commits, ref head_commit, ref pusher, .. } => {
+            Event::Push {
+                ref _ref,
+                ref commits,
+                ref head_commit,
+                ref pusher,
+                ..
+            } => {
                 println!("Handling {} commits pushed by {}",
                          commits.len(),
                          pusher.name);
@@ -330,9 +342,7 @@ pub fn main() {
         }
     });
 
-    let srvc = Server::http(&addr[..])
-        .unwrap()
-        .handle(hub);
+    let srvc = Server::http(&addr[..]).unwrap().handle(hub);
 
     println!("Taster listening on {}", addr);
     srvc.unwrap();

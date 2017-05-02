@@ -1,8 +1,8 @@
 use auth::with_authentication;
 
 use git2;
-use git2::{AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, RemoteCallbacks, Repository,
-           ResetType};
+use git2::{AutotagOption, BranchType, Commit, ErrorCode, FetchOptions, RemoteCallbacks,
+           Repository, ResetType};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -31,8 +31,9 @@ impl Workspace {
     pub fn new(github_repo: &str, local_path: &Path) -> Workspace {
         // Make workdir if it doesn't exist
         if !local_path.is_dir() {
-            fs::create_dir_all(&local_path)
-                .expect(format!("Couldn't mkdir {}", local_path.display()).as_str());
+            fs::create_dir_all(&local_path).expect(format!("Couldn't mkdir {}",
+                                                           local_path.display())
+                                                           .as_str());
         }
 
         let repo = match Repository::open(local_path.to_str().unwrap()) {
@@ -66,10 +67,12 @@ impl Workspace {
             Err(e) => panic!("Couldn't get remote branches: {}", e.message()),
             Ok(br) => {
                 br.map(|b| {
-                        let branch = b.unwrap().0;
-                        (String::from(branch.name().as_ref().unwrap().unwrap()),
-                         self.repo.find_commit(branch.get().target().unwrap()).unwrap())
-                    })
+                             let branch = b.unwrap().0;
+                             (String::from(branch.name().as_ref().unwrap().unwrap()),
+                              self.repo
+                                  .find_commit(branch.get().target().unwrap())
+                                  .unwrap())
+                         })
                     .collect()
             }
         }

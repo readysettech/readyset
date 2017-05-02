@@ -179,7 +179,8 @@ pub fn with_authentication<T, F>(url: &str, cfg: &git2::Config, mut f: F) -> Res
     // tried.
     let mut msg = "failed to authenticate when downloading repository".to_string();
     if ssh_agent_attempts.len() > 0 {
-        let names = ssh_agent_attempts.iter()
+        let names = ssh_agent_attempts
+            .iter()
             .map(|s| format!("`{}`", s))
             .collect::<Vec<_>>()
             .join(", ");

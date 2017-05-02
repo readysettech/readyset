@@ -68,22 +68,27 @@ pub fn parse_config(cfg: &Path,
     };
 
     // Github <-> Slack username mappings
-    let slack_aliases = value.iter()
+    let slack_aliases = value
+        .iter()
         .filter(|t| t.0 == "slack-aliases")
         .flat_map(|t| {
-            t.1
-                .as_table()
-                .unwrap()
-                .iter()
-                .map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap())))
-        })
+                      t.1
+                          .as_table()
+                          .unwrap()
+                          .iter()
+                          .map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap())))
+                  })
         .collect::<HashMap<_, _>>();
 
     // Benchmark definitions
-    let benchmarks = value.iter().filter(|t| t.0 != "slack-aliases").map(|t| to_bench(t)).collect();
+    let benchmarks = value
+        .iter()
+        .filter(|t| t.0 != "slack-aliases")
+        .map(|t| to_bench(t))
+        .collect();
 
     Ok(Config {
-        benchmarks: benchmarks,
-        slack_aliases: slack_aliases,
-    })
+           benchmarks: benchmarks,
+           slack_aliases: slack_aliases,
+       })
 }

@@ -187,10 +187,10 @@ pub fn taste_commit(ws: &Workspace,
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
-                    branch_history.insert(b.name.clone(), new_result.1.clone());
-                    new_result
-                })
+                         let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
+                         branch_history.insert(b.name.clone(), new_result.1.clone());
+                         new_result
+                     })
                 .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
         None => {
