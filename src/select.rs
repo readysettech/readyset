@@ -10,37 +10,37 @@ use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
     pub having: Option<ConditionExpression>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinClause {
     pub operator: JoinOperator,
     pub right: JoinRightSide,
     pub constraint: JoinConstraint,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LimitClause {
     pub limit: u64,
     pub offset: u64,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OrderClause {
     pub columns: Vec<(Column, OrderType)>, // TODO(malte): can this be an arbitrary expr?
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub tables: Vec<Table>,
     pub distinct: bool,

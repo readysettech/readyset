@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::str;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
     Avg(Column, bool),
     Count(Column, bool),
@@ -39,7 +39,7 @@ impl Display for FunctionExpression {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     pub alias: Option<String>,

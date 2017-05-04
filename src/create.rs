@@ -8,7 +8,7 @@ use common::{column_identifier_no_alias, field_list, sql_identifier, statement_t
 use column::Column;
 use table::Table;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<(Column, SqlType)>,

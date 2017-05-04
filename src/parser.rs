@@ -5,7 +5,7 @@ use create::*;
 use insert::*;
 use select::*;
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     Insert(InsertStatement),

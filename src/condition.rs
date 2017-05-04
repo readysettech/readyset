@@ -6,7 +6,7 @@ use std::str::{self, FromStr};
 use column::Column;
 use common::{binary_comparison_operator, column_identifier, Operator};
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
     Field(Column),
     StringLiteral(String),
@@ -14,7 +14,7 @@ pub enum ConditionBase {
     Placeholder,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConditionTree {
     pub operator: Operator,
     pub left: Box<ConditionExpression>,
@@ -48,7 +48,7 @@ impl<'a> ConditionTree {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionExpression {
     ComparisonOp(ConditionTree),
     LogicalOp(ConditionTree),
