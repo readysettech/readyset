@@ -5,3 +5,5 @@ authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
 nom = "^1.2.4"
+serde = "0.9"
+serde_derive = "0.9"
