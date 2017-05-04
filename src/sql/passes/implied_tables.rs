@@ -263,7 +263,7 @@ impl ImpliedTableExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{Column, FieldExpression, SqlQuery, Table};
+    use nom_sql::{Column, FieldExpression, SqlQuery, SqlType, Table};
     use std::collections::HashMap;
     use super::ImpliedTableExpansion;
 
@@ -276,7 +276,8 @@ mod tests {
         // CREATE TABLE address (address.addr_id, address.addr_street1);
         let q = CreateTableStatement {
             table: Table::from("address"),
-            fields: vec![Column::from("addr_id"), Column::from("addr_street1")],
+            fields: vec![(Column::from("addr_id"), SqlType::Text),
+                         (Column::from("addr_street1"), SqlType::Text)],
             ..Default::default()
         };
 
@@ -286,8 +287,8 @@ mod tests {
         match res {
             SqlQuery::CreateTable(tq) => {
                 assert_eq!(tq.fields,
-                           vec![Column::from("address.addr_id"),
-                                Column::from("address.addr_street1")]);
+                           vec![(Column::from("address.addr_id"), SqlType::Text),
+                                (Column::from("address.addr_street1"), SqlType::Text)]);
                 assert_eq!(tq.table, Table::from("address"));
             }
             // if we get anything other than a table creation query back,

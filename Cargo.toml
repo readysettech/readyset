@@ -31,7 +31,7 @@ arccstr = "0.3.2"
 vec_map = "0.7.0"
 
 spmc = "0.2.1"
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "82b02d79e7d00f347fa98c58ba95180f9cd6e6bd" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "640693af6c624326737bfe1c262545cc9eebfb32" }
 
 # for benchmarks
 # cli
