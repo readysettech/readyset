@@ -167,7 +167,8 @@ impl SqlToMirConverter {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
                 assert_eq!(name, ctq.table.name);
-                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref(), transactional);
+                let (column_names, _): (Vec<_>, Vec<_>) = ctq.fields.iter().cloned().unzip();
+                let n = self.make_base_node(&name, &column_names, ctq.keys.as_ref(), transactional);
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());

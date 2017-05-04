@@ -224,7 +224,7 @@ impl ImpliedTableExpansion for SqlQuery {
                 // Expand within field list
                 ctq.fields = ctq.fields
                     .into_iter()
-                    .map(|tf| set_table(tf, &table))
+                    .map(|tf| (set_table(tf.0, &table), tf.1))
                     .collect();
                 // Expand tables for key specification
                 if ctq.keys.is_some() {
