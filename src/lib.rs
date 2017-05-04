@@ -1,6 +1,11 @@
 #[macro_use]
 extern crate nom;
 
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+
+
 pub use self::common::{FieldExpression, Operator, TableKey};
 pub use self::column::{Column, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};

@@ -30,7 +30,7 @@ pub enum SqlType {
     Varbinary(u16),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
     And,
