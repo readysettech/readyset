@@ -6,7 +6,7 @@ use common::{field_list, statement_terminator, table_reference, value_list};
 use column::Column;
 use table::Table;
 
-#[derive(Clone, Debug, Default, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
     pub table: Table,
     pub fields: Vec<(Column, String)>,

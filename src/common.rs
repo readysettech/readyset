@@ -8,7 +8,7 @@ use column::{Column, FunctionExpression};
 use keywords::sql_keyword;
 use table::Table;
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
     Char(u16),
     Varchar(u16),
@@ -64,7 +64,7 @@ impl Display for Operator {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
     UniqueKey(Option<String>, Vec<Column>),
@@ -72,7 +72,7 @@ pub enum TableKey {
     Key(String, Vec<Column>),
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FieldExpression {
     All,
     AllInTable(String),
