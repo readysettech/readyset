@@ -4,7 +4,7 @@ use std::str;
 use std::str::FromStr;
 
 use common::{column_identifier_no_alias, field_list, sql_identifier, statement_terminator,
-             table_reference, SqlType, SqlValue, TableKey};
+             table_reference, Literal, SqlType, TableKey};
 use column::Column;
 use table::Table;
 
@@ -17,7 +17,7 @@ pub struct CreateTableStatement {
 
 pub enum ColumnConstraint {
     NotNull,
-    DefaultValue(SqlValue),
+    DefaultValue(Literal),
     AutoIncrement,
 }
 
@@ -268,15 +268,19 @@ named!(pub column_constraint<&[u8], ColumnConstraint>,
               multispace? ~
               caseless_tag!("default") ~
               multispace ~
-              alt_complete!(
-                    delimited!(tag!("'"), take_until!("'"), tag!("'"))
-                  | digit
-                  | tag!("''")
-                  | caseless_tag!("null")
-                  | caseless_tag!("current_timestamp")
+              def: alt_complete!(
+                    chain!(s: delimited!(tag!("'"), take_until!("'"), tag!("'")), || {
+                        Literal::String(String::from(str::from_utf8(s).unwrap()))
+                    })
+                  | chain!(d: map_res!(digit, str::from_utf8), || {
+                      Literal::Integer(i64::from_str(d).unwrap())
+                    })
+                  | chain!(tag!("''"), || { Literal::String(String::from("")) })
+                  | chain!(caseless_tag!("null"), || { Literal::Null })
+                  | chain!(caseless_tag!("current_timestamp"), || { Literal::CurrentTimestamp })
               ) ~
               multispace?,
-              || { ColumnConstraint::DefaultValue(SqlValue::Text(String::from(""))) }
+              || { ColumnConstraint::DefaultValue(def) }
           )
     )
 );
