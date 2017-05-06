@@ -30,21 +30,15 @@ pub enum SqlType {
     Varbinary(u16),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum SqlValue {
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+pub enum Literal {
     Null,
-    Char(u8),
-    Varchar(Vec<char>),
-    Int(i32),
-    Bigint(i64),
-    Tinyint(i16),
-    Double(f64),
-    Float(f32),
-    Tinytext(String),
-    Mediumtext(String),
-    Text(String),
-    Timestamp(u64),
-    Varbinary(Vec<u8>),
+    Integer(i64),
+    String(String),
+    Blob(Vec<u8>),
+    CurrentTime,
+    CurrentDate,
+    CurrentTimestamp,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]

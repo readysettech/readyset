@@ -4,13 +4,12 @@ use std::collections::{HashSet, VecDeque};
 use std::str::{self, FromStr};
 
 use column::Column;
-use common::{binary_comparison_operator, column_identifier, Operator};
+use common::{binary_comparison_operator, column_identifier, Literal, Operator};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
     Field(Column),
-    StringLiteral(String),
-    IntegerLiteral(i64),
+    Literal(Literal),
     Placeholder,
 }
 
@@ -151,7 +150,7 @@ named!(predicate<&[u8], ConditionExpression>,
                 field: delimited!(opt!(multispace), digit, opt!(multispace)),
                 || {
                     let intval = i64::from_str(str::from_utf8(field).unwrap()).unwrap();
-                    ConditionExpression::Base(ConditionBase::IntegerLiteral(intval))
+                    ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(intval)))
                 }
             )
         |   chain!(
@@ -164,7 +163,8 @@ named!(predicate<&[u8], ConditionExpression>,
                 || {
                     let field = field.unwrap_or("".as_bytes());
                     ConditionExpression::Base(
-                        ConditionBase::StringLiteral(String::from(str::from_utf8(field).unwrap()))
+                        ConditionBase::Literal(Literal::String(
+                                String::from(str::from_utf8(field).unwrap())))
                     )
                 }
             )
@@ -183,7 +183,7 @@ named!(predicate<&[u8], ConditionExpression>,
 mod tests {
     use super::*;
     use column::Column;
-    use common::Operator;
+    use common::{Literal, Operator};
 
     fn flat_condition_tree(op: Operator,
                            l: ConditionBase,
@@ -236,13 +236,13 @@ mod tests {
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::IntegerLiteral(42 as i64)));
+                                       ConditionBase::Literal(Literal::Integer(42 as i64))));
 
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::StringLiteral(String::from("hello"))));
+                                       ConditionBase::Literal(Literal::String(String::from("hello")))));
     }
 
     #[test]
@@ -254,13 +254,13 @@ mod tests {
         assert_eq!(res1.unwrap().1,
                    flat_condition_tree(Operator::GreaterOrEqual,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::IntegerLiteral(42 as i64)));
+                                       ConditionBase::Literal(Literal::Integer(42 as i64))));
 
         let res2 = condition_expr(cond2.as_bytes());
         assert_eq!(res2.unwrap().1,
                    flat_condition_tree(Operator::LessOrEqual,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::IntegerLiteral(5 as i64)));
+                                       ConditionBase::Literal(Literal::Integer(5 as i64))));
     }
 
     #[test]
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    flat_condition_tree(Operator::Equal,
                                        ConditionBase::Field(Column::from("foo")),
-                                       ConditionBase::StringLiteral(String::from(""))));
+                                       ConditionBase::Literal(Literal::String(String::from("")))));
     }
 
     #[test]
@@ -280,6 +280,7 @@ mod tests {
 
         use ConditionExpression::*;
         use ConditionBase::*;
+        use common::Literal;
 
         let a = ComparisonOp(ConditionTree {
                                  operator: Operator::Equal,
@@ -290,7 +291,7 @@ mod tests {
         let b = ComparisonOp(ConditionTree {
                                  operator: Operator::Equal,
                                  left: Box::new(Base(Field("bar".into()))),
-                                 right: Box::new(Base(IntegerLiteral(12.into()))),
+                                 right: Box::new(Base(Literal(Literal::Integer(12.into())))),
                              });
 
         let left = LogicalOp(ConditionTree {
@@ -302,7 +303,8 @@ mod tests {
         let right = ComparisonOp(ConditionTree {
                                      operator: Operator::Equal,
                                      left: Box::new(Base(Field("foobar".into()))),
-                                     right: Box::new(Base(StringLiteral("a".into()))),
+                                     right:
+                                         Box::new(Base(Literal(Literal::String("a".into())))),
                                  });
 
         let complete = LogicalOp(ConditionTree {
@@ -321,6 +323,7 @@ mod tests {
 
         use ConditionExpression::*;
         use ConditionBase::*;
+        use common::Literal;
 
         let a = ComparisonOp(ConditionTree {
                                  operator: Operator::Equal,
@@ -331,7 +334,7 @@ mod tests {
         let b = ComparisonOp(ConditionTree {
                                  operator: Operator::Equal,
                                  left: Box::new(Base(Field("bar".into()))),
-                                 right: Box::new(Base(IntegerLiteral(12.into()))),
+                                 right: Box::new(Base(Literal(Literal::Integer(12.into())))),
                              });
 
         let left = LogicalOp(ConditionTree {
@@ -343,7 +346,8 @@ mod tests {
         let right = ComparisonOp(ConditionTree {
                                      operator: Operator::Equal,
                                      left: Box::new(Base(Field("foobar".into()))),
-                                     right: Box::new(Base(StringLiteral("a".into()))),
+                                     right:
+                                         Box::new(Base(Literal(Literal::String("a".into())))),
                                  });
 
         let complete = LogicalOp(ConditionTree {
@@ -362,19 +366,20 @@ mod tests {
 
         use ConditionExpression::*;
         use ConditionBase::*;
+        use common::Literal::*;
 
         let left =
             NegationOp(Box::new(ComparisonOp(ConditionTree {
                                                  operator: Operator::Equal,
                                                  left: Box::new(Base(Field("bar".into()))),
                                                  right:
-                                                     Box::new(Base(IntegerLiteral(12.into()))),
+                                                     Box::new(Base(Literal(Integer(12.into())))),
                                              })));
 
         let right = ComparisonOp(ConditionTree {
                                      operator: Operator::Equal,
                                      left: Box::new(Base(Field("foobar".into()))),
-                                     right: Box::new(Base(StringLiteral("a".into()))),
+                                     right: Box::new(Base(Literal(String("a".into())))),
                                  });
 
         let complete = LogicalOp(ConditionTree {
