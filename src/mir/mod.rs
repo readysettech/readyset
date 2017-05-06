@@ -871,7 +871,12 @@ impl Debug for MirNodeType {
             MirNodeType::Filter { ref conditions } => {
                 use regex::Regex;
 
-                let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
+                let escape = |s: &str| {
+                    Regex::new("([<>])")
+                        .unwrap()
+                        .replace_all(s, "\\$1")
+                        .to_string()
+                };
                 write!(f,
                        "σ[{}]",
                        conditions

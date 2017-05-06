@@ -213,10 +213,8 @@ mod tests {
     #[test]
     fn merge_mir() {
         use mir::{MirNode, MirNodeType, MirQuery};
-        use slog::{self, DrainExt};
-        use slog_term;
 
-        let log = slog::Logger::root(slog_term::streamer().full().build().fuse(), None);
+        let log = ::logger_pls();
 
         let (a, b, c, d) = make_nodes();
 

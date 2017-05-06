@@ -321,7 +321,12 @@ impl Node {
     pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
         use regex::Regex;
 
-        let escape = |s: &str| Regex::new("([\"|{}])").unwrap().replace_all(s, "\\$1");
+        let escape = |s: &str| {
+            Regex::new("([\"|{}])")
+                .unwrap()
+                .replace_all(s, "\\$1")
+                .to_string()
+        };
         write!(f,
                " [style=filled, fillcolor={}, label=\"",
                self.domain

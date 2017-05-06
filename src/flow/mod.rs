@@ -285,7 +285,7 @@ impl Default for Blender {
             in_txs: HashMap::default(),
             domains: Vec::new(),
 
-            log: slog::Logger::root(slog::Discard, None),
+            log: slog::Logger::root(slog::Discard, o!()),
         }
     }
 }
@@ -311,7 +311,7 @@ impl Blender {
     /// Start setting up a new `Migration`.
     pub fn start_migration(&mut self) -> Migration {
         info!(self.log, "starting migration");
-        let miglog = self.log.new(None);
+        let miglog = self.log.new(o!());
         Migration {
             mainline: self,
             added: Default::default(),

@@ -56,7 +56,7 @@ pub struct SqlIncorporator {
 impl Default for SqlIncorporator {
     fn default() -> Self {
         SqlIncorporator {
-            log: slog::Logger::root(slog::Discard, None),
+            log: slog::Logger::root(slog::Discard, o!()),
             mir_converter: SqlToMirConverter::default(),
             leaf_addresses: HashMap::default(),
             num_queries: 0,
@@ -135,15 +135,15 @@ impl SqlIncorporator {
                             query_name: &str,
                             st: &SelectStatement)
                             -> (QueryGraph, QueryGraphReuse) {
-        debug!(self.log, format!("Making QG for \"{}\"", query_name));
-        trace!(self.log, format!("Query \"{}\": {:#?}", query_name, st));
+        debug!(self.log, "Making QG for \"{}\"", query_name);
+        trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
         let qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
 
-        trace!(self.log, format!("QG for \"{}\": {:#?}", query_name, qg));
+        trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
         // Do we already have this exact query or a subset of it?
         // TODO(malte): make this an O(1) lookup by QG signature

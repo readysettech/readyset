@@ -1,10 +1,5 @@
 #[cfg(feature="web")]
 extern crate distributary;
-extern crate slog;
-extern crate slog_term;
-
-#[cfg(feature="web")]
-use slog::DrainExt;
 
 #[cfg(feature="web")]
 fn main() {
@@ -12,7 +7,7 @@ fn main() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    g.log_with(slog::Logger::root(slog_term::streamer().full().build().fuse(), None));
+    g.log_with(distributary::logger_pls());
 
     {
         let mut mig = g.start_migration();

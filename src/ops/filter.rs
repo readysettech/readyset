@@ -99,7 +99,12 @@ impl Ingredient for Filter {
     fn description(&self) -> String {
         use regex::Regex;
 
-        let escape = |s: &str| Regex::new("([<>])").unwrap().replace_all(s, "\\$1");
+        let escape = |s: &str| {
+            Regex::new("([<>])")
+                .unwrap()
+                .replace_all(s, "\\$1")
+                .to_string()
+        };
         format!("σ[{}]",
                 self.filter
                     .iter()

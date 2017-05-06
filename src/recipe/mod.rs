@@ -79,7 +79,7 @@ impl Recipe {
                 Some(ref log) => Some(SqlIncorporator::new(log.clone())),
             },
             log: match log {
-                None => slog::Logger::root(slog::Discard, None),
+                None => slog::Logger::root(slog::Discard, o!()),
                 Some(log) => log,
             },
         }
@@ -167,11 +167,11 @@ impl Recipe {
         };
 
         let log = match log {
-            None => slog::Logger::root(slog::Discard, None),
+            None => slog::Logger::root(slog::Discard, o!()),
             Some(log) => log,
         };
 
-        debug!(log, format!("{} duplicate queries", duplicates); "version" => 0);
+        debug!(log, "{} duplicate queries", duplicates; "version" => 0);
 
         Recipe {
             expressions: expressions,
@@ -191,9 +191,9 @@ impl Recipe {
                     mig: &mut Migration,
                     transactional_base_nodes: bool)
                     -> Result<ActivationResult, String> {
-        debug!(self.log, format!("{} queries, {} of which are named",
+        debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
-                                 self.aliases.len()); "version" => self.version);
+                                 self.aliases.len(); "version" => self.version);
 
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
@@ -243,7 +243,7 @@ impl Recipe {
 
         // TODO(malte): deal with removal.
         for qid in removed {
-            error!(self.log,  "version" => self.version; "Unhandled query removal of {:?}", qid);
+            error!(self.log, "Unhandled query removal of {:?}", qid; "version" => self.version);
             //unimplemented!()
         }
 

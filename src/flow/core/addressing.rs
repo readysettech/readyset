@@ -34,17 +34,16 @@ impl Serialize for NodeAddress_ {
     {
         let def = match *self {
             NodeAddress_::Global(i) => NodeAddressDef::Global(i.index()),
-            NodeAddress_::Local(i) => {
-                NodeAddressDef::Local(i.id())
-            }
+            NodeAddress_::Local(i) => NodeAddressDef::Local(i.id()),
         };
 
         def.serialize(serializer)
     }
 }
 
-impl Deserialize for NodeAddress_ {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer
+impl<'de> Deserialize<'de> for NodeAddress_ {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: Deserializer<'de>
     {
         NodeAddressDef::deserialize(deserializer).map(|def|match def {
             NodeAddressDef::Local(idx) => NodeAddress_::Local(LocalNodeIndex{id: idx}),

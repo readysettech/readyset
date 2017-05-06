@@ -321,10 +321,6 @@
 #![cfg_attr(feature="b_netsoup", feature(plugin))]
 #![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]
 
-#[cfg(feature="b_netsoup")]
-#[macro_use]
-extern crate serde_derive;
-
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
@@ -332,6 +328,7 @@ extern crate slog_term;
 extern crate fnv;
 extern crate evmap;
 extern crate arccstr;
+extern crate vec_map;
 
 extern crate itertools;
 extern crate petgraph;
@@ -354,13 +351,14 @@ extern crate tarpc;
 #[cfg(feature="b_netsoup")]
 extern crate futures;
 #[cfg(feature="b_netsoup")]
-extern crate vec_map;
-#[cfg(feature="b_netsoup")]
 extern crate tokio_core;
 
-extern crate buf_redux;
 extern crate serde;
 extern crate serde_json;
+#[macro_use]
+extern crate serde_derive;
+
+extern crate buf_redux;
 extern crate snowflake;
 extern crate time;
 
@@ -392,6 +390,15 @@ pub use ops::filter::{Operator, Filter};
 pub use ops::topk::TopK;
 pub use recipe::Recipe;
 pub use sql::{SqlIncorporator, ToFlowParts};
+
+/// Just give me a damn terminal logger
+pub fn logger_pls() -> slog::Logger {
+    use slog::Drain;
+    use slog::Logger;
+    use slog_term::term_full;
+    use std::sync::Mutex;
+    Logger::root(Mutex::new(term_full()).fuse(), o!())
+}
 
 #[cfg(feature="web")]
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.

@@ -139,8 +139,8 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                    .any(|child| inquisitive_children.contains(&child)) {
                 // we have children that may query us, so our output should be materialized
                 trace!(log,
-                       format!("querying children force materialization of node {}",
-                               ni.index()));
+                       "querying children force materialization of node {}",
+                       ni.index());
                 materialize.insert(*n.addr().as_local());
             }
         }
@@ -667,7 +667,7 @@ pub fn reconstruct(log: &Logger,
         let tag = first_tag
             .take()
             .unwrap_or_else(|| Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
-        trace!(log, "tag" => tag.id(); "replaying along path {:?}", path);
+        trace!(log, "replaying along path {:?}", path; "tag" => tag.id());
 
         // partial materialization possible?
         let mut partial = None;
@@ -697,7 +697,7 @@ pub fn reconstruct(log: &Logger,
             segments.last_mut().unwrap().1.push((node, key));
         }
 
-        debug!(log, "tag" => tag.id(); "domain replay path is {:?}", segments);
+        debug!(log, "domain replay path is {:?}", segments; "tag" => tag.id());
 
         let locals = |i: usize| -> Vec<(NodeAddress, Option<usize>)> {
             let mut skip = 0;
@@ -986,7 +986,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
             })
             .min_by_key(|&(_, cost)| cost)
             .map(|(node, cost)| {
-                     debug!(log, "cost" => cost; "picked replay source {:?}", node);
+                     debug!(log, "picked replay source {:?}", node; "cost" => cost);
                      node
                  })
     })

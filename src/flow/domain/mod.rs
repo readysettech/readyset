@@ -548,13 +548,13 @@ impl Domain {
 
                 if done_tx.is_some() {
                     info!(self.log,
-                          "tag" => tag.id();
                           "told about terminating replay path {:?}",
-                          path
+                          path;
+                          "tag" => tag.id()
                     );
                     // NOTE: we set self.replaying_to when we first receive a replay with this tag
                 } else {
-                    info!(self.log, "tag" => tag.id(); "told about replay path {:?}", path);
+                    info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                 }
                 self.replay_paths
                     .insert(tag,
@@ -617,9 +617,9 @@ impl Domain {
                 }
 
                 trace!(self.log,
+                           "got replay request";
                            "tag" => tag.id(),
-                           "key" => format!("{:?}", key);
-                           "got replay request"
+                           "key" => format!("{:?}", key)
                     );
                 self.seed_replay(tag, &key[..], None);
             }
@@ -817,15 +817,15 @@ impl Domain {
             // trigger a replay to source node, and enqueue this request.
             self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
             trace!(self.log,
+                   "missed during replay request";
                    "tag" => tag.id(),
-                   "key" => format!("{:?}", key);
-                   "missed during replay request"
+                   "key" => format!("{:?}", key)
                    );
         } else {
             trace!(self.log,
+                   "satisfied replay request";
                    "tag" => tag.id(),
-                   "key" => format!("{:?}", key);
-                   "satisfied replay request"
+                   "key" => format!("{:?}", key)
             );
         }
 
@@ -987,7 +987,7 @@ impl Domain {
                         };
                         playback = Some(p);
 
-                        let log = self.log.new(None);
+                        let log = self.log.new(o!());
                         let inject_tx = self.inject_tx.clone().unwrap();
                         thread::Builder::new()
                             .name(format!("replay{}.{}",

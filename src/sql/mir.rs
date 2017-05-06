@@ -45,7 +45,7 @@ impl Default for SqlToMirConverter {
         SqlToMirConverter {
             base_schemas: HashMap::default(),
             current: HashMap::default(),
-            log: slog::Logger::root(slog::Discard, None),
+            log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
             schema_version: 0,
         }
@@ -1110,7 +1110,8 @@ impl SqlToMirConverter {
             nodes_added.push(leaf_node);
 
             debug!(self.log,
-                   format!("Added final MIR node for query named \"{}\"", name));
+                   "Added final MIR node for query named \"{}\"",
+                   name);
         }
 
         // finally, we output all the nodes we generated

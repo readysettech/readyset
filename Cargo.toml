@@ -16,18 +16,18 @@ binaries = ["default"]
 
 [dependencies]
 chrono = "0.3.0"
-itertools = "0.5"
-petgraph = "0.4"
-regex = "0.1"
-fnv = "1.0"
-serde = "0.9"
-serde_derive = "0.9"
-slog = "1.5.2"
-#slog = { version = "1.5.2", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "1.5.0"
+itertools = "0.6.0"
+petgraph = "0.4.4"
+regex = "0.2.1"
+fnv = "1.0.3"
+serde = { version = "1.0.2", features = ["rc"] }
+serde_derive = "1.0.2"
+slog = "2.0.2"
+#slog = { version = "2.0.2", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.0.0"
 
-evmap = "0.6.0"
-arccstr = "0.3.2"
+evmap = "0.6.4"
+arccstr = "0.4.0"
 vec_map = "0.7.0"
 
 spmc = "0.2.1"
@@ -35,36 +35,36 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "640693af6c62432
 
 # for benchmarks
 # cli
-clap = "2.13"
+clap = "2.24.0"
 # distributions
 rand = "0.3"
 zipf = "0.2.0"
 # sampling
-hdrsample = "2.1"
+hdrsample = "4.0.0"
 # mssql
 futures-state-stream = { version = "0.1", optional = true }
 tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
 # mysql
-mysql = { version = "10.0", optional = true }
+mysql = { version = "11.0.0", optional = true }
 # memcached
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi", optional = true }
 # netsoup
 futures = { version ="0.1.9", optional = true }
-tokio-core = { version = "0.1", optional = true }
+tokio-core = { version = "0.1.6", optional = true }
 tarpc = {git="https://github.com/jonhoo/tarpc.git", branch = "hack", optional = true}
 tarpc-plugins = { git = "https://github.com/jonhoo/tarpc", branch = "hack", optional = true }
 
 # for web
-rustc-serialize = { version = "0.3", optional = true }
+rustc-serialize = { version = "0.3.0", optional = true }
 
 # durable log
 snowflake = "1.2.0"
-serde_json = "0.9.8"
+serde_json = "1.0.1"
 buf_redux = "0.6.1"
 time = "0.1"
 
 [dependencies.rustful]
-version = "0.9"
+version = "0.9.0"
 default-features = false
 features = ["rustc_json_body", "multipart"]
 optional = true
