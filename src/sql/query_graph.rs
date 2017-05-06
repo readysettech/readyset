@@ -179,8 +179,7 @@ fn classify_conditionals(ce: &ConditionExpression,
                             }
                         }
                         // right-hand side is a literal, so this is a predicate
-                        ConditionBase::StringLiteral(_) |
-                        ConditionBase::IntegerLiteral(_) => {
+                        ConditionBase::Literal(_) => {
                             if let ConditionBase::Field(ref lf) = *l {
                                 // we assume that implied table names have previously been expanded
                                 // and thus all columns carry table names

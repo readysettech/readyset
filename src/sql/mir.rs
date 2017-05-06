@@ -4,8 +4,8 @@ use mir::{GroupedNodeType, MirNode, MirNodeType};
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use ops::join::JoinType;
 
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Operator, TableKey,
-              SqlQuery};
+use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Literal, Operator,
+              TableKey, SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderClause};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
@@ -64,18 +64,20 @@ impl SqlToMirConverter {
     /// and adds its to a vector of conditions that `shortcut` understands.
     /// Returns true if condition is sucessfully added.
     fn to_conditions(&self,
-                      ct: &ConditionTree,
-                      mut columns: &mut Vec<Column>,
-                      n: &MirNodeRef)
-                      -> Vec<Option<(Operator, DataType)>>{
+                     ct: &ConditionTree,
+                     mut columns: &mut Vec<Column>,
+                     n: &MirNodeRef)
+                     -> Vec<Option<(Operator, DataType)>> {
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
         };
         let r = match *ct.right.as_ref() {
-            ConditionExpression::Base(ConditionBase::IntegerLiteral(ref i)) => DataType::from(*i),
-            ConditionExpression::Base(ConditionBase::StringLiteral(ref s)) => {
+            ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref i))) => {
+                DataType::from(*i)
+            }
+            ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref s))) => {
                 DataType::from(s.clone())
             }
             _ => unimplemented!(),

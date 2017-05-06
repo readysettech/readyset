@@ -1,4 +1,4 @@
-use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Operator, Table};
+use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, Table};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
 use std::str;
@@ -96,21 +96,21 @@ fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
     // use Finkelstein-style direct elimination to check if this NQG predicate
     // implies the corresponding predicates in the EQG
     match *np.right {
-        ConditionExpression::Base(ConditionBase::StringLiteral(ref nv)) => {
+        ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref nv))) => {
             match *ep.right {
-                ConditionExpression::Base(ConditionBase::StringLiteral(ref ev)) => {
+                ConditionExpression::Base(ConditionBase::Literal(Literal::String(ref ev))) => {
                     check_op_elimination(nv, ev, &np.operator, &ep.operator)
                 }
-                ConditionExpression::Base(ConditionBase::IntegerLiteral(_)) => false,
+                ConditionExpression::Base(ConditionBase::Literal(_)) => false,
                 _ => panic!("right-hand side of predicate must currently be literal"),
             }
         }
-        ConditionExpression::Base(ConditionBase::IntegerLiteral(ref nv)) => {
+        ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref nv))) => {
             match *ep.right {
-                ConditionExpression::Base(ConditionBase::IntegerLiteral(ref ev)) => {
+                ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(ref ev))) => {
                     check_op_elimination(nv, ev, &np.operator, &ep.operator)
                 }
-                ConditionExpression::Base(ConditionBase::StringLiteral(_)) => false,
+                ConditionExpression::Base(ConditionBase::Literal(_)) => false,
                 _ => panic!("right-hand side of predicate must currently be literal"),
             }
         }
@@ -293,21 +293,22 @@ mod tests {
     fn predicate_implication() {
         use nom_sql::ConditionExpression::*;
         use nom_sql::ConditionBase::*;
+        use nom_sql::Literal;
 
         let pa = ConditionTree {
             operator: Operator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(IntegerLiteral(10.into()))),
+            right: Box::new(Base(Literal(Literal::Integer(10.into())))),
         };
         let pb = ConditionTree {
             operator: Operator::Less,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(IntegerLiteral(20.into()))),
+            right: Box::new(Base(Literal(Literal::Integer(20.into())))),
         };
         let pc = ConditionTree {
             operator: Operator::Equal,
             left: Box::new(Base(Field(Column::from("a")))),
-            right: Box::new(Base(IntegerLiteral(5.into()))),
+            right: Box::new(Base(Literal(Literal::Integer(5.into())))),
         };
 
         assert!(predicate_implies(&pa, &pb));
