@@ -370,8 +370,8 @@ impl SqlIncorporator {
     fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-            SqlQuery::Insert(ref iq) => iq.table.name.clone(),
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
+            _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
         self.nodes_for_named_query(q, name, mig)
     }
@@ -421,8 +421,8 @@ impl SqlIncorporator {
                     QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
             }
-            ref q @ SqlQuery::CreateTable { .. } |
-            ref q @ SqlQuery::Insert { .. } => self.add_base_via_mir(&query_name, q, mig),
+            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
+            ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
 
         // record info about query

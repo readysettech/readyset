@@ -177,18 +177,7 @@ impl SqlToMirConverter {
                 }
                 MirQuery::singleton(name, n)
             }
-            SqlQuery::Insert(ref iq) => {
-                assert_eq!(name, iq.table.name);
-                let (cols, _): (Vec<Column>, Vec<String>) = iq.fields.iter().cloned().unzip();
-                let n = self.make_base_node(&name, &cols, None, transactional);
-                let node_id = (String::from(name), self.schema_version);
-                if !self.nodes.contains_key(&node_id) {
-                    self.nodes.insert(node_id, n.clone());
-                    self.current.insert(String::from(name), self.schema_version);
-                }
-                MirQuery::singleton(name, n)
-            }
-            _ => panic!("expected base-yielding query!"),
+            _ => panic!("expected CREATE TABLE query!"),
         }
     }
 
