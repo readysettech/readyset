@@ -4,7 +4,7 @@ use std::str;
 use std::str::FromStr;
 
 use common::{column_identifier_no_alias, field_list, sql_identifier, statement_terminator,
-             table_reference, SqlType, TableKey};
+             table_reference, SqlType, SqlValue, TableKey};
 use column::Column;
 use table::Table;
 
@@ -13,6 +13,12 @@ pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<(Column, SqlType)>,
     pub keys: Option<Vec<TableKey>>,
+}
+
+pub enum ColumnConstraint {
+    NotNull,
+    DefaultValue(SqlValue),
+    AutoIncrement,
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {
@@ -223,35 +229,7 @@ named!(pub field_specification_list<&[u8], Vec<(Column, SqlType)> >,
                                       || { ti }
                                ))
                ) ~
-               // XXX(malte): some of these are mutually exclusive...
-               opt!(complete!(chain!(multispace? ~
-                           caseless_tag!("not null") ~
-                           multispace?,
-                           || {}
-                    ))
-               ) ~
-               opt!(complete!(chain!(multispace? ~
-                           caseless_tag!("auto_increment") ~
-                           multispace?,
-                           || {}
-                    ))
-               ) ~
-               opt!(complete!(
-                       chain!(
-                           multispace? ~
-                           caseless_tag!("default") ~
-                           multispace ~
-                           alt_complete!(
-                                 delimited!(tag!("'"), take_until!("'"), tag!("'"))
-                               | digit
-                               | tag!("''")
-                               | caseless_tag!("null")
-                               | caseless_tag!("current_timestamp")
-                           ) ~
-                           multispace?,
-                           || {}
-                       ))
-               ) ~
+               many0!(column_constraint) ~
                opt!(
                    complete!(chain!(
                        multispace? ~
@@ -269,6 +247,38 @@ named!(pub field_specification_list<&[u8], Vec<(Column, SqlType)> >,
                }
            ))
        )
+);
+
+/// Parse rule for a column definition contraint.
+named!(pub column_constraint<&[u8], ColumnConstraint>,
+    alt_complete!(
+          chain!(
+              multispace? ~
+              caseless_tag!("not null") ~
+              multispace?,
+              || { ColumnConstraint::NotNull }
+          )
+        | chain!(
+              multispace? ~
+              caseless_tag!("auto_increment") ~
+              multispace?,
+              || { ColumnConstraint::AutoIncrement }
+          )
+        | chain!(
+              multispace? ~
+              caseless_tag!("default") ~
+              multispace ~
+              alt_complete!(
+                    delimited!(tag!("'"), take_until!("'"), tag!("'"))
+                  | digit
+                  | tag!("''")
+                  | caseless_tag!("null")
+                  | caseless_tag!("current_timestamp")
+              ) ~
+              multispace?,
+              || { ColumnConstraint::DefaultValue(SqlValue::Text(String::from(""))) }
+          )
+    )
 );
 
 /// Parse rule for a SQL CREATE TABLE query.
