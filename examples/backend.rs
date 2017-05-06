@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use distributary::{Blender, DataType, Mutator, Recipe};
 
 type Datas = Vec<Vec<DataType>>;
-type Getter = Box<Fn(&DataType) -> Result<Datas, ()> + Send>;
+type Getter = Box<Fn(&DataType, bool) -> Result<Datas, ()> + Send>;
 
 pub struct Backend {
     getters: HashMap<String, Getter>,
@@ -39,7 +39,7 @@ impl Backend {
                            .get_getter(self.recipe.node_addr_for(kind)?)
                            .unwrap());
 
-        match get_fn(&key.into()) {
+        match get_fn(&key.into(), true) {
             Ok(records) => Ok(records),
             Err(_) => Err(format!("GET for {} failed!", kind)),
         }
