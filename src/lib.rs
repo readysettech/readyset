@@ -314,12 +314,9 @@
 //!
 #![feature(optin_builtin_traits)]
 #![feature(mpsc_select)]
-#![feature(conservative_impl_trait)]
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![deny(missing_docs)]
-#![cfg_attr(feature="b_netsoup", feature(plugin))]
-#![cfg_attr(feature="b_netsoup", plugin(tarpc_plugins))]
 
 #[macro_use]
 extern crate slog;
@@ -345,13 +342,8 @@ extern crate rustc_serialize;
 #[cfg(feature="web")]
 extern crate rustful;
 
-#[macro_use]
 #[cfg(feature="b_netsoup")]
-extern crate tarpc;
-#[cfg(feature="b_netsoup")]
-extern crate futures;
-#[cfg(feature="b_netsoup")]
-extern crate tokio_core;
+extern crate bincode;
 
 extern crate serde;
 extern crate serde_json;
