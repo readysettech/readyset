@@ -1671,8 +1671,8 @@ fn recipe_activates_and_migrates() {
 
 #[test]
 fn recipe_activates_and_migrates_with_join() {
-    let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
-                 INSERT INTO b (r, s) VALUES (?, ?);\n";
+    let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                 CREATE TABLE b (r int, s int);\n";
     let mut r = distributary::Recipe::from_str(r_txt, None).unwrap();
     assert_eq!(r.version(), 0);
     assert_eq!(r.expressions().len(), 2);

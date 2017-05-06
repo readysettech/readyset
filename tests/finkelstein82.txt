@@ -1,9 +1,6 @@
-#CREATE TABLE people (name varchar(100), employer int, age int, experience int, salary int, commission int, education varchar(50));
-INSERT INTO people (name, employer, age, experience, salary, commission, education) VALUES (?, ?, ?, ?, ?, ?, ?);
-#CREATE TABLE companies (corpname varchar(50), location varchar(2), earnings int, president varchar(100), business varchar(50));
-INSERT INTO companies (corpname, location, earnings, president, business) VALUES (?, ?, ?, ?, ?);
-#CREATE TABLE schools (schoolname varchar(50), level varchar(50));
-INSERT INTO schools (schoolname, level) VALUES (?, ?);
+CREATE TABLE people (name varchar(100), employer int, age int, experience int, salary int, commission int, education varchar(50));
+CREATE TABLE companies (corpname varchar(50), location varchar(2), earnings int, president varchar(100), business varchar(50));
+CREATE TABLE schools (schoolname varchar(50), level varchar(50));
 
 # Q1
 #SELECT name, experience FROM people WHERE experience >= 10;

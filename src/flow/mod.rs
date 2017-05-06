@@ -1178,8 +1178,8 @@ mod tests {
     fn it_works_blender_with_migration() {
         use Recipe;
 
-        let r_txt = "INSERT INTO a (x, y, z) VALUES (?, ?, ?);\n
-                     INSERT INTO b (r, s) VALUES (?, ?);\n";
+        let r_txt = "CREATE TABLE a (x int, y int, z int);\n
+                     CREATE TABLE b (r int, s int);\n";
         let mut r = Recipe::from_str(r_txt, None).unwrap();
 
         let mut b = Blender::new();

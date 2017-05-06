@@ -16,18 +16,17 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let _article = inc.add_query("INSERT INTO article (id, user, title, url) \
-                                     VALUES (?, ?, ?, ?);",
+        let _article = inc.add_query("CREATE TABLE article (id int, user int, title varchar(255), url text);",
                                      None,
                                      &mut mig)
             .unwrap();
 
         // add vote base table
-        let _vote = inc.add_query("INSERT INTO vote (user, id) VALUES (?, ?);", None, &mut mig)
+        let _vote = inc.add_query("CREATE TABLE vote (user int, id int);", None, &mut mig)
             .unwrap();
 
         // add a user account base table
-        let _user = inc.add_query("INSERT INTO user (id, username, hash) VALUES (?, ?, ?);",
+        let _user = inc.add_query("CREATE TABLE user (id int, username varchar(40), hash varchar(64));",
                                   None,
                                   &mut mig)
             .unwrap();

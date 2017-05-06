@@ -87,7 +87,7 @@ impl SqlIncorporator {
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
     /// argument is a string that holds a parameterized SQL query, and the `name` argument supplies
     /// an optional name for the query. If no `name` is specified, the table name is used in the
-    /// case of INSERT queries, and a deterministic, unique name is generated and returned
+    /// case of CREATE TABLE queries, and a deterministic, unique name is generated and returned
     /// otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
@@ -102,8 +102,8 @@ impl SqlIncorporator {
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
     /// argument is a `SqlQuery` structure, and the `name` argument supplies an optional name for
-    /// the query. If no `name` is specified, the table name is used in the case of INSERT queries,
-    /// and a deterministic, unique name is generated and returned otherwise.
+    /// the query. If no `name` is specified, the table name is used in the case of CREATE TABLE
+    /// queries, and a deterministic, unique name is generated and returned otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeAddress`es representing the nodes added to support the query.
@@ -534,7 +534,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Must have a base node for type inference to work, so make one manually
-        assert!("INSERT INTO users (id, name) VALUES (?, ?);"
+        assert!("CREATE TABLE users (id int, name varchar(40));"
                     .to_flow_parts(&mut inc, None, &mut mig)
                     .is_ok());
 
@@ -566,7 +566,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type for "users"
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
@@ -577,7 +577,7 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").description(), "B");
 
         // Establish a base write type for "articles"
-        assert!(inc.add_query("INSERT INTO articles (id, author, title) VALUES (?, ?, ?);",
+        assert!(inc.add_query("CREATE TABLE articles (id int, author int, title varchar(255));",
                               None,
                               &mut mig)
                     .is_ok());
@@ -619,7 +619,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
@@ -656,9 +656,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write types
-        assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
-                              None,
-                              &mut mig)
+        assert!(inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
                     .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
@@ -702,7 +700,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
@@ -741,7 +739,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
@@ -782,9 +780,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO votes (aid, userid) VALUES (?, ?);",
-                              None,
-                              &mut mig)
+        assert!(inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
                     .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
@@ -830,9 +826,7 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("INSERT INTO votes (userid, aid) VALUES (?, ?);",
-                              None,
-                              &mut mig)
+        assert!(inc.add_query("CREATE TABLE votes (userid int, aid int);", None, &mut mig)
                     .is_ok());
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
@@ -874,15 +868,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish base write types for "users" and "articles" and "votes"
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
-        assert!(inc.add_query("INSERT INTO votes (aid, uid) VALUES (?, ?);",
-                              None,
-                              &mut mig)
+        assert!(inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
                     .is_ok());
-        assert!(inc.add_query("INSERT INTO articles (aid, title, author) VALUES (?, ?, ?);",
+        assert!(inc.add_query("CREATE TABLE articles (aid int, title varchar(255), author int);",
                               None,
                               &mut mig)
                     .is_ok());
@@ -917,15 +909,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish base write types for "users" and "articles" and "votes"
-        assert!(inc.add_query("INSERT INTO users (id, name) VALUES (?, ?);",
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
                               None,
                               &mut mig)
                     .is_ok());
-        assert!(inc.add_query("INSERT INTO votes (aid, uid) VALUES (?, ?);",
-                              None,
-                              &mut mig)
+        assert!(inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
                     .is_ok());
-        assert!(inc.add_query("INSERT INTO articles (aid, title, author) VALUES (?, ?, ?);",
+        assert!(inc.add_query("CREATE TABLE articles (aid int, title varchar(255), author int);",
                               None,
                               &mut mig)
                     .is_ok());
