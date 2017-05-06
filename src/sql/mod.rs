@@ -232,12 +232,7 @@ impl SqlIncorporator {
                                   -> QueryFlowParts {
         // We want to hang the new leaf off the last non-leaf node of the query, so backtrack one
         // step here.
-        let final_node_of_query = leaf.borrow()
-            .ancestors()
-            .iter()
-            .next()
-            .unwrap()
-            .clone();
+        let final_node_of_query = leaf.borrow().ancestors().iter().next().unwrap().clone();
 
         let mut mir = self.mir_converter
             .add_leaf_below(final_node_of_query, query_name, params);
@@ -258,8 +253,7 @@ impl SqlIncorporator {
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas
-            .insert(String::from(query_name), fields);
+        self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR query
         //self.query_graphs.insert(qg.signature().hash, (qg, mir));
@@ -293,8 +287,7 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas
-            .insert(String::from(query_name), fields);
+        self.view_schemas.insert(String::from(query_name), fields);
 
         qfp
     }
@@ -330,8 +323,7 @@ impl SqlIncorporator {
         let qfp = mir.into_flow_parts(&mut mig);
 
         // TODO(malte): get rid of duplication and figure out where to track this state
-        self.view_schemas
-            .insert(String::from(query_name), fields);
+        self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
         self.query_graphs.insert(qg.signature().hash, (qg, mir));
@@ -688,11 +680,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
-                                       name: String::from("votes"),
-                                       alias: Some(String::from("votes")),
-                                       table: None,
-                                       function: Some(f),
-                                   }]);
+                                     name: String::from("votes"),
+                                     alias: Some(String::from("votes")),
+                                     table: None,
+                                     function: Some(f),
+                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
@@ -811,11 +803,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[],
                                 &[&Column {
-                                       name: String::from("count"),
-                                       alias: Some(String::from("count")),
-                                       table: None,
-                                       function: Some(f),
-                                   }]);
+                                     name: String::from("count"),
+                                     alias: Some(String::from("count")),
+                                     table: None,
+                                     function: Some(f),
+                                 }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
@@ -859,11 +851,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
-                                       name: String::from("count"),
-                                       alias: Some(String::from("count")),
-                                       table: None,
-                                       function: Some(f),
-                                   }]);
+                                     name: String::from("count"),
+                                     alias: Some(String::from("count")),
+                                     table: None,
+                                     function: Some(f),
+                                 }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));

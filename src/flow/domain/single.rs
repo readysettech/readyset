@@ -170,7 +170,10 @@ impl NodeDescriptor {
                 vec![]
             }
             flow::node::Type::Egress(None) => unreachable!(),
-            flow::node::Type::Egress(Some(flow::node::Egress { ref mut txs, ref tags })) => {
+            flow::node::Type::Egress(Some(flow::node::Egress {
+                                              ref mut txs,
+                                              ref tags,
+                                          })) => {
                 // send any queued updates to all external children
                 let txn = txs.len() - 1;
 
@@ -181,11 +184,10 @@ impl NodeDescriptor {
                 // to that ingress node.
                 let replay_to = m.tag()
                     .map(|tag| {
-                             tags
-                        .get(&tag)
-                        .map(|n| *n)
-                        .expect("egress node told about replay message, but not on replay path")
-                         });
+                        tags.get(&tag)
+                            .map(|n| *n)
+                            .expect("egress node told about replay message, but not on replay path")
+                    });
 
                 use std::mem;
                 let mut m = Some(mem::replace(m, Packet::None)); // so we can use .take()

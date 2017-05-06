@@ -216,10 +216,7 @@ impl ImpliedTableExpansion for SqlQuery {
             SqlQuery::CreateTable(mut ctq) => {
                 let table = ctq.table.clone();
                 let transform_key = |key_cols: Vec<Column>| {
-                    key_cols
-                        .into_iter()
-                        .map(|k| set_table(k, &table))
-                        .collect()
+                    key_cols.into_iter().map(|k| set_table(k, &table)).collect()
                 };
                 // Expand within field list
                 ctq.fields = ctq.fields

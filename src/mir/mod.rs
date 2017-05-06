@@ -293,13 +293,13 @@ impl MirNode {
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
         match self.ancestors
-                .iter()
-                .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
-                    None => (),
-                    Some(idx) => {
-                            self.ancestors.remove(idx);
-                    }
-                }
+                  .iter()
+                  .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
+            None => (),
+            Some(idx) => {
+                self.ancestors.remove(idx);
+            }
+        }
     }
 
     pub fn add_child(&mut self, c: MirNodeRef) {
@@ -308,13 +308,13 @@ impl MirNode {
 
     pub fn remove_child(&mut self, a: MirNodeRef) {
         match self.children
-                .iter()
-                .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
-                    None => (),
-                    Some(idx) => {
-                            self.children.remove(idx);
-                    }
-                }
+                  .iter()
+                  .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name()) {
+            None => (),
+            Some(idx) => {
+                self.children.remove(idx);
+            }
+        }
     }
 
 
@@ -433,9 +433,10 @@ impl MirNode {
                                           GroupedNodeType::Aggregation(kind.clone()),
                                           mig)
                     }
-                    MirNodeType::Base { ref keys, transactional } => {
-                        make_base_node(&name, self.columns.as_slice(), keys, mig, transactional)
-                    }
+                    MirNodeType::Base {
+                        ref keys,
+                        transactional,
+                    } => make_base_node(&name, self.columns.as_slice(), keys, mig, transactional),
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -609,7 +610,10 @@ pub enum MirNodeType {
         kind: AggregationKind,
     },
     /// columns, keys (non-compound)
-    Base { keys: Vec<Column>, transactional: bool },
+    Base {
+        keys: Vec<Column>,
+        transactional: bool,
+    },
     /// over column, group_by columns
     Extremum {
         on: Column,
@@ -710,11 +714,13 @@ impl MirNodeType {
                 match *other {
                     // it is, so dig deeper
                     MirNodeType::Reuse { ref node } => {
-                        // this does not check the projected columns of the inner node for two reasons:
-                        // 1) our own projected columns aren't accessible on `MirNodeType`, but only on
-                        //    the outer `MirNode`, which isn't accessible here; but more importantly
-                        // 2) since this is already a node reuse, the inner, reused node must have *at
-                        //    least* a superset of our own (inaccessible) projected columns.
+                        // this does not check the projected columns of the inner node for two
+                        // reasons:
+                        // 1) our own projected columns aren't accessible on `MirNodeType`, but
+                        //    only on the outer `MirNode`, which isn't accessible here; but more
+                        //    importantly
+                        // 2) since this is already a node reuse, the inner, reused node must have
+                        //    *at least* a superset of our own (inaccessible) projected columns.
                         // Hence, it is sufficient to check the projected columns on the parent
                         // `MirNode`, and if that check passes, it also holds for the nodes reused
                         // here.
@@ -744,12 +750,18 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            MirNodeType::Base { keys: ref our_keys, transactional: our_transactional } => {
+            MirNodeType::Base {
+                keys: ref our_keys,
+                transactional: our_transactional,
+            } => {
                 match *other {
-                    MirNodeType::Base { ref keys, transactional } => {
+                    MirNodeType::Base {
+                        ref keys,
+                        transactional,
+                    } => {
                         assert_eq!(our_transactional, transactional);
                         our_keys == keys
-                    },
+                    }
                     _ => false,
                 }
             }
@@ -842,10 +854,13 @@ impl Debug for MirNodeType {
                 write!(f, "{} γ[{}]", op_string, group_cols)
 
             }
-            MirNodeType::Base { ref keys, transactional } => {
+            MirNodeType::Base {
+                ref keys,
+                transactional,
+            } => {
                 write!(f,
                        "B{} [⚷: {}]",
-                       if transactional {"*"} else {""},
+                       if transactional { "*" } else { "" },
                        keys.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
@@ -1073,8 +1088,8 @@ fn make_grouped_node(name: &str,
         .iter()
         .position(|c| c == on)
         .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
-                         on,
-                         parent.borrow().columns()));
+                        on,
+                        parent.borrow().columns()));
     let group_col_indx = group_by
         .iter()
         .map(|c| {
@@ -1272,8 +1287,8 @@ fn make_project_node(name: &str,
                 .iter()
                 .position(|ref nc| *nc == c)
                 .expect(&format!("column {:?} not found on {}",
-                                 c,
-                                 parent.borrow().versioned_name()))
+                                c,
+                                parent.borrow().versioned_name()))
         })
         .collect::<Vec<_>>();
 

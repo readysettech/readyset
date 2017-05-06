@@ -129,8 +129,7 @@ impl SqlToMirConverter {
                                     vec![]);
 
         // always register lleaves
-        self.current
-            .insert(String::from(name), self.schema_version);
+        self.current.insert(String::from(name), self.schema_version);
         self.nodes
             .insert((String::from(name), self.schema_version), new_leaf.clone());
 
@@ -174,8 +173,7 @@ impl SqlToMirConverter {
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
-                    self.current
-                        .insert(String::from(name), self.schema_version);
+                    self.current.insert(String::from(name), self.schema_version);
                 }
                 MirQuery::singleton(name, n)
             }
@@ -186,8 +184,7 @@ impl SqlToMirConverter {
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
-                    self.current
-                        .insert(String::from(name), self.schema_version);
+                    self.current.insert(String::from(name), self.schema_version);
                 }
                 MirQuery::singleton(name, n)
             }
@@ -775,8 +772,8 @@ impl SqlToMirConverter {
                             let (left_node, right_node) =
                                 pick_join_columns(src, dst, prev_node, &joined_tables);
                             self.make_join_node(&format!("q_{:x}_n{}",
-                                                         qg.signature().hash,
-                                                         new_node_count),
+                                                        qg.signature().hash,
+                                                        new_node_count),
                                                 jps,
                                                 left_node,
                                                 right_node,
@@ -787,8 +784,8 @@ impl SqlToMirConverter {
                             let (left_node, right_node) =
                                 pick_join_columns(src, dst, prev_node, &joined_tables);
                             self.make_join_node(&format!("q_{:x}_n{}",
-                                                         qg.signature().hash,
-                                                         new_node_count),
+                                                        qg.signature().hash,
+                                                        new_node_count),
                                                 jps,
                                                 left_node,
                                                 right_node,
@@ -957,8 +954,8 @@ impl SqlToMirConverter {
                                         Some(pn) => pn,
                                     };
                                     let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                              qg.signature().hash,
-                                                                              new_node_count),
+                                                                             qg.signature().hash,
+                                                                             new_node_count),
                                                                      parent,
                                                                      &qgn.predicates);
                                     assert!(fns.len() > 0);
@@ -1026,8 +1023,8 @@ impl SqlToMirConverter {
                             Some(pn) => pn,
                         };
                         let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                  qg.signature().hash,
-                                                                  new_node_count),
+                                                                 qg.signature().hash,
+                                                                 new_node_count),
                                                          parent,
                                                          &qgn.predicates);
                         assert!(fns.len() > 0);
@@ -1052,8 +1049,8 @@ impl SqlToMirConverter {
                 let group_by = qg.parameters();
 
                 let node = self.make_topk_node(&format!("q_{:x}_n{}",
-                                                        qg.signature().hash,
-                                                        new_node_count),
+                                                       qg.signature().hash,
+                                                       new_node_count),
                                                final_node,
                                                group_by,
                                                &st.order,

@@ -66,10 +66,7 @@ pub mod test {
             let local = NodeAddress::mock_local(self.remap.len());
             self.graph.node_weight_mut(ni).unwrap().set_addr(local);
             remap.insert(global, local);
-            self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .on_commit(&remap);
+            self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
             self.states.insert(*local.as_local(), State::default());
             self.remap.insert(global, local);
             global
@@ -87,8 +84,7 @@ pub mod test {
             let parents = i.ancestors();
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
-            let ni = self.graph
-                .add_node(node::Node::new(name, fields, i, false));
+            let ni = self.graph.add_node(node::Node::new(name, fields, i, false));
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
             if materialized {

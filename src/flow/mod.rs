@@ -752,9 +752,7 @@ impl<'a> Migration<'a> {
             let r = node::Type::Reader(None, Default::default());
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
-            self.mainline
-                .ingredients
-                .add_edge(*n.as_global(), r, false);
+            self.mainline.ingredients.add_edge(*n.as_global(), r, false);
             self.readers.insert(*n.as_global(), r);
         }
     }
@@ -770,9 +768,8 @@ impl<'a> Migration<'a> {
         }
 
         let base_columns: Vec<(_, Option<_>)> =
-            self.mainline.ingredients[*n.as_global()].base_columns(key,
-                                                                   &self.mainline.ingredients,
-                                                                   *n.as_global());
+            self.mainline.ingredients[*n.as_global()]
+                .base_columns(key, &self.mainline.ingredients, *n.as_global());
 
         let coarse_parents = base_columns
             .iter()
@@ -856,10 +853,12 @@ impl<'a> Migration<'a> {
 
         // Otherwise, send a message to the reader's domain to have it add the streamer.
         let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
-        self.mainline.txs[&reader.domain()].send(payload::Packet::AddStreamer{
-            node: reader.addr().as_local().clone(),
-            new_streamer: tx,
-        }).unwrap();
+        self.mainline.txs[&reader.domain()]
+            .send(payload::Packet::AddStreamer {
+                      node: reader.addr().as_local().clone(),
+                      new_streamer: tx,
+                  })
+            .unwrap();
 
         rx
     }
@@ -875,9 +874,7 @@ impl<'a> Migration<'a> {
         let h = node::Type::Hook(Some(h));
         let h = self.mainline.ingredients[*n.as_global()].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
-        self.mainline
-            .ingredients
-            .add_edge(*n.as_global(), h, false);
+        self.mainline.ingredients.add_edge(*n.as_global(), h, false);
         Ok(h.into())
     }
 

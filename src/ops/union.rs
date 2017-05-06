@@ -103,10 +103,7 @@ impl Ingredient for Union {
 
                 // yield selected columns for this source
                 // TODO: if emitting all in same order then avoid clone
-                let res = self.emit[&from]
-                    .iter()
-                    .map(|&col| r[col].clone())
-                    .collect();
+                let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
 
                 // return new row with appropriate sign
                 if pos {
@@ -294,22 +291,10 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup();
         let r0 = u.node().resolve(0);
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l && c == 0));
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 0));
         let r1 = u.node().resolve(1);
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l && c == 1));
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r && c == 2));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 1));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 2));
     }
 }

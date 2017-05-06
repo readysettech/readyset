@@ -305,9 +305,7 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
-        rclones.extend((0..(self.state.len() - 1))
-                           .into_iter()
-                           .map(|_| r.clone()));
+        rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
 
         self.rows = self.rows.saturating_add(1);

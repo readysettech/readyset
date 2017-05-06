@@ -169,7 +169,7 @@ impl Type {
         keys::provenance_of(graph, index, column, |_, _| None)
             .into_iter()
             .map(|path| {
-        // we want the base node corresponding to each path
+                     // we want the base node corresponding to each path
                      path.into_iter().last().unwrap()
                  })
             .collect()
@@ -357,25 +357,25 @@ impl Node {
             Type::Internal(ref i) => {
                 write!(f, "{{")?;
 
-        // Output node name and description. First row.
+                // Output node name and description. First row.
                 write!(f,
                        "{{ {} / {} | {} }}",
                        idx.index(),
                        escape(self.name()),
                        escape(&i.description()))?;
 
-        // Output node outputs. Second row.
+                // Output node outputs. Second row.
                 write!(f, " | {}", self.fields().join(", \\n"))?;
 
-        // Maybe output node's HAVING conditions. Optional third row.
-        // TODO
-        // if let Some(conds) = n.node().unwrap().having_conditions() {
-        //     let conds = conds.iter()
-        //         .map(|c| format!("{}", c))
-        //         .collect::<Vec<_>>()
-        //         .join(" ∧ ");
-        //     write!(f, " | σ({})", escape(&conds))?;
-        // }
+                // Maybe output node's HAVING conditions. Optional third row.
+                // TODO
+                // if let Some(conds) = n.node().unwrap().having_conditions() {
+                //     let conds = conds.iter()
+                //         .map(|c| format!("{}", c))
+                //         .collect::<Vec<_>>()
+                //         .join(" ∧ ");
+                //     write!(f, " | σ({})", escape(&conds))?;
+                // }
 
                 write!(f, " }}")
             }

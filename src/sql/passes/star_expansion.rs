@@ -27,17 +27,17 @@ impl StarExpansion for SqlQuery {
                 .into_iter()
                 .flat_map(|field| match field {
                               FieldExpression::All => {
-                    let v: Vec<_> = sq.tables
-                        .iter()
-                        .map(|t| t.name.clone())
-                        .flat_map(&expand_table)
-                        .collect();
-                    v.into_iter()
-                }
+                                  let v: Vec<_> = sq.tables
+                                      .iter()
+                                      .map(|t| t.name.clone())
+                                      .flat_map(&expand_table)
+                                      .collect();
+                                  v.into_iter()
+                              }
                               FieldExpression::AllInTable(t) => {
-                    let v: Vec<_> = expand_table(t).collect();
-                    v.into_iter()
-                }
+                                  let v: Vec<_> = expand_table(t).collect();
+                                  v.into_iter()
+                              }
                               FieldExpression::Col(c) => vec![FieldExpression::Col(c)].into_iter(),
                           })
                 .collect();

@@ -288,8 +288,7 @@ impl Ingredient for TopK {
                 } else {
                     assert!(count as usize >= old_rs.len());
 
-                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..])
-                                        .into());
+                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..]).into());
                 }
                 self.counts.insert(group, (count + count_diff) as usize);
             }

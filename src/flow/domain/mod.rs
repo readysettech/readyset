@@ -333,10 +333,10 @@ impl Domain {
 
         let mut egress_messages = HashMap::new();
         let (ts, tracer) = if let Some(&Packet::Transaction {
-                                            state: ref ts @ TransactionState::Committed(..),
-                                            ref tracer,
-                                            ..
-                                        }) = messages.iter().next() {
+                                           state: ref ts @ TransactionState::Committed(..),
+                                           ref tracer,
+                                           ..
+                                       }) = messages.iter().next() {
             (ts.clone(), tracer.clone())
         } else {
             unreachable!();
@@ -568,15 +568,15 @@ impl Domain {
             Packet::RequestPartialReplay { tag, key } => {
                 match self.replay_paths.get(&tag).unwrap() {
                     &ReplayPath {
-                         trigger: TriggerEndpoint::End(..),
-                         ref path,
-                         ..
-                     } |
+                        trigger: TriggerEndpoint::End(..),
+                        ref path,
+                        ..
+                    } |
                     &ReplayPath {
-                         trigger: TriggerEndpoint::Local(..),
-                         ref path,
-                         ..
-                     } => {
+                        trigger: TriggerEndpoint::Local(..),
+                        ref path,
+                        ..
+                    } => {
                         // a miss in a reader! make sure we don't re-do work
                         use flow::node::{Type, Reader};
                         let addr = path.last().unwrap().0.as_local();
@@ -1505,13 +1505,7 @@ impl Domain {
                 input_rx: mpsc::Receiver<Packet>)
                 -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes
-            .values()
-            .next()
-            .unwrap()
-            .borrow()
-            .domain()
-            .into();
+        let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
         thread::Builder::new()
             .name(format!("domain{}", name))
             .spawn(move || {

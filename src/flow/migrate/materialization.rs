@@ -188,10 +188,7 @@ pub fn index(log: &Logger,
         .iter()
         .map(|&(ni, _)| (*graph[ni].addr().as_local(), ni))
         .collect();
-    let nodes: Vec<_> = nodes
-        .iter()
-        .map(|&(ni, new)| (&graph[ni], new))
-        .collect();
+    let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
 
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
@@ -288,9 +285,7 @@ pub fn index(log: &Logger,
                                        v,
                                        col,
                                        n);
-                                tmp.entry(n)
-                                    .or_insert_with(HashSet::new)
-                                    .insert(vec![col]);
+                                tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
                             }
                         }
                     }
@@ -789,11 +784,13 @@ pub fn reconstruct(log: &Logger,
 
             if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
-                txs[domain].send(Packet::UpdateEgress{
-                    node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
-                    new_tx: None,
-                    new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                }).unwrap();
+                txs[domain]
+                    .send(Packet::UpdateEgress {
+                              node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
+                              new_tx: None,
+                              new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                          })
+                    .unwrap();
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());
@@ -882,9 +879,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
         // must indeed be), and therefore that we can just pick that parent and get a free full
         // materialization. *however*, this would cause the node to be marked as fully
         // materialized, which is *not* okay if it has partially a materialized ancestor!
-        if let Some(&parent) = parents
-               .iter()
-               .find(|&&p| empty.contains(&graph[p].addr())) {
+        if let Some(&parent) = parents.iter().find(|&&p| empty.contains(&graph[p].addr())) {
             if !parents.iter().any(|p| partial.contains(p)) {
                 // no partial ancestors!
                 return Some(parent);

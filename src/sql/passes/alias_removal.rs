@@ -107,17 +107,17 @@ impl AliasRemoval for SqlQuery {
                     .map(|field| match field {
                              // WTF rustfmt?
                              FieldExpression::Col(mut col) => {
-                        if col.table.is_some() {
-                            let t = col.table.take().unwrap();
-                            col.table = if table_aliases.contains_key(&t) {
-                                Some(table_aliases[&t].clone())
-                            } else {
-                                Some(t.clone())
-                            };
-                            col.function = None;
-                        }
-                        FieldExpression::Col(col)
-                    }
+                                 if col.table.is_some() {
+                                     let t = col.table.take().unwrap();
+                                     col.table = if table_aliases.contains_key(&t) {
+                                         Some(table_aliases[&t].clone())
+                                     } else {
+                                         Some(t.clone())
+                                     };
+                                     col.function = None;
+                                 }
+                                 FieldExpression::Col(col)
+                             }
                              FieldExpression::AllInTable(t) => {
                                  if table_aliases.contains_key(&t) {
                                      FieldExpression::AllInTable(table_aliases[&t].clone())

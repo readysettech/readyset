@@ -63,9 +63,9 @@ impl Join {
                      JoinSource::L(c) => (true, c),
                      JoinSource::R(c) => (false, c),
                      JoinSource::B(lc, rc) => {
-                join_columns.push((lc, rc));
-                (true, lc)
-            }
+                         join_columns.push((lc, rc));
+                         (true, lc)
+                     }
                  })
             .collect();
 
@@ -230,12 +230,11 @@ impl Ingredient for Join {
 
                     if (positive && rc == 1) || (!positive && rc == 0) {
                         ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
-                                                           let foo: Records = vec![
-                                    (self.generate_null(r), !positive),
-                                    (self.generate_row(r, &row), positive)
-                                ].into();
-                                                           foo.into()
-                                                       }));
+                            let foo: Records = vec![(self.generate_null(r), !positive),
+                                                    (self.generate_row(r, &row), positive)]
+                                    .into();
+                            foo.into()
+                        }));
                         continue;
                     }
                 } else if other_rows.peek().is_none() {

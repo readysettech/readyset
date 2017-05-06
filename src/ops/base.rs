@@ -102,7 +102,8 @@ impl Base {
     /// Drop a column from this base node.
     pub fn drop_column(&mut self, column: usize) {
         assert!(!self.defaults.is_empty(),
-                "cannot add columns to base nodes without setting default values for initial columns");
+                "cannot add columns to base nodes without\
+                setting default values for initial columns");
         assert!(column < self.defaults.len());
         self.unmodified = false;
 
@@ -218,11 +219,7 @@ impl Base {
 
     /// Flush any buffered writes, and clear the buffer, returning all flushed writes.
     pub fn flush(&mut self) -> Records {
-        let flushed_writes = self.buffered_writes
-            .as_mut()
-            .unwrap()
-            .drain(..)
-            .collect();
+        let flushed_writes = self.buffered_writes.as_mut().unwrap().drain(..).collect();
         self.persist_to_log(&flushed_writes);
         self.last_flushed_at = Some(Instant::now());
 

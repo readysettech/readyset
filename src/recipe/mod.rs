@@ -228,10 +228,7 @@ impl Recipe {
             let (n, q) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc
-                .as_mut()
-                .unwrap()
-                .add_parsed_query(q, n, mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
 
             // we currently use a domain per query
             let d = mig.add_domain();

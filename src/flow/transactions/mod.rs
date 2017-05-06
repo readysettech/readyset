@@ -213,8 +213,7 @@ impl DomainState {
 
             match self.next_transaction {
                 Bundle::Empty => {
-                    let count = base.map(|b| self.ingress_from_base[b.index()])
-                        .unwrap_or(1);
+                    let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                     let bundle = match m {
                         Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
                         Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
@@ -347,10 +346,7 @@ impl DomainState {
     }
 
     pub fn schedule_replay(&mut self, tag: Tag, key: Vec<DataType>) {
-        let (ts, prevs) = self.checktable
-            .lock()
-            .unwrap()
-            .claim_replay_timestamp(&tag);
+        let (ts, prevs) = self.checktable.lock().unwrap().claim_replay_timestamp(&tag);
 
         let prev_ts = if self.ts == ts - 1 {
             ts - 1

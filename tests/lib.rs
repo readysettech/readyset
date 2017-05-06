@@ -537,8 +537,7 @@ fn votes() {
 
     // query vote count to see that the count was updated
     let res = vcq(&a1, true).unwrap();
-    assert!(res.iter()
-                .all(|r| r[0] == a1.clone() && r[1] == 1.into()));
+    assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
@@ -685,8 +684,7 @@ fn transactional_vote() {
 
     // query vote count to see that the count was updated
     let res = vcq(&a1, true).unwrap();
-    assert!(res.iter()
-                .all(|r| r[0] == a1.clone() && r[1] == 1.into()));
+    assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
