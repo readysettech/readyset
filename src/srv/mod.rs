@@ -2,6 +2,9 @@ use flow::prelude::*;
 use flow;
 
 use bincode;
+use bufstream::BufStream;
+use std::io::prelude::*;
+
 use vec_map::VecMap;
 
 use std::net::TcpListener;
@@ -28,6 +31,9 @@ pub enum Method {
         /// The column values for the new record
         args: Vec<DataType>,
     },
+
+    /// Flush any buffered responses.
+    Flush,
 }
 
 /// Construct a new `Server` handle for all Soup endpoints
@@ -67,8 +73,8 @@ pub struct Server {
 }
 
 /// Handle RPCs from a single `TcpStream`
-pub fn main(mut stream: TcpStream, s: Server) {
-    // TODO: Should we use a BufStream here? When do we flush? Do we want a separate "flush" RPC?
+pub fn main(stream: TcpStream, s: Server) {
+    let mut stream = BufStream::new(stream);
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
             Ok(Method::Query { view, key }) => {
@@ -82,6 +88,12 @@ pub fn main(mut stream: TcpStream, s: Server) {
             Ok(Method::Insert { view, args }) => {
                 s.put[view].2.put(args);
                 if let Err(e) = bincode::serialize_into(&mut stream, &0i64, bincode::Infinite) {
+                    println!("client left prematurely: {:?}", e);
+                    break;
+                }
+            }
+            Ok(Method::Flush) => {
+                if let Err(e) = stream.flush() {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }

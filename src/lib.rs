@@ -344,6 +344,8 @@ extern crate rustful;
 
 #[cfg(feature="b_netsoup")]
 extern crate bincode;
+#[cfg(feature="b_netsoup")]
+extern crate bufstream;
 
 extern crate serde;
 extern crate serde_json;
