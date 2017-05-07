@@ -2,6 +2,8 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::str;
 
+use common::{Literal, SqlType};
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FunctionExpression {
     Avg(Column, bool),
@@ -94,6 +96,41 @@ impl PartialOrd for Column {
             Some(self.name.cmp(&other.name))
         } else {
             None
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum ColumnConstraint {
+    NotNull,
+    DefaultValue(Literal),
+    AutoIncrement,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct ColumnSpecification {
+    pub column: Column,
+    pub sql_type: SqlType,
+    pub constraints: Vec<ColumnConstraint>,
+}
+
+impl ColumnSpecification {
+    pub fn new(c: Column, t: SqlType) -> ColumnSpecification {
+        ColumnSpecification {
+            column: c,
+            sql_type: t,
+            constraints: vec![],
+        }
+    }
+
+    pub fn with_constraints(c: Column,
+                            t: SqlType,
+                            ccs: Vec<ColumnConstraint>)
+                            -> ColumnSpecification {
+        ColumnSpecification {
+            column: c,
+            sql_type: t,
+            constraints: ccs,
         }
     }
 }

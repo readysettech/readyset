@@ -5,20 +5,14 @@ use std::str::FromStr;
 
 use common::{column_identifier_no_alias, field_list, sql_identifier, statement_terminator,
              table_reference, Literal, SqlType, TableKey};
-use column::Column;
+use column::{ColumnConstraint, ColumnSpecification};
 use table::Table;
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
     pub table: Table,
-    pub fields: Vec<(Column, SqlType)>,
+    pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
-}
-
-pub enum ColumnConstraint {
-    NotNull,
-    DefaultValue(Literal),
-    AutoIncrement,
 }
 
 fn len_as_u16(len: &[u8]) -> u16 {
@@ -219,17 +213,17 @@ named!(pub key_specification_list<&[u8], Vec<TableKey>>,
 );
 
 /// Parse rule for a comma-separated list.
-named!(pub field_specification_list<&[u8], Vec<(Column, SqlType)> >,
+named!(pub field_specification_list<&[u8], Vec<ColumnSpecification> >,
        many1!(
            complete!(chain!(
-               fieldname: column_identifier_no_alias ~
+               identifier: column_identifier_no_alias ~
                fieldtype: opt!(complete!(chain!(multispace ~
                                       ti: type_identifier ~
                                       multispace?,
                                       || { ti }
                                ))
                ) ~
-               many0!(column_constraint) ~
+               constraints: many0!(column_constraint) ~
                opt!(
                    complete!(chain!(
                        multispace? ~
@@ -243,7 +237,11 @@ named!(pub field_specification_list<&[u8], Vec<(Column, SqlType)> >,
                        None => SqlType::Text,
                        Some(ref t) => t.clone(),
                    };
-                   (fieldname, t)
+                   ColumnSpecification {
+                       column: identifier,
+                       sql_type: t,
+                       constraints: constraints,
+                   }
                }
            ))
        )
@@ -394,8 +392,8 @@ mod tests {
 
         let res = field_specification_list(qstring.as_bytes());
         assert_eq!(res.unwrap().1,
-                   vec![(Column::from("id"), SqlType::Bigint(20)),
-                        (Column::from("name"), SqlType::Varchar(255))]);
+                   vec![ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                        ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255))]);
     }
 
     #[test]
@@ -406,9 +404,12 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
-                                    (Column::from("name"), SqlType::Varchar(255)),
-                                    (Column::from("email"), SqlType::Varchar(255))],
+                       fields: vec![ColumnSpecification::new(Column::from("id"),
+                                                             SqlType::Bigint(20)),
+                                    ColumnSpecification::new(Column::from("name"),
+                                                             SqlType::Varchar(255)),
+                                    ColumnSpecification::new(Column::from("email"),
+                                                             SqlType::Varchar(255))],
                        ..Default::default()
                    });
     }
@@ -421,8 +422,19 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("user_newtalk"),
-                       fields: vec![(Column::from("user_id"), SqlType::Int(5)),
-                                    (Column::from("user_ip"), SqlType::Varchar(40))],
+                       fields: vec![
+                           ColumnSpecification::with_constraints(
+                               Column::from("user_id"),
+                               SqlType::Int(5),
+                               vec![ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(Literal::String(String::from("0")))]),
+                           ColumnSpecification::with_constraints(
+                               Column::from("user_ip"),
+                               SqlType::Varchar(40),
+                               vec![ColumnConstraint::NotNull,
+                                    ColumnConstraint::DefaultValue(
+                                        Literal::String(String::from("")))])
+                       ],
                        ..Default::default()
                    });
     }
@@ -437,9 +449,12 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
-                                    (Column::from("name"), SqlType::Varchar(255)),
-                                    (Column::from("email"), SqlType::Varchar(255))],
+                       fields: vec![ColumnSpecification::new(Column::from("id"),
+                                                             SqlType::Bigint(20)),
+                                    ColumnSpecification::new(Column::from("name"),
+                                                             SqlType::Varchar(255)),
+                                    ColumnSpecification::new(Column::from("email"),
+                                                             SqlType::Varchar(255))],
                        keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
                        ..Default::default()
                    });
@@ -452,9 +467,12 @@ mod tests {
         assert_eq!(res.unwrap().1,
                    CreateTableStatement {
                        table: Table::from("users"),
-                       fields: vec![(Column::from("id"), SqlType::Bigint(20)),
-                                    (Column::from("name"), SqlType::Varchar(255)),
-                                    (Column::from("email"), SqlType::Varchar(255))],
+                       fields: vec![ColumnSpecification::new(Column::from("id"),
+                                                             SqlType::Bigint(20)),
+                                    ColumnSpecification::new(Column::from("name"),
+                                                             SqlType::Varchar(255)),
+                                    ColumnSpecification::new(Column::from("email"),
+                                                             SqlType::Varchar(255))],
                        keys: Some(vec![TableKey::UniqueKey(Some(String::from("id_k")),
                                                            vec![Column::from("id")])]),
                        ..Default::default()
