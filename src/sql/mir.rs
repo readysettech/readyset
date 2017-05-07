@@ -4,8 +4,8 @@ use mir::{GroupedNodeType, MirNode, MirNodeType};
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use ops::join::JoinType;
 
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, Literal, Operator,
-              TableKey, SqlQuery};
+use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
+              Literal, Operator, TableKey, SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderClause};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
 
@@ -33,7 +33,7 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
 
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
-    base_schemas: HashMap<String, Vec<(usize, Vec<Column>)>>,
+    base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
     current: HashMap<String, usize>,
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
@@ -168,8 +168,7 @@ impl SqlToMirConverter {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
                 assert_eq!(name, ctq.table.name);
-                let (column_names, _): (Vec<_>, Vec<_>) = ctq.fields.iter().cloned().unzip();
-                let n = self.make_base_node(&name, &column_names, ctq.keys.as_ref(), transactional);
+                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref(), transactional);
                 let node_id = (String::from(name), self.schema_version);
                 if !self.nodes.contains_key(&node_id) {
                     self.nodes.insert(node_id, n.clone());
@@ -235,13 +234,14 @@ impl SqlToMirConverter {
 
     fn make_base_node(&mut self,
                       name: &str,
-                      cols: &Vec<Column>,
+                      cols: &Vec<ColumnSpecification>,
                       keys: Option<&Vec<TableKey>>,
                       transactional: bool)
                       -> MirNodeRef {
         // have we seen a base of this name before?
         if self.base_schemas.contains_key(name) {
-            let mut existing_schemas: Vec<(usize, Vec<Column>)> = self.base_schemas[name].clone();
+            let mut existing_schemas: Vec<(usize, Vec<ColumnSpecification>)> =
+                self.base_schemas[name].clone();
             existing_schemas.sort_by_key(|&(sv, _)| sv);
 
             for (existing_sv, ref schema) in existing_schemas {
@@ -298,7 +298,8 @@ impl SqlToMirConverter {
         }
 
         // all columns on a base must have the base as their table
-        assert!(cols.iter().all(|c| c.table == Some(String::from(name))));
+        assert!(cols.iter()
+                    .all(|c| c.column.table == Some(String::from(name))));
 
         let primary_keys = match keys {
             None => vec![],
@@ -334,7 +335,7 @@ impl SqlToMirConverter {
                            name);
                     MirNode::new(name,
                                  self.schema_version,
-                                 cols.clone(),
+                                 cols.iter().map(|cs| cs.column.clone()).collect(),
                                  MirNodeType::Base {
                                      keys: key_cols.clone(),
                                      transactional,
@@ -347,7 +348,7 @@ impl SqlToMirConverter {
         } else {
             MirNode::new(name,
                          self.schema_version,
-                         cols.clone(),
+                         cols.iter().map(|cs| cs.column.clone()).collect(),
                          MirNodeType::Base {
                              keys: vec![],
                              transactional,

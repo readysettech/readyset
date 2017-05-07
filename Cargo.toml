@@ -32,7 +32,7 @@ vec_map = "0.7.0"
 bufstream = "0.1"
 
 spmc = "0.2.1"
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "f2ca33d88235949475f107a4d8263dba8054ec61" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "aafa7ad49617aca9928dc09ec324f13bd8081ff7" }
 
 # for benchmarks
 # cli
