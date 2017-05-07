@@ -8,7 +8,7 @@ use column::{Column, FunctionExpression};
 use keywords::sql_keyword;
 use table::Table;
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SqlType {
     Char(u16),
     Varchar(u16),
@@ -30,7 +30,7 @@ pub enum SqlType {
     Varbinary(u16),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Null,
     Integer(i64),
