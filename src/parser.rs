@@ -52,13 +52,13 @@ mod tests {
 
     #[test]
     fn hash_query() {
-        let qstring = "INSERT INTO users VALUES (42, test);";
+        let qstring = "INSERT INTO users VALUES (42, \"test\");";
         let res = parse_query(qstring);
         assert!(res.is_ok());
 
         let expected = SqlQuery::Insert(InsertStatement {
                                             table: Table::from("users"),
-                                            fields: vec![(Column::from("0"), "42".into()),
+                                            fields: vec![(Column::from("0"), 42.into()),
                                                          (Column::from("1"), "test".into())],
                                             ..Default::default()
                                         });
@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn trim_query() {
-        let qstring = "   INSERT INTO users VALUES (42, test);     ";
+        let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
         let res = parse_query(qstring);
         assert!(res.is_ok());
     }
