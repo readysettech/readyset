@@ -108,7 +108,6 @@ impl Default for FieldExpression {
 
 #[inline]
 pub fn is_sql_identifier(chr: u8) -> bool {
-    // XXX(malte): dot should not be in here once we have proper alias handling
     is_alphanumeric(chr) || chr == '_' as u8
 }
 
