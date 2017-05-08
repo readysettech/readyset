@@ -41,6 +41,24 @@ pub enum Literal {
     CurrentTimestamp,
 }
 
+impl From<i64> for Literal {
+    fn from(i: i64) -> Self {
+        Literal::Integer(i)
+    }
+}
+
+impl From<String> for Literal {
+    fn from(s: String) -> Self {
+        Literal::String(s)
+    }
+}
+
+impl<'a> From<&'a str> for Literal {
+    fn from(s: &'a str) -> Self {
+        Literal::String(String::from(s))
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
@@ -110,19 +128,6 @@ impl Default for FieldExpression {
 pub fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == '_' as u8
 }
-
-#[inline]
-pub fn is_fp_number(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == '.' as u8
-}
-
-/// Parses a floating point number (very badly).
-named!(pub fp_number<&[u8], &[u8]>,
-// f64::from_str(&format!("{}.{}", integral, fractional)).unwrap()
-//      integral: map_res!(take_while1!(is_digit), str::from_utf8) ~
-//      fractional: map_res!(take_while!(is_digit), str::from_utf8),
-    take_while1!(is_fp_number)
-);
 
 /// Parses the arguments for an agregation function, and also returns whether the distinct flag is
 /// present.
@@ -432,29 +437,62 @@ named!(pub table_list<&[u8], Vec<Table> >,
        )
 );
 
+/// Integer literal value
+named!(pub integer_literal<&[u8], Literal>,
+    chain!(
+        val: delimited!(opt!(multispace), digit, opt!(multispace)),
+        || {
+            let intval = i64::from_str(str::from_utf8(val).unwrap()).unwrap();
+            Literal::Integer(intval)
+        }
+    )
+);
+
+/// String literal value
+named!(pub string_literal<&[u8], Literal>,
+    chain!(
+        val: delimited!(opt!(multispace),
+                 alt_complete!(
+                       delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
+                     | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
+                 ),
+                 opt!(multispace)
+              ),
+        || {
+            let val = val.unwrap_or("".as_bytes());
+            let s = String::from(str::from_utf8(val).unwrap());
+            Literal::String(s)
+        }
+    )
+);
+
+/// Any literal value.
+named!(pub literal<&[u8], Literal>,
+    alt_complete!(
+          integer_literal
+        | string_literal
+        | chain!(caseless_tag!("NULL"), || Literal::Null)
+        | chain!(caseless_tag!("CURRENT_TIMESTAMP"), || Literal::CurrentTimestamp)
+        | chain!(caseless_tag!("CURRENT_DATE"), || Literal::CurrentDate)
+        | chain!(caseless_tag!("CURRENT_TIME"), || Literal::CurrentTime)
+//        | float_literal
+    )
+);
+
 /// Parse a list of values (e.g., for INSERT syntax).
-/// XXX(malte): proper value type
-named!(pub value_list<&[u8], Vec<&str> >,
+named!(pub value_list<&[u8], Vec<Literal> >,
        many0!(
-           map_res!(
-               chain!(
-                   val: alt_complete!(
-                         tag_s!(b"?")
-                       | tag_s!(b"CURRENT_TIMESTAMP")
-                       | delimited!(tag!("'"), alphanumeric, tag!("'"))
-                       | fp_number
-                   ) ~
-                   opt!(
-                       complete!(chain!(
-                           multispace? ~
-                           tag!(",") ~
-                           multispace?,
-                           ||{}
-                       ))
-                   ),
-                   || { val }
+           chain!(
+               val: literal ~
+               opt!(
+                   complete!(chain!(
+                       multispace? ~
+                       tag!(",") ~
+                       multispace?,
+                       ||{}
+                   ))
                ),
-               str::from_utf8
+               || { val }
            )
        )
 );

@@ -1,10 +1,11 @@
-use nom::{digit, multispace};
+use nom::multispace;
 use nom::{IResult, Err, ErrorKind, Needed};
 use std::collections::{HashSet, VecDeque};
-use std::str::{self, FromStr};
+use std::str;
 
 use column::Column;
-use common::{binary_comparison_operator, column_identifier, Literal, Operator};
+use common::{binary_comparison_operator, column_identifier, integer_literal, string_literal,
+             Literal, Operator};
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
@@ -147,25 +148,15 @@ named!(predicate<&[u8], ConditionExpression>,
                 }
             )
         |   chain!(
-                field: delimited!(opt!(multispace), digit, opt!(multispace)),
+                field: integer_literal,
                 || {
-                    let intval = i64::from_str(str::from_utf8(field).unwrap()).unwrap();
-                    ConditionExpression::Base(ConditionBase::Literal(Literal::Integer(intval)))
+                    ConditionExpression::Base(ConditionBase::Literal(field))
                 }
             )
         |   chain!(
-                field: delimited!(opt!(multispace),
-                                  alt_complete!(
-                                        delimited!(tag!("\""), opt!(take_until!("\"")), tag!("\""))
-                                      | delimited!(tag!("'"), opt!(take_until!("'")), tag!("'"))
-                                  ),
-                                  opt!(multispace)),
+                field: string_literal,
                 || {
-                    let field = field.unwrap_or("".as_bytes());
-                    ConditionExpression::Base(
-                        ConditionBase::Literal(Literal::String(
-                                String::from(str::from_utf8(field).unwrap())))
-                    )
+                    ConditionExpression::Base(ConditionBase::Literal(field))
                 }
             )
         |   chain!(
