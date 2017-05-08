@@ -28,7 +28,7 @@ slog-term = "2.0.0"
 
 evmap = "0.6.4"
 arccstr = "0.4.0"
-vec_map = "0.7.0"
+vec_map = "0.8.0"
 bufstream = "0.1"
 
 spmc = "0.2.1"
