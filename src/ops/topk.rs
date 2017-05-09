@@ -5,8 +5,30 @@ use std::sync::Arc;
 use flow::prelude::*;
 use std::cmp::Ordering;
 
-pub type OrderedRecordComparator =
-    Fn(&&Arc<Vec<DataType>>, &&Arc<Vec<DataType>>) -> Ordering + Send + 'static;
+use nom_sql::OrderType;
+
+#[derive(Clone)]
+struct Order(Vec<(usize, OrderType)>);
+impl Order {
+    fn cmp(&self, a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>) -> Ordering {
+        for &(c, ref order_type) in &self.0 {
+            let result = match *order_type {
+                OrderType::OrderAscending => a[c].cmp(&b[c]),
+                OrderType::OrderDescending => b[c].cmp(&a[c]),
+            };
+            if result != Ordering::Equal {
+                return result;
+            }
+        }
+        Ordering::Equal
+    }
+}
+
+impl From<Vec<(usize, OrderType)>> for Order {
+    fn from(other: Vec<(usize, OrderType)>) -> Self {
+        Order(other)
+    }
+}
 
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
@@ -23,7 +45,7 @@ pub struct TopK {
     // precomputed datastructures
     group_by: Vec<usize>,
 
-    cmp_rows: Box<OrderedRecordComparator>,
+    order: Order,
     k: usize,
 
     counts: HashMap<Vec<DataType>, usize>,
@@ -36,7 +58,7 @@ impl TopK {
     /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
     /// of results per group.
     pub fn new(src: NodeAddress,
-               cmp_rows: Box<OrderedRecordComparator>,
+               order: Vec<(usize, OrderType)>,
                group_by: Vec<usize>,
                k: usize)
                -> Self {
@@ -49,9 +71,8 @@ impl TopK {
             us: None,
             cols: 0,
 
-            group_by: group_by,
-
-            cmp_rows: cmp_rows,
+            group_by,
+            order: order.into(),
             k: k,
 
             counts: HashMap::new(),
@@ -74,10 +95,10 @@ impl TopK {
 
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
-        current.sort_by(self.cmp_rows.as_ref());
+        current.sort_by(|a, b| self.order.cmp(a, b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
-                let idx = current.binary_search_by(|row| (self.cmp_rows)(&row, &&a));
+                let idx = current.binary_search_by(|row| self.order.cmp(&row, &&a));
                 if let Ok(idx) = idx {
                     current.remove(idx);
                     delta.push(r.clone())
@@ -92,7 +113,7 @@ impl TopK {
                         })
             .chain(current.into_iter().map(|a| (a, true)))
             .collect();
-        output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+        output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
         let src_db = state
             .get(self.src.as_local())
@@ -106,7 +127,7 @@ impl TopK {
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
                 let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
-                    (self.cmp_rows)(&&r, &&min) == Ordering::Equal
+                    self.order.cmp(&&r, &&min) == Ordering::Equal
                 };
 
                 let mut current_mins: Vec<_> = output_rows.iter().filter(is_min).cloned().collect();
@@ -117,7 +138,7 @@ impl TopK {
                         // by the fact that it currently contains all rows greater than `min`, and
                         // none less than it. The only complication are rows which compare equal to
                         // `min`: they get added except if there is already an identical row.
-                        match (self.cmp_rows)(&r, &&min) {
+                        match self.order.cmp(&r, &&min) {
                             Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
                                 let e = current_mins.iter().position(|&(ref s, _)| *s == r);
@@ -137,7 +158,7 @@ impl TopK {
             } else {
                 output_rows = rs.iter().map(|rs| (rs, false)).collect();
             }
-            output_rows.sort_by(|a, b| (self.cmp_rows)(&a.0, &b.0));
+            output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
         }
 
         if output_rows.len() > self.k {
@@ -177,7 +198,7 @@ impl Ingredient for TopK {
 
             group_by: self.group_by.clone(),
 
-            cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_, _| Ordering::Equal)),
+            order: self.order.clone(),
             k: self.k,
 
             counts: self.counts.clone(),
@@ -326,11 +347,9 @@ mod tests {
 
     fn setup(reversed: bool) -> (ops::test::MockGraph, NodeAddress) {
         let cmp_rows = if !reversed {
-            Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| a[2].cmp(&b[2])) as
-            Box<OrderedRecordComparator>
+            vec![(2, OrderType::OrderAscending)]
         } else {
-            Box::new(|a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| b[2].cmp(&a[2])) as
-            Box<OrderedRecordComparator>
+            vec![(2, OrderType::OrderDescending)]
         };
 
         let mut g = ops::test::MockGraph::new();

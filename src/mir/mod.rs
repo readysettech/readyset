@@ -1339,9 +1339,6 @@ fn make_topk_node(name: &str,
                   offset: usize,
                   mut mig: &mut Migration)
                   -> FlowNode {
-    use std::cmp::Ordering;
-    use std::sync::Arc;
-
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
@@ -1368,34 +1365,19 @@ fn make_topk_node(name: &str,
 
             let columns: Vec<_> = o.iter()
                 .map(|&(ref c, ref order_type)| {
-                    (order_type.clone(),
-                     parent
+                    (parent
                          .borrow()
                          .columns()
                          .iter()
                          .position(|pc| pc == c)
-                         .unwrap())
+                         .unwrap(),
+                     order_type.clone())
                 })
                 .collect();
 
-            Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
-                let mut ret = Ordering::Equal;
-                for &(ref o, c) in columns.iter() {
-                    ret = match *o {
-                        OrderType::OrderAscending => a[c].cmp(&b[c]),
-                        OrderType::OrderDescending => b[c].cmp(&a[c]),
-                    };
-                    if ret != Ordering::Equal {
-                        return ret;
-                    }
-                }
-                ret
-            }) as Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
+            columns
         }
-        None => {
-            Box::new(|_: &&_, _: &&_| Ordering::Equal) as
-            Box<Fn(&&_, &&_) -> Ordering + Send + 'static>
-        }
+        None => Vec::new(),
     };
 
     // make the new operator and record its metadata
