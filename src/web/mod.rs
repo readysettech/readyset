@@ -108,6 +108,16 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
         };
     }
 
+    insert_routes! {
+        &mut router => {
+            "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
+                let m: &Mutex<Blender> = ctx.global.get().unwrap();
+                res.headers_mut().set(ContentType::plaintext());
+                res.send(format!("{}", *m.lock().unwrap()));
+            }) as Box<Handler>,
+        }
+    };
+
     Server {
             handlers: router,
             host: 8080.into(),
