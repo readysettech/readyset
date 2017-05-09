@@ -8,7 +8,7 @@ web = ["rustful", "rustc-serialize"]
 b_memcached = ["memcached-rs"]
 b_mysql = ["mysql"]
 b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
-b_netsoup = ["bincode", "bufstream"]
+b_netsoup = ["bincode", "net2", "bufstream"]
 b_hybrid = ["mysql", "memcached-rs"]
 default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
 profiling = ["timekeeper/default"]
@@ -50,6 +50,7 @@ mysql = { version = "11.0.0", optional = true }
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi", optional = true }
 # netsoup
 bincode = { version = "0.8.0", optional = true }
+net2 = { version = "0.2.29", optional = true }
 bufstream = { version = "0.1", optional = true }
 # futures
 futures = { version ="0.1.9", optional = true }
