@@ -382,7 +382,7 @@ pub use ops::union::Union;
 pub use ops::latest::Latest;
 pub use ops::filter::{Operator, Filter};
 pub use ops::topk::TopK;
-pub use recipe::Recipe;
+pub use recipe::{ActivationResult, Recipe};
 pub use sql::{SqlIncorporator, ToFlowParts};
 
 /// Just give me a damn terminal logger
