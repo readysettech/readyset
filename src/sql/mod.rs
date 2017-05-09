@@ -347,11 +347,15 @@ impl SqlIncorporator {
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
+        trace!(self.log, "Optimized MIR: {}", new_opt_mir);
+
         // compare to existing query MIR and reuse prefix
         let (reused_mir, num_reused_nodes) =
             merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
+
+        trace!(self.log, "Post-reuse optimized MIR: {}", post_reuse_opt_mir);
 
         let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
 
