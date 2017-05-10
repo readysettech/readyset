@@ -419,36 +419,6 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
                         _ => panic!("Expected join edge for join condition {:#?}", jp),
                     };
-                    // XXX(malte): push join columns into projected column set as well. This isn't
-                    // strictly required, and eagerly pushes more columns than needed, but makes a
-                    // naive version of the graph construction work.
-                    {
-                        let left =
-                            &mut qg.relations
-                                     .entry(l.table.as_ref().unwrap().clone())
-                                     .or_insert_with(|| {
-                                                         new_node(l.table.as_ref().unwrap().clone(),
-                                                                  vec![],
-                                                                  st)
-                                                     });
-                        if !left.columns.iter().any(|c| c.name == l.name) {
-                            left.columns.push(l.clone());
-                        }
-                    }
-
-                    {
-                        let right =
-                            &mut qg.relations
-                                     .entry(r.table.as_ref().unwrap().clone())
-                                     .or_insert_with(|| {
-                                                         new_node(r.table.as_ref().unwrap().clone(),
-                                                                  vec![],
-                                                                  st)
-                                                     });
-                        if !right.columns.iter().any(|c| c.name == r.name) {
-                            right.columns.push(r.clone());
-                        }
-                    }
                 }
             }
         }

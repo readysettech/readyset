@@ -600,19 +600,15 @@ mod tests {
         assert!(q.is_ok());
         let qid = query_id_hash(&["articles", "users"],
                                 &[&Column::from("articles.author"), &Column::from("users.id")],
-                                &[&Column::from("articles.author"),
-                                  &Column::from("articles.title"),
-                                  &Column::from("users.id"),
-                                  &Column::from("users.name")]);
+                                &[&Column::from("articles.title"), &Column::from("users.name")]);
         // join node
         let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(new_join_view.fields(),
                    &["id", "author", "title", "id", "name"]);
         // leaf node
         let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
-        // XXX(malte): leaf overprojection needs fixing
-        assert_eq!(new_leaf_view.fields(), &["title", "author", "name", "id"]);
-        assert_eq!(new_leaf_view.description(), format!("π[2, 1, 4, 3]"));
+        assert_eq!(new_leaf_view.fields(), &["title", "name"]);
+        assert_eq!(new_leaf_view.description(), format!("π[2, 4]"));
     }
 
     #[test]
@@ -938,12 +934,8 @@ mod tests {
                                   &Column::from("articles.author"),
                                   &Column::from("users.id"),
                                   &Column::from("votes.aid")],
-                                &[&Column::from("articles.aid"),
-                                  &Column::from("articles.author"),
-                                  &Column::from("articles.title"),
-                                  &Column::from("users.id"),
+                                &[&Column::from("articles.title"),
                                   &Column::from("users.name"),
-                                  &Column::from("votes.aid"),
                                   &Column::from("votes.uid")]);
         // XXX(malte): non-deterministic join ordering below
         let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
@@ -956,8 +948,7 @@ mod tests {
         //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
-        assert_eq!(leaf_view.fields(),
-                   &["title", "author", "aid", "name", "id", "uid", "aid"]);
+        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
     }
 
     #[test]
