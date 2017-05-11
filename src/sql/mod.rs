@@ -2,6 +2,7 @@ mod mir;
 mod passes;
 mod query_graph;
 mod query_signature;
+mod query_utils;
 mod reuse;
 
 use flow::Migration;
@@ -112,13 +113,10 @@ impl SqlIncorporator {
                             name: Option<String>,
                             mut mig: &mut Migration)
                             -> Result<QueryFlowParts, String> {
-        let res = match name {
+        match name {
             None => self.nodes_for_query(query, mig),
             Some(n) => self.nodes_for_named_query(query, n, mig),
-        };
-        // TODO(malte): this currently always succeeds because `nodes_for_query` and
-        // `nodes_for_named_query` can't fail
-        Ok(res)
+        }
     }
 
     #[cfg(test)]
@@ -371,7 +369,10 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn nodes_for_query(&mut self, q: SqlQuery, mig: &mut Migration) -> QueryFlowParts {
+    fn nodes_for_query(&mut self,
+                       q: SqlQuery,
+                       mig: &mut Migration)
+                       -> Result<QueryFlowParts, String> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
@@ -384,12 +385,31 @@ impl SqlIncorporator {
                              q: SqlQuery,
                              query_name: String,
                              mut mig: &mut Migration)
-                             -> QueryFlowParts {
+                             -> Result<QueryFlowParts, String> {
+        use self::query_utils::ReferredTables;
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
         use sql::passes::negation_removal::NegationRemoval;
+
+        // first, check that all tables mentioned in the query exist.
+        // This must happen before the rewrite passes are applied because some of them rely on
+        // having the table schema available in `self.view_schemas`.
+        match q {
+            // if we're just about to create the table, we don't need to check if it exists. If it
+            // does, we will amend or reuse it; if it does not, we create it.
+            SqlQuery::CreateTable(_) => (),
+            // other kinds of queries *do* require their referred tables to exist!
+            ref q @ SqlQuery::Select(_) |
+            ref q @ SqlQuery::Insert(_) => {
+                for t in &q.referred_tables() {
+                    if !self.view_schemas.contains_key(&t.name) {
+                        return Err(format!("query refers to unknown table \"{}\"", t.name));
+                    }
+                }
+            }
+        }
 
         info!(self.log, "Processing query \"{}\"", query_name);
 
@@ -434,7 +454,7 @@ impl SqlIncorporator {
         self.leaf_addresses
             .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
-        qfp
+        Ok(qfp)
     }
 
     /// Upgrades the schema version that any nodes created for queries will be tagged with.
@@ -485,8 +505,8 @@ impl<'a> ToFlowParts for &'a str {
         match parsed_query {
             Ok(q) => {
                 match name {
-                    Some(name) => Ok(inc.nodes_for_named_query(q, name, mig)),
-                    None => Ok(inc.nodes_for_query(q, mig)),
+                    Some(name) => inc.nodes_for_named_query(q, name, mig),
+                    None => inc.nodes_for_query(q, mig),
                 }
             }
             Err(e) => Err(String::from(e)),

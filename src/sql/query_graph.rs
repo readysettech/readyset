@@ -207,34 +207,6 @@ fn classify_conditionals(ce: &ConditionExpression,
     }
 }
 
-fn tables_referred_in_condition(ce: &ConditionExpression) -> Vec<String> {
-    let mut tables = Vec::new();
-    match *ce {
-        ConditionExpression::LogicalOp(ref ct) |
-        ConditionExpression::ComparisonOp(ref ct) => {
-            for t in tables_referred_in_condition(&*ct.left)
-                    .into_iter()
-                    .chain(tables_referred_in_condition(&*ct.right).into_iter()) {
-                if !tables.contains(&t) {
-                    tables.push(t.clone());
-                }
-            }
-        }
-        ConditionExpression::Base(ConditionBase::Field(ref f)) => {
-            match f.table {
-                Some(ref t) => {
-                    if !tables.contains(t) {
-                        tables.push(t.clone());
-                    }
-                }
-                None => (),
-            }
-        }
-        _ => unimplemented!(),
-    }
-    tables
-}
-
 pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
@@ -313,9 +285,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
                 let join_pred = match jc.constraint {
                     JoinConstraint::On(ref cond) => {
+                        use sql::query_utils::ReferredTables;
+
                         // find all distinct tables mentioned in the condition
                         // conditions for now.
-                        let mut tables_mentioned = tables_referred_in_condition(cond);
+                        let mut tables_mentioned: Vec<String> =
+                            cond.referred_tables().into_iter().map(|t| t.name).collect();
 
                         match *cond {
                             ConditionExpression::ComparisonOp(ref ct) => {
