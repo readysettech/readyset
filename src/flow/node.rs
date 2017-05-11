@@ -47,43 +47,36 @@ impl From<Vec<DataType>> for StreamUpdate {
 #[derive(Clone)]
 pub struct Reader {
     pub streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
-    pub state: Option<backlog::ReadHandle>,
+    pub state: Option<usize>,
     pub token_generator: Option<checktable::TokenGenerator>,
 }
 
 impl Reader {
-    pub fn get_reader
-        (&self)
-         -> Option<Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
-        self.state
-            .clone()
-            .map(|arc| {
-                Box::new(move |q: &DataType, block: bool| -> Result<Datas, ()> {
-                    arc.find_and(q,
-                                  |rs| {
-                            rs.into_iter()
-                                .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
-                                .collect()
-                        },
-                                  block)
-                        .map(|r| r.0.unwrap_or_else(Vec::new))
-                }) as Box<_>
-            })
-    }
-
-    pub fn key(&self) -> Result<usize, String> {
-        match self.state {
-            None => Err(String::from("no state on reader")),
-            Some(ref s) => Ok(s.key()),
-        }
-    }
-
-    pub fn len(&self) -> Result<usize, String> {
-        match self.state {
-            None => Err(String::from("no state on reader")),
-            Some(ref s) => Ok(s.len()),
-        }
-    }
+    //pub fn get_reader
+    //    (&self)
+    //     -> Option<Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
+    //    self.state
+    //        .clone()
+    //        .map(|arc| {
+    //            Box::new(move |q: &DataType, block: bool| -> Result<Datas, ()> {
+    //                arc.find_and(q,
+    //                              |rs| {
+    //                        rs.into_iter()
+    //                            .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
+    //                            .collect()
+    //                    },
+    //                              block)
+    //                    .map(|r| r.0.unwrap_or_else(Vec::new))
+    //            }) as Box<_>
+    //        })
+    //}
+    //
+    //pub fn len(&self) -> Result<usize, String> {
+    //    match self.state {
+    //        None => Err(String::from("no state on reader")),
+    //        Some(ref s) => Ok(s.len()),
+    //    }
+    //}
 
     pub fn take(&mut self) -> Self {
         Self {
@@ -340,13 +333,18 @@ impl Node {
             Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
             Type::Reader(_, ref r) => {
-                let key = match r.key() {
-                    Err(_) => String::from("none"),
-                    Ok(k) => format!("{}", k),
+                let key = match r.state {
+                    None => String::from("none"),
+                    Some(k) => format!("{}", k),
                 };
-                let size = match r.len() {
-                    Err(_) => String::from("empty"),
-                    Ok(s) => format!("{} distinct keys", s),
+                use flow::VIEW_READERS;
+                let size = match VIEW_READERS
+                          .lock()
+                          .unwrap()
+                          .get(&idx)
+                          .map(|state| state.len()) {
+                    None => String::from("empty"),
+                    Some(s) => format!("{} distinct keys", s),
                 };
                 write!(f,
                        "{{ {} | (reader / key: {}) | {} }}",

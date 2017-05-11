@@ -1,19 +1,19 @@
-use petgraph;
-use petgraph::graph::NodeIndex;
+use backlog;
 use checktable;
 use ops::base::Base;
 
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt;
-use std::time;
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
 use std::thread;
+use std::time;
+use std::fmt;
 use std::io;
 
 use slog;
+use petgraph;
+use petgraph::graph::NodeIndex;
 
 pub mod domain;
 pub mod prelude;
@@ -35,6 +35,10 @@ macro_rules! dur_to_ns {
         let d = $d;
         d.as_secs() * NANOS_PER_SEC + d.subsec_nanos() as u64
     }}
+}
+
+lazy_static! {
+    static ref VIEW_READERS: Mutex<HashMap<NodeIndex, backlog::ReadHandle>> = Mutex::default();
 }
 
 pub type Edge = bool; // should the edge be materialized?
@@ -156,19 +160,19 @@ impl Blender {
     ///
     /// This function will only tell you which nodes are output nodes in the graph. To obtain a
     /// function for performing reads, call `.get_reader()` on the returned reader.
-    pub fn outputs(&self) -> Vec<(core::NodeAddress, &node::Node, &node::Reader)> {
+    pub fn outputs(&self) -> Vec<(core::NodeAddress, &node::Node)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 use flow::node;
-                if let node::Type::Reader(_, ref inner) = *self.ingredients[n] {
+                if let node::Type::Reader(..) = *self.ingredients[n] {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
                     let src = self.ingredients
                         .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
                         .next()
                         .unwrap();
-                    Some((src.into(), &self.ingredients[src], inner))
+                    Some((src.into(), &self.ingredients[src]))
                 } else {
                     None
                 }
@@ -183,17 +187,34 @@ impl Blender {
          -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
         // reader should be a child of the given node
-        trace!(self.log, "creating reader"; "for" => node.as_global().index());
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
-                            Some(inner)
-                        } else {
-                            None
-                        })
+            .filter(|&ni| if let node::Type::Reader(..) = *self.ingredients[ni] {
+                        true
+                    } else {
+                        false
+                    })
             .next(); // there should be at most one
 
-        reader.and_then(|r| r.get_reader())
+        // look up the read handle, clone it, and construct the read closure
+        reader.and_then(|r| {
+            let vr = VIEW_READERS.lock().unwrap();
+            let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
+            rh.map(|rh| {
+                Box::new(move |q: &prelude::DataType,
+                               block: bool|
+                               -> Result<prelude::Datas, ()> {
+                    rh.find_and(q,
+                                  |rs| {
+                            rs.into_iter()
+                                .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
+                                .collect()
+                        },
+                                  block)
+                        .map(|r| r.0.unwrap_or_else(Vec::new))
+                }) as Box<_>
+            })
+        })
     }
 
     /// Obtain a new function for querying a given (already maintained) transactional reader node.
@@ -209,35 +230,44 @@ impl Blender {
         }
 
         // reader should be a child of the given node
-        trace!(self.log, "creating transactional reader"; "for" => node.as_global().index());
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
             .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
-                            Some(inner)
+                            Some((ni, inner))
                         } else {
                             None
                         })
             .next(); // there should be at most one
 
-        reader.map_or(Err(()), |inner| {
-            let arc = inner.state.as_ref().unwrap().clone();
-            let generator = inner.token_generator.clone().unwrap();
-            let f =
-                move |q: &prelude::DataType| -> Result<(core::Datas, checktable::Token), ()> {
-                    arc.find_and(q,
-                                  |rs| {
-                                      rs.into_iter()
-                                          .map(|v| (&**v).clone())
-                                          .collect::<Vec<_>>()
-                                  },
-                                  true)
-                        .map(|(res, ts)| {
-                                 let token = generator.generate(ts, q.clone());
-                                 (res.unwrap_or_else(Vec::new), token)
-                             })
-                };
-            Ok(Box::new(f) as Box<_>)
-        })
+        // look up the read handle, clone it, and construct the read closure
+        reader
+            .and_then(|(r, inner)| {
+                let vr = VIEW_READERS.lock().unwrap();
+                let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
+                rh.map(|rh| {
+                    let generator = inner.token_generator.clone().unwrap();
+                    Box::new(move |q: &prelude::DataType|
+                                   -> Result<(core::Datas, checktable::Token), ()> {
+                        rh.find_and(q,
+                                      |rs| {
+                                rs.into_iter()
+                                    .map(|v| {
+                                             (&**v)
+                                                 .into_iter()
+                                                 .map(|v| v.external_clone())
+                                                 .collect()
+                                         })
+                                    .collect()
+                            },
+                                      true)
+                            .map(|(res, ts)| {
+                                     let token = generator.generate(ts, q.clone());
+                                     (res.unwrap_or_else(Vec::new), token)
+                                 })
+                    }) as Box<_>
+                })
+            })
+            .ok_or(())
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
@@ -612,17 +642,11 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[n.as_global()];
 
-        // we need to do these here because we'll mutably borrow self.mainline in the if let
-        let cols = self.mainline.ingredients[ri].fields().len();
-
-        if let node::Type::Reader(ref mut wh, ref mut inner) = *self.mainline.ingredients[ri] {
-            if let Some(ref s) = inner.state {
-                assert_eq!(s.key(), key);
+        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
+            if let Some(skey) = inner.state {
+                assert_eq!(skey, key);
             } else {
-                use backlog;
-                let (r, w) = backlog::new(cols, key);
-                inner.state = Some(r);
-                *wh = Some(w);
+                inner.state = Some(key);
             }
         } else {
             unreachable!("tried to use non-reader node as a reader")

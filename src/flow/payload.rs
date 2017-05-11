@@ -1,6 +1,5 @@
 use petgraph;
 
-use backlog;
 use checktable;
 use flow::domain;
 use flow::node;
@@ -40,8 +39,18 @@ pub enum TriggerEndpoint {
 pub enum InitialState {
     PartialLocal(usize),
     IndexedLocal(Vec<Vec<usize>>),
-    PartialGlobal(backlog::WriteHandle, backlog::ReadHandle),
-    Global,
+    PartialGlobal {
+        gid: petgraph::graph::NodeIndex,
+        cols: usize,
+        key: usize,
+        tag: Tag,
+        trigger_tx: mpsc::SyncSender<Packet>,
+    },
+    Global {
+        gid: petgraph::graph::NodeIndex,
+        cols: usize,
+        key: usize,
+    },
 }
 
 #[derive(Clone)]

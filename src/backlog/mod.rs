@@ -26,21 +26,23 @@ fn new_inner(cols: usize,
         .with_meta(-1)
         .with_hasher(FnvBuildHasher::default())
         .construct();
+    let w = WriteHandle {
+        partial: trigger.is_some(),
+        handle: w,
+        key: key,
+        cols: cols,
+    };
     let r = ReadHandle {
         handle: r,
         trigger: trigger,
         key: key,
-    };
-    let w = WriteHandle {
-        handle: w,
-        key: key,
-        cols: cols,
     };
     (r, w)
 }
 
 pub struct WriteHandle {
     handle: evmap::WriteHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    partial: bool,
     cols: usize,
     key: usize,
 }
@@ -84,6 +86,24 @@ impl WriteHandle {
 
     pub fn mark_hole(&mut self, key: &DataType) {
         self.handle.empty(key.clone());
+    }
+
+    pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
+        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    {
+        self.handle.meta_get_and(key, &mut then).ok_or(())
+    }
+
+    pub fn key(&self) -> usize {
+        self.key
+    }
+
+    pub fn len(&self) -> usize {
+        self.handle.len()
+    }
+
+    pub fn is_partial(&self) -> bool {
+        self.partial
     }
 }
 
@@ -142,24 +162,11 @@ impl ReadHandle {
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
         where F: FnMut(&[Arc<Vec<DataType>>]) -> T
     {
-        match self.handle.meta_get_and(key, &mut then) {
-            Some(val) => {
-                return Ok(val);
-            }
-            None => return Err(()),
-        }
-    }
-
-    pub fn key(&self) -> usize {
-        self.key
+        self.handle.meta_get_and(key, &mut then).ok_or(())
     }
 
     pub fn len(&self) -> usize {
         self.handle.len()
-    }
-
-    pub fn is_partial(&self) -> bool {
-        self.trigger.is_some()
     }
 }
 

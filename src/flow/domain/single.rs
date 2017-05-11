@@ -67,14 +67,13 @@ impl NodeDescriptor {
             }
             flow::node::Type::Reader(ref mut w, ref mut r) => {
                 if let Some(ref mut state) = *w {
-                    let r = r.state.as_ref().unwrap();
                     // make sure we don't fill a partial materialization
                     // hole with incomplete (i.e., non-replay) state.
-                    if m.is_regular() && r.is_partial() {
-                        let key = r.key();
+                    if m.is_regular() && state.is_partial() {
+                        let key = state.key();
                         m.map_data(|data| {
                             data.retain(|row| {
-                                match r.try_find_and(&row[key], |_| ()) {
+                                match state.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
                                         // row would miss in partial state.
                                         // leave it blank so later lookup triggers replay.
@@ -94,11 +93,11 @@ impl NodeDescriptor {
                     // it *can* happen that multiple readers miss (and thus request replay for) the
                     // same hole at the same time. we need to make sure that we ignore any such
                     // duplicated replay.
-                    if !m.is_regular() && r.is_partial() {
-                        let key = r.key();
+                    if !m.is_regular() && state.is_partial() {
+                        let key = state.key();
                         m.map_data(|data| {
                             data.retain(|row| {
-                                match r.try_find_and(&row[key], |_| ()) {
+                                match state.try_find_and(&row[key], |_| ()) {
                                     Ok((None, _)) => {
                                         // filling a hole with replay -- ok
                                         true
@@ -128,7 +127,7 @@ impl NodeDescriptor {
 
                     // TODO: avoid swapping if writes are empty
 
-                    if swap || (!m.is_regular() && r.is_partial()) {
+                    if swap || (!m.is_regular() && state.is_partial()) {
                         state.swap();
                     }
                 }

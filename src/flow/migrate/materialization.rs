@@ -15,7 +15,6 @@ use petgraph::graph::NodeIndex;
 
 use std::collections::{HashSet, HashMap};
 use std::sync::mpsc;
-use std::sync;
 
 use slog::Logger;
 
@@ -397,6 +396,25 @@ pub fn initialize(log: &Logger,
             // all parents are empty, so we can materialize it immediately
             info!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
+
+            // we need to make sure the domain constructs reader backlog handles!
+            if let flow::node::Type::Reader(_, ref r) = *graph[node] {
+                if let Some(key) = r.state {
+                    use flow::payload::InitialState;
+
+                    txs[&d]
+                        .send(Packet::PrepareState {
+                                  node: *addr.as_local(),
+                                  state: InitialState::Global {
+                                      cols: graph[node].fields().len(),
+                                      key: key,
+                                      gid: node,
+                                  },
+                              })
+                        .unwrap();
+                }
+            }
+
             ready(txs, index_on);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
@@ -449,8 +467,8 @@ pub fn reconstruct(log: &Logger,
         // figure out what key that Reader is using
         if let flow::node::Type::Reader(_, ref r) = *graph[node] {
             assert!(r.state.is_some());
-            if let Some(ref rh) = r.state {
-                index_on.push(vec![rh.key()]);
+            if let Some(rh) = r.state {
+                index_on.push(vec![rh]);
             }
         } else {
             unreachable!();
@@ -589,12 +607,10 @@ pub fn reconstruct(log: &Logger,
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
     // mutable references to taken state.
     let s = match *graph.node_weight_mut(node).unwrap().inner_mut() {
-        NodeHandle::Taken(Type::Reader(ref mut wh, Reader { ref mut state, .. })) if partial_ok => {
+        NodeHandle::Taken(Type::Reader(ref mut wh, Reader { ref state, .. })) if partial_ok => {
             // make sure Reader is actually prepared to receive state
             assert!(wh.is_none());
             assert!(state.is_some());
-            let state = state.as_mut().unwrap();
-            assert_eq!(state.len(), 0);
 
             if paths.len() != 1 {
                 unreachable!(); // due to FIXME above
@@ -602,22 +618,21 @@ pub fn reconstruct(log: &Logger,
 
             // since we're partially materializing a reader node,
             // we need to give it a way to trigger replays.
-            use backlog;
-            let tag = first_tag.unwrap();
-            let tx = sync::Mutex::new(txs[&last_domain.unwrap()].clone());
-            let (r_part, w_part) = backlog::new_partial(cols, state.key(), move |key| {
-                tx.lock()
-                    .unwrap()
-                    .send(Packet::RequestPartialReplay {
-                              key: vec![key.clone()],
-                              tag: tag,
-                          })
-                    .unwrap();
-            });
-            *state = r_part.clone();
-            InitialState::PartialGlobal(w_part, r_part)
+            InitialState::PartialGlobal {
+                gid: node,
+                cols,
+                key: state.unwrap(),
+                tag: first_tag.unwrap(),
+                trigger_tx: txs[&last_domain.unwrap()].clone(),
+            }
         }
-        NodeHandle::Taken(Type::Reader(..)) => InitialState::Global,
+        NodeHandle::Taken(Type::Reader(_, Reader { ref state, .. })) => {
+            InitialState::Global {
+                cols,
+                key: state.unwrap(),
+                gid: node,
+            }
+        }
         NodeHandle::Owned(..) => unreachable!(),
         _ if partial_ok => {
             assert_eq!(index_on.len(), 1);

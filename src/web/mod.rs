@@ -46,11 +46,11 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
             .collect();
         let outs: Vec<_> = soup.outputs()
             .into_iter()
-            .map(|(_, n, r)| {
+            .map(|(ni, n)| {
                      (n.name().to_owned(),
                       GetEndpoint {
                           arguments: n.fields().iter().cloned().collect(),
-                          f: r.get_reader().unwrap(),
+                          f: soup.get_getter(ni).unwrap(),
                       })
                  })
             .collect();

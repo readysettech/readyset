@@ -13,6 +13,7 @@ use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext};
 pub use flow::domain::single::NodeDescriptor;
 use flow::statistics;
+use flow::node::Type;
 
 use slog::Logger;
 
@@ -516,23 +517,49 @@ impl Domain {
                         }
                         self.state.insert(node, state);
                     }
-                    InitialState::PartialGlobal(new_wh, new_rh) => {
-                        use flow::node::{Type, Reader};
+                    InitialState::PartialGlobal {
+                        gid,
+                        cols,
+                        key,
+                        tag,
+                        trigger_tx,
+                    } => {
+                        use flow;
+                        use backlog;
+                        let tx = Mutex::new(trigger_tx);
+                        let (r_part, w_part) = backlog::new_partial(cols, key, move |key| {
+                            tx.lock()
+                                .unwrap()
+                                .send(Packet::RequestPartialReplay {
+                                          key: vec![key.clone()],
+                                          tag: tag,
+                                      })
+                                .unwrap();
+                        });
+                        flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
+
                         let mut n = self.nodes[&node].borrow_mut();
-                        if let Type::Reader(ref mut wh, Reader { ref mut state, .. }) = *n.inner {
+                        if let Type::Reader(ref mut wh, _) = *n.inner {
                             // make sure Reader is actually prepared to receive state
-                            assert!(wh.is_some());
-                            let wh = wh.as_mut().unwrap();
-                            assert!(state.is_some());
-                            let rh = state.as_mut().unwrap();
-                            assert_eq!(rh.len(), 0);
-                            *wh = new_wh;
-                            *rh = new_rh;
+                            *wh = Some(w_part);
                         } else {
                             unreachable!();
                         }
                     }
-                    InitialState::Global => {}
+                    InitialState::Global { gid, cols, key } => {
+                        use flow;
+                        use backlog;
+                        let (r_part, w_part) = backlog::new(cols, key);
+                        flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
+
+                        let mut n = self.nodes[&node].borrow_mut();
+                        if let Type::Reader(ref mut wh, _) = *n.inner {
+                            // make sure Reader is actually prepared to receive state
+                            *wh = Some(w_part);
+                        } else {
+                            unreachable!();
+                        }
+                    }
                 }
             }
             Packet::SetupReplayPath {
@@ -578,11 +605,10 @@ impl Domain {
                         ..
                     } => {
                         // a miss in a reader! make sure we don't re-do work
-                        use flow::node::{Type, Reader};
                         let addr = path.last().unwrap().0.as_local();
                         let n = self.nodes[addr].borrow();
-                        if let Type::Reader(_, Reader { state: Some(ref r), .. }) = *n.inner {
-                            if r.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
+                        if let Type::Reader(Some(ref wh), _) = *n.inner {
+                            if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
                                 // key has already been replayed!
                                 return;
                             }

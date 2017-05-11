@@ -327,6 +327,9 @@ extern crate evmap;
 extern crate arccstr;
 extern crate vec_map;
 
+#[macro_use]
+extern crate lazy_static;
+
 extern crate itertools;
 extern crate petgraph;
 extern crate regex;
