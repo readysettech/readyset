@@ -13,7 +13,7 @@ pub use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
-pub use flow::payload::{Link, Packet, PacketEvent, Tracer, TriggerEndpoint};
+pub use flow::payload::{Link, Packet, PacketEvent, Tracer, TriggerEndpoint, TransactionState};
 pub use flow::migrate::materialization::Tag;
 
 // domain local state
