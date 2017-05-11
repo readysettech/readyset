@@ -107,7 +107,7 @@ impl Recipe {
                 };
                 match na {
                     None => {
-                        Err(format!("No flow graph node for \"{}\" exists at v{}",
+                        Err(format!("No query endpoint for \"{}\" exists at v{}.",
                                     name,
                                     self.version))
                     }
