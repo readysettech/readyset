@@ -57,14 +57,14 @@ pub fn analyze_graph(graph: &Graph,
 
 pub fn finalize(ingresses_from_base: HashMap<domain::Index, HashMap<NodeIndex, usize>>,
                 log: &Logger,
-                txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
+                txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
                 at: i64) {
     for (domain, ingress_from_base) in ingresses_from_base {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ctx = txs.get_mut(&domain).unwrap();
-        let _ = ctx.send(Packet::CompleteMigration {
-                             at: at,
-                             ingress_from_base: ingress_from_base,
-                         });
+        let _ = ctx.send(box Packet::CompleteMigration {
+                                 at: at,
+                                 ingress_from_base: ingress_from_base,
+                             });
     }
 }

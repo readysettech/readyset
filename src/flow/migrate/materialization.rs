@@ -328,7 +328,7 @@ pub fn initialize(log: &Logger,
                   partial_ok: bool,
                   mut materialize: HashMap<domain::Index,
                                            HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
+                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>)
                   -> HashMap<Tag, Vec<domain::Index>> {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -376,11 +376,11 @@ pub fn initialize(log: &Logger,
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
-                .send(Packet::Ready {
-                          node: *addr.as_local(),
-                          index: index_on,
-                          ack: ack_tx,
-                      })
+                .send(box Packet::Ready {
+                              node: *addr.as_local(),
+                              index: index_on,
+                              ack: ack_tx,
+                          })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -403,14 +403,14 @@ pub fn initialize(log: &Logger,
                     use flow::payload::InitialState;
 
                     txs[&d]
-                        .send(Packet::PrepareState {
-                                  node: *addr.as_local(),
-                                  state: InitialState::Global {
-                                      cols: graph[node].fields().len(),
-                                      key: key,
-                                      gid: node,
-                                  },
-                              })
+                        .send(box Packet::PrepareState {
+                                      node: *addr.as_local(),
+                                      state: InitialState::Global {
+                                          cols: graph[node].fields().len(),
+                                          key: key,
+                                          gid: node,
+                                      },
+                                  })
                         .unwrap();
                 }
             }
@@ -457,7 +457,7 @@ pub fn reconstruct(log: &Logger,
                    mut partial_ok: bool,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
+                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
                    node: NodeIndex,
                    mut index_on: Vec<Vec<usize>>)
                    -> HashMap<Tag, Vec<domain::Index>> {
@@ -643,10 +643,10 @@ pub fn reconstruct(log: &Logger,
     };
 
     txs[&domain]
-        .send(Packet::PrepareState {
-                  node: *addr.as_local(),
-                  state: s,
-              })
+        .send(box Packet::PrepareState {
+                      node: *addr.as_local(),
+                      state: s,
+                  })
         .unwrap();
 
     // NOTE:
@@ -749,24 +749,24 @@ pub fn reconstruct(log: &Logger,
                 continue;
             }
 
-            let mut setup = Packet::SetupReplayPath {
-                tag: tag,
-                source: None,
-                path: locals,
-                done_tx: None,
-                trigger: TriggerEndpoint::None,
-                ack: wait_tx.clone(),
-            };
+            let mut setup = box Packet::SetupReplayPath {
+                                    tag: tag,
+                                    source: None,
+                                    path: locals,
+                                    done_tx: None,
+                                    trigger: TriggerEndpoint::None,
+                                    ack: wait_tx.clone(),
+                                };
             if i == 0 {
                 // first domain also gets to know source node
-                if let Packet::SetupReplayPath { ref mut source, .. } = setup {
+                if let box Packet::SetupReplayPath { ref mut source, .. } = setup {
                     *source = Some(graph[nodes[0].0].addr());
                 }
             }
 
 
             if let Some(ref key) = partial {
-                if let Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                if let box Packet::SetupReplayPath { ref mut trigger, .. } = setup {
                     if segments.len() == 1 {
                         // replay is entirely contained within one domain
                         *trigger = TriggerEndpoint::Local(vec![*key]);
@@ -777,7 +777,7 @@ pub fn reconstruct(log: &Logger,
                         // otherwise, should know what how to trigger partial replay
                         let (tx, rx) = mpsc::channel();
                         txs[&segments[0].0]
-                            .send(Packet::RequestUnboundedTx(tx))
+                            .send(box Packet::RequestUnboundedTx(tx))
                             .unwrap();
                         let root_unbounded_tx = rx.recv().unwrap();
                         *trigger = TriggerEndpoint::End(root_unbounded_tx);
@@ -788,7 +788,7 @@ pub fn reconstruct(log: &Logger,
             } else {
                 if i == segments.len() - 1 {
                     // last domain should report when it's done if it is to be fully replayed
-                    if let Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
+                    if let box Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
                         assert!(main_done_tx.is_some());
                         *done_tx = main_done_tx.take();
                     } else {
@@ -800,11 +800,11 @@ pub fn reconstruct(log: &Logger,
             if i != segments.len() - 1 {
                 // the last node *must* be an egress node since there's a later domain
                 txs[domain]
-                    .send(Packet::UpdateEgress {
-                              node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
-                              new_tx: None,
-                              new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                          })
+                    .send(box Packet::UpdateEgress {
+                                  node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
+                                  new_tx: None,
+                                  new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                              })
                     .unwrap();
             }
 
@@ -822,11 +822,11 @@ pub fn reconstruct(log: &Logger,
             // tell the first domain to start playing
             trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
             txs[&segments[0].0]
-                .send(Packet::StartReplay {
-                          tag: tag,
-                          from: graph[segments[0].1[0].0].addr(),
-                          ack: wait_tx.clone(),
-                      })
+                .send(box Packet::StartReplay {
+                              tag: tag,
+                              from: graph[segments[0].1[0].0].addr(),
+                              ack: wait_tx.clone(),
+                          })
                 .unwrap();
 
             // and finally, wait for the last domain to finish the replay
@@ -845,7 +845,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
                   empty: &'a HashSet<NodeIndex>,
                   partial: &'a HashSet<NodeIndex>,
                   materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
-                  txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Packet>>)
+                  txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>)
                   -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
 
     Box::new(move |node, parents| {
@@ -971,10 +971,10 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 let (tx, rx) = mpsc::sync_channel(1);
                 let stateful = &graph[stateful];
                 txs[&stateful.domain()]
-                    .send(Packet::StateSizeProbe {
-                              node: *stateful.addr().as_local(),
-                              ack: tx,
-                          })
+                    .send(box Packet::StateSizeProbe {
+                                  node: *stateful.addr().as_local(),
+                                  ack: tx,
+                              })
                     .unwrap();
                 let mut size = rx.recv().expect("stateful parent should have state");
 

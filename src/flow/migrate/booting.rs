@@ -30,8 +30,8 @@ pub fn boot_new(log: Logger,
                 graph: &mut Graph,
                 nodes: Vec<(NodeIndex, bool)>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
-                rx: mpsc::Receiver<Packet>,
-                input_rx: mpsc::Receiver<Packet>,
+                rx: mpsc::Receiver<Box<Packet>>,
+                input_rx: mpsc::Receiver<Box<Packet>>,
                 ts: i64)
                 -> thread::JoinHandle<()> {
     let nodes = build_descriptors(graph, nodes);

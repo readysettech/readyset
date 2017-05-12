@@ -20,7 +20,7 @@ use slog::Logger;
 pub fn inform(log: &Logger,
               graph: &mut Graph,
               source: NodeIndex,
-              txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
+              txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
               ts: i64,
               prevs: Box<HashMap<domain::Index, i64>>) {
@@ -32,11 +32,11 @@ pub fn inform(log: &Logger,
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
         trace!(log, "informing domain of migration start");
-        let _ = ctx.send(Packet::StartMigration {
-                             at: ts,
-                             prev_ts: prevs[&domain],
-                             ack: ready_tx,
-                         });
+        let _ = ctx.send(box Packet::StartMigration {
+                                 at: ts,
+                                 prev_ts: prevs[&domain],
+                                 ack: ready_tx,
+                             });
         let _ = ready_rx.recv();
         trace!(log, "domain ready for migration");
 
@@ -68,10 +68,10 @@ pub fn inform(log: &Logger,
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());
-            ctx.send(Packet::AddNode {
-                          node: Box::new(node),
-                          parents: old_parents,
-                      })
+            ctx.send(box Packet::AddNode {
+                              node: Box::new(node),
+                              parents: old_parents,
+                          })
                 .unwrap();
         }
     }

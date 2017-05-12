@@ -15,10 +15,10 @@ use checktable;
 
 
 enum BufferedTransaction {
-    Transaction(NodeIndex, Packet),
+    Transaction(NodeIndex, Box<Packet>),
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
-    Replay(Packet),
+    Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
 
@@ -49,18 +49,18 @@ impl Eq for BufferEntry {}
 
 enum Bundle {
     Empty,
-    Messages(usize, Vec<Packet>),
+    Messages(usize, Vec<Box<Packet>>),
     MigrationStart(mpsc::SyncSender<()>),
     MigrationEnd(HashMap<NodeIndex, usize>),
-    Replay(Packet),
+    Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
 
 pub enum Event {
-    Transaction(Vec<Packet>),
+    Transaction(Vec<Box<Packet>>),
     StartMigration,
     CompleteMigration,
-    Replay(Packet),
+    Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
     None,
 }
@@ -121,15 +121,22 @@ impl DomainState {
         }
     }
 
-    fn assign_ts(&mut self, packet: &mut Packet) -> bool {
-        match *packet {
+    fn assign_ts(&mut self, packet: &mut Box<Packet>) -> bool {
+        // all this is for #16223
+        let mut unsafe_state_ref_mut = None;
+        if let Packet::Transaction { ref mut state, .. } = **packet {
+            match *state {
+                TransactionState::Committed(..) => {}
+                _ => {
+                    unsafe_state_ref_mut = Some(state as *mut _);
+                }
+            }
+        }
+
+        match **packet {
             Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
-            Packet::Transaction {
-                ref mut state,
-                ref link,
-                ref data,
-                ..
-            } => {
+            Packet::Transaction { ref link, ref data, .. } => {
+                let state: &mut TransactionState = unsafe { &mut *unsafe_state_ref_mut.unwrap() };
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
                 match pending {
@@ -171,8 +178,8 @@ impl DomainState {
         }
     }
 
-    fn buffer_transaction(&mut self, m: Packet) {
-        let (ts, base, prev_ts) = match m {
+    fn buffer_transaction(&mut self, m: Box<Packet>) {
+        let (ts, base, prev_ts) = match *m {
             Packet::Transaction {
                 state: TransactionState::Committed(ts, base, ref prevs), ..
             } => {
@@ -215,12 +222,12 @@ impl DomainState {
                 Bundle::Empty => {
                     let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                     let bundle = match m {
-                        Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
-                        Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
-                        Packet::CompleteMigration { ingress_from_base, .. } => {
+                        box Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
+                        box Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
+                        box Packet::CompleteMigration { ingress_from_base, .. } => {
                             Bundle::MigrationEnd(ingress_from_base)
                         }
-                        Packet::ReplayPiece { .. } => Bundle::Replay(m),
+                        box Packet::ReplayPiece { .. } => Bundle::Replay(m),
                         _ => unreachable!(),
                     };
 
@@ -231,12 +238,14 @@ impl DomainState {
             }
         } else {
             let transaction = match m {
-                Packet::Transaction { .. } => BufferedTransaction::Transaction(base.unwrap(), m),
-                Packet::StartMigration { ack, .. } => BufferedTransaction::MigrationStart(ack),
-                Packet::CompleteMigration { ingress_from_base, .. } => {
+                box Packet::Transaction { .. } => {
+                    BufferedTransaction::Transaction(base.unwrap(), m)
+                }
+                box Packet::StartMigration { ack, .. } => BufferedTransaction::MigrationStart(ack),
+                box Packet::CompleteMigration { ingress_from_base, .. } => {
                     BufferedTransaction::MigrationEnd(ingress_from_base)
                 }
-                Packet::ReplayPiece { .. } => BufferedTransaction::Replay(m),
+                box Packet::ReplayPiece { .. } => BufferedTransaction::Replay(m),
                 _ => unreachable!(),
             };
             let entry = BufferEntry {
@@ -248,7 +257,7 @@ impl DomainState {
         }
     }
 
-    pub fn handle(&mut self, mut m: Packet) {
+    pub fn handle(&mut self, mut m: Box<Packet>) {
         if self.assign_ts(&mut m) {
             self.buffer_transaction(m);
         }

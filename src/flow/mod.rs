@@ -57,8 +57,8 @@ pub struct Blender {
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
 
-    txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
-    in_txs: HashMap<domain::Index, mpsc::SyncSender<payload::Packet>>,
+    txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
+    in_txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
     domains: Vec<thread::JoinHandle<()>>,
 
     log: slog::Logger,
@@ -306,7 +306,7 @@ impl Blender {
             .iter()
             .map(|(di, s)| {
                 let (tx, rx) = mpsc::sync_channel(1);
-                s.send(payload::Packet::GetStatistics(tx)).unwrap();
+                s.send(box payload::Packet::GetStatistics(tx)).unwrap();
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
                 let node_map = node_stats
@@ -672,10 +672,10 @@ impl<'a> Migration<'a> {
         // Otherwise, send a message to the reader's domain to have it add the streamer.
         let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
         self.mainline.txs[&reader.domain()]
-            .send(payload::Packet::AddStreamer {
-                      node: reader.addr().as_local().clone(),
-                      new_streamer: tx,
-                  })
+            .send(box payload::Packet::AddStreamer {
+                          node: reader.addr().as_local().clone(),
+                          new_streamer: tx,
+                      })
             .unwrap();
 
         rx
@@ -909,19 +909,19 @@ impl<'a> Migration<'a> {
                 let n = &mainline.ingredients[ni];
                 let m = match change {
                     ColumnChange::Add(field, default) => {
-                        payload::Packet::AddBaseColumn {
-                            node: *n.addr().as_local(),
-                            field: field,
-                            default: default,
-                            ack: tx,
-                        }
+                        box payload::Packet::AddBaseColumn {
+                                node: *n.addr().as_local(),
+                                field: field,
+                                default: default,
+                                ack: tx,
+                            }
                     }
                     ColumnChange::Drop(column) => {
-                        payload::Packet::DropBaseColumn {
-                            node: *n.addr().as_local(),
-                            column: column,
-                            ack: tx,
-                        }
+                        box payload::Packet::DropBaseColumn {
+                                node: *n.addr().as_local(),
+                                column: column,
+                                ack: tx,
+                            }
                     }
                 };
                 mainline.txs[&n.domain()].send(m).unwrap();
@@ -971,7 +971,7 @@ impl Drop for Blender {
     fn drop(&mut self) {
         for (_, tx) in &mut self.txs {
             // don't unwrap, because given domain may already have terminated
-            drop(tx.send(payload::Packet::Quit));
+            drop(tx.send(box payload::Packet::Quit));
         }
         for d in self.domains.drain(..) {
             d.join().unwrap();

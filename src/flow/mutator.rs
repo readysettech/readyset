@@ -10,7 +10,7 @@ use std::time;
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
     pub(crate) src: NodeAddress,
-    pub(crate) tx: mpsc::SyncSender<Packet>,
+    pub(crate) tx: mpsc::SyncSender<Box<Packet>>,
     pub(crate) addr: NodeAddress,
     pub(crate) primary_key: Vec<usize>,
     pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
@@ -98,18 +98,18 @@ impl Mutator {
     fn send(&self, mut rs: Records) {
         self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
-            Packet::Transaction {
-                link: Link::new(self.src, self.addr),
-                data: rs,
-                state: TransactionState::WillCommit,
-                tracer: self.tracer.clone(),
-            }
+            box Packet::Transaction {
+                    link: Link::new(self.src, self.addr),
+                    data: rs,
+                    state: TransactionState::WillCommit,
+                    tracer: self.tracer.clone(),
+                }
         } else {
-            Packet::Message {
-                link: Link::new(self.src, self.addr),
-                data: rs,
-                tracer: self.tracer.clone(),
-            }
+            box Packet::Message {
+                    link: Link::new(self.src, self.addr),
+                    data: rs,
+                    tracer: self.tracer.clone(),
+                }
         };
 
         self.tx.clone().send(m).unwrap();
@@ -120,12 +120,12 @@ impl Mutator {
 
         self.inject_dropped_cols(&mut rs);
         let send = self.tx_reply_channel.0.clone();
-        let m = Packet::Transaction {
-            link: Link::new(self.src, self.addr),
-            data: rs,
-            state: TransactionState::Pending(t, send),
-            tracer: self.tracer.clone(),
-        };
+        let m = box Packet::Transaction {
+                        link: Link::new(self.src, self.addr),
+                        data: rs,
+                        state: TransactionState::Pending(t, send),
+                        tracer: self.tracer.clone(),
+                    };
         self.tx.clone().send(m).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {

@@ -316,6 +316,7 @@
 #![feature(mpsc_select)]
 #![feature(try_from)]
 #![feature(box_patterns)]
+#![feature(box_syntax)]
 #![deny(missing_docs)]
 
 #[macro_use]
