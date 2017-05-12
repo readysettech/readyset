@@ -1561,29 +1561,48 @@ impl Domain {
 
                 self.total_time.start();
                 self.total_ptime.start();
+                let mut packet = None;
                 loop {
-                    self.wait_time.start();
-                    let id = sel.wait();
-                    self.wait_time.stop();
-
-                    let m = if id == rx_handle.id() {
-                        rx_handle.recv()
-                    } else if id == inject_rx_handle.id() {
-                        inject_rx_handle.recv()
-                    } else if id == back_rx_handle.id() {
-                        back_rx_handle.recv()
-                    } else if id == input_rx_handle.id() {
-                        let m = input_rx_handle.recv();
-                        debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
-                        if let Ok(ref p) = m {
-                            p.trace(PacketEvent::ExitInputChannel);
+                    // try to avoid going to sleep if there's more work to be done.
+                    // sleeps and wakeups are expensive. but limit to 10ms to avoid spinning.
+                    let start = time::Instant::now();
+                    while start.elapsed() < time::Duration::from_millis(1) {
+                        if let Ok(p) = inject_rx
+                               .try_recv()
+                               .or_else(|_| back_rx.try_recv())
+                               .or_else(|_| rx.try_recv())
+                               .or_else(|_| input_rx.try_recv()) {
+                            packet = Some(Ok(p));
+                            break;
                         }
-                        m
-                    } else {
-                        unreachable!()
-                    };
+                    }
 
-                    match m {
+                    // block for the next
+                    if packet.is_none() {
+                        self.wait_time.start();
+                        let id = sel.wait();
+                        self.wait_time.stop();
+
+                        let p = if id == rx_handle.id() {
+                            rx_handle.recv()
+                        } else if id == inject_rx_handle.id() {
+                            inject_rx_handle.recv()
+                        } else if id == back_rx_handle.id() {
+                            back_rx_handle.recv()
+                        } else if id == input_rx_handle.id() {
+                            let m = input_rx_handle.recv();
+                            debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
+                            if let Ok(ref p) = m {
+                                p.trace(PacketEvent::ExitInputChannel);
+                            }
+                            m
+                        } else {
+                            unreachable!()
+                        };
+                        packet = Some(p);
+                    }
+
+                    match packet.take().unwrap() {
                         Err(_) => break,
                         Ok(Packet::Quit) => break,
                         Ok(Packet::RequestUnboundedTx(ack)) => {
