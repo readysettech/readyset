@@ -109,7 +109,7 @@ impl TokenGenerator {
 /// Represents the result of a transaction
 pub enum TransactionResult {
     /// The transaction committed at a given timestamp
-    Committed(i64, Option<HashMap<domain::Index, i64>>),
+    Committed(i64, Option<Box<HashMap<domain::Index, i64>>>),
     /// The transaction aborted
     Aborted,
 }
@@ -199,14 +199,14 @@ impl CheckTable {
 
     fn compute_previous_timestamps(&self,
                                    base: Option<NodeIndex>)
-                                   -> Option<HashMap<domain::Index, i64>> {
+                                   -> Option<Box<HashMap<domain::Index, i64>>> {
         if self.last_base.is_some() && self.last_base == base {
             return None;
         }
 
-        Some(self.domain_dependencies
-                 .iter()
-                 .map(|(d, v)| {
+        Some(Box::new(self.domain_dependencies
+                          .iter()
+                          .map(|(d, v)| {
             let earliest: i64 = v.iter()
                 .filter_map(|b| self.toplevel.get(b))
                 .chain(self.last_migration.iter())
@@ -216,7 +216,7 @@ impl CheckTable {
                 .unwrap_or(0);
             (*d, earliest)
         })
-                 .collect())
+                          .collect()))
     }
 
     pub fn attempt_claim_timestamp(&mut self,
@@ -235,7 +235,7 @@ impl CheckTable {
     pub fn claim_timestamp(&mut self,
                            base: NodeIndex,
                            rs: &Records)
-                           -> (i64, Option<HashMap<domain::Index, i64>>) {
+                           -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;
@@ -267,7 +267,7 @@ impl CheckTable {
 
     pub fn claim_replay_timestamp(&mut self,
                                   path: &ReplayPath)
-                                  -> (i64, Option<HashMap<domain::Index, i64>>) {
+                                  -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;
@@ -289,7 +289,7 @@ impl CheckTable {
     pub fn perform_migration(&mut self,
                              ingresses_from_base: &HashMap<domain::Index,
                                                            HashMap<NodeIndex, usize>>)
-                             -> (i64, i64, Option<HashMap<domain::Index, i64>>) {
+                             -> (i64, i64, Option<Box<HashMap<domain::Index, i64>>>) {
         let ts = self.next_timestamp;
         let prevs = self.compute_previous_timestamps(None);
 

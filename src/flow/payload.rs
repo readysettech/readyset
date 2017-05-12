@@ -64,7 +64,7 @@ pub enum ReplayPieceContext {
 
 #[derive(Clone)]
 pub enum TransactionState {
-    Committed(i64, petgraph::graph::NodeIndex, Option<HashMap<domain::Index, i64>>),
+    Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
     Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
     WillCommit,
 }
@@ -72,7 +72,7 @@ pub enum TransactionState {
 #[derive(Clone)]
 pub struct ReplayTransactionState {
     pub ts: i64,
-    pub prevs: Option<HashMap<domain::Index, i64>>,
+    pub prevs: Option<Box<HashMap<domain::Index, i64>>>,
 }
 
 /// Different events that can occur as a packet is being processed.
@@ -90,6 +90,7 @@ pub enum PacketEvent {
 
 pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
 
+#[warn(variant_size_differences)]
 pub enum Packet {
     // Data messages
     //
@@ -129,7 +130,7 @@ pub enum Packet {
     //
     /// Add a new node to this domain below the given parents.
     AddNode {
-        node: domain::NodeDescriptor,
+        node: Box<domain::NodeDescriptor>,
         parents: Vec<LocalNodeIndex>,
     },
 

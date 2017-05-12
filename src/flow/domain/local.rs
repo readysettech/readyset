@@ -75,7 +75,9 @@ impl<T> Map<T> {
                      .enumerate()
                      .filter_map(|(i, t)| {
                                      t.as_ref()
-                                         .map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                         .map(|v| {
+                                                  (unsafe { NodeAddress::make_local(i as u32) }, v)
+                                              })
                                  }))
     }
 
@@ -141,7 +143,7 @@ impl<T: 'static> IntoIterator for Map<T> {
                      .into_iter()
                      .enumerate()
                      .filter_map(|(i, v)| {
-                                     v.map(|v| (unsafe { NodeAddress::make_local(i) }, v))
+                                     v.map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
                                  }))
     }
 }

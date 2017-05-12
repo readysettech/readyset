@@ -6,12 +6,12 @@ use serde::{Serialize, Serializer, Deserialize, Deserializer};
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct LocalNodeIndex {
-    id: usize, // not a tuple struct so this field can be made private
+    id: u32, // not a tuple struct so this field can be made private
 }
 
 impl LocalNodeIndex {
     pub fn id(&self) -> usize {
-        self.id
+        self.id as usize
     }
 }
 
@@ -24,8 +24,8 @@ pub enum NodeAddress_ {
 /// Variant of NodeAddress_ used for serialization
 #[derive(Serialize, Deserialize)]
 enum NodeAddressDef {
-    Global(usize),
-    Local(usize),
+    Global(u32),
+    Local(u32),
 }
 
 impl Serialize for NodeAddress_ {
@@ -33,8 +33,8 @@ impl Serialize for NodeAddress_ {
         where S: Serializer
     {
         let def = match *self {
-            NodeAddress_::Global(i) => NodeAddressDef::Global(i.index()),
-            NodeAddress_::Local(i) => NodeAddressDef::Local(i.id()),
+            NodeAddress_::Global(i) => NodeAddressDef::Global(i.index() as u32),
+            NodeAddress_::Local(i) => NodeAddressDef::Local(i.id() as u32),
         };
 
         def.serialize(serializer)
@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for NodeAddress_ {
     {
         NodeAddressDef::deserialize(deserializer).map(|def|match def {
             NodeAddressDef::Local(idx) => NodeAddress_::Local(LocalNodeIndex{id: idx}),
-            NodeAddressDef::Global(idx) => NodeAddress_::Global(NodeIndex::new(idx)),
+            NodeAddressDef::Global(idx) => NodeAddress_::Global(NodeIndex::new(idx as usize)),
         })
     }
 }
@@ -71,7 +71,7 @@ impl fmt::Debug for NodeAddress {
 impl NodeAddress {
     // https://github.com/rust-lang-nursery/rustfmt/issues/1394
     #[cfg_attr(rustfmt, rustfmt_skip)]
-    pub(crate) unsafe fn make_local(id: usize) -> NodeAddress {
+    pub(crate) unsafe fn make_local(id: u32) -> NodeAddress {
         NodeAddress { addr: NodeAddress_::Local(LocalNodeIndex { id: id }) }
     }
 
@@ -85,7 +85,7 @@ impl NodeAddress {
 
     #[cfg(test)]
     pub fn mock_local(id: usize) -> NodeAddress {
-        unsafe { Self::make_local(id) }
+        unsafe { Self::make_local(id as u32) }
     }
 
     #[cfg(test)]

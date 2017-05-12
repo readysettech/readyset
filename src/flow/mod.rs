@@ -792,7 +792,7 @@ impl<'a> Migration<'a> {
                            "local" => nnodes
                     );
                     mainline.ingredients[ni]
-                        .set_addr(unsafe { prelude::NodeAddress::make_local(nnodes) });
+                        .set_addr(unsafe { prelude::NodeAddress::make_local(nnodes as u32) });
                     nnodes += 1;
                 }
             }
@@ -1006,5 +1006,13 @@ mod tests {
             assert!(r.activate(&mut mig, false).is_ok());
             mig.commit();
         }
+    }
+
+    #[test]
+    fn small_packets() {
+        use std::mem;
+        assert!(mem::size_of::<prelude::Packet>() <= 128,
+                format!("Packets are too big ({} bytes)",
+                        mem::size_of::<prelude::Packet>()));
     }
 }

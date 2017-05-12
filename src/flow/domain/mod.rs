@@ -440,7 +440,7 @@ impl Domain {
                         .children
                         .push(node.addr());
                 }
-                self.nodes.insert(addr, cell::RefCell::new(node));
+                self.nodes.insert(addr, cell::RefCell::new(*node));
                 trace!(self.log, "new node incorporated"; "local" => addr.id());
             }
             Packet::AddBaseColumn {

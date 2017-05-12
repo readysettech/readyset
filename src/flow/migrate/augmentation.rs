@@ -23,7 +23,7 @@ pub fn inform(log: &Logger,
               txs: &mut HashMap<domain::Index, mpsc::SyncSender<Packet>>,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
               ts: i64,
-              prevs: HashMap<domain::Index, i64>) {
+              prevs: Box<HashMap<domain::Index, i64>>) {
 
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
@@ -69,7 +69,7 @@ pub fn inform(log: &Logger,
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(Packet::AddNode {
-                          node: node,
+                          node: Box::new(node),
                           parents: old_parents,
                       })
                 .unwrap();
