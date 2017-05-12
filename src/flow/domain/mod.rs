@@ -1561,37 +1561,29 @@ impl Domain {
 
                 self.total_time.start();
                 self.total_ptime.start();
+                let mut packet = None;
                 loop {
-                    let mut m = None;
-
+                    // try to avoid going to sleep if there's more work to be done.
+                    // sleeps and wakeups are expensive. but limit to 10ms to avoid spinning.
                     let start = time::Instant::now();
                     while start.elapsed() < time::Duration::from_millis(10) {
-                        if let Ok(p) = inject_rx.try_recv() {
-                            m = Some(p);
-                            break;
-                        }
-                        if let Ok(p) = back_rx.try_recv() {
-                            m = Some(p);
-                            break;
-                        }
-                        if let Ok(p) = rx.try_recv() {
-                            m = Some(p);
-                            break;
-                        }
-                        if let Ok(p) = input_rx.try_recv() {
-                            m = Some(p);
+                        if let Ok(p) = inject_rx
+                               .try_recv()
+                               .or_else(|_| back_rx.try_recv())
+                               .or_else(|_| rx.try_recv())
+                               .or_else(|_| input_rx.try_recv()) {
+                            packet = Some(Ok(p));
                             break;
                         }
                     }
 
-                    let m = if m.is_some() {
-                        Ok(m.unwrap())
-                    } else {
+                    // block for the next
+                    if packet.is_none() {
                         self.wait_time.start();
                         let id = sel.wait();
                         self.wait_time.stop();
 
-                        let m = if id == rx_handle.id() {
+                        let p = if id == rx_handle.id() {
                             rx_handle.recv()
                         } else if id == inject_rx_handle.id() {
                             inject_rx_handle.recv()
@@ -1607,10 +1599,10 @@ impl Domain {
                         } else {
                             unreachable!()
                         };
-                        m
-                    };
+                        packet = Some(p);
+                    }
 
-                    match m {
+                    match packet.take().unwrap() {
                         Err(_) => break,
                         Ok(Packet::Quit) => break,
                         Ok(Packet::RequestUnboundedTx(ack)) => {
