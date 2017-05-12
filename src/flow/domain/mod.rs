@@ -1566,7 +1566,7 @@ impl Domain {
                     // try to avoid going to sleep if there's more work to be done.
                     // sleeps and wakeups are expensive. but limit to 10ms to avoid spinning.
                     let start = time::Instant::now();
-                    while start.elapsed() < time::Duration::from_millis(10) {
+                    while start.elapsed() < time::Duration::from_millis(1) {
                         if let Ok(p) = inject_rx
                                .try_recv()
                                .or_else(|_| back_rx.try_recv())
