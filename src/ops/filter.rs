@@ -58,13 +58,12 @@ impl Ingredient for Filter {
                 -> ProcessingResult {
 
         rs.retain(|r| {
-            let mut f = self.filter.iter();
-            r.iter()
-                .all(|d| {
+            self.filter
+                .iter()
+                .enumerate()
+                .all(|(i, fi)| {
                     // check if this filter matches
-                    let fi =
-                        f.next()
-                            .expect("should have as many filters as there are columns in ancestor");
+                    let d = &r[i];
                     if let Some((ref op, ref f)) = *fi {
                         match *op {
                             Operator::Equal => d == f,
