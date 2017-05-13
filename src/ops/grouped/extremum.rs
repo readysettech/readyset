@@ -74,7 +74,18 @@ impl GroupedOperation for ExtremumOperator {
         let v = match r[self.over] {
             DataType::Int(n) => n as i64,
             DataType::BigInt(n) => n,
-            _ => unreachable!(),
+            _ => {
+                // the column we're aggregating over is non-numerical (or rather, this value is).
+                // if you've removed a column, chances are the  default value has the wrong type.
+                unreachable!();
+
+                // if you *really* want to ignore this error, use this code:
+                //
+                //   match self.op {
+                //       Extremum::MIN => i64::max_value(),
+                //       Extremum::MAX => i64::min_value(),
+                //   }
+            }
         };
 
         if pos {
