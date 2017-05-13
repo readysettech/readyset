@@ -32,7 +32,7 @@ impl fmt::Debug for Link {
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(mpsc::Sender<Packet>),
+    End(mpsc::Sender<Box<Packet>>),
     Local(Vec<usize>),
 }
 
@@ -44,7 +44,7 @@ pub enum InitialState {
         cols: usize,
         key: usize,
         tag: Tag,
-        trigger_tx: mpsc::SyncSender<Packet>,
+        trigger_tx: mpsc::SyncSender<Box<Packet>>,
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -152,7 +152,7 @@ pub enum Packet {
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>,
+        new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
         new_tag: Option<(Tag, NodeAddress)>,
     },
 
@@ -167,7 +167,7 @@ pub enum Packet {
     /// We need these channels to send replay requests, as using the bounded channels could easily
     /// result in a deadlock. Since the unbounded channel is only used for requests as a result of
     /// processing, it is essentially self-clocking.
-    RequestUnboundedTx(mpsc::Sender<mpsc::Sender<Packet>>),
+    RequestUnboundedTx(mpsc::Sender<mpsc::Sender<Box<Packet>>>),
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
@@ -245,8 +245,6 @@ pub enum Packet {
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
-
-    None,
 }
 
 impl Packet {
@@ -276,7 +274,6 @@ impl Packet {
             Packet::Transaction { ref data, .. } => data.is_empty(),
             Packet::FullReplay { .. } => false,
             Packet::ReplayPiece { ref data, .. } => data.is_empty(),
-            Packet::None => true,
             _ => unreachable!(),
         }
     }
@@ -321,9 +318,8 @@ impl Packet {
         }
     }
 
-    pub fn take_data(&mut self) -> Records {
-        use std::mem;
-        match mem::replace(self, Packet::None) {
+    pub fn take_data(self) -> Records {
+        match self {
             Packet::Message { data, .. } => data,
             Packet::Transaction { data, .. } => data,
             Packet::ReplayPiece { data, .. } => data,
@@ -422,7 +418,6 @@ impl fmt::Debug for Packet {
                        tag.id(),
                        state.len())
             }
-            Packet::None => write!(f, "Packet::Node"),
             _ => write!(f, "Packet::Control"),
         }
     }

@@ -98,7 +98,7 @@ impl Default for Reader {
 }
 
 pub struct Egress {
-    pub txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Packet>)>,
+    pub txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
     pub tags: HashMap<Tag, NodeAddress>,
 }
 

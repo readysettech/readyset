@@ -45,18 +45,19 @@ impl NodeDescriptor {
     }
 
     pub fn process(&mut self,
-                   m: &mut Packet,
+                   m: &mut Option<Box<Packet>>,
                    keyed_by: Option<usize>,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
                    swap: bool)
                    -> Vec<Miss> {
-        m.trace(PacketEvent::Process);
+        m.as_mut().unwrap().trace(PacketEvent::Process);
 
         use flow::payload::TransactionState;
         let addr = self.addr();
         match *self.inner {
             flow::node::Type::Ingress => {
+                let m = m.as_mut().unwrap();
                 let mut misses = Vec::new();
                 m.map_data(|rs| {
                                misses = materialize(rs,
@@ -67,6 +68,7 @@ impl NodeDescriptor {
             }
             flow::node::Type::Reader(ref mut w, ref mut r) => {
                 if let Some(ref mut state) = *w {
+                    let m = m.as_mut().unwrap();
                     // make sure we don't fill a partial materialization
                     // hole with incomplete (i.e., non-replay) state.
                     if m.is_regular() && state.is_partial() {
@@ -121,7 +123,7 @@ impl NodeDescriptor {
                     state.add(m.data().iter().cloned());
                     if let Packet::Transaction {
                                state: TransactionState::Committed(ts, ..), ..
-                           } = *m {
+                           } = **m {
                         state.update_ts(ts);
                     }
 
@@ -134,9 +136,9 @@ impl NodeDescriptor {
 
                 // TODO: don't send replays to streams?
 
-                m.trace(PacketEvent::ReachedReader);
+                m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
-                let mut data = Some(m.take_data()); // so we can .take() for last tx
+                let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
                 let mut left = r.streamers.as_ref().unwrap().len();
 
                 // remove any channels where the receiver has hung up
@@ -162,7 +164,7 @@ impl NodeDescriptor {
             }
             flow::node::Type::Hook(ref mut h) => {
                 if let &mut Some(ref mut h) = h {
-                    h.on_input(m.take_data());
+                    h.on_input(m.take().unwrap().take_data());
                 } else {
                     unreachable!();
                 }
@@ -181,15 +183,15 @@ impl NodeDescriptor {
                 // we need to find the ingress node following this egress according to the path
                 // with replay.tag, and then forward this message only on the channel corresponding
                 // to that ingress node.
-                let replay_to = m.tag()
+                let replay_to = m.as_ref()
+                    .unwrap()
+                    .tag()
                     .map(|tag| {
                         tags.get(&tag)
                             .map(|n| *n)
                             .expect("egress node told about replay message, but not on replay path")
                     });
 
-                use std::mem;
-                let mut m = Some(mem::replace(m, Packet::None)); // so we can use .take()
                 for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {
                     let mut take = txi == txn;
                     if let Some(replay_to) = replay_to.as_ref() {
@@ -206,7 +208,7 @@ impl NodeDescriptor {
                     } else {
                         // we know this is a data (not a replay)
                         // because, a replay will force a take
-                        m.as_ref().map(|m| m.clone_data()).unwrap()
+                        m.as_ref().map(|m| box m.clone_data()).unwrap()
                     };
 
                     m.link_mut().src = self.index.into();
@@ -224,54 +226,60 @@ impl NodeDescriptor {
                 vec![]
             }
             flow::node::Type::Internal(ref mut i) => {
-                let from = m.link().src;
-
-                let replay = if let Packet::ReplayPiece {
-                           context: flow::payload::ReplayPieceContext::Partial {
-                               ref for_key,
-                               ignore,
-                           },
-                           ..
-                       } = *m {
-                    assert!(!ignore);
-                    assert!(keyed_by.is_some());
-                    assert_eq!(for_key.len(), 1);
-                    Some((keyed_by.unwrap(), for_key[0].clone()))
-                } else {
-                    None
-                };
-
-                let mut tracer = m.tracer().and_then(|t| t.take());
                 let mut captured = false;
                 let mut misses = Vec::new();
-                m.map_data(|data| {
-                    use std::mem;
+                let mut tracer;
 
-                    // we need to own the data
-                    let old_data = mem::replace(data, Records::default());
+                {
+                    let m = m.as_mut().unwrap();
+                    let from = m.link().src;
 
-                    match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
-                        RawProcessingResult::Regular(m) => {
-                            mem::replace(data, m.results);
-                            misses = m.misses;
+                    let replay = if let Packet::ReplayPiece {
+                               context: flow::payload::ReplayPieceContext::Partial {
+                                   ref for_key,
+                                   ignore,
+                               },
+                               ..
+                           } = **m {
+                        assert!(!ignore);
+                        assert!(keyed_by.is_some());
+                        assert_eq!(for_key.len(), 1);
+                        Some((keyed_by.unwrap(), for_key[0].clone()))
+                    } else {
+                        None
+                    };
+
+                    tracer = m.tracer().and_then(|t| t.take());
+                    m.map_data(|data| {
+                        use std::mem;
+
+                        // we need to own the data
+                        let old_data = mem::replace(data, Records::default());
+
+                        match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
+                            RawProcessingResult::Regular(m) => {
+                                mem::replace(data, m.results);
+                                misses = m.misses;
+                            }
+                            RawProcessingResult::ReplayPiece(rs) => {
+                                // we already know that m must be a ReplayPiece since only a
+                                // ReplayPiece can release a ReplayPiece.
+                                mem::replace(data, rs);
+                            }
+                            RawProcessingResult::Captured => {
+                                captured = true;
+                            }
                         }
-                        RawProcessingResult::ReplayPiece(rs) => {
-                            // we already know that m must be a ReplayPiece since only a
-                            // ReplayPiece can release a ReplayPiece.
-                            mem::replace(data, rs);
-                        }
-                        RawProcessingResult::Captured => {
-                            captured = true;
-                        }
-                    }
-                });
+                    });
+                }
 
                 if captured {
                     use std::mem;
-                    mem::replace(m, Packet::Captured);
+                    mem::replace(m, Some(box Packet::Captured));
                     return misses;
                 }
 
+                let m = m.as_mut().unwrap();
                 if let Some(t) = m.tracer() {
                     *t = tracer.take();
                 }
