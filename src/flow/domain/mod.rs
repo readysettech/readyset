@@ -918,9 +918,8 @@ impl Domain {
                 // unfortunately, if this is a reader node, we can't just copy in the state
                 // since State and Reader use different internal data structures
                 // TODO: can we do better?
-                use flow::node::Type;
                 let n = self.nodes[path[0].0.as_local()].borrow();
-                if let Type::Reader(..) = *n.inner {
+                if n.inner.is_reader() {
                     can_handle_directly = false;
                 }
             }

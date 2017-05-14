@@ -580,7 +580,7 @@ pub fn reconstruct(log: &Logger,
     // yet know about those paths, that's a bit inconvenient. we might be able to mvoe
     // this entire block below the main loop somehow (?), but for now:
     if partial_ok {
-        if let Type::Reader(_) = *graph[node] {
+        if graph[node].is_reader() {
             partial_ok = paths.len() == 1;
         }
     }

@@ -302,6 +302,14 @@ impl Node {
         }
     }
 
+    pub fn is_reader(&self) -> bool {
+        if let Type::Reader { .. } = *self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_ingress(&self) -> bool {
         if let Type::Ingress = *self.inner {
             true

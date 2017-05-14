@@ -164,8 +164,7 @@ impl Blender {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                use flow::node;
-                if let node::Type::Reader(..) = *self.ingredients[n] {
+                if self.ingredients[n].is_reader() {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
                     let src = self.ingredients
@@ -189,11 +188,7 @@ impl Blender {
         // reader should be a child of the given node
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter(|&ni| if let node::Type::Reader(..) = *self.ingredients[ni] {
-                        true
-                    } else {
-                        false
-                    })
+            .filter(|&ni| self.ingredients[ni].is_reader())
             .next(); // there should be at most one
 
         // look up the read handle, clone it, and construct the read closure

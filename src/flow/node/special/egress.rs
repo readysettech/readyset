@@ -4,8 +4,8 @@ use flow::prelude::*;
 use petgraph::graph::NodeIndex;
 
 pub struct Egress {
-    pub txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
-    pub tags: HashMap<Tag, NodeAddress>,
+    txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
+    tags: HashMap<Tag, NodeAddress>,
 }
 
 impl Default for Egress {

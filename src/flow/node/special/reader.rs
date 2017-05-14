@@ -29,10 +29,10 @@ impl From<Vec<DataType>> for StreamUpdate {
 }
 
 pub struct Reader {
-    pub writer: Option<backlog::WriteHandle>,
-    pub streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
-    pub state: Option<usize>,
-    pub token_generator: Option<checktable::TokenGenerator>,
+    writer: Option<backlog::WriteHandle>,
+    streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
+    state: Option<usize>,
+    token_generator: Option<checktable::TokenGenerator>,
 }
 
 impl Reader {
