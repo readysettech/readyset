@@ -361,8 +361,8 @@ pub fn initialize(log: &Logger,
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
-        if let flow::node::Type::Reader(_, ref r) = *graph[node] {
-            if r.state.is_some() {
+        if let flow::node::Type::Reader(ref r) = *graph[node] {
+            if r.is_materialized() {
                 has_state = true;
             }
         }
@@ -398,8 +398,8 @@ pub fn initialize(log: &Logger,
             empty.insert(node);
 
             // we need to make sure the domain constructs reader backlog handles!
-            if let flow::node::Type::Reader(_, ref r) = *graph[node] {
-                if let Some(key) = r.state {
+            if let flow::node::Type::Reader(ref r) = *graph[node] {
+                if let Some(key) = r.key() {
                     use flow::payload::InitialState;
 
                     txs[&d]
@@ -465,9 +465,9 @@ pub fn reconstruct(log: &Logger,
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
         // figure out what key that Reader is using
-        if let flow::node::Type::Reader(_, ref r) = *graph[node] {
-            assert!(r.state.is_some());
-            if let Some(rh) = r.state {
+        if let flow::node::Type::Reader(ref r) = *graph[node] {
+            assert!(r.is_materialized());
+            if let Some(rh) = r.key() {
                 index_on.push(vec![rh]);
             }
         } else {
@@ -580,7 +580,7 @@ pub fn reconstruct(log: &Logger,
     // yet know about those paths, that's a bit inconvenient. we might be able to mvoe
     // this entire block below the main loop somehow (?), but for now:
     if partial_ok {
-        if let Type::Reader(_, Reader { .. }) = *graph[node] {
+        if let Type::Reader(_) = *graph[node] {
             partial_ok = paths.len() == 1;
         }
     }
@@ -598,7 +598,7 @@ pub fn reconstruct(log: &Logger,
 
     // tell the domain in question to create an empty state for the node in question
     use flow::payload::InitialState;
-    use flow::node::{Type, Reader, NodeHandle};
+    use flow::node::{Type, NodeHandle};
 
     // if there's only one path
     let last_domain = paths.get(0).map(|p| graph[p[0].0].domain());
@@ -607,10 +607,9 @@ pub fn reconstruct(log: &Logger,
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
     // mutable references to taken state.
     let s = match *graph.node_weight_mut(node).unwrap().inner_mut() {
-        NodeHandle::Taken(Type::Reader(ref mut wh, Reader { ref state, .. })) if partial_ok => {
+        NodeHandle::Taken(Type::Reader(ref r)) if partial_ok => {
             // make sure Reader is actually prepared to receive state
-            assert!(wh.is_none());
-            assert!(state.is_some());
+            assert!(r.is_materialized());
 
             if paths.len() != 1 {
                 unreachable!(); // due to FIXME above
@@ -621,15 +620,15 @@ pub fn reconstruct(log: &Logger,
             InitialState::PartialGlobal {
                 gid: node,
                 cols,
-                key: state.unwrap(),
+                key: r.key().unwrap(),
                 tag: first_tag.unwrap(),
                 trigger_tx: txs[&last_domain.unwrap()].clone(),
             }
         }
-        NodeHandle::Taken(Type::Reader(_, Reader { ref state, .. })) => {
+        NodeHandle::Taken(Type::Reader(ref r)) => {
             InitialState::Global {
                 cols,
-                key: state.unwrap(),
+                key: r.key().unwrap(),
                 gid: node,
             }
         }
@@ -996,8 +995,8 @@ fn cost_fn<'a, T>(log: &'a Logger,
             })
             .min_by_key(|&(_, cost)| cost)
             .map(|(node, cost)| {
-                     debug!(log, "picked replay source {:?}", node; "cost" => cost);
-                     node
-                 })
+                debug!(log, "picked replay source {:?}", node; "cost" => cost);
+                node
+            })
     })
 }

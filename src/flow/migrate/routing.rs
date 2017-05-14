@@ -94,11 +94,7 @@ pub fn add(log: &Logger,
                 if egress.is_none() {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
-                    let proxy = graph[node]
-                        .mirror(node::Type::Egress(Some(node::Egress {
-                                                            tags: Default::default(),
-                                                            txs: Default::default(),
-                                                        })));
+                    let proxy = graph[node].mirror(node::Type::Egress(Some(Default::default())));
                     let eid = graph.add_node(proxy);
                     graph.add_edge(node, eid, false);
 
@@ -165,11 +161,7 @@ pub fn add(log: &Logger,
 
             let egress = egress.unwrap_or_else(|| {
                 // no, okay, so we need to add an egress for that other node,
-                let proxy =
-                    graph[*parent].mirror(node::Type::Egress(Some(node::Egress {
-                                                                      txs: Default::default(),
-                                                                      tags: Default::default(),
-                                                                  })));
+                let proxy = graph[*parent].mirror(node::Type::Egress(Some(Default::default())));
                 let egress = graph.add_node(proxy);
 
                 trace!(log,

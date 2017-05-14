@@ -477,27 +477,24 @@ impl Domain {
                         new_tx,
                         new_tag,
                     } => {
-                        use flow::node::{Type, Egress};
+                        use flow::node::Type;
                         let mut n = self.nodes[&node].borrow_mut();
-                        if let Type::Egress(Some(Egress {
-                                                     ref mut txs,
-                                                     ref mut tags,
-                                                 })) = *n.inner {
+                        if let Type::Egress(Some(ref mut e)) = *n.inner {
                             if let Some(new_tx) = new_tx {
-                                txs.push(new_tx);
+                                e.add_tx(new_tx.0, new_tx.1, new_tx.2);
                             }
                             if let Some(new_tag) = new_tag {
-                                tags.insert(new_tag.0, new_tag.1);
+                                e.add_tag(new_tag.0, new_tag.1);
                             }
                         } else {
                             unreachable!();
                         }
                     }
                     Packet::AddStreamer { node, new_streamer } => {
-                        use flow::node::{Type, Reader};
+                        use flow::node::Type;
                         let mut n = self.nodes[&node].borrow_mut();
-                        if let Type::Reader(_, Reader { ref mut streamers, .. }) = *n.inner {
-                            streamers.as_mut().unwrap().push(new_streamer);
+                        if let Type::Reader(ref mut r) = *n.inner {
+                            r.add_streamer(new_streamer).unwrap();
                         } else {
                             unreachable!();
                         }
@@ -547,9 +544,9 @@ impl Domain {
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
-                                if let Type::Reader(ref mut wh, _) = *n.inner {
+                                if let Type::Reader(ref mut inner) = *n.inner {
                                     // make sure Reader is actually prepared to receive state
-                                    *wh = Some(w_part);
+                                    inner.set_write_handle(w_part);
                                 } else {
                                     unreachable!();
                                 }
@@ -561,9 +558,9 @@ impl Domain {
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
-                                if let Type::Reader(ref mut wh, _) = *n.inner {
+                                if let Type::Reader(ref mut r) = *n.inner {
                                     // make sure Reader is actually prepared to receive state
-                                    *wh = Some(w_part);
+                                    r.set_write_handle(w_part);
                                 } else {
                                     unreachable!();
                                 }
@@ -616,10 +613,12 @@ impl Domain {
                                 // a miss in a reader! make sure we don't re-do work
                                 let addr = path.last().unwrap().0.as_local();
                                 let n = self.nodes[addr].borrow();
-                                if let Type::Reader(Some(ref wh), _) = *n.inner {
-                                    if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
-                                        // key has already been replayed!
-                                        return;
+                                if let Type::Reader(ref r) = *n.inner {
+                                    if let Some(wh) = r.writer() {
+                                        if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
+                                            // key has already been replayed!
+                                            return;
+                                        }
                                     }
                                 } else {
                                     unreachable!();
@@ -729,8 +728,8 @@ impl Domain {
                         {
                             use flow::node::Type;
                             let mut n = self.nodes[&node].borrow_mut();
-                            if let Type::Reader(ref mut w, _) = *n.inner {
-                                if let Some(ref mut state) = *w {
+                            if let Type::Reader(ref mut r) = *n.inner {
+                                if let Some(ref mut state) = r.writer_mut() {
                                     trace!(self.log, "swapping state"; "local" => node.id());
                                     state.swap();
                                     trace!(self.log, "state swapped"; "local" => node.id());
@@ -994,10 +993,10 @@ impl Domain {
                         if let Type::Egress { .. } = *n.inner {
                             // forward the state to the next domain without doing anything with it.
                             let mut p = Some(box Packet::FullReplay {
-                                tag: tag,
-                                link: link, // the egress node will fix this up
-                                state: state,
-                            });
+                                                     tag: tag,
+                                                     link: link, // the egress node will fix this up
+                                                     state: state,
+                                                 });
                             debug!(self.log, "doing bulk egress forward");
                             n.process(&mut p, None, &mut self.state, &self.nodes, false);
                             debug!(self.log, "bulk egress forward completed");
@@ -1015,12 +1014,12 @@ impl Domain {
                         // finishes. so, we deal with this case separately (and also avoid spawning
                         // a thread to walk empty state).
                         let p = box Packet::ReplayPiece {
-                            tag: tag,
-                            link: link,
-                            context: ReplayPieceContext::Regular { last: true },
-                            data: Records::default(),
-                            transaction_state: None,
-                        };
+                                        tag: tag,
+                                        link: link,
+                                        context: ReplayPieceContext::Regular { last: true },
+                                        data: Records::default(),
+                                        transaction_state: None,
+                                    };
 
                         debug!(self.log, "empty full state replay conveyed");
                         playback = Some(p);
@@ -1035,12 +1034,12 @@ impl Domain {
                         // we may already have processed some other messages that are not yet a
                         // part of state.
                         let p = box Packet::ReplayPiece {
-                            tag: tag,
-                            link: link.clone(),
-                            context: ReplayPieceContext::Regular { last: false },
-                            data: Vec::<Record>::new().into(),
-                            transaction_state: None,
-                        };
+                                        tag: tag,
+                                        link: link.clone(),
+                                        context: ReplayPieceContext::Regular { last: false },
+                                        data: Vec::<Record>::new().into(),
+                                        transaction_state: None,
+                                    };
                         playback = Some(p);
 
                         let log = self.log.new(o!());
@@ -1135,8 +1134,8 @@ impl Domain {
                         use flow::node::Type;
 
                         let mut n = self.nodes[ni.as_local()].borrow_mut();
-                        let is_reader = if let Type::Reader(Some(..), _) = *n.inner {
-                            true
+                        let is_reader = if let Type::Reader(ref r) = *n.inner {
+                            r.is_materialized()
                         } else {
                             false
                         };
@@ -1174,11 +1173,11 @@ impl Domain {
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(ni.as_local()) {
                                 state.mark_filled(partial_key.clone());
-                            } else if let Type::Reader(Some(ref mut wh), _) = *n.inner {
+                            } else if let Type::Reader(ref mut r) = *n.inner {
                                 // we must be filling a hole in a Reader. we need to ensure that
                                 // the hole for the key we're replaying ends up being filled, even
                                 // if that hole is empty!
-                                wh.mark_filled(&partial_key[0]);
+                                r.writer_mut().map(|wh| wh.mark_filled(&partial_key[0]));
                             } else {
                                 unreachable!();
                             }
@@ -1208,14 +1207,14 @@ impl Domain {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
                                     use flow::node::Type;
-                                    if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                        wh.mark_hole(&partial_key[0]);
+                                    if let Type::Reader(ref mut r) = *n.inner {
+                                        r.writer_mut().map(|wh| wh.mark_hole(&partial_key[0]));
                                     }
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
-                                if let Type::Reader(Some(ref mut wh), _) = *n.inner {
-                                    wh.swap();
+                                if let Type::Reader(ref mut r) = *n.inner {
+                                    r.writer_mut().map(|wh| wh.swap());
                                 }
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) =

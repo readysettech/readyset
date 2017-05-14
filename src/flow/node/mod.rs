@@ -1,106 +1,15 @@
 use petgraph;
 use petgraph::graph::NodeIndex;
 
-use std::sync::mpsc;
-use std::sync;
 use std::fmt;
 use std::collections::HashMap;
 
 use std::ops::{Deref, DerefMut};
 
-use checktable;
-
 use flow::domain;
 use flow::keys;
-use flow::payload::Packet;
-use flow::migrate::materialization::Tag;
 use flow::prelude::*;
 use flow::hook;
-
-use backlog;
-
-/// A StreamUpdate reflects the addition or deletion of a row from a reader node.
-#[derive(Clone, Debug, PartialEq)]
-pub enum StreamUpdate {
-    /// Indicates the addition of a new row
-    AddRow(sync::Arc<Vec<DataType>>),
-    /// Indicates the removal of an existing row
-    DeleteRow(sync::Arc<Vec<DataType>>),
-}
-
-impl From<Record> for StreamUpdate {
-    fn from(other: Record) -> Self {
-        match other {
-            Record::Positive(u) => StreamUpdate::AddRow(u),
-            Record::Negative(u) => StreamUpdate::DeleteRow(u),
-            Record::DeleteRequest(..) => unreachable!(),
-        }
-    }
-}
-
-impl From<Vec<DataType>> for StreamUpdate {
-    fn from(other: Vec<DataType>) -> Self {
-        StreamUpdate::AddRow(sync::Arc::new(other))
-    }
-}
-
-#[derive(Clone)]
-pub struct Reader {
-    pub streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
-    pub state: Option<usize>,
-    pub token_generator: Option<checktable::TokenGenerator>,
-}
-
-impl Reader {
-    //pub fn get_reader
-    //    (&self)
-    //     -> Option<Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>> {
-    //    self.state
-    //        .clone()
-    //        .map(|arc| {
-    //            Box::new(move |q: &DataType, block: bool| -> Result<Datas, ()> {
-    //                arc.find_and(q,
-    //                              |rs| {
-    //                        rs.into_iter()
-    //                            .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
-    //                            .collect()
-    //                    },
-    //                              block)
-    //                    .map(|r| r.0.unwrap_or_else(Vec::new))
-    //            }) as Box<_>
-    //        })
-    //}
-    //
-    //pub fn len(&self) -> Result<usize, String> {
-    //    match self.state {
-    //        None => Err(String::from("no state on reader")),
-    //        Some(ref s) => Ok(s.len()),
-    //    }
-    //}
-
-    pub fn take(&mut self) -> Self {
-        Self {
-            streamers: self.streamers.take(),
-            state: self.state.clone(),
-            token_generator: self.token_generator.clone(),
-        }
-    }
-}
-
-impl Default for Reader {
-    fn default() -> Self {
-        Reader {
-            streamers: Some(Vec::new()),
-            state: None,
-            token_generator: None,
-        }
-    }
-}
-
-pub struct Egress {
-    pub txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
-    pub tags: HashMap<Tag, NodeAddress>,
-}
 
 pub(crate) enum NodeHandle {
     Owned(Type),
@@ -140,11 +49,14 @@ impl DerefMut for NodeHandle {
     }
 }
 
+mod special;
+pub use self::special::StreamUpdate;
+
 pub enum Type {
     Ingress,
     Internal(Box<Ingredient>),
-    Egress(Option<Egress>),
-    Reader(Option<backlog::WriteHandle>, Reader),
+    Egress(Option<special::Egress>),
+    Reader(special::Reader),
     Hook(Option<hook::Hook>),
     Source,
 }
@@ -284,7 +196,7 @@ impl Node {
     pub fn take(&mut self) -> Node {
         let inner = match *self.inner {
             Type::Egress(ref mut e) => Type::Egress(e.take()),
-            Type::Reader(ref mut w, ref mut r) => Type::Reader(w.take(), r.take()),
+            Type::Reader(ref mut r) => Type::Reader(r.take()),
             Type::Ingress => Type::Ingress,
             Type::Internal(ref mut i) if self.domain.is_some() => Type::Internal(i.take()),
             Type::Hook(ref mut h) => Type::Hook(h.take()),
@@ -332,8 +244,8 @@ impl Node {
             Type::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
             Type::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
             Type::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
-            Type::Reader(_, ref r) => {
-                let key = match r.state {
+            Type::Reader(ref r) => {
+                let key = match r.key() {
                     None => String::from("none"),
                     Some(k) => format!("{}", k),
                 };

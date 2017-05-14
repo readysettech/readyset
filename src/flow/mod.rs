@@ -232,7 +232,7 @@ impl Blender {
         // reader should be a child of the given node
         let reader = self.ingredients
             .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter_map(|ni| if let node::Type::Reader(_, ref inner) = *self.ingredients[ni] {
+            .filter_map(|ni| if let node::Type::Reader(ref inner) = *self.ingredients[ni] {
                             Some((ni, inner))
                         } else {
                             None
@@ -245,7 +245,7 @@ impl Blender {
                 let vr = VIEW_READERS.lock().unwrap();
                 let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
                 rh.map(|rh| {
-                    let generator = inner.token_generator.clone().unwrap();
+                    let generator = inner.token_generator().cloned().unwrap();
                     Box::new(move |q: &prelude::DataType|
                                    -> Result<(core::Datas, checktable::Token), ()> {
                         rh.find_and(q,
@@ -573,7 +573,7 @@ impl<'a> Migration<'a> {
     fn ensure_reader_for(&mut self, n: core::NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let r = node::Type::Reader(None, Default::default());
+            let r = node::Type::Reader(Default::default());
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
@@ -583,8 +583,8 @@ impl<'a> Migration<'a> {
 
     fn ensure_token_generator(&mut self, n: core::NodeAddress, key: usize) {
         let ri = self.readers[n.as_global()];
-        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
-            if inner.token_generator.is_some() {
+        if let node::Type::Reader(ref inner) = *self.mainline.ingredients[ri] {
+            if inner.token_generator().is_some() {
                 return;
             }
         } else {
@@ -616,17 +616,8 @@ impl<'a> Migration<'a> {
             .unwrap()
             .track(&token_generator);
 
-        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
-            inner.token_generator = Some(token_generator);
-        }
-    }
-
-    fn reader_for(&mut self, n: core::NodeAddress) -> &mut node::Reader {
-        let ri = self.readers[n.as_global()];
-        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
-            &mut *inner
-        } else {
-            unreachable!("tried to use non-reader node as a reader")
+        if let node::Type::Reader(ref mut inner) = *self.mainline.ingredients[ri] {
+            inner.set_token_generator(token_generator);
         }
     }
 
@@ -642,12 +633,8 @@ impl<'a> Migration<'a> {
 
         let ri = self.readers[n.as_global()];
 
-        if let node::Type::Reader(_, ref mut inner) = *self.mainline.ingredients[ri] {
-            if let Some(skey) = inner.state {
-                assert_eq!(skey, key);
-            } else {
-                inner.state = Some(key);
-            }
+        if let node::Type::Reader(ref mut inner) = *self.mainline.ingredients[ri] {
+            inner.set_key(key);
         } else {
             unreachable!("tried to use non-reader node as a reader")
         }
@@ -660,14 +647,20 @@ impl<'a> Migration<'a> {
     /// slower than the system as a hole will accumulate a large buffer over time.
     pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
-        let (tx, rx) = mpsc::channel();
+        let (mut tx, rx) = mpsc::channel();
 
         // If the reader hasn't been incorporated into the graph yet, just add the streamer
         // directly.
-        if let Some(ref mut streamers) = self.reader_for(n).streamers {
-            streamers.push(tx);
-            return rx;
+        let ri = self.readers[n.as_global()];
+        if let node::Type::Reader(ref mut inner) = *self.mainline.ingredients[ri] {
+            tx = match inner.add_streamer(tx) {
+                Ok(_) => return rx,
+                Err(tx) => tx,
+            }
+        } else {
+            unreachable!("tried to use non-reader node as a reader")
         }
+
 
         // Otherwise, send a message to the reader's domain to have it add the streamer.
         let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
@@ -848,13 +841,13 @@ impl<'a> Migration<'a> {
         let index = domain_nodes
             .iter()
             .map(|(domain, nodes)| {
-                     use self::migrate::materialization::{pick, index};
-                     debug!(log, "picking materializations"; "domain" => domain.index());
-                     let mat = pick(&log, &mainline.ingredients, &nodes[..]);
-                     debug!(log, "deriving indices"; "domain" => domain.index());
-                     let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
-                     (*domain, idx)
-                 })
+                use self::migrate::materialization::{pick, index};
+                debug!(log, "picking materializations"; "domain" => domain.index());
+                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
+                debug!(log, "deriving indices"; "domain" => domain.index());
+                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
+                (*domain, idx)
+            })
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
