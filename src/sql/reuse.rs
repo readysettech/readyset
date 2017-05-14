@@ -7,6 +7,7 @@ use std::vec::Vec;
 #[derive(Clone, Debug)]
 pub enum ReuseType {
     DirectExtension,
+    #[allow(dead_code)]
     BackjoinRequired(Vec<Table>),
 }
 
