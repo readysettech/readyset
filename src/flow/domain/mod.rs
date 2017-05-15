@@ -703,11 +703,14 @@ impl Domain {
                         // swap replayed reader nodes to expose new state
                         {
                             let mut n = self.nodes[&node].borrow_mut();
-                            n.with_reader_mut(|r| if let Some(ref mut state) = r.writer_mut() {
-                                trace!(self.log, "swapping state"; "local" => node.id());
-                                state.swap();
-                                trace!(self.log, "state swapped"; "local" => node.id());
-                            });
+                            if n.is_reader() {
+                                n.with_reader_mut(|r| if let Some(ref mut state) =
+                                    r.writer_mut() {
+                                    trace!(self.log, "swapping state"; "local" => node.id());
+                                    state.swap();
+                                    trace!(self.log, "state swapped"; "local" => node.id());
+                                });
+                            }
                         }
 
                         drop(ack);

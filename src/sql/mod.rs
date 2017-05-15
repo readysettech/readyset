@@ -519,6 +519,7 @@ mod tests {
     use nom_sql::Column;
     use flow::node::Node;
     use flow::Migration;
+    use flow::prelude::Ingredient;
     use Blender;
     use super::{SqlIncorporator, ToFlowParts};
     use nom_sql::FunctionExpression;

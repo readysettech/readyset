@@ -280,7 +280,7 @@ impl Blender {
         Mutator {
             src: self.source.into(),
             tx: tx,
-            addr: (*node.global_addr()).into(),
+            addr: (*node.local_addr()).into(),
             primary_key: self.ingredients[*base.as_global()]
                 .suggest_indexes(base)
                 .remove(&base)
@@ -712,7 +712,6 @@ impl<'a> Migration<'a> {
 
             });
             mainline.ingredients[node].add_to(domain);
-            mainline.ingredients[node].set_global_addr(node.into());
             new.insert(node);
         }
 
@@ -781,6 +780,7 @@ impl<'a> Migration<'a> {
                     );
                     mainline.ingredients[ni]
                         .set_local_addr(unsafe { prelude::NodeAddress::make_local(nnodes as u32) });
+                    mainline.ingredients[ni].set_global_addr(ni.into());
                     nnodes += 1;
                 }
             }

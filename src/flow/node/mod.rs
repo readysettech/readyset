@@ -85,6 +85,7 @@ impl Node {
         let inner = self.inner.take();
         let mut n = self.mirror(inner);
         n.addr = self.addr;
+        n.index = self.index;
         self.taken = true;
 
         DanglingDomainNode(n)

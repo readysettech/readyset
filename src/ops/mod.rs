@@ -234,14 +234,22 @@ pub mod test {
                                  defaults: Vec<DataType>)
                                  -> NodeAddress {
             use ops::base::Base;
-            let mut i = Base::new(defaults).into();
+            let mut i = Base::new(defaults);
             i.on_connected(&self.graph);
+            let i: NodeOperator = i.into();
             let ni = self.graph.add_node(Node::new(name, fields, i, false));
             self.graph.add_edge(self.source, ni, false);
             let mut remap = HashMap::new();
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
-            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_global_addr(global);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_local_addr(local);
             remap.insert(global, local);
             self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
             self.states.insert(*local.as_local(), State::default());
@@ -249,18 +257,17 @@ pub mod test {
             global
         }
 
-        pub fn set_op<I>(&mut self, name: &str, fields: &[&str], i: I, materialized: bool)
-            where I: Into<node::NodeType>
+        pub fn set_op<I>(&mut self, name: &str, fields: &[&str], mut i: I, materialized: bool)
+            where I: Ingredient + Into<NodeOperator>
         {
             use petgraph;
             assert!(self.nut.is_none(), "only one node under test is supported");
 
-            let mut i = i.into();
             i.on_connected(&self.graph);
-
             let parents = i.ancestors();
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
+            let i: NodeOperator = i.into();
             let ni = self.graph.add_node(node::Node::new(name, fields, i, false));
             let global = NodeAddress::mock_global(ni);
             let local = NodeAddress::mock_local(self.remap.len());
@@ -271,7 +278,14 @@ pub mod test {
                 self.graph.add_edge(*parent.as_global(), ni, false);
             }
             self.remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().set_addr(local);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_global_addr(global);
+            self.graph
+                .node_weight_mut(ni)
+                .unwrap()
+                .set_local_addr(local);
             self.graph
                 .node_weight_mut(ni)
                 .unwrap()
@@ -299,6 +313,13 @@ pub mod test {
             }
 
             // we're now committing to testing this op
+            // add all nodes to the same domain
+            for node in self.graph.node_weights_mut() {
+                if node.is_source() {
+                    continue;
+                }
+                node.add_to(0.into());
+            }
             // store the id
             self.nut = Some((ni, local));
             // and also set up the node list
@@ -308,15 +329,16 @@ pub mod test {
                 if node == self.source {
                     continue;
                 }
-                self.graph[node].add_to(0.into());
-                nodes.push((node, self.graph[node].take()));
+                let n = self.graph[node].take();
+                let n = n.finalize(&self.graph);
+                nodes.push((node, n));
             }
 
-            let nodes: Vec<_> = self.nodes = nodes
+            self.nodes = nodes
                 .into_iter()
                 .map(|(_, n)| {
                          use std::cell;
-                         (*n.addr().as_local(), cell::RefCell::new(n))
+                         (*n.local_addr().as_local(), cell::RefCell::new(n))
                      })
                 .collect();
         }
@@ -366,8 +388,7 @@ pub mod test {
             let mut u = {
                 let id = self.nut.unwrap().1;
                 let mut n = self.nodes[id.as_local()].borrow_mut();
-                let m = n.inner
-                    .on_input(src, u.into(), &mut None, &self.nodes, &self.states);
+                let m = n.on_input(src, u.into(), &mut None, &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
