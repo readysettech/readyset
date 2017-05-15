@@ -811,6 +811,25 @@ impl MirNodeType {
                     _ => us.borrow().inner.can_reuse_as(other),
                 }
             }
+            MirNodeType::TopK {
+                order: ref our_order,
+                group_by: ref our_group_by,
+                k: our_k,
+                offset: our_offset,
+            } => {
+                match *other {
+                    MirNodeType::TopK {
+                        ref order,
+                        ref group_by,
+                        k,
+                        offset,
+                    } => {
+                        order == our_order && group_by == our_group_by && k == our_k &&
+                        offset == our_offset
+                    }
+                    _ => false,
+                }
+            }
             MirNodeType::Leaf { keys: ref our_keys, .. } => {
                 match *other {
                     MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
