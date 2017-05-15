@@ -101,14 +101,14 @@ impl SqlToMirConverter {
     }
 
     pub fn add_leaf_below(&mut self,
-                          leaf: MirNodeRef,
+                          prior_leaf: MirNodeRef,
                           name: &str,
                           params: &Vec<Column>)
                           -> MirQuery {
-        let columns: Vec<Column> = leaf.borrow().columns().iter().cloned().collect();
+        let columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
 
         // reuse the previous leaf node
-        let parent = MirNode::reuse(leaf, self.schema_version);
+        let parent = MirNode::reuse(prior_leaf, self.schema_version);
 
         // add an identity node and then another leaf
         let id = MirNode::new(&format!("{}_id", name),
