@@ -1174,11 +1174,12 @@ fn make_join_node(name: &str,
                proj_cols.len());
 
     let find_column_id = |n: &MirNodeRef, col: &Column| -> usize {
+        let name = n.borrow().versioned_name();
         n.borrow()
             .columns
             .iter()
             .position(|ref nc| *nc == col)
-            .expect(&format!("column {:?} not found on {:?}!", col, n))
+            .expect(&format!("column {:?} not found on {}!", col, name))
     };
 
     let join_config = proj_cols
