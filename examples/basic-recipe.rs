@@ -8,12 +8,12 @@ use backend::Backend;
 
 fn load_recipe() -> Result<Backend, String> {
     // inline recipe definition
-    let sql = "# write types (SQL type names are ignored)
+    let sql = "# base tables
                CREATE TABLE Article (aid int, title varchar(255), \
                                      url text, PRIMARY KEY(aid));
                CREATE TABLE Vote (aid int, uid int);
 
-               # read expressions
+               # read queries
                VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                ArticleWithVoteCount: SELECT Article.aid, title, url, VoteCount.votes AS votes \
