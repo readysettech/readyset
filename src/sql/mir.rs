@@ -31,6 +31,15 @@ fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     }
 }
 
+fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
+    c.table = Some(view_name.to_string());
+    c.function = None;
+    if c.alias.is_some() && *c.alias.as_ref().unwrap() == c.name {
+        c.alias = None;
+    }
+    c
+}
+
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
@@ -120,7 +129,11 @@ impl SqlToMirConverter {
 
         let new_leaf = MirNode::new(name,
                                     self.schema_version,
-                                    columns,
+                                    columns
+                                        .clone()
+                                        .into_iter()
+                                        .map(|c| sanitize_leaf_column(c, name))
+                                        .collect(),
                                     MirNodeType::Leaf {
                                         node: parent.clone(),
                                         keys: params.clone(),
@@ -1084,6 +1097,7 @@ impl SqlToMirConverter {
                 .columns()
                 .iter()
                 .cloned()
+                .map(|c| sanitize_leaf_column(c, name))
                 .collect();
 
             let leaf_node = MirNode::new(name,

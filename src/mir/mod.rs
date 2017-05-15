@@ -262,6 +262,9 @@ impl MirNode {
         have_all_columns && self.inner.can_reuse_as(&for_node.inner)
     }
 
+    /// Wraps an existing MIR node into a `Reuse` node.
+    /// Note that this does *not* wire the reuse node into ancestors or children of the original
+    /// node; if required, this is the responsibility of the caller.
     pub fn reuse(node: MirNodeRef, v: usize) -> MirNodeRef {
         let rcn = node.clone();
 
@@ -270,17 +273,12 @@ impl MirNode {
             from_version: v,
             columns: node.borrow().columns.clone(),
             inner: MirNodeType::Reuse { node: rcn },
-            ancestors: node.borrow().ancestors.clone(),
-            children: node.borrow().children.clone(),
+            ancestors: vec![],
+            children: vec![],
             flow_node: None, // will be set in `into_flow_parts`
         };
 
         let rc_mn = Rc::new(RefCell::new(mn));
-
-        // register as child on ancestors
-        for ref ancestor in &node.borrow().ancestors {
-            ancestor.borrow_mut().add_child(rc_mn.clone());
-        }
 
         rc_mn
     }
