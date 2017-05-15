@@ -83,6 +83,13 @@ impl NodeAddress {
         }
     }
 
+    pub(crate) fn is_local(&self) -> bool {
+        match self.addr {
+            NodeAddress_::Local(_) => true,
+            _ => false,
+        }
+    }
+
     #[cfg(test)]
     pub fn mock_local(id: usize) -> NodeAddress {
         unsafe { Self::make_local(id as u32) }

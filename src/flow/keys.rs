@@ -44,7 +44,7 @@ fn trace<F>(graph: &Graph,
                                    .filter_map(|&ni| {
                                                    let n = &graph[ni];
                                                    if n.domain() == domain {
-                                                       Some((n.addr(), ni))
+                                                       Some((*n.local_addr(), ni))
                                                    } else {
                                                        None
                                                    }
@@ -89,7 +89,7 @@ fn trace<F>(graph: &Graph,
 
     // is it a generated column?
     let local = if n.is_localized() {
-        n.addr()
+        *n.local_addr()
     } else {
         node.into()
     };
@@ -114,7 +114,7 @@ fn trace<F>(graph: &Graph,
         if resolved.0.is_global() {
             assert_eq!(resolved.0, parent.into());
         } else {
-            assert_eq!(resolved.0, graph[parent].addr());
+            assert_eq!(&resolved.0, graph[parent].local_addr());
         }
         path.push((parent, resolved.1));
         return trace(graph, on_join, path);

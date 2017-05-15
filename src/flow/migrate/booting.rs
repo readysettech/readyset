@@ -4,7 +4,6 @@
 //! such as `DomainNodes`, and initializing transaction handling.
 
 use flow::prelude::*;
-use flow::domain::single;
 use flow::domain;
 use flow::checktable;
 
@@ -20,8 +19,11 @@ use slog::Logger;
 fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
     nodes
         .into_iter()
-        .map(|(ni, _)| single::NodeDescriptor::new(graph, ni))
-        .map(|nd| (*nd.addr().as_local(), cell::RefCell::new(nd)))
+        .map(|(ni, _)| {
+                 let node = graph.node_weight_mut(ni).unwrap().take();
+                 node.finalize(graph)
+             })
+        .map(|nd| (*nd.local_addr().as_local(), cell::RefCell::new(nd)))
         .collect()
 }
 

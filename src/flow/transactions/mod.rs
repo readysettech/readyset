@@ -95,18 +95,19 @@ impl DomainState {
         let base_for_ingress = nodes
             .values()
             .filter_map(|n| {
-                if n.borrow().children.is_empty() {
+                if !n.borrow().has_children() {
                     return None;
                 }
 
-                let child = nodes[n.borrow().children[0].as_local()].borrow();
+                let child = nodes[n.borrow().child(0).as_local()].borrow();
                 if !child.is_internal() || !child.get_base().is_some() {
                     return None;
                 }
 
-                let ni = *n.borrow().inner.addr().as_local();
+                let lid = *n.borrow().local_addr().as_local();
+                let gid = *child.global_addr().as_global();
 
-                Some((ni, child.index))
+                Some((lid, gid))
             })
             .collect();
 

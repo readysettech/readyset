@@ -167,21 +167,22 @@ impl TopK {
 }
 
 impl Ingredient for TopK {
-    fn take(&mut self) -> Box<Ingredient> {
+    fn take(&mut self) -> NodeOperator {
         // Necessary because cmp_rows can't be cloned.
-        Box::new(Self {
-                     src: self.src,
+        Self {
+                src: self.src,
 
-                     us: self.us,
-                     cols: self.cols,
+                us: self.us,
+                cols: self.cols,
 
-                     group_by: self.group_by.clone(),
+                group_by: self.group_by.clone(),
 
-                     cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_, _| Ordering::Equal)),
-                     k: self.k,
+                cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_, _| Ordering::Equal)),
+                k: self.k,
 
-                     counts: self.counts.clone(),
-                 })
+                counts: self.counts.clone(),
+            }
+            .into()
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {

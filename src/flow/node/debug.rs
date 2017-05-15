@@ -1,0 +1,91 @@
+use std::fmt;
+use petgraph::graph::NodeIndex;
+use flow::node::{Node, NodeType};
+use flow::core::processing::Ingredient;
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.inner {
+            NodeType::Source => write!(f, "source node"),
+            NodeType::Ingress => write!(f, "ingress node"),
+            NodeType::Egress { .. } => write!(f, "egress node"),
+            NodeType::Reader(..) => write!(f, "reader node"),
+            NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
+            NodeType::Hook(..) => write!(f, "hook node"),
+        }
+    }
+}
+
+impl Node {
+    pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
+        write!(f,
+               " [style=filled, fillcolor={}, label=\"",
+               self.domain
+                   .map(|d| -> usize { d.into() })
+                   .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                   .unwrap_or("white".into()))?;
+
+        match self.inner {
+            NodeType::Source => write!(f, "(source)"),
+            NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
+            NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
+            NodeType::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
+            NodeType::Reader(ref r) => {
+                let key = match r.key() {
+                    None => String::from("none"),
+                    Some(k) => format!("{}", k),
+                };
+                use flow::VIEW_READERS;
+                let size = match VIEW_READERS
+                          .lock()
+                          .unwrap()
+                          .get(&idx)
+                          .map(|state| state.len()) {
+                    None => String::from("empty"),
+                    Some(s) => format!("{} distinct keys", s),
+                };
+                write!(f,
+                       "{{ {} | (reader / key: {}) | {} }}",
+                       idx.index(),
+                       key,
+                       size)
+            }
+            NodeType::Internal(ref i) => {
+                write!(f, "{{")?;
+
+                // Output node name and description. First row.
+                write!(f,
+                       "{{ {} / {} | {} }}",
+                       idx.index(),
+                       Self::escape(self.name()),
+                       Self::escape(&i.description()))?;
+
+                // Output node outputs. Second row.
+                write!(f, " | {}", self.fields().join(", \\n"))?;
+
+                // Maybe output node's HAVING conditions. Optional third row.
+                // TODO
+                // if let Some(conds) = n.node().unwrap().having_conditions() {
+                //     let conds = conds.iter()
+                //         .map(|c| format!("{}", c))
+                //         .collect::<Vec<_>>()
+                //         .join(" ∧ ");
+                //     write!(f, " | σ({})", escape(&conds))?;
+                // }
+
+                write!(f, " }}")
+            }
+        }?;
+
+        writeln!(f, "\"]")
+    }
+
+    fn escape(s: &str) -> String {
+        use regex::Regex;
+
+        Regex::new("([\"|{}])")
+            .unwrap()
+            .replace_all(s, "\\$1")
+            .to_string()
+    }
+}

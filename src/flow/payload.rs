@@ -90,7 +90,7 @@ pub enum PacketEvent {
 
 pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
 
-#[warn(variant_size_differences)]
+//#[warn(variant_size_differences)]
 pub enum Packet {
     // Data messages
     //
@@ -130,7 +130,7 @@ pub enum Packet {
     //
     /// Add a new node to this domain below the given parents.
     AddNode {
-        node: Box<domain::NodeDescriptor>,
+        node: Node,
         parents: Vec<LocalNodeIndex>,
     },
 
