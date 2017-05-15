@@ -128,7 +128,7 @@ impl SqlToMirConverter {
                                     vec![id.clone()],
                                     vec![]);
 
-        // always register lleaves
+        // always register leaves
         self.current.insert(String::from(name), self.schema_version);
         self.nodes
             .insert((String::from(name), self.schema_version), new_leaf.clone());
