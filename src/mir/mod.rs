@@ -827,10 +827,20 @@ impl MirNodeType {
 impl Debug for MirNode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         write!(f,
-               "{}, {} ancestors, {} children",
+               "{}, {} ancestors ({}), {} children ({})",
                self.description(),
                self.ancestors.len(),
-               self.children.len())
+               self.ancestors
+                   .iter()
+                   .map(|a| a.borrow().versioned_name())
+                   .collect::<Vec<_>>()
+                   .join(", "),
+               self.children.len(),
+               self.children
+                   .iter()
+                   .map(|c| c.borrow().versioned_name())
+                   .collect::<Vec<_>>()
+                   .join(", "))
     }
 }
 
