@@ -339,9 +339,6 @@ extern crate timekeeper;
 
 extern crate memcached;
 
-#[cfg(feature="web")]
-extern crate rustc_serialize;
-
 #[macro_use]
 #[cfg(feature="web")]
 extern crate rustful;
@@ -352,6 +349,7 @@ extern crate bincode;
 extern crate bufstream;
 
 extern crate serde;
+#[macro_use]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;

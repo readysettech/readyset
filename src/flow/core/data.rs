@@ -1,7 +1,7 @@
 use arccstr::ArcCStr;
 
 #[cfg(feature="web")]
-use rustc_serialize::json::{ToJson, Json};
+use serde_json::Value;
 
 use std::ops::{Deref, DerefMut};
 use std::sync;
@@ -29,15 +29,16 @@ pub enum DataType {
 }
 
 #[cfg(feature="web")]
-impl ToJson for DataType {
-    fn to_json(&self) -> Json {
+impl DataType {
+    /// Lossy representation as JSON value.
+    pub fn to_json(&self) -> Value {
         match *self {
-            DataType::None => Json::Null,
-            DataType::Int(n) => Json::I64(n as i64),
-            DataType::BigInt(n) => Json::I64(n),
-            DataType::Real(i, f) => Json::F64((i as f64) + (f as f64) * 1.0e-9),
+            DataType::None => json!(null),
+            DataType::Int(n) => json!(n),
+            DataType::BigInt(n) => json!(n),
+            DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
             DataType::Text(..) |
-            DataType::TinyText(..) => Json::String(self.into()),
+            DataType::TinyText(..) => Value::String(self.into()),
         }
     }
 }
@@ -385,8 +386,8 @@ mod tests {
         let a: DataType = (2.5).into();
         let b: DataType = (-2.01).into();
         let c: DataType = (-0.012345678).into();
-        assert_eq!(a.to_json(), Json::F64(2.5));
-        assert_eq!(b.to_json(), Json::F64(-2.01));
-        assert_eq!(c.to_json(), Json::F64(-0.012345678));
+        assert_eq!(a.to_json(), json!(2.5));
+        assert_eq!(b.to_json(), json!(-2.01));
+        assert_eq!(c.to_json(), json!(-0.012345678));
     }
 }
