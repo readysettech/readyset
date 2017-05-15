@@ -4,7 +4,7 @@ use memcached::proto::{Operation, ProtoType};
 #[cfg(test)]
 use memcached::proto::MemCachedResult;
 
-use rustc_serialize::json::{ToJson, Json};
+use serde_json::Value;
 
 use std::io;
 
@@ -17,7 +17,7 @@ unsafe impl Send for Memcache {}
 pub struct Hook {
     client: Memcache,
     key_columns: Vec<usize>,
-    name: Json,
+    name: Value,
 
     state: State,
 }
@@ -41,7 +41,7 @@ impl Hook {
         Ok(Self {
                client: Memcache(client),
                key_columns: key_columns,
-               name: Json::String(name),
+               name: Value::String(name),
                state: s,
            })
     }
@@ -94,12 +94,13 @@ impl Hook {
                     unreachable!();
                 }
             };
-            let k = Json::Array(vec![self.name.clone(), key.to_json()]).to_string();
-            let v = Json::Array(rows.into_iter()
-                                    .map(|row| {
-                                             Json::Array(row.iter().map(|c| c.to_json()).collect())
-                                         })
-                                    .collect())
+            let array = key.iter().map(DataType::to_json).collect();
+            let k = Value::Array(vec![self.name.clone(), array]).to_string();
+            let v = Value::Array(rows.into_iter()
+                                     .map(|row| {
+                                              Value::Array(row.iter().map(DataType::to_json).collect())
+                                          })
+                                     .collect())
                     .to_string();
             let flags = 0xdeadbeef;
             (self.client.0)
@@ -110,7 +111,8 @@ impl Hook {
 
     #[cfg(test)]
     pub fn get_row(&mut self, key: Vec<DataType>) -> MemCachedResult<(Vec<u8>, u32)> {
-        let k = Json::Array(vec![self.name.clone(), key.to_json()]).to_string();
+        let array = key.iter().map(DataType::to_json).collect();
+        let k = Value::Array(vec![self.name.clone(), array]).to_string();
         self.client.0.get(k.as_bytes())
     }
 }

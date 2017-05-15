@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use flow::Blender;
 use flow::prelude::DataType;
-use std::collections::HashMap;
+use serde_json::{self, Value};
 
 struct GetEndpoint<F> {
     arguments: Vec<String>,
@@ -27,7 +27,6 @@ struct PutEndpoint<Mutator> {
 /// array with all matching records is returned. Each record is represented as a JSON object with
 /// field names as dictated by those passed to `new()` for the view being queried.
 pub fn run(soup: Blender) -> HttpResult<Listening> {
-    use rustc_serialize::json::ToJson;
     use rustful::header::ContentType;
 
     let mut router = TreeRouter::new();
@@ -65,7 +64,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                 path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    let ts = put.lock().unwrap().put((args.iter().map(|arg| {
+                    let ts: () = put.lock().unwrap().put((args.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {
@@ -73,7 +72,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                         }
                     })).collect::<Vec<DataType>>());
                     res.headers_mut().set(ContentType::json());
-                    res.send(format!("{}", ts.to_json()));
+                    res.send(json!(ts).to_string()); // TODO this is always `null`
                 }) as Box<Handler>,
             }
         };
@@ -97,11 +96,11 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                                 args
                                 .clone()
                                 .into_iter()
-                                .zip(row.into_iter())
-                                .collect::<HashMap<_, _>>()
-                        }).collect::<Vec<_>>();
+                                .zip(row.iter().map(|vec| vec.iter().map(DataType::to_json).collect()))
+                                .collect::<serde_json::Map<_, _>>()
+                        }).collect::<Value>();
                         res.headers_mut().set(ContentType::json());
-                        res.send(format!("{}", data.to_json()));
+                        res.send(data.to_string());
                     }
                 }) as Box<Handler>,
             }
