@@ -2,6 +2,7 @@ use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 
 use ops::base::Base;
+use ops;
 use flow::prelude;
 
 #[derive(PartialEq, Eq, Debug)]
@@ -26,7 +27,7 @@ pub trait Ingredient
 {
     /// Construct a new node from this node that will be given to the domain running this node.
     /// Whatever is left behind in self is what remains observable in the graph.
-    fn take(&mut self) -> Box<Ingredient>;
+    fn take(&mut self) -> ops::NodeOperator;
 
     fn ancestors(&self) -> Vec<prelude::NodeAddress>;
     fn should_materialize(&self) -> bool;

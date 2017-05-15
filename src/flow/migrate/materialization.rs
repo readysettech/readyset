@@ -5,7 +5,6 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use flow;
 use flow::keys;
 use flow::domain;
 use flow::prelude::*;
@@ -61,20 +60,19 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
             //
             // that last point needs to be checked *after* we have determined if all internal
             // nodes should be materialized
-            match **n {
-                flow::node::Type::Internal(ref i) => {
-                    if i.should_materialize() ||
-                       graph
-                           .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                           .any(|e| *e.weight()) {
-                        trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
-                        Some(*n.addr().as_local())
-                    } else {
-                        trace!(log, "not materializing"; "node" => format!("{}", ni.index()));
-                        None
-                    }
+            if n.is_internal() {
+                if n.should_materialize() ||
+                   graph
+                       .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                       .any(|e| *e.weight()) {
+                    trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
+                    Some(*n.local_addr().as_local())
+                } else {
+                    trace!(log, "not materializing"; "node" => format!("{}", ni.index()));
+                    None
                 }
-                _ => None,
+            } else {
+                None
             }
         })
         .collect();
@@ -87,9 +85,9 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
              inquisitive_children: &mut HashSet<NodeIndex>|
              -> Option<NodeIndex> {
                 let n = &graph[ni];
-                if let flow::node::Type::Internal(ref nn) = **n {
-                    if !materialize.contains(n.addr().as_local()) {
-                        if nn.can_query_through() {
+                if n.is_internal() {
+                    if !materialize.contains(n.local_addr().as_local()) {
+                        if n.can_query_through() {
                             trace!(log, "parent can be queried through, mark it as querying";
                                    "node" => format!("{}", ni.index()));
                             inquisitive_children.insert(ni);
@@ -99,15 +97,15 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                             // we can't query through this internal node, so materialize it
                             trace!(log, "parent can't be queried through, so materialize it";
                                    "node" => format!("{}", ni.index()));
-                            materialize.insert(*n.addr().as_local());
+                            materialize.insert(*n.local_addr().as_local());
                         }
                     }
                 }
                 None
             };
         for &(ni, n, _) in nodes.iter() {
-            if let flow::node::Type::Internal(..) = **n {
-                if n.will_query(materialize.contains(n.addr().as_local())) {
+            if n.is_internal() {
+                if n.will_query(materialize.contains(n.local_addr().as_local())) {
                     trace!(log, "found querying child"; "node" => format!("{}", ni.index()));
                     inquisitive_children.insert(ni);
                     // track child back to an ingress, marking any unmaterialized nodes on the path
@@ -132,7 +130,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     }
 
     for &(ni, n, _) in &nodes {
-        if let flow::node::Type::Ingress = **n {
+        if n.is_ingress() {
             if graph
                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
                    .any(|child| inquisitive_children.contains(&child)) {
@@ -140,7 +138,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 trace!(log,
                        "querying children force materialization of node {}",
                        ni.index());
-                materialize.insert(*n.addr().as_local());
+                materialize.insert(*n.local_addr().as_local());
             }
         }
     }
@@ -148,12 +146,12 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     // find all nodes that can be queried through, and where any of its outgoing edges are
     // materialized. for those nodes, we should instead materialize the input to that node.
     for &(ni, n, _) in &nodes {
-        if let flow::node::Type::Internal(..) = **n {
+        if n.is_internal() {
             if !n.can_query_through() {
                 continue;
             }
 
-            if !materialize.contains(n.addr().as_local()) {
+            if !materialize.contains(n.local_addr().as_local()) {
                 // we're not materialized, so no materialization shifting necessary
                 continue;
             }
@@ -162,13 +160,13 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                    .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
                    .any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
-                materialize.remove(n.addr().as_local());
+                materialize.remove(n.local_addr().as_local());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
 
                 // TODO: unclear if we need *all* our parents to be materialized. it's
                 // certainly the case for filter, which is our only use-case for now...
                 for p in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                    materialize.insert(*graph[p].addr().as_local());
+                    materialize.insert(*graph[p].local_addr().as_local());
                 }
             }
         }
@@ -185,7 +183,7 @@ pub fn index(log: &Logger,
 
     let map: HashMap<_, _> = nodes
         .iter()
-        .map(|&(ni, _)| (*graph[ni].addr().as_local(), ni))
+        .map(|&(ni, _)| (*graph[ni].local_addr().as_local(), ni))
         .collect();
     let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
 
@@ -199,7 +197,7 @@ pub fn index(log: &Logger,
     // that we need to push indices through non-materialized views so that they end up on the
     // columns of the views that will actually query into a table of some sort.
     {
-        let nodes: HashMap<_, _> = nodes.iter().map(|&(n, _)| (n.addr(), n)).collect();
+        let nodes: HashMap<_, _> = nodes.iter().map(|&(n, _)| (n.local_addr(), n)).collect();
         let mut indices = nodes.iter()
                 .filter(|&(_, node)| node.is_internal()) // only internal nodes can suggest indices
                 .filter(|&(_, node)| {
@@ -216,7 +214,7 @@ pub fn index(log: &Logger,
                     //  will_query(false) as an indicator of whether indices are necessary.
                     node.will_query(false)
                 })
-                .flat_map(|(ni, node)| node.suggest_indexes(*ni).into_iter())
+                .flat_map(|(ni, node)| node.suggest_indexes(**ni).into_iter())
                 .filter(|&(ref node, _)| nodes.contains_key(node))
                 .fold(HashMap::new(), |mut hm, (v, idx)| {
                     hm.entry(v).or_insert_with(HashSet::new).insert(idx);
@@ -239,7 +237,7 @@ pub fn index(log: &Logger,
                 } else if let Some(node) = nodes.get(&v) {
                     // this node is not materialized
                     // we need to push the index up to its ancestor(s)
-                    if let flow::node::Type::Ingress = ***node {
+                    if node.is_ingress() {
                         // we can't push further up!
                         unreachable!("node suggested index outside domain, and ingress isn't \
                                       materialized");
@@ -346,7 +344,7 @@ pub fn initialize(log: &Logger,
     let mut domains_on_path = HashMap::new();
     let mut empty = HashSet::new();
     for node in topo_list {
-        let addr = graph[node].addr();
+        let addr = *graph[node].local_addr();
         let d = graph[node].domain();
 
         let index_on = materialize
@@ -361,11 +359,9 @@ pub fn initialize(log: &Logger,
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
-        if let flow::node::Type::Reader(ref r) = *graph[node] {
-            if r.is_materialized() {
-                has_state = true;
-            }
-        }
+        graph[node].with_reader(|r| if r.is_materialized() {
+                                    has_state = true;
+                                });
 
         // ready communicates to the domain in charge of a particular node that it should start
         // delivering updates to a given new node. note that we wait for the domain to acknowledge
@@ -398,22 +394,20 @@ pub fn initialize(log: &Logger,
             empty.insert(node);
 
             // we need to make sure the domain constructs reader backlog handles!
-            if let flow::node::Type::Reader(ref r) = *graph[node] {
-                if let Some(key) = r.key() {
-                    use flow::payload::InitialState;
+            graph[node].with_reader(|r| if let Some(key) = r.key() {
+                                        use flow::payload::InitialState;
 
-                    txs[&d]
-                        .send(box Packet::PrepareState {
-                                      node: *addr.as_local(),
-                                      state: InitialState::Global {
-                                          cols: graph[node].fields().len(),
-                                          key: key,
-                                          gid: node,
-                                      },
-                                  })
-                        .unwrap();
-                }
-            }
+                                        txs[&d]
+                                            .send(box Packet::PrepareState {
+                                                          node: *addr.as_local(),
+                                                          state: InitialState::Global {
+                                                              cols: graph[node].fields().len(),
+                                                              key: key,
+                                                              gid: node,
+                                                          },
+                                                      })
+                                            .unwrap();
+                                    });
 
             ready(txs, index_on);
         } else {
@@ -429,7 +423,7 @@ pub fn initialize(log: &Logger,
             // we have a parent that has data, so we need to replay and reconstruct
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
-            info!(log, "beginning reconstruction of {:?}", *graph[node]);
+            info!(log, "beginning reconstruction of {:?}", graph[node]);
             let new_paths = reconstruct(&log,
                                         graph,
                                         &empty,
@@ -465,14 +459,14 @@ pub fn reconstruct(log: &Logger,
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
         // figure out what key that Reader is using
-        if let flow::node::Type::Reader(ref r) = *graph[node] {
-            assert!(r.is_materialized());
-            if let Some(rh) = r.key() {
-                index_on.push(vec![rh]);
-            }
-        } else {
-            unreachable!();
-        }
+        graph[node]
+            .with_reader(|r| {
+                             assert!(r.is_materialized());
+                             if let Some(rh) = r.key() {
+                                 index_on.push(vec![rh]);
+                             }
+                         })
+            .unwrap();
     }
 
     // okay, so here's the situation: `node` is a node that
@@ -523,7 +517,7 @@ pub fn reconstruct(log: &Logger,
 
                     let is_materialized = materialized
                         .get(&n.domain())
-                        .map(|dm| dm.contains_key(n.addr().as_local()))
+                        .map(|dm| dm.contains_key(n.local_addr().as_local()))
                         .unwrap_or(false);
                     if is_materialized {
                         // we want to take this node, but not any later ones
@@ -568,7 +562,7 @@ pub fn reconstruct(log: &Logger,
             // node must also have an *index* on col
             materialized
                 .get(&n.domain())
-                .and_then(|d| d.get(n.addr().as_local()))
+                .and_then(|d| d.get(n.local_addr().as_local()))
                 .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
                 .unwrap_or(false)
         });
@@ -591,14 +585,13 @@ pub fn reconstruct(log: &Logger,
     }
 
     let domain = graph[node].domain();
-    let addr = graph[node].addr();
+    let addr = *graph[node].local_addr();
     let cols = graph[node].fields().len();
     assert!(!index_on.is_empty(),
             "all materialized nodes must have a state key");
 
     // tell the domain in question to create an empty state for the node in question
     use flow::payload::InitialState;
-    use flow::node::{Type, NodeHandle};
 
     // if there's only one path
     let last_domain = paths.get(0).map(|p| graph[p[0].0].domain());
@@ -606,40 +599,40 @@ pub fn reconstruct(log: &Logger,
 
     // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
     // mutable references to taken state.
-    let s = match *graph.node_weight_mut(node).unwrap().inner_mut() {
-        NodeHandle::Taken(Type::Reader(ref r)) if partial_ok => {
-            // make sure Reader is actually prepared to receive state
-            assert!(r.is_materialized());
+    let s = graph[node]
+        .with_reader(|r| {
+            if partial_ok {
+                // make sure Reader is actually prepared to receive state
+                assert!(r.is_materialized());
 
-            if paths.len() != 1 {
-                unreachable!(); // due to FIXME above
-            }
+                if paths.len() != 1 {
+                    unreachable!(); // due to FIXME above
+                }
 
-            // since we're partially materializing a reader node,
-            // we need to give it a way to trigger replays.
-            InitialState::PartialGlobal {
-                gid: node,
-                cols,
-                key: r.key().unwrap(),
-                tag: first_tag.unwrap(),
-                trigger_tx: txs[&last_domain.unwrap()].clone(),
+                // since we're partially materializing a reader node,
+                // we need to give it a way to trigger replays.
+                InitialState::PartialGlobal {
+                    gid: node,
+                    cols,
+                    key: r.key().unwrap(),
+                    tag: first_tag.unwrap(),
+                    trigger_tx: txs[&last_domain.unwrap()].clone(),
+                }
+            } else {
+                InitialState::Global {
+                    cols,
+                    key: r.key().unwrap(),
+                    gid: node,
+                }
             }
-        }
-        NodeHandle::Taken(Type::Reader(ref r)) => {
-            InitialState::Global {
-                cols,
-                key: r.key().unwrap(),
-                gid: node,
-            }
-        }
-        NodeHandle::Owned(..) => unreachable!(),
-        _ if partial_ok => {
-            assert_eq!(index_on.len(), 1);
-            assert_eq!(index_on[0].len(), 1);
-            InitialState::PartialLocal(index_on[0][0])
-        }
-        _ => InitialState::IndexedLocal(index_on),
-    };
+        })
+        .unwrap_or_else(|| if partial_ok {
+                            assert_eq!(index_on.len(), 1);
+                            assert_eq!(index_on[0].len(), 1);
+                            InitialState::PartialLocal(index_on[0][0])
+                        } else {
+                            InitialState::IndexedLocal(index_on)
+                        });
 
     txs[&domain]
         .send(box Packet::PrepareState {
@@ -723,7 +716,7 @@ pub fn reconstruct(log: &Logger,
                 .1
                 .iter()
                 .skip(skip)
-                .map(|&(ni, key)| (graph[ni].addr(), key))
+                .map(|&(ni, key)| (*graph[ni].local_addr(), key))
                 .collect()
         };
 
@@ -759,7 +752,7 @@ pub fn reconstruct(log: &Logger,
             if i == 0 {
                 // first domain also gets to know source node
                 if let box Packet::SetupReplayPath { ref mut source, .. } = setup {
-                    *source = Some(graph[nodes[0].0].addr());
+                    *source = Some(*graph[nodes[0].0].local_addr());
                 }
             }
 
@@ -800,7 +793,10 @@ pub fn reconstruct(log: &Logger,
                 // the last node *must* be an egress node since there's a later domain
                 txs[domain]
                     .send(box Packet::UpdateEgress {
-                                  node: graph[nodes.last().unwrap().0].addr().as_local().clone(),
+                                  node: graph[nodes.last().unwrap().0]
+                                      .local_addr()
+                                      .as_local()
+                                      .clone(),
                                   new_tx: None,
                                   new_tag: Some((tag, segments[i + 1].1[0].0.into())),
                               })
@@ -823,7 +819,7 @@ pub fn reconstruct(log: &Logger,
             txs[&segments[0].0]
                 .send(box Packet::StartReplay {
                               tag: tag,
-                              from: graph[segments[0].1[0].0].addr(),
+                              from: *graph[segments[0].1[0].0].local_addr(),
                               ack: wait_tx.clone(),
                           })
                 .unwrap();
@@ -854,7 +850,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
             let n = &graph[ni];
             materialized
                 .get(&n.domain())
-                .map(|dm| dm.contains_key(n.addr().as_local()))
+                .map(|dm| dm.contains_key(n.local_addr().as_local()))
                 .unwrap_or(false)
         };
 
@@ -868,14 +864,14 @@ fn cost_fn<'a, T>(log: &'a Logger,
         let empty: HashSet<_> = parents
             .iter()
             .filter(|ni| empty.contains(ni))
-            .map(|ni| graph[*ni].addr())
+            .map(|ni| *graph[*ni].local_addr())
             .collect();
 
         let options = n.must_replay_among()
             .expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
-        parents.retain(|&parent| options.contains(&graph[parent].addr()));
+        parents.retain(|&parent| options.contains(graph[parent].local_addr()));
         assert!(!parents.is_empty());
 
         // if there is only one left, we don't have a choice
@@ -885,7 +881,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
         }
 
         // if *all* the options are empty, we can safely pick any of them
-        if parents.iter().all(|&p| empty.contains(&graph[p].addr())) {
+        if parents
+               .iter()
+               .all(|&p| empty.contains(graph[p].local_addr())) {
             return parents.pop();
         }
 
@@ -893,7 +891,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
         // must indeed be), and therefore that we can just pick that parent and get a free full
         // materialization. *however*, this would cause the node to be marked as fully
         // materialized, which is *not* okay if it has partially a materialized ancestor!
-        if let Some(&parent) = parents.iter().find(|&&p| empty.contains(&graph[p].addr())) {
+        if let Some(&parent) = parents
+               .iter()
+               .find(|&&p| empty.contains(graph[p].local_addr())) {
             if !parents.iter().any(|p| partial.contains(p)) {
                 // no partial ancestors!
                 return Some(parent);
@@ -971,7 +971,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 let stateful = &graph[stateful];
                 txs[&stateful.domain()]
                     .send(box Packet::StateSizeProbe {
-                                  node: *stateful.addr().as_local(),
+                                  node: *stateful.local_addr().as_local(),
                                   ack: tx,
                               })
                     .unwrap();

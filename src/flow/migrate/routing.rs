@@ -73,7 +73,7 @@ pub fn add(log: &Logger,
             if !new.contains(child) {
                 continue;
             }
-            if let node::Type::Egress { .. } = *graph[*child] {
+            if graph[*child].is_egress() {
                 // we already have an egress for this node!
                 assert!(egress.is_none());
                 egress = Some(*child);
@@ -94,7 +94,7 @@ pub fn add(log: &Logger,
                 if egress.is_none() {
                     // create an egress node to handle that
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
-                    let proxy = graph[node].mirror(node::Type::Egress(Some(Default::default())));
+                    let proxy = graph[node].mirror(node::special::Egress::default());
                     let eid = graph.add_node(proxy);
                     graph.add_edge(node, eid, false);
 
@@ -150,7 +150,7 @@ pub fn add(log: &Logger,
             // since we are traversing in topological order, egress nodes should have been added to
             // all our parents, and our incoming edges should have been updated. if that *isn't*
             // the case for a given parent, it must be a pre-existing parent.
-            if let node::Type::Egress { .. } = *graph[*parent] {
+            if graph[*parent].is_egress() {
                 continue;
             }
 
@@ -161,7 +161,7 @@ pub fn add(log: &Logger,
 
             let egress = egress.unwrap_or_else(|| {
                 // no, okay, so we need to add an egress for that other node,
-                let proxy = graph[*parent].mirror(node::Type::Egress(Some(Default::default())));
+                let proxy = graph[*parent].mirror(node::special::Egress::default());
                 let egress = graph.add_node(proxy);
 
                 trace!(log,
@@ -201,7 +201,7 @@ pub fn add(log: &Logger,
 
             if ingress.is_none() {
                 // nope -- create our new ingress node
-                let mut i = graph[parent].mirror(node::Type::Ingress);
+                let mut i = graph[parent].mirror(node::special::Ingress);
                 i.add_to(domain); // it belongs to this domain, not that of the parent
                 let i = graph.add_node(i);
                 graph.add_edge(parent, i, false);
@@ -272,7 +272,7 @@ pub fn connect(log: &Logger,
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
     for &node in new {
         let n = &graph[node];
-        if let node::Type::Ingress = **n {
+        if n.is_ingress() {
             // check the egress connected to this ingress
         } else {
             continue;
@@ -280,25 +280,24 @@ pub fn connect(log: &Logger,
 
         for egress in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             let egress_node = &graph[egress];
-            match **egress_node {
-                node::Type::Egress(..) => {
-                    trace!(log,
+            if egress_node.is_egress() {
+                trace!(log,
                            "connecting";
                            "egress" => egress.index(),
                            "ingress" => node.index()
                     );
-                    main_txs[&egress_node.domain()]
-                        .send(box Packet::UpdateEgress {
-                                      node: egress_node.addr().as_local().clone(),
-                                      new_tx: Some((node.into(),
-                                                    n.addr(),
-                                                    main_txs[&n.domain()].clone())),
-                                      new_tag: None,
-                                  })
-                        .unwrap();
-                }
-                node::Type::Source => {}
-                _ => unreachable!("ingress parent is not egress"),
+                main_txs[&egress_node.domain()]
+                    .send(box Packet::UpdateEgress {
+                                  node: egress_node.local_addr().as_local().clone(),
+                                  new_tx: Some((node.into(),
+                                                *n.local_addr(),
+                                                main_txs[&n.domain()].clone())),
+                                  new_tag: None,
+                              })
+                    .unwrap();
+            } else if egress_node.is_source() {
+            } else {
+                unreachable!("ingress parent is not egress");
             }
         }
     }

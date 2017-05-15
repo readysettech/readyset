@@ -86,9 +86,11 @@ impl<T: GroupedOperation> GroupedOperator<T> {
     }
 }
 
-impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T> {
-    fn take(&mut self) -> Box<Ingredient> {
-        Box::new(Clone::clone(self))
+impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
+    where Self: Into<NodeOperator>
+{
+    fn take(&mut self) -> NodeOperator {
+        Clone::clone(self).into()
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {

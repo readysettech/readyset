@@ -35,6 +35,17 @@ pub struct Reader {
     token_generator: Option<checktable::TokenGenerator>,
 }
 
+impl Default for Reader {
+    fn default() -> Self {
+        Reader {
+            writer: None,
+            streamers: Some(Vec::new()),
+            state: None,
+            token_generator: None,
+        }
+    }
+}
+
 impl Reader {
     pub fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
@@ -184,16 +195,5 @@ impl Reader {
                     }
                     .is_ok()
             });
-    }
-}
-
-impl Default for Reader {
-    fn default() -> Self {
-        Reader {
-            writer: None,
-            streamers: Some(Vec::new()),
-            state: None,
-            token_generator: None,
-        }
     }
 }

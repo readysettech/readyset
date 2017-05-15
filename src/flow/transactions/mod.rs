@@ -104,9 +104,10 @@ impl DomainState {
                     return None;
                 }
 
-                let ni = *n.borrow().inner.addr().as_local();
+                let lid = *n.borrow().local_addr().as_local();
+                let gid = *child.global_addr().as_global();
 
-                Some((ni, child.index))
+                Some((lid, gid))
             })
             .collect();
 

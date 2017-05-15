@@ -56,7 +56,7 @@ pub fn inform(log: &Logger,
                 continue;
             }
 
-            let node = domain::single::NodeDescriptor::new(graph, ni);
+            let node = graph.node_weight_mut(ni).unwrap().take();
             // new parents already have the right child list
             let old_parents = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
@@ -64,12 +64,12 @@ pub fn inform(log: &Logger,
                 .filter(|ni| old_nodes.contains(ni))
                 .map(|ni| &graph[ni])
                 .filter(|n| n.domain() == domain)
-                .map(|n| *n.addr().as_local())
+                .map(|n| *n.local_addr().as_local())
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(box Packet::AddNode {
-                              node: Box::new(node),
+                              node: node,
                               parents: old_parents,
                           })
                 .unwrap();

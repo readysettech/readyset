@@ -1,3 +1,8 @@
+use flow::core::processing::Ingredient;
+use std::collections::{HashSet, HashMap};
+use std::sync::Arc;
+use flow::prelude::*;
+
 pub mod base;
 pub mod grouped;
 pub mod join;
@@ -10,13 +15,185 @@ pub mod gatedid;
 pub mod filter;
 pub mod topk;
 
+pub enum NodeOperator {
+    Base(base::Base),
+    Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
+    Extremum(grouped::GroupedOperator<grouped::extremum::ExtremumOperator>),
+    Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
+    Join(join::Join),
+    Latest(latest::Latest),
+    Permute(permute::Permute),
+    Project(project::Project),
+    Union(union::Union),
+    Identity(identity::Identity),
+    GatedId(gatedid::GatedIdentity),
+    Filter(filter::Filter),
+    TopK(topk::TopK),
+}
+
+macro_rules! nodeop_from_impl {
+    ($variant:path, $type:ty) => {
+        impl From<$type> for NodeOperator {
+            fn from(other: $type) -> Self {
+                $variant(other)
+            }
+        }
+    }
+}
+
+nodeop_from_impl!(NodeOperator::Base, base::Base);
+nodeop_from_impl!(NodeOperator::Sum, grouped::GroupedOperator<grouped::aggregate::Aggregator>);
+nodeop_from_impl!(NodeOperator::Extremum, grouped::GroupedOperator<grouped::extremum::ExtremumOperator>);
+nodeop_from_impl!(NodeOperator::Concat, grouped::GroupedOperator<grouped::concat::GroupConcat>);
+nodeop_from_impl!(NodeOperator::Join, join::Join);
+nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
+nodeop_from_impl!(NodeOperator::Permute, permute::Permute);
+nodeop_from_impl!(NodeOperator::Project, project::Project);
+nodeop_from_impl!(NodeOperator::Union, union::Union);
+nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
+nodeop_from_impl!(NodeOperator::GatedId, gatedid::GatedIdentity);
+nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
+nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
+
+macro_rules! impl_ingredient_fn_mut {
+    ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
+        match *$self {
+            NodeOperator::Base(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Sum(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Extremum(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Permute(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::GatedId(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
+        }
+    }
+}
+
+macro_rules! impl_ingredient_fn_ref {
+    ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
+        match *$self {
+            NodeOperator::Base(ref i) => i.$fn($($arg),*),
+            NodeOperator::Sum(ref i) => i.$fn($($arg),*),
+            NodeOperator::Extremum(ref i) => i.$fn($($arg),*),
+            NodeOperator::Concat(ref i) => i.$fn($($arg),*),
+            NodeOperator::Join(ref i) => i.$fn($($arg),*),
+            NodeOperator::Latest(ref i) => i.$fn($($arg),*),
+            NodeOperator::Permute(ref i) => i.$fn($($arg),*),
+            NodeOperator::Project(ref i) => i.$fn($($arg),*),
+            NodeOperator::Union(ref i) => i.$fn($($arg),*),
+            NodeOperator::Identity(ref i) => i.$fn($($arg),*),
+            NodeOperator::GatedId(ref i) => i.$fn($($arg),*),
+            NodeOperator::Filter(ref i) => i.$fn($($arg),*),
+            NodeOperator::TopK(ref i) => i.$fn($($arg),*),
+        }
+    }
+}
+
+impl Ingredient for NodeOperator {
+    fn take(&mut self) -> NodeOperator {
+        impl_ingredient_fn_mut!(self,take,)
+    }
+    fn ancestors(&self) -> Vec<NodeAddress> {
+        impl_ingredient_fn_ref!(self,ancestors,)
+    }
+    fn should_materialize(&self) -> bool {
+        impl_ingredient_fn_ref!(self,should_materialize,)
+    }
+    fn must_replay_among(&self) -> Option<HashSet<NodeAddress>> {
+        impl_ingredient_fn_ref!(self,must_replay_among,)
+    }
+    fn will_query(&self, materialized: bool) -> bool {
+        impl_ingredient_fn_ref!(self, will_query, materialized)
+    }
+    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+        impl_ingredient_fn_ref!(self, suggest_indexes, you)
+    }
+    fn resolve(&self, i: usize) -> Option<Vec<(NodeAddress, usize)>> {
+        impl_ingredient_fn_ref!(self, resolve, i)
+    }
+    fn get_base(&self) -> Option<&base::Base> {
+        impl_ingredient_fn_ref!(self, get_base,)
+    }
+    fn get_base_mut(&mut self) -> Option<&mut base::Base> {
+        impl_ingredient_fn_mut!(self, get_base_mut,)
+    }
+    fn is_join(&self) -> bool {
+        impl_ingredient_fn_ref!(self, is_join,)
+    }
+    fn description(&self) -> String {
+        impl_ingredient_fn_ref!(self, description,)
+    }
+    fn on_connected(&mut self, graph: &Graph) {
+        impl_ingredient_fn_mut!(self, on_connected, graph)
+    }
+    fn on_commit(&mut self, you: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+        impl_ingredient_fn_mut!(self, on_commit, you, remap)
+    }
+    fn on_input(&mut self,
+                from: NodeAddress,
+                data: Records,
+                tracer: &mut Tracer,
+                domain: &DomainNodes,
+                states: &StateMap)
+                -> ProcessingResult {
+        impl_ingredient_fn_mut!(self, on_input, from, data, tracer, domain, states)
+    }
+    fn on_input_raw(&mut self,
+                    from: NodeAddress,
+                    data: Records,
+                    tracer: &mut Tracer,
+                    is_replay_of: Option<(usize, DataType)>,
+                    domain: &DomainNodes,
+                    states: &StateMap)
+                    -> RawProcessingResult {
+        impl_ingredient_fn_mut!(self,
+                                on_input_raw,
+                                from,
+                                data,
+                                tracer,
+                                is_replay_of,
+                                domain,
+                                states)
+    }
+    fn can_query_through(&self) -> bool {
+        impl_ingredient_fn_ref!(self, can_query_through, )
+    }
+    fn query_through<'a>(&self,
+                         columns: &[usize],
+                         key: &KeyType<DataType>,
+                         states: &'a StateMap)
+                         -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+        impl_ingredient_fn_ref!(self, query_through, columns, key, states)
+    }
+    fn lookup<'a>(&self,
+                  parent: NodeAddress,
+                  columns: &[usize],
+                  key: &KeyType<DataType>,
+                  domain: &DomainNodes,
+                  states: &'a StateMap)
+                  -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+        impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
+    }
+    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+        impl_ingredient_fn_ref!(self, parent_columns, column)
+    }
+    fn is_selective(&self) -> bool {
+        impl_ingredient_fn_ref!(self, is_selective,)
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use std::collections::HashMap;
     use std::cell;
 
     use flow::prelude::*;
-    use flow::domain::single;
     use flow::node;
 
     use petgraph::graph::NodeIndex;
@@ -35,7 +212,7 @@ pub mod test {
             let mut graph = Graph::new();
             let source = graph.add_node(node::Node::new("source",
                                                         &["because-type-inference"],
-                                                        node::Type::Source,
+                                                        node::special::Source,
                                                         true));
             MockGraph {
                 graph: graph,
@@ -57,7 +234,7 @@ pub mod test {
                                  defaults: Vec<DataType>)
                                  -> NodeAddress {
             use ops::base::Base;
-            let mut i: node::Type = Base::new(defaults).into();
+            let mut i = Base::new(defaults).into();
             i.on_connected(&self.graph);
             let ni = self.graph.add_node(Node::new(name, fields, i, false));
             self.graph.add_edge(self.source, ni, false);
@@ -73,12 +250,12 @@ pub mod test {
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], i: I, materialized: bool)
-            where I: Into<node::Type>
+            where I: Into<node::NodeType>
         {
             use petgraph;
             assert!(self.nut.is_none(), "only one node under test is supported");
 
-            let mut i: node::Type = i.into();
+            let mut i = i.into();
             i.on_connected(&self.graph);
 
             let parents = i.ancestors();
@@ -135,20 +312,9 @@ pub mod test {
                 nodes.push((node, self.graph[node].take()));
             }
 
-            let nodes: Vec<_> = nodes
+            let nodes: Vec<_> = self.nodes = nodes
                 .into_iter()
-                .map(|(ni, n)| {
-                         single::NodeDescriptor {
-                             index: ni,
-                             inner: n,
-                             children: Vec::default(),
-                         }
-                     })
-                .collect();
-
-            self.nodes = nodes
-                .into_iter()
-                .map(|n| {
+                .map(|(_, n)| {
                          use std::cell;
                          (*n.addr().as_local(), cell::RefCell::new(n))
                      })
@@ -210,9 +376,9 @@ pub mod test {
                 return u;
             }
 
-            let misses = single::materialize(&mut u,
-                                             *self.nut.unwrap().1.as_local(),
-                                             self.states.get_mut(self.nut.unwrap().1.as_local()));
+            let misses = node::materialize(&mut u,
+                                           *self.nut.unwrap().1.as_local(),
+                                           self.states.get_mut(self.nut.unwrap().1.as_local()));
             assert_eq!(misses, vec![]);
             u
         }
@@ -234,7 +400,7 @@ pub mod test {
             self.narrow_one::<Record>(d.into(), remember)
         }
 
-        pub fn node(&self) -> cell::Ref<single::NodeDescriptor> {
+        pub fn node(&self) -> cell::Ref<node::Node> {
             self.nodes[self.nut.unwrap().1.as_local()].borrow()
         }
 

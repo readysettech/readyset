@@ -36,8 +36,8 @@ impl Project {
 }
 
 impl Ingredient for Project {
-    fn take(&mut self) -> Box<Ingredient> {
-        Box::new(Clone::clone(self))
+    fn take(&mut self) -> NodeOperator {
+        Clone::clone(self).into()
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
