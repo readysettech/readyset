@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use flow::domain;
 use flow::prelude::*;
+use petgraph;
 use ops;
 
 mod process;
@@ -23,7 +24,7 @@ pub struct Node {
     transactional: bool,
 
     fields: Vec<String>,
-    pub children: Vec<NodeAddress>,
+    children: Vec<NodeAddress>,
     inner: NodeType,
     taken: bool,
 }
@@ -57,9 +58,26 @@ impl Node {
     }
 }
 
+#[must_use]
+pub struct DanglingDomainNode(Node);
+
+impl DanglingDomainNode {
+    pub fn finalize(self, graph: &Graph) -> Node {
+        let mut n = self.0;
+        let ni = *n.global_addr().as_global();
+        let dm = n.domain();
+        n.children = graph
+            .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+            .filter(|&c| graph[c].domain() == dm)
+            .map(|ni| *graph[ni].local_addr())
+            .collect();
+        n
+    }
+}
+
 // events
 impl Node {
-    pub fn take(&mut self) -> Node {
+    pub fn take(&mut self) -> DanglingDomainNode {
         assert!(!self.taken);
         assert!(!self.is_internal() || self.domain.is_some(),
                 "tried to take unassigned node");
@@ -69,10 +87,7 @@ impl Node {
         n.addr = self.addr;
         self.taken = true;
 
-        // TODO: need to populate .children
-        unimplemented!();
-
-        n
+        DanglingDomainNode(n)
     }
 
     pub fn on_commit(&mut self, remap: &HashMap<NodeAddress, NodeAddress>) {
@@ -146,8 +161,32 @@ impl DerefMut for Node {
     }
 }
 
+// children
+impl Node {
+    pub fn children(&self) -> &[NodeAddress] {
+        &self.children[..]
+    }
+
+    pub fn child(&self, i: usize) -> &NodeAddress {
+        &self.children[i]
+    }
+
+    pub fn has_children(&self) -> bool {
+        !self.children.is_empty()
+    }
+
+    pub fn nchildren(&self) -> usize {
+        self.children.len()
+    }
+}
+
 // attributes
 impl Node {
+    pub fn add_child(&mut self, child: NodeAddress) {
+        assert!(child.is_local());
+        self.children.push(child);
+    }
+
     pub fn add_column(&mut self, field: &str) -> usize {
         self.fields.push(field.to_string());
         self.fields.len() - 1

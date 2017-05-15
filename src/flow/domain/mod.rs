@@ -260,17 +260,17 @@ impl Domain {
         }
 
         let n = nodes[me.as_local()].borrow();
-        for i in 0..n.children.len() {
+        for i in 0..n.nchildren() {
             // avoid cloning if we can
-            let mut m = if i == n.children.len() - 1 {
+            let mut m = if i == n.nchildren() - 1 {
                 m.take().unwrap()
             } else {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            if enable_output || !nodes[n.children[i].as_local()].borrow().is_output() {
+            if enable_output || !nodes[n.child(i).as_local()].borrow().is_output() {
                 m.link_mut().src = me;
-                m.link_mut().dst = n.children[i];
+                m.link_mut().dst = *n.child(i);
 
                 for (k, mut v) in Self::dispatch(m,
                                                  not_ready,
@@ -292,7 +292,7 @@ impl Domain {
                 }
             } else {
                 let mut data = m.take_data();
-                match output_messages.entry(n.children[i]) {
+                match output_messages.entry(*n.child(i)) {
                     Entry::Occupied(entry) => {
                         entry.into_mut().append(&mut data);
                     }
@@ -384,7 +384,7 @@ impl Domain {
                 .process(&mut m, None, &mut self.state, &self.nodes, true);
             self.process_ptimes.stop();
             self.process_times.stop();
-            assert_eq!(n.borrow().children.len(), 0);
+            assert_eq!(n.borrow().nchildren(), 0);
         }
     }
 
@@ -433,8 +433,7 @@ impl Domain {
                                 .get_mut(&p)
                                 .unwrap()
                                 .borrow_mut()
-                                .children
-                                .push(*node.local_addr());
+                                .add_child(*node.local_addr());
                         }
                         self.nodes.insert(addr, cell::RefCell::new(node));
                         trace!(self.log, "new node incorporated"; "local" => addr.id());

@@ -57,6 +57,7 @@ pub fn inform(log: &Logger,
             }
 
             let node = graph.node_weight_mut(ni).unwrap().take();
+            let node = node.finalize(graph);
             // new parents already have the right child list
             let old_parents = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
