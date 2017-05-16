@@ -318,13 +318,15 @@ impl Packet {
         }
     }
 
-    pub fn take_data(self) -> Records {
-        match self {
-            Packet::Message { data, .. } => data,
-            Packet::Transaction { data, .. } => data,
-            Packet::ReplayPiece { data, .. } => data,
+    pub fn take_data(&mut self) -> Records {
+        use std::mem;
+        let inner = match *self {
+            Packet::Message { ref mut data, .. } => data,
+            Packet::Transaction { ref mut data, .. } => data,
+            Packet::ReplayPiece { ref mut data, .. } => data,
             _ => unreachable!(),
-        }
+        };
+        mem::replace(inner, Records::default())
     }
 
     pub fn clone_data(&self) -> Self {

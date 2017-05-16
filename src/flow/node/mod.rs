@@ -27,6 +27,8 @@ pub struct Node {
     children: Vec<NodeAddress>,
     inner: NodeType,
     taken: bool,
+
+    sharded_by: Option<(NodeAddress, usize)>,
 }
 
 // constructors
@@ -48,6 +50,8 @@ impl Node {
             children: Vec::new(),
             inner: inner.into(),
             taken: false,
+
+            sharded_by: None,
         }
     }
 
@@ -89,6 +93,16 @@ impl Node {
         self.taken = true;
 
         DanglingDomainNode(n)
+    }
+
+    /// Mark this node as sharded.
+    ///
+    /// The arguments give a canonical representation of which column the node is sharded by.
+    /// The canonical source column is the matching column in the view that first introduced the
+    /// given value. This is usually a `Base`, but can also be e.g., the output of an aggregation.
+    pub fn shard_by(&mut self, src: NodeAddress, col: usize) {
+        assert!(self.sharded_by.is_none());
+        self.sharded_by = Some((src, col))
     }
 
     pub fn on_commit(&mut self, remap: &HashMap<NodeAddress, NodeAddress>) {
@@ -183,6 +197,10 @@ impl Node {
 
 // attributes
 impl Node {
+    pub fn sharded_by(&self) -> Option<&(NodeAddress, usize)> {
+        self.sharded_by.as_ref()
+    }
+
     pub fn add_child(&mut self, child: NodeAddress) {
         assert!(child.is_local());
         self.children.push(child);

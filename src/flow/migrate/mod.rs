@@ -25,3 +25,4 @@ pub mod transactions;
 pub mod materialization;
 pub mod augmentation;
 pub mod booting;
+pub mod sharding;

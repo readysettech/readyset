@@ -723,6 +723,9 @@ impl<'a> Migration<'a> {
             new.insert(reader);
         }
 
+        // Shard the graph as desired
+        migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
+
         // Set up ingress and egress nodes
         let mut swapped =
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
