@@ -314,6 +314,15 @@ impl Ingredient for Base {
                 -> ProcessingResult {
         // Write incoming records to log before processing them if we are a durable node.
         let records_to_return;
+
+        // XXX(malte): this is currently incorrect for replays, which pass through the base node
+        // that they originate at. We will write *the whole table* out again (and erroneously so)
+        // because the information that we're processing a replay is not available inside
+        // `on_input`.
+        //
+        // See 5d0d03dddb753f3fc04b994d3eaf09fa910d9087 for details.
+        //
+        // TODO: we ought to fix this!
         match self.durability {
             Some(BaseDurabilityLevel::Buffered) => {
                 // keep track of tracer
