@@ -100,11 +100,20 @@ impl Node {
                     *t = tracer.take();
                 }
 
-                m.map_data(|rs| {
-                               misses.extend(materialize(rs,
-                                                         *addr.as_local(),
-                                                         state.get_mut(addr.as_local())));
-                           });
+                // When a replay originates at a base node, we replay the data *through* that same
+                // base node because its column set may have changed. However, this replay through
+                // the base node itself should *NOT* update the materialization, because otherwise
+                // it would duplicate each record in the base table every time a replay happens!
+                //
+                // So: only materialize if either (1) the message we're processing is not a replay,
+                // or (2) if the node we're at is not a base.
+                if m.is_regular() || i.get_base().is_none() {
+                    m.map_data(|rs| {
+                                   misses.extend(materialize(rs,
+                                                             *addr.as_local(),
+                                                             state.get_mut(addr.as_local())));
+                               });
+                }
 
                 misses
             }
