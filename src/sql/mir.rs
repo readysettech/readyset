@@ -690,6 +690,7 @@ impl SqlToMirConverter {
                                 st: &SelectStatement,
                                 qg: &QueryGraph)
                                 -> Vec<MirNodeRef> {
+        use std::cmp::Ordering;
         use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
@@ -735,7 +736,15 @@ impl SqlToMirConverter {
             let mut joined_tables = HashSet::new();
             let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
                 qg.edges.iter().collect();
-            sorted_edges.sort_by_key(|k| &(k.0).0);
+            // Sort the edges to ensure deterministic join order.
+            sorted_edges.sort_by(|&(a, _), &(b, _)| {
+                                     let src_ord = a.0.cmp(&b.0);
+                                     if src_ord == Ordering::Equal {
+                                         a.1.cmp(&b.1)
+                                     } else {
+                                         src_ord
+                                     }
+                                 });
             let mut prev_node = None;
 
             {
