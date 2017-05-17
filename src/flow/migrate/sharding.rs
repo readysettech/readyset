@@ -78,7 +78,12 @@ pub fn shard(log: &Logger,
         // output column resolves to.
         if let Some(want_sharding) = need_sharding.remove(&node.into()) {
             if want_sharding.len() != 1 {
-                unimplemented!();
+                // no supported yet -- force no sharding
+                error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
+                for (&ni, _) in &input_shardings {
+                    reshard(log, graph, ni, node, Sharding::None);
+                }
+                continue;
             }
             let want_sharding = want_sharding[0];
 
