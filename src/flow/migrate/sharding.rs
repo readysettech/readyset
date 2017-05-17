@@ -43,6 +43,7 @@ pub fn shard(log: &Logger,
             .collect();
 
         // FIXME: suggest_indexes will start returning local indices after the first migration :(
+        // FIXME: what about non-internal nodes?
         let mut need_sharding = graph[node].suggest_indexes(node.into());
         if need_sharding.is_empty() {
             // no shuffle necessary -- can re-use any existing sharding
@@ -68,7 +69,7 @@ pub fn shard(log: &Logger,
             let want_sharding = want_sharding[0];
 
             match graph[node].resolve(want_sharding) {
-                None => {
+                None if !graph[node].is_internal() || graph[node].get_base().is_none() => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
                     for (ni, s) in input_shardings.iter_mut() {
@@ -78,6 +79,11 @@ pub fn shard(log: &Logger,
                     info!(log, "de-sharding node that partitions by output key";
                           "node" => ?node);
                     // ok to continue since standard shard_by is None
+                    continue;
+                }
+                None => {
+                    // base nodes -- what do we shard them by?
+                    warn!(log, "not sharding base node"; "node" => ?node);
                     continue;
                 }
                 Some(want_sharding_input) => {
