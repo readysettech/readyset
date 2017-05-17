@@ -812,7 +812,7 @@ impl SqlToMirConverter {
             }
 
 
-            // 3. Get columns used by each filter node.
+            // 2. Get columns used by each filter node.
             let mut filter_columns = HashMap::new();
             let mut filter_nodes = Vec::new();
             let mut moved_filters = Vec::new();
@@ -837,7 +837,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 3. Grouped and function nodes
+            // 3. Add function and grouped nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
             match qg.relations.get("computed_columns") {
                 None => (),
@@ -1007,7 +1007,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 3. Generate the necessary filter node for each relation node in the query graph.
+            // 4. Generate the necessary filter node for each relation node in the query graph.
 
             // Need to iterate over relations in a deterministic order, as otherwise nodes will be
             // added in a different order every time, which will yield different node identifiers
@@ -1037,7 +1037,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            // 4. Get the final node
+            // 5. Get the final node
             let mut final_node: MirNodeRef = if prev_node.is_some() {
                 prev_node.unwrap().clone()
             } else {
@@ -1046,7 +1046,7 @@ impl SqlToMirConverter {
                 base_nodes[sorted_rels.last().unwrap().as_str()].clone()
             };
 
-            // 4. Potentially insert TopK node below the final node
+            // 6. Potentially insert TopK node below the final node
             if let Some(ref limit) = st.limit {
                 let group_by = qg.parameters();
 
