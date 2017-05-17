@@ -5,7 +5,7 @@ use std::collections::{HashSet, HashMap};
 use slog::Logger;
 use petgraph;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Sharding {
     None,
     Random,
@@ -51,6 +51,9 @@ pub fn shard(log: &Logger,
             } else {
                 Sharding::Random
             };
+            info!(log, "preserving sharding of pass-through node";
+                  "node" => ?node,
+                  "sharding" => ?s);
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
         }
@@ -69,9 +72,11 @@ pub fn shard(log: &Logger,
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
                     for (ni, s) in input_shardings.iter_mut() {
-                        reshard(graph, *ni, node, Sharding::None);
+                        reshard(log, graph, *ni, node, Sharding::None);
                         *s = Sharding::None;
                     }
+                    info!(log, "de-sharding node that partitions by output key";
+                          "node" => ?node);
                     // ok to continue since standard shard_by is None
                     continue;
                 }
@@ -93,11 +98,19 @@ pub fn shard(log: &Logger,
                             if in_shard_col != lookup_col {
                                 // we do lookups on this input on a different column than the one
                                 // that produces the output shard column.
+                                warn!(log, "not sharding self-lookup node; lookup conflict";
+                                      "node" => ?node,
+                                      "wants" => want_sharding,
+                                      "lookup" => ?(ni, lookup_col));
                                 ok = false;
                             }
                         } else {
                             // we do lookups on this input column, but it's not the one we're
                             // sharding output on -- no unambigous sharding.
+                            warn!(log, "not sharding self-lookup node; also looks up by other";
+                                  "node" => ?node,
+                                  "wants" => want_sharding,
+                                  "lookup" => ?(ni, lookup_col));
                             ok = false;
                         }
                     }
@@ -108,14 +121,16 @@ pub fn shard(log: &Logger,
                             let need_sharding = Sharding::ByColumn(col);
                             if input_shardings[ni.as_global()] != need_sharding {
                                 // input is sharded by different key -- need shuffle
-                                reshard(graph, *ni.as_global(), node, need_sharding);
+                                reshard(log, graph, *ni.as_global(), node, need_sharding);
                                 input_shardings.insert(*ni.as_global(), need_sharding);
                             }
                         }
-                        graph
-                            .node_weight_mut(node)
-                            .unwrap()
-                            .shard_by(Sharding::ByColumn(want_sharding));
+
+                        let s = Sharding::ByColumn(want_sharding);
+                        info!(log, "sharding node doing self-lookup";
+                              "node" => ?node,
+                              "sharding" => ?s);
+                        graph.node_weight_mut(node).unwrap().shard_by(s);
                         continue;
                     }
                 }
@@ -128,6 +143,7 @@ pub fn shard(log: &Logger,
             // TODO: we kind of want to know if any of our children (transitively) *want* us to
             // sharded by a particular key. if they do, we could shard more of the computation,
             // which is probably good for us.
+            info!(log, "preserving non-sharding of node"; "node" => ?node);
             continue;
         } else {
             // we do lookups into at least one view that is sharded. the safe thing to do here is
@@ -174,14 +190,15 @@ pub fn shard(log: &Logger,
                 for &(ni, src) in &srcs {
                     let need_sharding = Sharding::ByColumn(src);
                     if input_shardings[ni.as_global()] != need_sharding {
-                        reshard(graph, *ni.as_global(), node, need_sharding);
+                        reshard(log, graph, *ni.as_global(), node, need_sharding);
                         input_shardings.insert(*ni.as_global(), need_sharding);
                     }
                 }
-                graph
-                    .node_weight_mut(node)
-                    .unwrap()
-                    .shard_by(Sharding::ByColumn(col));
+                let s = Sharding::ByColumn(col);
+                info!(log, "sharding node with consistent lookup column";
+                      "node" => ?node,
+                      "sharding" => ?s);
+                graph.node_weight_mut(node).unwrap().shard_by(s);
                 continue 'nodes;
             }
 
@@ -191,10 +208,11 @@ pub fn shard(log: &Logger,
             for ni in need_sharding.keys() {
                 if input_shardings[ni.as_global()] != sharding {
                     // ancestor must be forced to right sharding
-                    reshard(graph, *ni.as_global(), node, sharding);
+                    reshard(log, graph, *ni.as_global(), node, sharding);
                     input_shardings.insert(*ni.as_global(), sharding);
                 }
             }
+            warn!(log, "forcing de-sharding"; "node" => ?node);
         }
     }
 
@@ -213,11 +231,15 @@ pub fn shard(log: &Logger,
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by column `col`.
-fn reshard(graph: &mut Graph, src: NodeIndex, dst: NodeIndex, to: Sharding) {
+fn reshard(log: &Logger, graph: &mut Graph, src: NodeIndex, dst: NodeIndex, to: Sharding) {
     if graph[src].sharded_by() == Sharding::None {
         // src isn't sharded, so conforms to all shardings
         return;
     }
 
-    unimplemented!();
+    error!(log, "told to shuffle";
+           "src" => ?src,
+           "dst" => ?dst,
+           "sharding" => ?to);
+    //unimplemented!();
 }
