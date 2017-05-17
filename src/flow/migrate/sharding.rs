@@ -43,8 +43,22 @@ pub fn shard(log: &Logger,
             .collect();
 
         // FIXME: suggest_indexes will start returning local indices after the first migration :(
-        // FIXME: what about non-internal nodes?
-        let mut need_sharding = graph[node].suggest_indexes(node.into());
+        let mut need_sharding = if graph[node].is_internal() {
+            graph[node].suggest_indexes(node.into())
+        } else if graph[node].is_reader() {
+            // TODO: we may want to allow sharded Readers eventually...
+            info!(log, "forcing de-sharding prior to Reader"; "node" => ?node);
+            assert_eq!(input_shardings.len(), 1);
+            reshard(log,
+                    graph,
+                    input_shardings.keys().next().cloned().unwrap(),
+                    node,
+                    Sharding::None);
+            continue;
+        } else {
+            // non-internal nodes are always pass-through
+            HashMap::new()
+        };
         if need_sharding.is_empty() {
             // no shuffle necessary -- can re-use any existing sharding
             let s = if input_shardings.len() == 1 {
@@ -68,7 +82,17 @@ pub fn shard(log: &Logger,
             }
             let want_sharding = want_sharding[0];
 
-            match graph[node].resolve(want_sharding) {
+            let resolved = if graph[node].is_internal() {
+                graph[node].resolve(want_sharding)
+            } else {
+                // non-internal nodes just pass through columns
+                assert_eq!(input_shardings.len(), 1);
+                Some(graph
+                         .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                         .map(|ni| (ni.into(), want_sharding))
+                         .collect())
+            };
+            match resolved {
                 None if !graph[node].is_internal() || graph[node].get_base().is_none() => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
