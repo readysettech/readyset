@@ -37,16 +37,16 @@ pub fn shard(log: &Logger,
     // we want to shard every node by its "input" index. if the index required from a parent
     // doesn't match the current sharding key, we need to do a shuffle (i.e., a Union + Sharder).
     for node in topo_list {
-        let input_shardings: HashMap<_, _> = graph
+        let mut input_shardings: HashMap<_, _> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .map(|ni| (ni, graph[ni].sharded_by()))
             .collect();
 
-        let need_sharding = graph[node].suggest_indexes(node.into());
+        let mut need_sharding = graph[node].suggest_indexes(node.into());
         if need_sharding.is_empty() {
             // no shuffle necessary -- can re-use any existing sharding
             let s = if input_shardings.len() == 1 {
-                input_shardings.into_iter().next().unwrap()
+                input_shardings.into_iter().map(|(_, s)| s).next().unwrap()
             } else {
                 Sharding::Random
             };
@@ -60,21 +60,27 @@ pub fn shard(log: &Logger,
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
         if let Some(need_sharding) = need_sharding.remove(&node.into()) {
+            if need_sharding.len() != 1 {
+                unimplemented!();
+            }
+            let need_sharding = need_sharding[0];
+
             match graph[node].resolve(need_sharding) {
                 None => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
-                    for ni in input_shardings.keys() {
-                        reshard(graph, ni, node, Sharding::None);
-                        input_shardings.insert(ni, Sharding::None);
+                    for (ni, s) in input_shardings.iter_mut() {
+                        reshard(graph, *ni, node, Sharding::None);
+                        *s = Sharding::None;
                     }
                 }
                 Some(need_sharding_in) => {
                     for (ni, need_sharding) in need_sharding_in {
-                        if have_sharding != Sharding::ByColum(need_sharding) {
+                        let need_sharding = Sharding::ByColumn(need_sharding);
+                        if input_shardings[ni.as_global()] != need_sharding {
                             // input is sharded by different key -- need shuffle
-                            reshard(graph, ni, node, need_sharding);
-                            input_shardings.insert(ni, Sharding::ByColumn(need_sharding));
+                            reshard(graph, *ni.as_global(), node, need_sharding);
+                            input_shardings.insert(*ni.as_global(), need_sharding);
                         }
                     }
                     sharding = Sharding::ByColumn(need_sharding);
@@ -82,43 +88,86 @@ pub fn shard(log: &Logger,
             }
         }
 
-        // any lookups we do into ancestor views need to be sharded by the lookup key (or not at
-        // all) to give correct results. if they're not, we need to shuffle them.
-        if input_shardings.values().all(|s| s == Sharding::None) {
+        if input_shardings.values().all(|s| s == &Sharding::None) {
             // none of our inputs are sharded, so we are also not sharded
-            if sharding == Sharding::Random {
-                // TODO: we kind of want to know if any of our children (transitively) *want* us to
-                // sharded by a particular key. if they do, we could shard more of the computation,
-                // which is probably good for us.
-                sharding = Sharding::None
-            } else {
-                // the if let Some above must have kicked in, and we should keep that sharding
-            }
-        } else {
-            for (ni, cols) in need_sharding {
-                if cols.len() != 1 {
-                    unimplemented!();
-                }
-                let need_sharding = cols[0];
+            // TODO: we kind of want to know if any of our children (transitively) *want* us to
+            // sharded by a particular key. if they do, we could shard more of the computation,
+            // which is probably good for us.
+            sharding = Sharding::None
 
-                // given input must be unsharded, or sharded by given key
-                if let Some(have_sharding) = input_shardings.get(ni) {
-                    if have_sharding != Sharding::ByColumn(need_sharding) {
+            // if sharding == Sharding::Random, the if let Some above must have kicked in, and we
+            // might want to start sharding here and keep that sharding.
+        } else {
+            // we do lookups into at least one view that is sharded. the safe thing to do here is
+            // to simply force all our ancestors to be unsharded. however, if a single output
+            // column resolves to the lookup column of *every* ancestor, we know that sharding by
+            // that column *should* be safe, so we mark the output as sharded by that key.
+            let mut done = false;
+            'outer: for col in 0..graph[node].fields().len() {
+                let srcs = match graph[node].resolve(col) {
+                    Some(srcs) => srcs,
+                    None => continue,
+                };
+
+                if srcs.len() != input_shardings.len() {
+                    continue;
+                }
+
+                // resolved to all ancestors!
+                // does it match the key we're doing lookups based on?
+                for &(ni, src) in &srcs {
+                    match need_sharding.get(&ni) {
+                        Some(col) if col.len() != 1 => {
+                            // we're looking up by a compound key -- that's hard to shard
+                            continue 'outer;
+                        }
+                        Some(col) if col[0] != src => {
+                            // we're looking up by a different key. it's kind of weird that this
+                            // output column still resolved to a column in all our inputs...
+                            continue 'outer;
+                        }
+                        Some(_) => {
+                            // looking up by the same column -- that's fine
+                        }
+                        None => {
+                            // we're never looking up in this view. must mean that a given
+                            // column resolved to *two* columns in the *same* view?
+                            unreachable!()
+                        }
+                    }
+                }
+
+                // `col` resolves to the same column we use to lookup in each ancestor,
+                // so it's safe for us to shard by `col`! we do have to ensure that each
+                // input is also sharded by that key though.
+                if let Sharding::ByColumn(oldcol) = sharding {
+                    // we've already chosen to shard by a key?
+                    assert_eq!(oldcol, col);
+                }
+                sharding = Sharding::ByColumn(col);
+                for &(ni, src) in &srcs {
+                    let need_sharding = Sharding::ByColumn(src);
+                    if input_shardings[ni.as_global()] != need_sharding {
+                        reshard(graph, *ni.as_global(), node, need_sharding);
+                        input_shardings.insert(*ni.as_global(), need_sharding);
+                    }
+                }
+                done = true;
+                break;
+            }
+
+            if !done {
+                // we couldn't use our heuristic :(
+                // force everything to be unsharded...
+                sharding = Sharding::None;
+                for ni in need_sharding.keys() {
+                    if input_shardings[ni.as_global()] != sharding {
                         // ancestor must be forced to right sharding
-                        reshard(graph, ni, node, need_sharding);
-                        input_shardings.insert(ni, Sharding::ByColumn(need_sharding));
+                        reshard(graph, *ni.as_global(), node, sharding);
+                        input_shardings.insert(*ni.as_global(), sharding);
                     }
                 }
             }
-
-            // at least one of our inputs is sharded. who knows what we're sharded by now!
-            //
-            // TODO:
-            // we should do better here. a join should be marked as sharded by the join column.
-            // the way to detect this is probably to check if there is *some* column in the
-            // output of this node that resolves to the need_sharding column of *all*
-            // ancestors? could also add `Node::produces_sharding`?
-            sharding = Sharding::Random;
         }
 
         graph.node_weight_mut(node).unwrap().shard_by(sharding);
@@ -130,13 +179,17 @@ pub fn shard(log: &Logger,
     // multiple copies of the given node. but that probably has very deep-reaching consequences in
     // the code...
 
+    // TODO
+    // maybe we can "flatten" shuffles here? if we detect a node that is unsharded that is
+    // immediately followed by a sharder, we can push the sharder up?
+
     swaps
 }
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by column `col`.
-fn reshard(graph: &mut Graph, src: NodeIndex, dst: NodeIndex, col: usize) {
-    if graph[src].shard_by() == Sharding::None {
+fn reshard(graph: &mut Graph, src: NodeIndex, dst: NodeIndex, to: Sharding) {
+    if graph[src].sharded_by() == Sharding::None {
         // src isn't sharded, so conforms to all shardings
         return;
     }
