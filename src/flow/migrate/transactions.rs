@@ -63,8 +63,8 @@ pub fn finalize(ingresses_from_base: HashMap<domain::Index, HashMap<NodeIndex, u
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ctx = txs.get_mut(&domain).unwrap();
         let _ = ctx.send(box Packet::CompleteMigration {
-                                 at: at,
-                                 ingress_from_base: ingress_from_base,
-                             });
+                             at: at,
+                             ingress_from_base: ingress_from_base,
+                         });
     }
 }

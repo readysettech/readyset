@@ -63,17 +63,15 @@ impl Ingredient for Project {
         // Eliminate emit specifications which require no permutation of
         // the inputs, so we don't needlessly perform extra work on each
         // update.
-        self.emit = self.emit
-            .take()
-            .and_then(|emit| {
-                let complete = emit.len() == self.cols && self.additional.is_none();
-                let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
-                if complete && sequential {
-                    None
-                } else {
-                    Some(emit)
-                }
-            });
+        self.emit = self.emit.take().and_then(|emit| {
+            let complete = emit.len() == self.cols && self.additional.is_none();
+            let sequential = emit.iter().enumerate().all(|(i, &j)| i == j);
+            if complete && sequential {
+                None
+            } else {
+                Some(emit)
+            }
+        });
     }
 
     fn on_input(&mut self,

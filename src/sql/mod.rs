@@ -699,11 +699,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.aid")],
                                 &[&Column {
-                                     name: String::from("votes"),
-                                     alias: Some(String::from("votes")),
-                                     table: None,
-                                     function: Some(f),
-                                 }]);
+                                      name: String::from("votes"),
+                                      alias: Some(String::from("votes")),
+                                      table: None,
+                                      function: Some(f),
+                                  }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
@@ -820,11 +820,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[],
                                 &[&Column {
-                                     name: String::from("count"),
-                                     alias: Some(String::from("count")),
-                                     table: None,
-                                     function: Some(f),
-                                 }]);
+                                      name: String::from("count"),
+                                      alias: Some(String::from("count")),
+                                      table: None,
+                                      function: Some(f),
+                                  }]);
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
@@ -866,11 +866,11 @@ mod tests {
         let qid = query_id_hash(&["computed_columns", "votes"],
                                 &[&Column::from("votes.userid")],
                                 &[&Column {
-                                     name: String::from("count"),
-                                     alias: Some(String::from("count")),
-                                     table: None,
-                                     function: Some(f),
-                                 }]);
+                                      name: String::from("count"),
+                                      alias: Some(String::from("count")),
+                                      table: None,
+                                      function: Some(f),
+                                  }]);
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));

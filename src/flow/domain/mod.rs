@@ -327,10 +327,10 @@ impl Domain {
 
         let mut egress_messages = HashMap::new();
         let (ts, tracer) = if let Some(&box Packet::Transaction {
-                                               state: ref ts @ TransactionState::Committed(..),
-                                               ref tracer,
-                                               ..
-                                           }) = messages.iter().next() {
+                                           state: ref ts @ TransactionState::Committed(..),
+                                           ref tracer,
+                                           ..
+                                       }) = messages.iter().next() {
             (ts.clone(), tracer.clone())
         } else {
             unreachable!();
@@ -357,19 +357,19 @@ impl Domain {
             // TODO: message should be from actual parent, not self.
             let m = if n.borrow().is_transactional() {
                 box Packet::Transaction {
-                        link: Link::new(addr, addr),
-                        data: data,
-                        state: ts.clone(),
-                        tracer: tracer.clone(),
-                    }
+                    link: Link::new(addr, addr),
+                    data: data,
+                    state: ts.clone(),
+                    tracer: tracer.clone(),
+                }
             } else {
                 // The packet is about to hit a non-transactional output node (which could be an
                 // egress node), so it must be converted to a normal normal message.
                 box Packet::Message {
-                        link: Link::new(addr, addr),
-                        data: data,
-                        tracer: tracer.clone(),
-                    }
+                    link: Link::new(addr, addr),
+                    data: data,
+                    tracer: tracer.clone(),
+                }
             };
 
             if !self.not_ready.is_empty() && self.not_ready.contains(addr.as_local()) {
@@ -514,9 +514,9 @@ impl Domain {
                                         tx.lock()
                                             .unwrap()
                                             .send(box Packet::RequestPartialReplay {
-                                                          key: vec![key.clone()],
-                                                          tag: tag,
-                                                      })
+                                                      key: vec![key.clone()],
+                                                      tag: tag,
+                                                  })
                                             .unwrap();
                                     });
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
@@ -563,14 +563,13 @@ impl Domain {
                         } else {
                             info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                         }
-                        self.replay_paths
-                            .insert(tag,
-                                    ReplayPath {
-                                        source,
-                                        path,
-                                        done_tx,
-                                        trigger,
-                                    });
+                        self.replay_paths.insert(tag,
+                                                 ReplayPath {
+                                                     source,
+                                                     path,
+                                                     done_tx,
+                                                     trigger,
+                                                 });
                     }
                     Packet::RequestPartialReplay { tag, key } => {
                         match self.replay_paths.get(&tag).unwrap() {
@@ -618,8 +617,8 @@ impl Domain {
                         }
 
                         if let &mut ReplayPath {
-                                        trigger: TriggerEndpoint::End(ref mut trigger), ..
-                                    } = self.replay_paths.get_mut(&tag).unwrap() {
+                                   trigger: TriggerEndpoint::End(ref mut trigger), ..
+                               } = self.replay_paths.get_mut(&tag).unwrap() {
                             trigger
                                 .send(box Packet::RequestPartialReplay { tag, key })
                                 .unwrap();
@@ -661,10 +660,10 @@ impl Domain {
                         );
 
                         let m = box Packet::FullReplay {
-                                        link: Link::new(from, self.replay_paths[&tag].path[0].0),
-                                        tag: tag,
-                                        state: state,
-                                    };
+                            link: Link::new(from, self.replay_paths[&tag].path[0].0),
+                            tag: tag,
+                            state: state,
+                        };
 
                         self.handle_replay(m);
                     }
@@ -798,28 +797,28 @@ impl Domain {
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let m = Some(box Packet::ReplayPiece {
-                                         link: Link::new(source, path[0].0),
-                                         tag: tag,
-                                         context: ReplayPieceContext::Partial {
-                                             for_key: Vec::from(key),
-                                             ignore: false,
-                                         },
-                                         data: Records::from_iter(rs.into_iter().cloned()),
-                                         transaction_state: transaction_state,
-                                     });
+                                     link: Link::new(source, path[0].0),
+                                     tag: tag,
+                                     context: ReplayPieceContext::Partial {
+                                         for_key: Vec::from(key),
+                                         ignore: false,
+                                     },
+                                     data: Records::from_iter(rs.into_iter().cloned()),
+                                     transaction_state: transaction_state,
+                                 });
                     (m, source, false)
                 } else if transaction_state.is_some() {
                     // we need to forward a ReplayPiece for the timestamp we claimed
                     let m = Some(box Packet::ReplayPiece {
-                                         link: Link::new(source, path[0].0),
-                                         tag: tag,
-                                         context: ReplayPieceContext::Partial {
-                                             for_key: Vec::from(key),
-                                             ignore: true,
-                                         },
-                                         data: Records::default(),
-                                         transaction_state: transaction_state,
-                                     });
+                                     link: Link::new(source, path[0].0),
+                                     tag: tag,
+                                     context: ReplayPieceContext::Partial {
+                                         for_key: Vec::from(key),
+                                         ignore: true,
+                                     },
+                                     data: Records::default(),
+                                     transaction_state: transaction_state,
+                                 });
                     (m, source, true)
                 } else {
                     (None, source, true)
@@ -859,10 +858,10 @@ impl Domain {
             // this loop is just here so we have a way of giving up the borrow of self.replay_paths
 
             let &mut ReplayPath {
-                         ref path,
-                         ref mut done_tx,
-                         ..
-                     } = self.replay_paths.get_mut(&tag).unwrap();
+                ref path,
+                ref mut done_tx,
+                ..
+            } = self.replay_paths.get_mut(&tag).unwrap();
 
             match self.mode {
                 DomainMode::Forwarding if done_tx.is_some() => {
@@ -932,8 +931,8 @@ impl Domain {
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
 
             if let box Packet::ReplayPiece {
-                           context: ReplayPieceContext::Partial { ignore: true, .. }, ..
-                       } = m {
+                       context: ReplayPieceContext::Partial { ignore: true, .. }, ..
+                   } = m {
                 let mut n = self.nodes[&path.last().unwrap().0.as_local()].borrow_mut();
                 if n.is_egress() && n.is_transactional() {
                     // We need to propagate this replay even though it contains no data, so that
@@ -967,10 +966,10 @@ impl Domain {
                         if n.is_egress() {
                             // forward the state to the next domain without doing anything with it.
                             let mut p = Some(box Packet::FullReplay {
-                                                     tag: tag,
-                                                     link: link, // the egress node will fix this up
-                                                     state: state,
-                                                 });
+                                                 tag: tag,
+                                                 link: link, // the egress node will fix this up
+                                                 state: state,
+                                             });
                             debug!(self.log, "doing bulk egress forward");
                             n.process(&mut p, None, &mut self.state, &self.nodes, false);
                             debug!(self.log, "bulk egress forward completed");
@@ -988,12 +987,12 @@ impl Domain {
                         // finishes. so, we deal with this case separately (and also avoid spawning
                         // a thread to walk empty state).
                         let p = box Packet::ReplayPiece {
-                                        tag: tag,
-                                        link: link,
-                                        context: ReplayPieceContext::Regular { last: true },
-                                        data: Records::default(),
-                                        transaction_state: None,
-                                    };
+                            tag: tag,
+                            link: link,
+                            context: ReplayPieceContext::Regular { last: true },
+                            data: Records::default(),
+                            transaction_state: None,
+                        };
 
                         debug!(self.log, "empty full state replay conveyed");
                         playback = Some(p);
@@ -1008,12 +1007,12 @@ impl Domain {
                         // we may already have processed some other messages that are not yet a
                         // part of state.
                         let p = box Packet::ReplayPiece {
-                                        tag: tag,
-                                        link: link.clone(),
-                                        context: ReplayPieceContext::Regular { last: false },
-                                        data: Vec::<Record>::new().into(),
-                                        transaction_state: None,
-                                    };
+                            tag: tag,
+                            link: link.clone(),
+                            context: ReplayPieceContext::Regular { last: false },
+                            data: Vec::<Record>::new().into(),
+                            transaction_state: None,
+                        };
                         playback = Some(p);
 
                         let log = self.log.new(o!());
@@ -1088,12 +1087,12 @@ impl Domain {
 
                     // forward the current message through all local nodes.
                     let m = box Packet::ReplayPiece {
-                                    link: link.clone(),
-                                    tag,
-                                    data,
-                                    context: context.clone(),
-                                    transaction_state: transaction_state.clone(),
-                                };
+                        link: link.clone(),
+                        tag,
+                        data,
+                        context: context.clone(),
+                        transaction_state: transaction_state.clone(),
+                    };
                     let mut m = Some(m);
 
                     // keep track of whether we're filling any partial holes
@@ -1110,8 +1109,8 @@ impl Domain {
 
                         if !n.is_transactional() {
                             if let Some(box Packet::ReplayPiece {
-                                                ref mut transaction_state, ..
-                                            }) = m {
+                                            ref mut transaction_state, ..
+                                        }) = m {
                                 // Transactional replays that cross into non-transactional subgraphs
                                 // should stop being transactional. This is necessary to ensure that
                                 // they don't end up being buffered, and thus re-ordered relative to
@@ -1175,10 +1174,9 @@ impl Domain {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
                                     n.with_reader_mut(|r| {
-                                                          r.writer_mut()
-                                                              .map(|wh| {
-                                                                       wh.mark_hole(&partial_key[0])
-                                                                   });
+                                                          r.writer_mut().map(|wh| {
+                                            wh.mark_hole(&partial_key[0])
+                                        });
                                                       });
                                 }
                             } else if is_reader {
@@ -1206,15 +1204,15 @@ impl Domain {
                                         // domains don't end up waiting forever for the timestamp we
                                         // claimed.
                                         let m = box Packet::ReplayPiece {
-                                                        link: link, // TODO: use dummy link instead
-                                                        tag,
-                                                        data: Vec::<Record>::new().into(),
-                                                        context: ReplayPieceContext::Partial {
-                                                            for_key: partial_key.unwrap().clone(),
-                                                            ignore: true,
-                                                        },
-                                                        transaction_state,
-                                                    };
+                                            link: link, // TODO: use dummy link instead
+                                            tag,
+                                            data: Vec::<Record>::new().into(),
+                                            context: ReplayPieceContext::Partial {
+                                                for_key: partial_key.unwrap().clone(),
+                                                ignore: true,
+                                            },
+                                            transaction_state,
+                                        };
                                         // No need to set link src/dst since the egress node will
                                         // not use them.
                                         let mut m = Some(m);
@@ -1235,12 +1233,10 @@ impl Domain {
                         // if we missed during replay, we need to do a replay
                         if partial_key.is_some() && !misses.is_empty() {
                             // replays are always for just one key
-                            assert!(misses
-                                        .iter()
-                                        .all(|miss| {
-                                                 miss.node == misses[0].node &&
-                                                 miss.key == misses[0].key
-                                             }));
+                            assert!(misses.iter().all(|miss| {
+                                                          miss.node == misses[0].node &&
+                                                          miss.key == misses[0].key
+                                                      }));
                             let miss = misses.swap_remove(0);
                             need_replay = Some((miss.node, miss.key, tag));
                             break 'outer;

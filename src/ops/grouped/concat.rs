@@ -337,63 +337,58 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
         // group 1 had [2], now has [1,2]
-        assert!(rs.iter()
-                    .any(|r| if let Record::Negative(ref r) = *r {
-                             if r[0] == 1.into() {
-                                 assert_eq!(r[1], ".2;".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
-        assert!(rs.iter()
-                    .any(|r| if let Record::Positive(ref r) = *r {
-                             if r[0] == 1.into() {
-                                 assert_eq!(r[1], ".1;#.2;".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  if r[0] == 1.into() {
+                                      assert_eq!(r[1], ".2;".into());
+                                      true
+                                  } else {
+                                      false
+                                  }
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  if r[0] == 1.into() {
+                                      assert_eq!(r[1], ".1;#.2;".into());
+                                      true
+                                  } else {
+                                      false
+                                  }
+                              } else {
+                                  false
+                              }));
         // group 2 was [2], is now [1,2,3]
-        assert!(rs.iter()
-                    .any(|r| if let Record::Negative(ref r) = *r {
-                             if r[0] == 2.into() {
-                                 assert_eq!(r[1], ".2;".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
-        assert!(rs.iter()
-                    .any(|r| if let Record::Positive(ref r) = *r {
-                             if r[0] == 2.into() {
-                                 assert_eq!(r[1], ".1;#.2;#.3;".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+                                  if r[0] == 2.into() {
+                                      assert_eq!(r[1], ".2;".into());
+                                      true
+                                  } else {
+                                      false
+                                  }
+                              } else {
+                                  false
+                              }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  if r[0] == 2.into() {
+                                      assert_eq!(r[1], ".1;#.2;#.3;".into());
+                                      true
+                                  } else {
+                                      false
+                                  }
+                              } else {
+                                  false
+                              }));
         // group 3 was [], is now [3]
-        assert!(rs.iter()
-                    .any(|r| if let Record::Positive(ref r) = *r {
-                             if r[0] == 3.into() {
-                                 assert_eq!(r[1], ".3;".into());
-                                 true
-                             } else {
-                                 false
-                             }
-                         } else {
-                             false
-                         }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+                                  if r[0] == 3.into() {
+                                      assert_eq!(r[1], ".3;".into());
+                                      true
+                                  } else {
+                                      false
+                                  }
+                              } else {
+                                  false
+                              }));
     }
 
     #[test]

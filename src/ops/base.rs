@@ -357,9 +357,9 @@ impl Ingredient for Base {
                     self.buffered_writes.as_mut().unwrap().append(&mut rs);
 
                     return ProcessingResult {
-                               results: Records::default(),
-                               misses: Vec::new(),
-                           };
+                        results: Records::default(),
+                        misses: Vec::new(),
+                    };
                 }
             }
             Some(BaseDurabilityLevel::SyncImmediately) => {
@@ -371,34 +371,32 @@ impl Ingredient for Base {
             }
         }
 
-        let results = records_to_return
-            .into_iter()
-            .map(|r| {
-                //rustfmt
-                match r {
-                    Record::Positive(u) => Record::Positive(u),
-                    Record::Negative(u) => Record::Negative(u),
-                    Record::DeleteRequest(key) => {
-                        let cols = self.primary_key
-                            .as_ref()
-                            .expect("base must have a primary key to support deletions");
-                        let db =
+        let results = records_to_return.into_iter().map(|r| {
+            //rustfmt
+            match r {
+                Record::Positive(u) => Record::Positive(u),
+                Record::Negative(u) => Record::Negative(u),
+                Record::DeleteRequest(key) => {
+                    let cols = self.primary_key
+                        .as_ref()
+                        .expect("base must have a primary key to support deletions");
+                    let db =
                     state.get(self.us
                                   .as_ref()
                                   .unwrap()
                                   .as_local())
                         .expect("base must have its own state materialized to support deletions");
 
-                        match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
-                            LookupResult::Some(rows) => {
-                                assert_eq!(rows.len(), 1);
-                                Record::Negative(rows[0].clone())
-                            }
-                            LookupResult::Missing => unreachable!(),
+                    match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
+                        LookupResult::Some(rows) => {
+                            assert_eq!(rows.len(), 1);
+                            Record::Negative(rows[0].clone())
                         }
+                        LookupResult::Missing => unreachable!(),
                     }
                 }
-            });
+            }
+        });
 
         let rs = if self.unmodified {
             results.collect()

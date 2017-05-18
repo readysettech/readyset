@@ -249,17 +249,15 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table in &st.tables {
-        qg.relations
-            .insert(table.name.clone(),
-                    new_node(table.name.clone(), Vec::new(), st));
+        qg.relations.insert(table.name.clone(),
+                            new_node(table.name.clone(), Vec::new(), st));
     }
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
                 if !qg.relations.contains_key(&table.name) {
-                    qg.relations
-                        .insert(table.name.clone(),
-                                new_node(table.name.clone(), Vec::new(), st));
+                    qg.relations.insert(table.name.clone(),
+                                        new_node(table.name.clone(), Vec::new(), st));
                 }
             }
             _ => unimplemented!(),

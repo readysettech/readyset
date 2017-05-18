@@ -42,9 +42,12 @@ macro_rules! nodeop_from_impl {
 }
 
 nodeop_from_impl!(NodeOperator::Base, base::Base);
-nodeop_from_impl!(NodeOperator::Sum, grouped::GroupedOperator<grouped::aggregate::Aggregator>);
-nodeop_from_impl!(NodeOperator::Extremum, grouped::GroupedOperator<grouped::extremum::ExtremumOperator>);
-nodeop_from_impl!(NodeOperator::Concat, grouped::GroupedOperator<grouped::concat::GroupConcat>);
+nodeop_from_impl!(NodeOperator::Sum,
+                  grouped::GroupedOperator<grouped::aggregate::Aggregator>);
+nodeop_from_impl!(NodeOperator::Extremum,
+                  grouped::GroupedOperator<grouped::extremum::ExtremumOperator>);
+nodeop_from_impl!(NodeOperator::Concat,
+                  grouped::GroupedOperator<grouped::concat::GroupConcat>);
 nodeop_from_impl!(NodeOperator::Join, join::Join);
 nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
 nodeop_from_impl!(NodeOperator::Permute, permute::Permute);
@@ -428,10 +431,10 @@ pub mod test {
         pub fn narrow_base_id(&self) -> NodeAddress {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
             *self.remap
-                 .values()
-                 .skip_while(|&&n| n == self.nut.unwrap().1)
-                 .next()
-                 .unwrap()
+                .values()
+                .skip_while(|&&n| n == self.nut.unwrap().1)
+                .next()
+                .unwrap()
         }
 
         pub fn to_local(&self, global: NodeAddress) -> NodeAddress {

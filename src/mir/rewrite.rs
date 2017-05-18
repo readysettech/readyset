@@ -29,9 +29,9 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
             .into_iter()
             .filter(|c| {
                         !mn.borrow()
-                             .ancestors()
-                             .iter()
-                             .any(|a| a.borrow().columns().contains(c))
+                            .ancestors()
+                            .iter()
+                            .any(|a| a.borrow().columns().contains(c))
                     })
             .collect();
 

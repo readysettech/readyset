@@ -258,16 +258,15 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node = real_cols
-                            .into_iter()
-                            .fold(HashMap::new(), |mut acc, nc| {
-                                if let Some(p_cols) = nc {
-                                    for (pn, pc) in p_cols {
-                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
-                                    }
+                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
+                                                                                |mut acc, nc| {
+                            if let Some(p_cols) = nc {
+                                for (pn, pc) in p_cols {
+                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
                                 }
-                                acc
-                            });
+                            }
+                            acc
+                        });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
                         // Note that this, and the semantics of node.resolve(), imply that each
@@ -373,10 +372,10 @@ pub fn initialize(log: &Logger,
             trace!(log, "readying node"; "node" => node.index());
             txs[&d]
                 .send(box Packet::Ready {
-                              node: *addr.as_local(),
-                              index: index_on,
-                              ack: ack_tx,
-                          })
+                          node: *addr.as_local(),
+                          index: index_on,
+                          ack: ack_tx,
+                      })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -399,13 +398,13 @@ pub fn initialize(log: &Logger,
 
                                         txs[&d]
                                             .send(box Packet::PrepareState {
-                                                          node: *addr.as_local(),
-                                                          state: InitialState::Global {
-                                                              cols: graph[node].fields().len(),
-                                                              key: key,
-                                                              gid: node,
-                                                          },
-                                                      })
+                                                      node: *addr.as_local(),
+                                                      state: InitialState::Global {
+                                                          cols: graph[node].fields().len(),
+                                                          key: key,
+                                                          gid: node,
+                                                      },
+                                                  })
                                             .unwrap();
                                     });
 
@@ -548,9 +547,7 @@ pub fn reconstruct(log: &Logger,
     // `key` in the materialized state we're replaying?
     if partial_ok {
         partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-                     paths
-                         .iter()
-                         .all(|path| {
+                     paths.iter().all(|path| {
             let &(node, col) = path.last().unwrap();
             if col.is_none() {
                 // doesn't trace back to a column
@@ -636,9 +633,9 @@ pub fn reconstruct(log: &Logger,
 
     txs[&domain]
         .send(box Packet::PrepareState {
-                      node: *addr.as_local(),
-                      state: s,
-                  })
+                  node: *addr.as_local(),
+                  state: s,
+              })
         .unwrap();
 
     // NOTE:
@@ -742,13 +739,13 @@ pub fn reconstruct(log: &Logger,
             }
 
             let mut setup = box Packet::SetupReplayPath {
-                                    tag: tag,
-                                    source: None,
-                                    path: locals,
-                                    done_tx: None,
-                                    trigger: TriggerEndpoint::None,
-                                    ack: wait_tx.clone(),
-                                };
+                tag: tag,
+                source: None,
+                path: locals,
+                done_tx: None,
+                trigger: TriggerEndpoint::None,
+                ack: wait_tx.clone(),
+            };
             if i == 0 {
                 // first domain also gets to know source node
                 if let box Packet::SetupReplayPath { ref mut source, .. } = setup {
@@ -793,13 +790,13 @@ pub fn reconstruct(log: &Logger,
                 // the last node *must* be an egress node since there's a later domain
                 txs[domain]
                     .send(box Packet::UpdateEgress {
-                                  node: graph[nodes.last().unwrap().0]
-                                      .local_addr()
-                                      .as_local()
-                                      .clone(),
-                                  new_tx: None,
-                                  new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                              })
+                              node: graph[nodes.last().unwrap().0]
+                                  .local_addr()
+                                  .as_local()
+                                  .clone(),
+                              new_tx: None,
+                              new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                          })
                     .unwrap();
             }
 
@@ -818,10 +815,10 @@ pub fn reconstruct(log: &Logger,
             trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
             txs[&segments[0].0]
                 .send(box Packet::StartReplay {
-                              tag: tag,
-                              from: *graph[segments[0].1[0].0].local_addr(),
-                              ack: wait_tx.clone(),
-                          })
+                          tag: tag,
+                          from: *graph[segments[0].1[0].0].local_addr(),
+                          ack: wait_tx.clone(),
+                      })
                 .unwrap();
 
             // and finally, wait for the last domain to finish the replay
@@ -971,9 +968,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 let stateful = &graph[stateful];
                 txs[&stateful.domain()]
                     .send(box Packet::StateSizeProbe {
-                                  node: *stateful.local_addr().as_local(),
-                                  ack: tx,
-                              })
+                              node: *stateful.local_addr().as_local(),
+                              ack: tx,
+                          })
                     .unwrap();
                 let mut size = rx.recv().expect("stateful parent should have state");
 

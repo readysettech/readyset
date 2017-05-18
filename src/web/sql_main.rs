@@ -16,7 +16,8 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let _article = inc.add_query("CREATE TABLE article (id int, user int, title varchar(255), url text);",
+        let _article = inc.add_query("CREATE TABLE article \
+                                     (id int, user int, title varchar(255), url text);",
                                      None,
                                      &mut mig)
             .unwrap();
@@ -26,7 +27,8 @@ fn main() {
             .unwrap();
 
         // add a user account base table
-        let _user = inc.add_query("CREATE TABLE user (id int, username varchar(40), hash varchar(64));",
+        let _user = inc.add_query("CREATE TABLE user \
+                                  (id int, username varchar(40), hash varchar(64));",
                                   None,
                                   &mut mig)
             .unwrap();

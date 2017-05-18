@@ -221,9 +221,9 @@ impl Ingredient for TopK {
 
         if rs.is_empty() {
             return ProcessingResult {
-                       results: rs,
-                       misses: vec![],
-                   };
+                results: rs,
+                misses: vec![],
+            };
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.
@@ -257,20 +257,18 @@ impl Ingredient for TopK {
         {
             let us = *self.us.unwrap().as_local();
             let group_by = &self.group_by[..];
-            let current = consolidate
-                .into_iter()
-                .filter_map(|(group, diffs)| {
-                    match db.lookup(group_by, &KeyType::from(&group[..])) {
-                        LookupResult::Some(rs) => Some((group, diffs, rs)),
-                        LookupResult::Missing => {
-                            misses.push(Miss {
-                                            node: us,
-                                            key: group.clone(),
-                                        });
-                            None
-                        }
+            let current = consolidate.into_iter().filter_map(|(group, diffs)| {
+                match db.lookup(group_by, &KeyType::from(&group[..])) {
+                    LookupResult::Some(rs) => Some((group, diffs, rs)),
+                    LookupResult::Missing => {
+                        misses.push(Miss {
+                                        node: us,
+                                        key: group.clone(),
+                                    });
+                        None
                     }
-                });
+                }
+            });
 
             for (group, mut diffs, old_rs) in current {
                 // Retrieve then update the number of times in this group

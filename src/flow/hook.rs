@@ -96,12 +96,13 @@ impl Hook {
             };
             let array = key.iter().map(DataType::to_json).collect();
             let k = Value::Array(vec![self.name.clone(), array]).to_string();
-            let v = Value::Array(rows.into_iter()
-                                     .map(|row| {
-                                              Value::Array(row.iter().map(DataType::to_json).collect())
-                                          })
-                                     .collect())
-                    .to_string();
+            let v =
+                Value::Array(rows.into_iter()
+                                 .map(|row| {
+                                          Value::Array(row.iter().map(DataType::to_json).collect())
+                                      })
+                                 .collect())
+                        .to_string();
             let flags = 0xdeadbeef;
             (self.client.0)
                 .set(k.as_bytes(), v.as_bytes(), flags, 0)

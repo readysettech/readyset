@@ -179,21 +179,18 @@ impl Reader {
         let mut left = self.streamers.as_ref().unwrap().len();
 
         // remove any channels where the receiver has hung up
-        self.streamers
-            .as_mut()
-            .unwrap()
-            .retain(|tx| {
-                left -= 1;
-                if left == 0 {
-                        tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
-                    } else {
-                        tx.send(data.clone()
-                                    .unwrap()
-                                    .into_iter()
-                                    .map(|r| r.into())
-                                    .collect())
-                    }
-                    .is_ok()
-            });
+        self.streamers.as_mut().unwrap().retain(|tx| {
+            left -= 1;
+            if left == 0 {
+                    tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                } else {
+                    tx.send(data.clone()
+                                .unwrap()
+                                .into_iter()
+                                .map(|r| r.into())
+                                .collect())
+                }
+                .is_ok()
+        });
     }
 }

@@ -154,9 +154,9 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
 
         if rs.is_empty() {
             return ProcessingResult {
-                       results: rs,
-                       misses: vec![],
-                   };
+                results: rs,
+                misses: vec![],
+            };
         }
 
         // First, we want to be smart about multiple added/removed rows with same group.

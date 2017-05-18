@@ -616,16 +616,14 @@ impl SqlToMirConverter {
                      }
                      None => c.clone(),
                  })
-            .chain(literal_names
-                       .into_iter()
-                       .map(|n| {
-                                Column {
-                                    name: n,
-                                    alias: None,
-                                    table: Some(String::from(name)),
-                                    function: None,
-                                }
-                            }))
+            .chain(literal_names.into_iter().map(|n| {
+                                                     Column {
+                                                         name: n,
+                                                         alias: None,
+                                                         table: Some(String::from(name)),
+                                                         function: None,
+                                                     }
+                                                 }))
             .collect();
 
         // remove aliases from emit columns because they are later compared to parent node columns
@@ -786,8 +784,8 @@ impl SqlToMirConverter {
                             let (left_node, right_node) =
                                 pick_join_columns(src, dst, prev_node, &joined_tables);
                             self.make_join_node(&format!("q_{:x}_n{}",
-                                                        qg.signature().hash,
-                                                        new_node_count),
+                                                         qg.signature().hash,
+                                                         new_node_count),
                                                 jps,
                                                 left_node,
                                                 right_node,
@@ -798,8 +796,8 @@ impl SqlToMirConverter {
                             let (left_node, right_node) =
                                 pick_join_columns(src, dst, prev_node, &joined_tables);
                             self.make_join_node(&format!("q_{:x}_n{}",
-                                                        qg.signature().hash,
-                                                        new_node_count),
+                                                         qg.signature().hash,
+                                                         new_node_count),
                                                 jps,
                                                 left_node,
                                                 right_node,
@@ -870,10 +868,10 @@ impl SqlToMirConverter {
                                     QueryGraphEdge::GroupBy(ref gbc) => {
                                         let table =
                                             gbc.into_iter().next().unwrap().table.as_ref().unwrap();
-                                        assert!(gbc.into_iter()
-                                                    .all(|c| {
-                                                             c.table.as_ref().unwrap() == table
-                                                         }));
+                                        assert!(gbc.into_iter().all(|c| {
+                                                                        c.table.as_ref().unwrap() ==
+                                                                        table
+                                                                    }));
                                         gb_cols.extend(gbc);
                                     }
                                     _ => unreachable!(),
@@ -933,8 +931,8 @@ impl SqlToMirConverter {
                             };
 
                             let n = self.make_function_node(&format!("q_{:x}_n{}",
-                                                                    qg.signature().hash,
-                                                                    new_node_count),
+                                                                     qg.signature().hash,
+                                                                     new_node_count),
                                                             fn_col,
                                                             gb_and_param_cols,
                                                             parent_node);
@@ -987,9 +985,9 @@ impl SqlToMirConverter {
 
                             let (group_cols, parent_node) = if proj_cols_from_target_table
                                    .is_empty() {
-                                // slightly messy hack: if there are no group columns and the table on
-                                // which we compute has no projected columns in the output, we make one
-                                // up a group column by adding an extra projection node
+                                // slightly messy hack: if there are no group columns and the table
+                                // on which we compute has no projected columns in the output, we
+                                // make one up a group column by adding an extra projection node
                                 let proj_name = format!("{}_prj_hlpr", agg_node_name);
                                 let proj = self.make_projection_helper(&proj_name,
                                                                        parent_node,
@@ -1034,8 +1032,8 @@ impl SqlToMirConverter {
                             Some(pn) => pn,
                         };
                         let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                 qg.signature().hash,
-                                                                 new_node_count),
+                                                                  qg.signature().hash,
+                                                                  new_node_count),
                                                          parent,
                                                          &qgn.predicates);
                         assert!(fns.len() > 0);
@@ -1060,8 +1058,8 @@ impl SqlToMirConverter {
                 let group_by = qg.parameters();
 
                 let node = self.make_topk_node(&format!("q_{:x}_n{}",
-                                                       qg.signature().hash,
-                                                       new_node_count),
+                                                        qg.signature().hash,
+                                                        new_node_count),
                                                final_node,
                                                group_by,
                                                &st.order,
@@ -1084,12 +1082,10 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = sorted_rels
-                .iter()
-                .fold(Vec::new(), |mut v, s| {
-                    v.extend(qg.relations[*s].columns.iter());
-                    v
-                });
+            let projected_columns: Vec<&Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
+                v.extend(qg.relations[*s].columns.iter());
+                v
+            });
 
             let leaf_project_node =
                 self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),

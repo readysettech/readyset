@@ -189,12 +189,9 @@ impl CheckTable {
 
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
-        !token
-             .conflicts
-             .iter()
-             .any(|&(ts, ref key, ref conflicts)| {
-                      conflicts.iter().any(|c| self.check_conflict(ts, key, c))
-                  })
+        !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
+                                        conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+                                    })
     }
 
     fn compute_previous_timestamps(&self,
