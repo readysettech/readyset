@@ -288,12 +288,12 @@ pub fn connect(log: &Logger,
                     );
                 main_txs[&egress_node.domain()]
                     .send(box Packet::UpdateEgress {
-                                  node: egress_node.local_addr().as_local().clone(),
-                                  new_tx: Some((node.into(),
-                                                *n.local_addr(),
-                                                main_txs[&n.domain()].clone())),
-                                  new_tag: None,
-                              })
+                              node: egress_node.local_addr().as_local().clone(),
+                              new_tx: Some((node.into(),
+                                            *n.local_addr(),
+                                            main_txs[&n.domain()].clone())),
+                              new_tag: None,
+                          })
                     .unwrap();
             } else if egress_node.is_source() {
             } else {

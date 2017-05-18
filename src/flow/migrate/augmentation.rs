@@ -33,10 +33,10 @@ pub fn inform(log: &Logger,
 
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(box Packet::StartMigration {
-                                 at: ts,
-                                 prev_ts: prevs[&domain],
-                                 ack: ready_tx,
-                             });
+                             at: ts,
+                             prev_ts: prevs[&domain],
+                             ack: ready_tx,
+                         });
         let _ = ready_rx.recv();
         trace!(log, "domain ready for migration");
 
@@ -70,9 +70,9 @@ pub fn inform(log: &Logger,
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(box Packet::AddNode {
-                              node: node,
-                              parents: old_parents,
-                          })
+                          node: node,
+                          parents: old_parents,
+                      })
                 .unwrap();
         }
     }

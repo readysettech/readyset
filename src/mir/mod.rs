@@ -1115,8 +1115,8 @@ fn make_grouped_node(name: &str,
         .iter()
         .position(|c| c == on)
         .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
-                        on,
-                        parent.borrow().columns()));
+                         on,
+                         parent.borrow().columns()));
     let group_col_indx = group_by
         .iter()
         .map(|c| {
@@ -1221,13 +1221,13 @@ fn make_join_node(name: &str,
                      if projected_cols_left.contains(c) {
                          JoinSource::L(find_column_id(&left, c))
                      } else if projected_cols_right.contains(c) {
-            JoinSource::R(find_column_id(&right, c))
-        } else {
-            panic!("Join column {:?} found in neither parent {:?} or {:?}?!",
-                   c,
-                   left,
-                   right);
-        }
+                         JoinSource::R(find_column_id(&right, c))
+                     } else {
+                         panic!("Join column {:?} found in neither parent {:?} or {:?}?!",
+                                c,
+                                left,
+                                right);
+                     }
                  }
              })
         .collect();
@@ -1315,8 +1315,8 @@ fn make_project_node(name: &str,
                 .iter()
                 .position(|ref nc| *nc == c)
                 .expect(&format!("column {:?} not found on {}",
-                                c,
-                                parent.borrow().versioned_name()))
+                                 c,
+                                 parent.borrow().versioned_name()))
         })
         .collect::<Vec<_>>();
 

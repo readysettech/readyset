@@ -398,11 +398,11 @@ impl<'a> Migration<'a> {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
 
-        let transactional =
-            !parents.is_empty() &&
-            parents
-                .iter()
-                .all(|p| self.mainline.ingredients[*p.as_global()].is_transactional());
+        let transactional = !parents.is_empty() &&
+                            parents.iter().all(|p| {
+                                                   self.mainline.ingredients[*p.as_global()]
+                                                       .is_transactional()
+                                               });
 
         // add to the graph
         let ni = self.mainline
@@ -661,9 +661,9 @@ impl<'a> Migration<'a> {
         let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
         self.mainline.txs[&reader.domain()]
             .send(box payload::Packet::AddStreamer {
-                          node: reader.local_addr().as_local().clone(),
-                          new_streamer: tx,
-                      })
+                      node: reader.local_addr().as_local().clone(),
+                      new_streamer: tx,
+                  })
             .unwrap();
 
         rx
@@ -901,18 +901,18 @@ impl<'a> Migration<'a> {
                 let m = match change {
                     ColumnChange::Add(field, default) => {
                         box payload::Packet::AddBaseColumn {
-                                node: *n.local_addr().as_local(),
-                                field: field,
-                                default: default,
-                                ack: tx,
-                            }
+                            node: *n.local_addr().as_local(),
+                            field: field,
+                            default: default,
+                            ack: tx,
+                        }
                     }
                     ColumnChange::Drop(column) => {
                         box payload::Packet::DropBaseColumn {
-                                node: *n.local_addr().as_local(),
-                                column: column,
-                                ack: tx,
-                            }
+                            node: *n.local_addr().as_local(),
+                            column: column,
+                            ack: tx,
+                        }
                     }
                 };
                 mainline.txs[&n.domain()].send(m).unwrap();

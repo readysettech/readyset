@@ -96,7 +96,9 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
                                 args
                                 .clone()
                                 .into_iter()
-                                .zip(row.iter().map(|vec| vec.iter().map(DataType::to_json).collect()))
+                                .zip(row.iter().map(|vec| {
+                                    vec.iter().map(DataType::to_json).collect()
+                                }))
                                 .collect::<serde_json::Map<_, _>>()
                         }).collect::<Value>();
                         res.headers_mut().set(ContentType::json());

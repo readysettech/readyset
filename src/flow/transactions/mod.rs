@@ -383,12 +383,11 @@ impl DomainState {
                 unreachable!();
             }
         } else {
-            self.buffer
-                .push(BufferEntry {
-                          ts: ts,
-                          prev_ts: prev_ts,
-                          transaction: BufferedTransaction::SeedReplay(tag, key, rts),
-                      });
+            self.buffer.push(BufferEntry {
+                                 ts: ts,
+                                 prev_ts: prev_ts,
+                                 transaction: BufferedTransaction::SeedReplay(tag, key, rts),
+                             });
         }
     }
 }

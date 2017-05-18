@@ -69,10 +69,9 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols
-            .extend(self.emit
-                        .keys()
-                        .map(|&n| (n, g[*n.as_global()].fields().len())));
+        self.cols.extend(self.emit
+                             .keys()
+                             .map(|&n| (n, g[*n.as_global()].fields().len())));
     }
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {

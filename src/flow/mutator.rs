@@ -99,17 +99,17 @@ impl Mutator {
         self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
             box Packet::Transaction {
-                    link: Link::new(self.src, self.addr),
-                    data: rs,
-                    state: TransactionState::WillCommit,
-                    tracer: self.tracer.clone(),
-                }
+                link: Link::new(self.src, self.addr),
+                data: rs,
+                state: TransactionState::WillCommit,
+                tracer: self.tracer.clone(),
+            }
         } else {
             box Packet::Message {
-                    link: Link::new(self.src, self.addr),
-                    data: rs,
-                    tracer: self.tracer.clone(),
-                }
+                link: Link::new(self.src, self.addr),
+                data: rs,
+                tracer: self.tracer.clone(),
+            }
         };
 
         self.tx.clone().send(m).unwrap();
@@ -121,11 +121,11 @@ impl Mutator {
         self.inject_dropped_cols(&mut rs);
         let send = self.tx_reply_channel.0.clone();
         let m = box Packet::Transaction {
-                        link: Link::new(self.src, self.addr),
-                        data: rs,
-                        state: TransactionState::Pending(t, send),
-                        tracer: self.tracer.clone(),
-                    };
+            link: Link::new(self.src, self.addr),
+            data: rs,
+            state: TransactionState::Pending(t, send),
+            tracer: self.tracer.clone(),
+        };
         self.tx.clone().send(m).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {

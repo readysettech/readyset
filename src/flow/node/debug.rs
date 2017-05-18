@@ -21,7 +21,9 @@ impl Node {
         write!(f,
                " [style=filled, fillcolor={}, label=\"",
                self.domain
-                   .map(|d| -> usize { d.into() })
+                   .map(|d| -> usize {
+                            d.into()
+                        })
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                    .unwrap_or("white".into()))?;
 
