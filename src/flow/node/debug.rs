@@ -9,6 +9,7 @@ impl fmt::Debug for Node {
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
+            NodeType::Sharder { .. } => write!(f, "sharder"),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
             NodeType::Hook(..) => write!(f, "hook node"),
@@ -31,6 +32,7 @@ impl Node {
             NodeType::Source => write!(f, "(source)"),
             NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
             NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
+            NodeType::Sharder { .. } => write!(f, "{{ {} | (sharder) }}", idx.index()),
             NodeType::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {

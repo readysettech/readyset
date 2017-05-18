@@ -41,6 +41,10 @@ impl Node {
                 e.process(m, *self.index.unwrap().as_global());
                 vec![]
             }
+            NodeType::Sharder(ref mut s) => {
+                s.process(m, *self.index.unwrap().as_global());
+                vec![]
+            }
             NodeType::Internal(ref mut i) => {
                 let mut captured = false;
                 let mut misses = Vec::new();

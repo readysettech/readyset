@@ -724,11 +724,36 @@ impl<'a> Migration<'a> {
         }
 
         // Shard the graph as desired
-        migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
+        let mut swapped0 =
+            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
         // Set up ingress and egress nodes
-        let mut swapped =
+        let swapped1 =
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
+
+        // Merge the swap lists
+        for (domain, swaps) in swapped1 {
+            let mut domain0 = swapped0.entry(domain).or_insert_with(HashMap::new);
+            for (from, to) in swaps {
+                use std::collections::hash_map::Entry;
+                match domain0.entry(from) {
+                    Entry::Occupied(to0) => {
+                        if &to != to0.get() {
+                            crit!(log, "sharding and routing swapped nodes inconsistently";
+                                  "domain" => ?domain,
+                                  "from" => ?from,
+                                  "to_s" => ?to0,
+                                  "to_r" => ?to);
+                            unreachable!();
+                        }
+                    }
+                    Entry::Vacant(hole) => {
+                        hole.insert(to);
+                    }
+                }
+            }
+        }
+        let mut swapped = swapped0;
 
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<_> = new.iter()

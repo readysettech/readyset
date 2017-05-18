@@ -93,6 +93,7 @@ pub fn add(log: &Logger,
                 // child is in a different domain
                 if egress.is_none() {
                     // create an egress node to handle that
+                    // TODO: we shouldn't add an egress after a Sharder!
                     // NOTE: technically, this doesn't need to mirror its parent, but meh
                     let proxy = graph[node].mirror(node::special::Egress::default());
                     let eid = graph.add_node(proxy);

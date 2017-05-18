@@ -4,6 +4,7 @@ use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use slog::Logger;
 use petgraph;
+use ops;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Sharding {
@@ -50,6 +51,7 @@ pub fn shard(log: &Logger,
             info!(log, "forcing de-sharding prior to Reader"; "node" => ?node);
             assert_eq!(input_shardings.len(), 1);
             reshard(log,
+                    &mut swaps,
                     graph,
                     input_shardings.keys().next().cloned().unwrap(),
                     node,
@@ -79,9 +81,11 @@ pub fn shard(log: &Logger,
         if let Some(want_sharding) = need_sharding.remove(&node.into()) {
             if want_sharding.len() != 1 {
                 // no supported yet -- force no sharding
+                // TODO: if we're sharding by a two-part key and need sharding by the *first* part
+                // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
                 for (&ni, _) in &input_shardings {
-                    reshard(log, graph, ni, node, Sharding::None);
+                    reshard(log, &mut swaps, graph, ni, node, Sharding::None);
                 }
                 continue;
             }
@@ -104,7 +108,7 @@ pub fn shard(log: &Logger,
                     info!(log, "de-sharding node that partitions by output key";
                           "node" => ?node);
                     for (ni, s) in input_shardings.iter_mut() {
-                        reshard(log, graph, *ni, node, Sharding::None);
+                        reshard(log, &mut swaps, graph, *ni, node, Sharding::None);
                         *s = Sharding::None;
                     }
                     // ok to continue since standard shard_by is None
@@ -165,7 +169,12 @@ pub fn shard(log: &Logger,
                             let need_sharding = Sharding::ByColumn(col);
                             if input_shardings[ni.as_global()] != need_sharding {
                                 // input is sharded by different key -- need shuffle
-                                reshard(log, graph, *ni.as_global(), node, need_sharding);
+                                reshard(log,
+                                        &mut swaps,
+                                        graph,
+                                        *ni.as_global(),
+                                        node,
+                                        need_sharding);
                                 input_shardings.insert(*ni.as_global(), need_sharding);
                             }
                         }
@@ -251,7 +260,7 @@ pub fn shard(log: &Logger,
                 for &(ni, src) in &srcs {
                     let need_sharding = Sharding::ByColumn(src);
                     if input_shardings[ni.as_global()] != need_sharding {
-                        reshard(log, graph, *ni.as_global(), node, need_sharding);
+                        reshard(log, &mut swaps, graph, *ni.as_global(), node, need_sharding);
                         input_shardings.insert(*ni.as_global(), need_sharding);
                     }
                 }
@@ -266,7 +275,7 @@ pub fn shard(log: &Logger,
             for ni in need_sharding.keys() {
                 if input_shardings[ni.as_global()] != sharding {
                     // ancestor must be forced to right sharding
-                    reshard(log, graph, *ni.as_global(), node, sharding);
+                    reshard(log, &mut swaps, graph, *ni.as_global(), node, sharding);
                     input_shardings.insert(*ni.as_global(), sharding);
                 }
             }
@@ -288,7 +297,12 @@ pub fn shard(log: &Logger,
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by column `col`.
-fn reshard(log: &Logger, graph: &mut Graph, src: NodeIndex, dst: NodeIndex, to: Sharding) {
+fn reshard(log: &Logger,
+           swaps: &mut HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>>,
+           graph: &mut Graph,
+           src: NodeIndex,
+           dst: NodeIndex,
+           to: Sharding) {
     if graph[src].sharded_by() == Sharding::None {
         // src isn't sharded, so conforms to all shardings
         return;
@@ -298,5 +312,47 @@ fn reshard(log: &Logger, graph: &mut Graph, src: NodeIndex, dst: NodeIndex, to: 
            "src" => ?src,
            "dst" => ?dst,
            "sharding" => ?to);
-    //unimplemented!();
+
+    let mut node = match to {
+        Sharding::None => {
+            // an identity node that is *not* marked as sharded will end up acting like a union!
+            let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
+            let mut n = graph[src].mirror(n);
+
+            // `src` is sharded into many domains -- the merging has to happen in *one* domain
+            // (namely the one of the destination).
+            n.add_to(graph[dst].domain());
+            n.shard_by(Sharding::None);
+
+            n
+        }
+        Sharding::ByColumn(c) => {
+            use flow::node;
+            // TODO: sharder needs to know about channels to destinations (just like Egress)
+            let mut n = graph[src].mirror(node::special::Sharder::new(c));
+
+            // TODO: the shuffler should probably be in its own domain, since the destination is
+            // also sharded (and thus will be split into *multiple* domains.
+            n.add_to(graph[dst].domain());
+
+            // the sharder itself isn't sharded
+            n.shard_by(Sharding::None);
+
+            n
+        }
+        Sharding::Random => unreachable!(),
+    };
+    let node = graph.add_node(node);
+
+    // hook in node that does appropriate shuffle
+    let old = graph.find_edge(src, dst).unwrap();
+    let was_materialized = graph.remove_edge(old).unwrap();
+    graph.add_edge(src, node, false);
+    graph.add_edge(node, dst, was_materialized);
+
+    // any node in the `dst` domain that refers to `src` now needs to refer to `node` instead
+    swaps
+        .entry(graph[dst].domain())
+        .or_insert_with(HashMap::new)
+        .insert(src, node);
 }

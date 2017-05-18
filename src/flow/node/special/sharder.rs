@@ -18,6 +18,16 @@ impl Sharder {
         }
     }
 
+    pub fn take(&mut self) -> Self {
+        use std::mem;
+        let txs = mem::replace(&mut self.txs, Vec::new());
+        Self {
+            txs: txs,
+            sharded: VecMap::default(),
+            shard_by: self.shard_by,
+        }
+    }
+
     pub fn add_shard(&mut self,
                      dst_g: NodeAddress,
                      dst_l: NodeAddress,
