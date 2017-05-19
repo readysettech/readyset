@@ -13,6 +13,7 @@ use std::io;
 
 use slog;
 use petgraph;
+use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
 pub mod domain;
@@ -166,19 +167,35 @@ impl Blender {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                if self.ingredients[n].is_reader() {
+                self.ingredients[n].with_reader(|r| {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
-                    let src = self.ingredients
-                        .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
-                        .next()
-                        .unwrap();
-                    Some((src.into(), &self.ingredients[src]))
-                } else {
-                    None
-                }
+                    let src = r.is_for().clone();
+                    (src, &self.ingredients[*src.as_global()])
+                })
             })
             .collect()
+    }
+
+    fn find_getter_for(&self, node: &core::NodeAddress) -> Option<NodeIndex> {
+        // reader should be a child of the given node. however, due to sharding, it may not be an
+        // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
+        // *unrelated* reader node. to account for this, readers keep track of what node they are
+        // "for", and we simply search for the appropriate reader by that metric. since we know
+        // that the reader must be relatively close, a BFS search is the way to go.
+        // presumably only
+        let mut bfs = Bfs::new(&self.ingredients, *node.as_global());
+        let mut reader = None;
+        while let Some(child) = bfs.next(&self.ingredients) {
+            if self.ingredients[child]
+                   .with_reader(|r| r.is_for() == node)
+                   .unwrap_or(false) {
+                reader = Some(child);
+                break;
+            }
+        }
+
+        reader
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
@@ -187,22 +204,8 @@ impl Blender {
          node: core::NodeAddress)
          -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
-        // reader should be a child of the given node
-        let reader = self.ingredients
-            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter(|&ni| self.ingredients[ni].is_reader())
-            .next(); // there should be at most one
-
-        if reader.is_none() {
-            // FIXME: what if we injected a de-sharding node between original leaf view and Reader?
-            // how do we even detect this? going two deep could give us the *wrong* reader. can't
-            // just look for *single* child either, because leaf is allowed to have other children
-            // (e.g., that continue sharding).
-            unimplemented!();
-        }
-
         // look up the read handle, clone it, and construct the read closure
-        reader.and_then(|r| {
+        self.find_getter_for(&node).and_then(|r| {
             let vr = VIEW_READERS.lock().unwrap();
             let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
             rh.map(|rh| {
@@ -234,15 +237,10 @@ impl Blender {
             return Err(());
         }
 
-        // reader should be a child of the given node
-        let reader = self.ingredients
-            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter_map(|ni| self.ingredients[ni].with_reader(|r| (ni, r)))
-            .next(); // there should be at most one
-
         // look up the read handle, clone it, and construct the read closure
-        reader
-            .and_then(|(r, inner)| {
+        self.find_getter_for(&node)
+            .and_then(|r| {
+                let inner = self.ingredients[r].with_reader(|r| r).unwrap();
                 let vr = VIEW_READERS.lock().unwrap();
                 let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
                 rh.map(|rh| {
@@ -577,7 +575,7 @@ impl<'a> Migration<'a> {
     fn ensure_reader_for(&mut self, n: core::NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let r = node::special::Reader::default();
+            let r = node::special::Reader::new(n);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
