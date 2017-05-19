@@ -52,6 +52,7 @@ pub fn shard(log: &Logger,
             info!(log, "forcing de-sharding prior to Reader"; "node" => ?node);
             assert_eq!(input_shardings.len(), 1);
             reshard(log,
+                    new,
                     &mut swaps,
                     graph,
                     input_shardings.keys().next().cloned().unwrap(),
@@ -86,7 +87,7 @@ pub fn shard(log: &Logger,
                 // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
                 for (&ni, _) in &input_shardings {
-                    reshard(log, &mut swaps, graph, ni, node, Sharding::None);
+                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
                 }
                 continue;
             }
@@ -109,7 +110,7 @@ pub fn shard(log: &Logger,
                     info!(log, "de-sharding node that partitions by output key";
                           "node" => ?node);
                     for (ni, s) in input_shardings.iter_mut() {
-                        reshard(log, &mut swaps, graph, *ni, node, Sharding::None);
+                        reshard(log, new, &mut swaps, graph, *ni, node, Sharding::None);
                         *s = Sharding::None;
                     }
                     // ok to continue since standard shard_by is None
@@ -171,6 +172,7 @@ pub fn shard(log: &Logger,
                             if input_shardings[ni.as_global()] != need_sharding {
                                 // input is sharded by different key -- need shuffle
                                 reshard(log,
+                                        new,
                                         &mut swaps,
                                         graph,
                                         *ni.as_global(),
@@ -261,7 +263,13 @@ pub fn shard(log: &Logger,
                 for &(ni, src) in &srcs {
                     let need_sharding = Sharding::ByColumn(src);
                     if input_shardings[ni.as_global()] != need_sharding {
-                        reshard(log, &mut swaps, graph, *ni.as_global(), node, need_sharding);
+                        reshard(log,
+                                new,
+                                &mut swaps,
+                                graph,
+                                *ni.as_global(),
+                                node,
+                                need_sharding);
                         input_shardings.insert(*ni.as_global(), need_sharding);
                     }
                 }
@@ -276,7 +284,7 @@ pub fn shard(log: &Logger,
             for ni in need_sharding.keys() {
                 if input_shardings[ni.as_global()] != sharding {
                     // ancestor must be forced to right sharding
-                    reshard(log, &mut swaps, graph, *ni.as_global(), node, sharding);
+                    reshard(log, new, &mut swaps, graph, *ni.as_global(), node, sharding);
                     input_shardings.insert(*ni.as_global(), sharding);
                 }
             }
@@ -299,6 +307,7 @@ pub fn shard(log: &Logger,
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by column `col`.
 fn reshard(log: &Logger,
+           new: &mut HashSet<NodeIndex>,
            swaps: &mut HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>>,
            graph: &mut Graph,
            src: NodeIndex,
@@ -344,6 +353,7 @@ fn reshard(log: &Logger,
         Sharding::Random => unreachable!(),
     };
     let node = graph.add_node(node);
+    new.insert(node);
 
     // hook in node that does appropriate shuffle
     // FIXME: what if we already added a sharder in previous migration?
