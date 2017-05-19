@@ -193,6 +193,14 @@ impl Blender {
             .filter(|&ni| self.ingredients[ni].is_reader())
             .next(); // there should be at most one
 
+        if reader.is_none() {
+            // FIXME: what if we injected a de-sharding node between original leaf view and Reader?
+            // how do we even detect this? going two deep could give us the *wrong* reader. can't
+            // just look for *single* child either, because leaf is allowed to have other children
+            // (e.g., that continue sharding).
+            unimplemented!();
+        }
+
         // look up the read handle, clone it, and construct the read closure
         reader.and_then(|r| {
             let vr = VIEW_READERS.lock().unwrap();
