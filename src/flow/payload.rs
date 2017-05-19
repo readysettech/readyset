@@ -156,6 +156,14 @@ pub enum Packet {
         new_tag: Option<(Tag, NodeAddress)>,
     },
 
+    /// Add a shard to a Sharder node.
+    ///
+    /// Note that this *must* be done *before* the sharder starts being used!
+    UpdateSharder {
+        node: LocalNodeIndex,
+        new_tx: (NodeAddress, mpsc::SyncSender<Box<Packet>>),
+    },
+
     /// Add a streamer to an existing reader node.
     AddStreamer {
         node: LocalNodeIndex,

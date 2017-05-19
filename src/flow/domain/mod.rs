@@ -473,6 +473,10 @@ impl Domain {
                                               }
                                           });
                     }
+                    Packet::UpdateSharder { node, new_tx } => {
+                        let mut n = self.nodes[&node].borrow_mut();
+                        n.with_sharder_mut(move |s| { s.add_shard(new_tx.0, new_tx.1); });
+                    }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap());

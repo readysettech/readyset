@@ -113,6 +113,15 @@ impl Node {
 
 // derefs
 impl Node {
+    pub fn with_sharder_mut<F>(&mut self, f: F)
+        where F: FnOnce(&mut special::Sharder)
+    {
+        match self.inner {
+            NodeType::Sharder(ref mut s) => f(s),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn with_egress_mut<F>(&mut self, f: F)
         where F: FnOnce(&mut special::Egress)
     {
@@ -278,6 +287,14 @@ impl Node {
         }
     }
 
+    pub fn is_sharder(&self) -> bool {
+        if let NodeType::Sharder { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_reader(&self) -> bool {
         if let NodeType::Reader { .. } = self.inner {
             true
@@ -302,12 +319,21 @@ impl Node {
         }
     }
 
+    pub fn is_sender(&self) -> bool {
+        match self.inner {
+            NodeType::Egress { .. } |
+            NodeType::Sharder(..) => true,
+            _ => false,
+        }
+    }
+
     /// A node is considered to be an output node if changes to its state are visible outside of
     /// its domain.
     pub fn is_output(&self) -> bool {
         match self.inner {
             NodeType::Egress { .. } |
             NodeType::Reader(..) |
+            NodeType::Sharder(..) |
             NodeType::Hook(..) => true,
             _ => false,
         }

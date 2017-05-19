@@ -43,8 +43,9 @@ pub fn shard(log: &Logger,
             .map(|ni| (ni, graph[ni].sharded_by()))
             .collect();
 
-        // FIXME: suggest_indexes will start returning local indices after the first migration :(
         let mut need_sharding = if graph[node].is_internal() {
+            // suggest_indexes is okay because `node` *must* be new, and therefore will return
+            // global node indices.
             graph[node].suggest_indexes(node.into())
         } else if graph[node].is_reader() {
             // TODO: we may want to allow sharded Readers eventually...
@@ -313,7 +314,7 @@ fn reshard(log: &Logger,
            "dst" => ?dst,
            "sharding" => ?to);
 
-    let mut node = match to {
+    let node = match to {
         Sharding::None => {
             // an identity node that is *not* marked as sharded will end up acting like a union!
             let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
@@ -345,6 +346,7 @@ fn reshard(log: &Logger,
     let node = graph.add_node(node);
 
     // hook in node that does appropriate shuffle
+    // FIXME: what if we already added a sharder in previous migration?
     let old = graph.find_edge(src, dst).unwrap();
     let was_materialized = graph.remove_edge(old).unwrap();
     graph.add_edge(src, node, false);

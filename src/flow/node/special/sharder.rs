@@ -4,7 +4,7 @@ use vec_map::VecMap;
 use petgraph::graph::NodeIndex;
 
 pub struct Sharder {
-    txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
+    txs: Vec<(NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
@@ -28,11 +28,8 @@ impl Sharder {
         }
     }
 
-    pub fn add_shard(&mut self,
-                     dst_g: NodeAddress,
-                     dst_l: NodeAddress,
-                     tx: mpsc::SyncSender<Box<Packet>>) {
-        self.txs.push((dst_g, dst_l, tx));
+    pub fn add_shard(&mut self, dst: NodeAddress, tx: mpsc::SyncSender<Box<Packet>>) {
+        self.txs.push((dst, tx));
     }
 
     #[inline]
@@ -55,7 +52,7 @@ impl Sharder {
             p.map_data(|rs| rs.push(record));
         }
 
-        for (i, &mut (ref globaddr, dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
+        for (i, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
             if let Some(mut shard) = self.sharded.remove(i) {
                 shard.link_mut().src = index.into();
                 shard.link_mut().dst = dst;
