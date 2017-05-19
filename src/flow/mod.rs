@@ -751,6 +751,15 @@ impl<'a> Migration<'a> {
                         hole.insert(to);
                     }
                 }
+
+                // we may also already have swapped the parents of some node *to* `from`. in
+                // swapped0. we want to change that mapping as well, since lookups in swapped
+                // aren't recursive.
+                for (_, to0) in domain0.iter_mut() {
+                    if *to0 == from {
+                        *to0 = to;
+                    }
+                }
             }
         }
         let mut swapped = swapped0;
