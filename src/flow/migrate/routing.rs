@@ -175,6 +175,11 @@ pub fn add(log: &Logger,
                 sender
             };
 
+            if sender == source {
+                // no need for egress from source
+                continue;
+            }
+
             if graph[sender].is_sender() {
                 // all good -- we're already hooked up with an egress or sharder!
                 if graph[sender].is_egress() {
