@@ -230,10 +230,9 @@ impl Ingredient for Join {
 
                     if (positive && rc == 1) || (!positive && rc == 0) {
                         ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
-                            let foo: Records =
-                                vec![(self.generate_null(r), !positive),
+                            let foo: Records = vec![(self.generate_null(r), !positive),
                                                     (self.generate_row(r, &row), positive)]
-                                        .into();
+                                    .into();
                             foo.into()
                         }));
                         continue;
@@ -407,11 +406,10 @@ mod tests {
         use std::collections::HashMap;
         let me = NodeAddress::mock_global(2.into());
         let (g, l, r) = setup();
-        let hm: HashMap<_, _> =
-            vec![(l, vec![0]), /* join column for left */
+        let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
                                      (r, vec![0]) /* join column for right */]
-                    .into_iter()
-                    .collect();
+                .into_iter()
+                .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);
     }
 
