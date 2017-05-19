@@ -148,7 +148,7 @@ pub fn add(log: &Logger,
             swaps
                 .entry(domain)
                 .or_insert_with(HashMap::new)
-                .insert(node, ingress);
+                .insert(parent, ingress);
         }
     }
 
