@@ -339,6 +339,15 @@ fn reshard(log: &Logger,
             // TODO: the shuffler should probably be in its own domain, since the destination is
             // also sharded (and thus will be split into *multiple* domains.
             n.add_to(graph[src].domain());
+            if graph[src].domain() == graph[dst].domain() {
+                // materialization and routing get very confused when there isn't
+                // an ingress after a Sharder
+                crit!(log, "sharder shares domain with source and destination";
+                      "src" => ?src,
+                      "dst" => ?dst,
+                      "domain" => ?graph[src].domain());
+                unimplemented!();
+            }
 
             // the sharder itself isn't sharded
             n.shard_by(Sharding::None);
