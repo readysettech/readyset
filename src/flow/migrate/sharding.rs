@@ -337,7 +337,7 @@ fn reshard(log: &Logger,
 
             // TODO: the shuffler should probably be in its own domain, since the destination is
             // also sharded (and thus will be split into *multiple* domains.
-            n.add_to(graph[dst].domain());
+            n.add_to(graph[src].domain());
 
             // the sharder itself isn't sharded
             n.shard_by(Sharding::None);
