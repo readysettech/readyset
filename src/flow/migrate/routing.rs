@@ -63,21 +63,20 @@ pub fn add(log: &Logger,
     // causing re-use of ingress and egress nodes that were added in a *previous* migration.
     //
     // we do this in a couple of passes, as described below.
-    //
-    // first, we look at all other-domain parents of new nodes. if a parent does not have an egress
-    // node child, we *don't* add one at this point (this is done at a later stage, because we also
-    // need to handle the case where the parent is a sharder). when the parent does not have any
-    // egress children, the node's domain *cannot* have an ingress for that parent already, so we
-    // also make an ingress node. if the parent does have an egress child, we check the children of
-    // that egress node for any ingress nodes that are in the domain of the current node. if there
-    // aren't any, we make one. if there are, we only need to redirect the node's parent edge to
-    // the ingress.
     for &node in &topo_list {
         let domain = graph[node].domain();
         let parents: Vec<_> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .collect(); // collect so we can mutate graph
 
+        // first, we look at all other-domain parents of new nodes. if a parent does not have an
+        // egress node child, we *don't* add one at this point (this is done at a later stage,
+        // because we also need to handle the case where the parent is a sharder). when the parent
+        // does not have any egress children, the node's domain *cannot* have an ingress for that
+        // parent already, so we also make an ingress node. if the parent does have an egress
+        // child, we check the children of that egress node for any ingress nodes that are in the
+        // domain of the current node. if there aren't any, we make one. if there are, we only need
+        // to redirect the node's parent edge to the ingress.
         for parent in parents {
             if !graph[parent].is_source() && graph[parent].domain() == domain {
                 continue;
@@ -150,18 +149,14 @@ pub fn add(log: &Logger,
                 .or_insert_with(HashMap::new)
                 .insert(parent, ingress);
         }
-    }
 
-    // we now have all the ingress nodes we need. it's time to check that they are all connected to
-    // an egress or a sharder (otherwise they would never receive anything!).
-    //
-    // TODO:
-    // we may actually be able to merge this loop with the one above due to topological traversal..
-    for &node in &topo_list {
+        // we now have all the ingress nodes we need. it's time to check that they are all
+        // connected to an egress or a sharder (otherwise they would never receive anything!).
+        // Note that we need to re-load the list of parents, because it might have changed as a
+        // result of adding ingress nodes.
         let parents: Vec<_> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .collect(); // collect so we can mutate graph
-
         for ingress in parents {
             if !graph[ingress].is_ingress() {
                 continue;
@@ -192,25 +187,49 @@ pub fn add(log: &Logger,
                 continue;
             }
 
-            // need to inject an egress above us
-            // NOTE: technically, this doesn't need to mirror its parent, but meh
-            let egress = graph[sender].mirror(node::special::Egress::default());
-            let egress = graph.add_node(egress);
+            // ingress is not already connected to egress/sharder
+            // next, check if source node already has an egress
+            let egress = {
+                let mut es = graph
+                    .neighbors_directed(sender, petgraph::EdgeDirection::Outgoing)
+                    .filter(|&ni| graph[ni].is_egress());
+                let egress = es.next();
+                assert_eq!(es.count(), 0, "node has more than one egress");
+                egress
+            };
+
+            if let Some(egress) = egress {
+                trace!(log,
+                       "re-using cross-domain egress to ingress";
+                       "ingress" => ingress.index(),
+                       "egress" => egress.index()
+                );
+            }
+
+            let egress = egress.unwrap_or_else(|| {
+                // need to inject an egress above us
+
+                // NOTE: technically, this doesn't need to mirror its parent, but meh
+                let egress = graph[sender].mirror(node::special::Egress::default());
+                let egress = graph.add_node(egress);
+                graph.add_edge(sender, egress, false);
+
+                // we also now need to deal with this egress node
+                new.insert(egress);
+
+                trace!(log,
+                       "adding cross-domain egress to send to new ingress";
+                       "ingress" => ingress.index(),
+                       "egress" => egress.index()
+                );
+
+                egress
+            });
 
             // we need to hook the egress in between the ingress and its "real" parent
-            graph.add_edge(sender, egress, false);
             let old = graph.find_edge(sender, ingress).unwrap();
             let was_materialized = graph.remove_edge(old).unwrap();
             graph.add_edge(egress, ingress, was_materialized);
-
-            // we also now need to deal with this egress node
-            new.insert(egress);
-
-            trace!(log,
-                   "adding cross-domain egress to send to new ingress";
-                   "ingress" => node.index(),
-                   "egress" => egress.index()
-            );
 
             // NOTE: we *don't* need to update swaps here, because ingress doesn't care
         }
