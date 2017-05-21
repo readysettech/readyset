@@ -65,7 +65,8 @@ pub fn shard(log: &Logger,
         };
         if need_sharding.is_empty() {
             // no shuffle necessary -- can re-use any existing sharding
-            let s = if input_shardings.len() == 1 {
+            let s = if input_shardings.len() == 1 ||
+                       input_shardings.iter().all(|(_, &s)| s == Sharding::None) {
                 input_shardings.into_iter().map(|(_, s)| s).next().unwrap()
             } else {
                 Sharding::Random
