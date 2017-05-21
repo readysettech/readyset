@@ -363,8 +363,16 @@ fn reshard(log: &Logger,
     graph.add_edge(node, dst, was_materialized);
 
     // any node in the `dst` domain that refers to `src` now needs to refer to `node` instead
-    swaps
+    let old = swaps
         .entry(graph[dst].domain())
         .or_insert_with(HashMap::new)
         .insert(src, node);
+    if let Some(old) = old {
+        crit!(log, "re-sharding already sharded node introduces swap collision";
+                     "src" => ?src,
+                     "dst" => ?dst,
+                     "node" => ?node,
+                     "prev" => ?old);
+        unimplemented!();
+    }
 }

@@ -738,19 +738,34 @@ impl<'a> Migration<'a> {
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
         // Merge the swap lists
+        // TODO: swaps have to be *per target node* now that we have sharding, because we might
+        // introduce different sharders above different child nodes.
         for (domain, swaps) in swapped1 {
             let mut domain0 = swapped0.entry(domain).or_insert_with(HashMap::new);
             for (from, to) in swaps {
                 use std::collections::hash_map::Entry;
                 match domain0.entry(from) {
-                    Entry::Occupied(to0) => {
+                    Entry::Occupied(mut to0) => {
                         if &to != to0.get() {
-                            crit!(log, "sharding and routing swapped nodes inconsistently";
-                                  "domain" => ?domain,
-                                  "from" => ?from,
-                                  "to_s" => ?to0,
-                                  "to_r" => ?to);
-                            unreachable!();
+                            // This can happen if sharding decides to add a Sharder *under* a node,
+                            // and routing decides to add an ingress/egress pair between that node
+                            // and the Sharder. It's perfectly okay, but we should prefer the
+                            // "bottommost" swap to take place (i.e., the node that is *now*
+                            // closest to the dst node). This *should* be the sharding node, unless
+                            // routing added an ingress *under* the Sharder. We resolve the
+                            // collision by looking at which translation currently has an adge from
+                            // `from`, and then picking the *other*, since that must then be node
+                            // below.
+                            if mainline.ingredients.find_edge(from, to).is_some() {
+                                // from -> to -> to0 -> [children]
+                                // from [children]'s perspective, we should use to0 for from, so we
+                                // can just ignore the `to` swap.
+                            } else {
+                                // from -> to0 -> to -> [children]
+                                // from [children]'s perspective, we should use to for from, so we
+                                // need to prefer the `to` swap.
+                                *to0.get_mut() = to;
+                            }
                         }
                     }
                     Entry::Vacant(hole) => {
