@@ -239,8 +239,11 @@ pub fn index(log: &Logger,
                     // we need to push the index up to its ancestor(s)
                     if node.is_ingress() {
                         // we can't push further up!
-                        unreachable!("node suggested index outside domain, and ingress isn't \
-                                      materialized");
+                        crit!(log, "suggested index is at domain edge, but ingress isn't \
+                                      materialized";
+                                      "node" => ?node.global_addr(),
+                                      "idxs" => ?idxs.into_iter().collect::<Vec<_>>());
+                        unreachable!();
                     }
 
                     assert!(node.is_internal());
