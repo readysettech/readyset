@@ -6,7 +6,7 @@ use std::sync::mpsc;
 
 use std::collections::HashMap;
 
-const SETTLE_TIME_MS: u64 = 500;
+const SETTLE_TIME_MS: u64 = 750;
 
 #[test]
 fn it_works() {
