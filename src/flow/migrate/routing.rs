@@ -115,8 +115,11 @@ pub fn add(log: &Logger,
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
 
-                // we also now need to deal with this ingress node
+                // insert the new ingress node
                 let ingress = graph.add_node(i);
+                graph.add_edge(parent, ingress, false);
+
+                // we also now need to deal with this ingress node
                 new.insert(ingress);
 
                 if parent == source {
@@ -137,8 +140,7 @@ pub fn add(log: &Logger,
                 ingress
             });
 
-            // we need to hook the ingress node in between us and the parent
-            graph.add_edge(parent, ingress, false);
+            // we need to hook the ingress node in between us and our remote parent
             let old = graph.find_edge(parent, node).unwrap();
             let was_materialized = graph.remove_edge(old).unwrap();
             graph.add_edge(ingress, node, was_materialized);
