@@ -318,11 +318,6 @@ fn reshard(log: &Logger,
         return;
     }
 
-    error!(log, "told to shuffle";
-           "src" => ?src,
-           "dst" => ?dst,
-           "sharding" => ?to);
-
     let node = match to {
         Sharding::None => {
             // an identity node that is *not* marked as sharded will end up acting like a union!
@@ -338,7 +333,6 @@ fn reshard(log: &Logger,
         }
         Sharding::ByColumn(c) => {
             use flow::node;
-            // TODO: sharder needs to know about channels to destinations (just like Egress)
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
 
             // TODO: the shuffler should probably be in its own domain, since the destination is
@@ -353,6 +347,12 @@ fn reshard(log: &Logger,
         Sharding::Random => unreachable!(),
     };
     let node = graph.add_node(node);
+    error!(log, "told to shuffle";
+           "src" => ?src,
+           "dst" => ?dst,
+           "using" => ?node,
+           "sharding" => ?to);
+
     new.insert(node);
 
     // hook in node that does appropriate shuffle
