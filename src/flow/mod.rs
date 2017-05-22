@@ -865,7 +865,10 @@ impl<'a> Migration<'a> {
             // Those ingress nodes' indices are now local.
             for (&(dst, src), &instead) in &swapped {
                 if &mainline.ingredients[dst].domain() == domain {
-                    remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
+                    // FIXME: if we have two remappings of the same src in the same domain, this
+                    // masks a remap. we actually need a remap per *node*!
+                    let old = remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
+                    assert_eq!(old, None);
                 }
             }
 
