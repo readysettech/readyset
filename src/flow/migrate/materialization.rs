@@ -790,17 +790,21 @@ pub fn reconstruct(log: &Logger,
             }
 
             if i != segments.len() - 1 {
-                // the last node *must* be an egress node since there's a later domain
-                txs[domain]
-                    .send(box Packet::UpdateEgress {
-                              node: graph[nodes.last().unwrap().0]
-                                  .local_addr()
-                                  .as_local()
-                                  .clone(),
-                              new_tx: None,
-                              new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                          })
-                    .unwrap();
+                // since there is a later domain, the last node of any non-final domain must either
+                // be an egress or a Sharder. If it's an egress, we need to tell it about this
+                // replay path so that it knows what path to forward replay packets on.
+                let n = &graph[nodes.last().unwrap().0];
+                if n.is_egress() {
+                    txs[domain]
+                        .send(box Packet::UpdateEgress {
+                                  node: n.local_addr().as_local().clone(),
+                                  new_tx: None,
+                                  new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                              })
+                        .unwrap();
+                } else {
+                    assert!(n.is_sharder());
+                }
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());

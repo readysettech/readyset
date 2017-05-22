@@ -363,6 +363,21 @@ impl Packet {
                     tracer: tracer.clone(),
                 }
             }
+            Packet::ReplayPiece {
+                ref link,
+                ref tag,
+                ref data,
+                context: ref context @ ReplayPieceContext::Regular { .. },
+                ref transaction_state,
+            } => {
+                Packet::ReplayPiece {
+                    link: link.clone(),
+                    tag: tag.clone(),
+                    data: data.clone(),
+                    context: context.clone(),
+                    transaction_state: transaction_state.clone(),
+                }
+            }
             _ => unreachable!(),
         }
     }
