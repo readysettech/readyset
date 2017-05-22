@@ -340,13 +340,9 @@ fn reshard(log: &Logger,
             // also sharded (and thus will be split into *multiple* domains.
             n.add_to(graph[src].domain());
             if graph[src].domain() == graph[dst].domain() {
-                // materialization and routing get very confused when there isn't
-                // an ingress after a Sharder
-                crit!(log, "sharder shares domain with source and destination";
-                      "src" => ?src,
-                      "dst" => ?dst,
-                      "domain" => ?graph[src].domain());
-                unimplemented!();
+                // materialization and routing get very confused when there isn't an ingress after
+                // a Sharder. however, since it's a bit tricky to allocate a new domain here, we
+                // instead fix this up in flow/mod, right after the call to shard()
             }
 
             // the sharder itself isn't sharded
