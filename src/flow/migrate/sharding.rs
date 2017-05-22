@@ -17,7 +17,7 @@ pub fn shard(log: &Logger,
              graph: &mut Graph,
              source: NodeIndex,
              new: &mut HashSet<NodeIndex>)
-             -> HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>> {
+             -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
 
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -310,7 +310,7 @@ pub fn shard(log: &Logger,
 /// records received by `dst` are sharded by column `col`.
 fn reshard(log: &Logger,
            new: &mut HashSet<NodeIndex>,
-           swaps: &mut HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>>,
+           swaps: &mut HashMap<(NodeIndex, NodeIndex), NodeIndex>,
            graph: &mut Graph,
            src: NodeIndex,
            dst: NodeIndex,
@@ -364,18 +364,10 @@ fn reshard(log: &Logger,
     graph.add_edge(node, dst, was_materialized);
 
     // any node in the `dst` domain that refers to `src` now needs to refer to `node` instead
-    let old = swaps
-        .entry(graph[dst].domain())
-        .or_insert_with(HashMap::new)
-        .insert(src, node);
-    if let Some(old) = old {
-        crit!(log, "re-sharding already sharded node introduces swap collision";
-                     "src" => ?src,
-                     "dst" => ?dst,
-                     "node" => ?node,
-                     "prev" => ?old);
-        unimplemented!();
-    }
+    let old = swaps.insert((dst, src), node);
+    assert_eq!(old,
+               None,
+               "re-sharding already sharded node introduces swap collision");
 }
 
 pub fn make_shard_domains(log: &Logger, graph: &mut Graph, s: NodeIndex, domain: domain::Index) {

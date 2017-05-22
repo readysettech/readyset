@@ -24,7 +24,7 @@ pub fn add(log: &Logger,
            graph: &mut Graph,
            source: NodeIndex,
            new: &mut HashSet<NodeIndex>)
-           -> HashMap<domain::Index, HashMap<NodeIndex, NodeIndex>> {
+           -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
 
     // find all new nodes in topological order. we collect first since we'll be mutating the graph
     // below. it's convenient to have the nodes in topological order, because we then know that
@@ -146,10 +146,7 @@ pub fn add(log: &Logger,
             graph.add_edge(ingress, node, was_materialized);
 
             // we now need to refer to the ingress instead of the "real" parent
-            swaps
-                .entry(domain)
-                .or_insert_with(HashMap::new)
-                .insert(parent, ingress);
+            swaps.insert((node, parent), ingress);
         }
 
         // we now have all the ingress nodes we need. it's time to check that they are all

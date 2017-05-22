@@ -735,11 +735,9 @@ impl<'a> Migration<'a> {
 
         // Every time we shard, we shard to *new* domains
         let mut new_sharders = HashSet::new();
-        for (_, swaps) in &swapped0 {
-            for (_, &new) in swaps {
-                if mainline.ingredients[new].is_sharder() {
-                    new_sharders.insert(new);
-                }
+        for (_, &sharder) in &swapped0 {
+            if mainline.ingredients[sharder].is_sharder() {
+                new_sharders.insert(sharder);
             }
         }
         let mut shard_domains = HashSet::new();
@@ -750,7 +748,6 @@ impl<'a> Migration<'a> {
             mainline.ndomains += 1;
             shard_domains.insert(domain);
             migrate::sharding::make_shard_domains(&log, &mut mainline.ingredients, s, domain);
-            // TODO: this also needs to update "swaps"
         }
 
         // Set up ingress and egress nodes
@@ -758,52 +755,47 @@ impl<'a> Migration<'a> {
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
         // Merge the swap lists
-        // TODO: swaps have to be *per target node* now that we have sharding, because we might
-        // introduce different sharders above different child nodes.
-        for (domain, swaps) in swapped1 {
-            let mut domain0 = swapped0.entry(domain).or_insert_with(HashMap::new);
-            for (from, to) in swaps {
-                use std::collections::hash_map::Entry;
-                match domain0.entry(from) {
-                    Entry::Occupied(mut to0) => {
-                        if &to != to0.get() {
-                            // This can happen if sharding decides to add a Sharder *under* a node,
-                            // and routing decides to add an ingress/egress pair between that node
-                            // and the Sharder. It's perfectly okay, but we should prefer the
-                            // "bottommost" swap to take place (i.e., the node that is *now*
-                            // closest to the dst node). This *should* be the sharding node, unless
-                            // routing added an ingress *under* the Sharder. We resolve the
-                            // collision by looking at which translation currently has an adge from
-                            // `from`, and then picking the *other*, since that must then be node
-                            // below.
-                            if mainline.ingredients.find_edge(from, to).is_some() {
-                                // from -> to -> to0 -> [children]
-                                // from [children]'s perspective, we should use to0 for from, so we
-                                // can just ignore the `to` swap.
-                            } else {
-                                // from -> to0 -> to -> [children]
-                                // from [children]'s perspective, we should use to for from, so we
-                                // need to prefer the `to` swap.
-                                *to0.get_mut() = to;
-                            }
+        for ((dst, src), instead) in swapped1 {
+            use std::collections::hash_map::Entry;
+            match swapped0.entry((dst, src)) {
+                Entry::Occupied(mut instead0) => {
+                    if &instead != instead0.get() {
+                        // This can happen if sharding decides to add a Sharder *under* a node,
+                        // and routing decides to add an ingress/egress pair between that node
+                        // and the Sharder. It's perfectly okay, but we should prefer the
+                        // "bottommost" swap to take place (i.e., the node that is *now*
+                        // closest to the dst node). This *should* be the sharding node, unless
+                        // routing added an ingress *under* the Sharder. We resolve the
+                        // collision by looking at which translation currently has an adge from
+                        // `src`, and then picking the *other*, since that must then be node
+                        // below.
+                        if mainline.ingredients.find_edge(src, instead).is_some() {
+                            // src -> instead -> instead0 -> [children]
+                            // from [children]'s perspective, we should use instead0 for from, so
+                            // we can just ignore the `instead` swap.
+                        } else {
+                            // src -> instead0 -> instead -> [children]
+                            // from [children]'s perspective, we should use instead for src, so we
+                            // need to prefer the `instead` swap.
+                            *instead0.get_mut() = instead;
                         }
                     }
-                    Entry::Vacant(hole) => {
-                        hole.insert(to);
-                    }
                 }
+                Entry::Vacant(hole) => {
+                    hole.insert(instead);
+                }
+            }
 
-                // we may also already have swapped the parents of some node *to* `from`. in
-                // swapped0. we want to change that mapping as well, since lookups in swapped
-                // aren't recursive.
-                for (_, to0) in domain0.iter_mut() {
-                    if *to0 == from {
-                        *to0 = to;
-                    }
+            // we may also already have swapped the parents of some node *to* `src`. in
+            // swapped0. we want to change that mapping as well, since lookups in swapped
+            // aren't recursive.
+            for (_, instead0) in swapped0.iter_mut() {
+                if *instead0 == src {
+                    *instead0 = instead;
                 }
             }
         }
-        let mut swapped = swapped0;
+        let swapped = swapped0;
 
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<_> = new.iter()
@@ -871,8 +863,10 @@ impl<'a> Migration<'a> {
             }
             // Parents in other domains have been swapped for ingress nodes.
             // Those ingress nodes' indices are now local.
-            for (from, to) in swapped.remove(domain).unwrap_or_else(HashMap::new) {
-                remap.insert(from.into(), *mainline.ingredients[to].local_addr());
+            for (&(dst, src), &instead) in &swapped {
+                if &mainline.ingredients[dst].domain() == domain {
+                    remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
+                }
             }
 
             // Initialize each new node
