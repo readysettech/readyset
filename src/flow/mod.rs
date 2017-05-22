@@ -733,24 +733,24 @@ impl<'a> Migration<'a> {
         let mut swapped0 =
             migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
-        // Make sure all Sharders are marked as being in their own domains
-        //
-        // TODO: this *shouldn't* be necessary once we actually implement sharding, because the
-        // nodes downstream of a Sharder are *all* moved into other (sharded) domains.
+        // Every time we shard, we shard to *new* domains
+        let mut new_sharders = HashSet::new();
         for (_, swaps) in &swapped0 {
-            for (&anc, &new) in swaps {
-                if !mainline.ingredients[new].is_sharder() {
-                    continue;
-                }
-                if mainline.ingredients[anc].domain() == mainline.ingredients[new].domain() {
-                    mainline.ndomains += 1;
-                    mainline.ingredients[new].add_to((mainline.ndomains - 1).into());
-                    crit!(log, "shifting sharder domain";
-                          "src" => ?anc,
-                          "dst" => ?new,
-                          "domain" => (mainline.ndomains-1));
+            for (_, &new) in swaps {
+                if mainline.ingredients[new].is_sharder() {
+                    new_sharders.insert(new);
                 }
             }
+        }
+        let mut shard_domains = HashSet::new();
+        for s in new_sharders {
+            // everything downstream of the sharder (until a merge or shuffle) is in a new
+            // "domain" (really it'll be multiple thread domains eventually).
+            let domain = mainline.ndomains.into();
+            mainline.ndomains += 1;
+            shard_domains.insert(domain);
+            migrate::sharding::make_shard_domains(&log, &mut mainline.ingredients, s, domain);
+            // TODO: this also needs to update "swaps"
         }
 
         // Set up ingress and egress nodes
