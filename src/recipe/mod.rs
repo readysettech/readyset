@@ -231,10 +231,10 @@ impl Recipe {
             let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
 
             // we currently use a domain per query
-            let d = mig.add_domain();
-            for na in qfp.new_nodes.iter() {
-                mig.assign_domain(na.clone(), d);
-            }
+            // let d = mig.add_domain();
+            // for na in qfp.new_nodes.iter() {
+            //     mig.assign_domain(na.clone(), d);
+            // }
             result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
         }
 

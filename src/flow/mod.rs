@@ -369,7 +369,7 @@ enum ColumnChange {
 /// graph until the `Migration` is committed (using `Migration::commit`).
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
-    added: HashMap<NodeIndex, Option<domain::Index>>,
+    added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
@@ -379,13 +379,6 @@ pub struct Migration<'a> {
 }
 
 impl<'a> Migration<'a> {
-    /// Add a new (empty) domain to the graph
-    pub fn add_domain(&mut self) -> domain::Index {
-        trace!(self.log, "creating new domain"; "domain" => self.mainline.ndomains);
-        self.mainline.ndomains += 1;
-        (self.mainline.ndomains - 1).into()
-    }
-
     /// Add the given `Ingredient` to the Soup.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
@@ -421,7 +414,7 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.insert(ni, None);
+        self.added.push(ni);
         // insert it into the graph
         if parents.is_empty() {
             self.mainline
@@ -462,7 +455,7 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.insert(ni, None);
+        self.added.push(ni);
         // insert it into the graph
         self.mainline
             .ingredients
@@ -481,7 +474,7 @@ impl<'a> Migration<'a> {
                                    default: prelude::DataType)
                                    -> usize {
         // not allowed to add columns to new nodes
-        assert!(!self.added.contains_key(node.as_global()));
+        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
 
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[*node.as_global()];
@@ -509,7 +502,7 @@ impl<'a> Migration<'a> {
     /// Drop a column from a base node.
     pub fn drop_column(&mut self, node: core::NodeAddress, column: usize) {
         // not allowed to drop columns from new nodes
-        assert!(!self.added.contains_key(node.as_global()));
+        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
 
         let base = &mut self.mainline.ingredients[*node.as_global()];
         assert!(base.is_internal() && base.get_base().is_some());
@@ -557,19 +550,6 @@ impl<'a> Migration<'a> {
             self.materialize
                 .insert((*src.as_global(), *dst.as_global()));
         }
-    }
-
-    /// Assign the ingredient with identifier `n` to the thread domain `d`.
-    ///
-    /// `n` must be have been added in this migration.
-    pub fn assign_domain(&mut self, n: core::NodeAddress, d: domain::Index) {
-        // TODO: what if a node is added to an *existing* domain?
-        debug!(self.log,
-               "node manually assigned to domain";
-               "node" => n.as_global().index(),
-               "domain" => d.index()
-        );
-        assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
     }
 
     fn ensure_reader_for(&mut self, n: core::NodeAddress) {
@@ -696,36 +676,14 @@ impl<'a> Migration<'a> {
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(self) {
         info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
-        let mut new = HashSet::new();
 
         let log = self.log;
         let start = self.start;
         let mainline = self.mainline;
-
-        // Make sure all new nodes are assigned to a domain
-        for (node, domain) in self.added {
-            let domain = domain.unwrap_or_else(|| {
-                // new node that doesn't belong to a domain
-                // create a new domain just for that node
-                // NOTE: this is the same code as in add_domain(), but we can't use self here
-                trace!(log,
-                       "node automatically added to domain";
-                       "node" => node.index(),
-                       "domain" => mainline.ndomains
-                );
-                mainline.ndomains += 1;
-                (mainline.ndomains - 1).into()
-
-            });
-            mainline.ingredients[node].add_to(domain);
-            new.insert(node);
-        }
+        let mut new: HashSet<_> = self.added.into_iter().collect();
 
         // Readers are nodes too.
-        // And they should be assigned the same domain as their parents
-        for (parent, reader) in self.readers {
-            let domain = mainline.ingredients[parent].domain();
-            mainline.ingredients[reader].add_to(domain);
+        for (_parent, reader) in self.readers {
             new.insert(reader);
         }
 
@@ -733,22 +691,12 @@ impl<'a> Migration<'a> {
         let mut swapped0 =
             migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
 
-        // Every time we shard, we shard to *new* domains
-        let mut new_sharders = HashSet::new();
-        for (_, &sharder) in &swapped0 {
-            if mainline.ingredients[sharder].is_sharder() {
-                new_sharders.insert(sharder);
-            }
-        }
-        let mut shard_domains = HashSet::new();
-        for s in new_sharders {
-            // everything downstream of the sharder (until a merge or shuffle) is in a new
-            // "domain" (really it'll be multiple thread domains eventually).
-            let domain = mainline.ndomains.into();
-            mainline.ndomains += 1;
-            shard_domains.insert(domain);
-            migrate::sharding::make_shard_domains(&log, &mut mainline.ingredients, s, domain);
-        }
+        // Assign domains
+        migrate::assignment::assign(&log,
+                                    &mut mainline.ingredients,
+                                    mainline.source,
+                                    &new,
+                                    &mut mainline.ndomains);
 
         // Set up ingress and egress nodes
         let swapped1 =

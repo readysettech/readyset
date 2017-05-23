@@ -1,5 +1,4 @@
 use flow::prelude::*;
-use flow::domain;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use slog::Logger;
@@ -325,20 +324,12 @@ fn reshard(log: &Logger,
             // an identity node that is *not* marked as sharded will end up acting like a union!
             let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
             let mut n = graph[src].mirror(n);
-
-            // `src` is sharded into many domains -- the merging has to happen in *one* domain
-            // (namely the one of the destination).
-            n.add_to(graph[dst].domain());
             n.shard_by(Sharding::None);
-
             n
         }
         Sharding::ByColumn(c) => {
             use flow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
-
-            // the sharding happens in the source domain
-            n.add_to(graph[src].domain());
 
             // the sharder itself isn't sharded
             n.shard_by(Sharding::None);
@@ -363,49 +354,9 @@ fn reshard(log: &Logger,
     graph.add_edge(src, node, false);
     graph.add_edge(node, dst, was_materialized);
 
-    // any node in the `dst` domain that refers to `src` now needs to refer to `node` instead
+    // if `dst` refers to `src`, it now needs to refer to `node` instead
     let old = swaps.insert((dst, src), node);
     assert_eq!(old,
                None,
                "re-sharding already sharded node introduces swap collision");
-}
-
-pub fn make_shard_domains(log: &Logger, graph: &mut Graph, s: NodeIndex, domain: domain::Index) {
-    // TODO
-    // what about existing domain assignments? if a and b are both children of a Sharder, but are
-    // assigned different domains, that's probably an indicator that they should be kept in
-    // separate domains. we'd still have to assign them *new* domains, but we should use the same
-    // new domain for nodes that previously had the same domain, and different new domains for
-    // nodes that do not.
-    let mut children = graph
-        .neighbors_directed(s, petgraph::EdgeDirection::Outgoing)
-        .detach();
-    debug!(log, "reassigning domains for sharded nodes";
-           "sharder" => ?s,
-           "domain" => ?domain);
-    while let Some((_, c)) = children.next(graph) {
-        shard_domains_inner(log, graph, c, domain);
-    }
-}
-
-fn shard_domains_inner(log: &Logger, graph: &mut Graph, n: NodeIndex, domain: domain::Index) {
-    if graph[n].is_sharder() {
-        // we're shuffling -- downstream nodes will get a new domain
-        debug!(log, "hit boundary at sharder"; "sharder" => ?n);
-        graph[n].add_to(domain);
-    } else if graph[n].sharded_by() == Sharding::None {
-        debug!(log, "hit boundary at merge"; "merge" => ?n);
-        // merge node -- leave in its target domain
-    } else {
-        assert_ne!(graph[n].sharded_by(), Sharding::None);
-        trace!(log, "reassigning sharded node"; "node" => ?n);
-        graph[n].add_to(domain);
-        // keep sharding children
-        let mut children = graph
-            .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
-            .detach();
-        while let Some((_, c)) = children.next(graph) {
-            shard_domains_inner(log, graph, c, domain);
-        }
-    }
 }
