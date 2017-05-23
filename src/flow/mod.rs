@@ -856,25 +856,31 @@ impl<'a> Migration<'a> {
             }
 
             // Figure out all the remappings that have happened
+            // NOTE: this has to be *per node*, since a shared parent may be remapped differently
+            // to different children (due to sharding for example). we just allocate it once
+            // though.
             let mut remap = HashMap::new();
-            // The global address of each node in this domain is now a local one
-            for &(ni, _) in nodes.iter() {
-                remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
-            }
-            // Parents in other domains have been swapped for ingress nodes.
-            // Those ingress nodes' indices are now local.
-            for (&(dst, src), &instead) in &swapped {
-                if &mainline.ingredients[dst].domain() == domain {
-                    // FIXME: if we have two remappings of the same src in the same domain, this
-                    // masks a remap. we actually need a remap per *node*!
-                    let old = remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
-                    assert_eq!(old, None);
-                }
-            }
 
             // Initialize each new node
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
+                    // The global address of each node in this domain is now a local one
+                    remap.clear();
+                    for &(ni, _) in nodes.iter() {
+                        remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
+                    }
+
+                    // Parents in other domains have been swapped for ingress nodes.
+                    // Those ingress nodes' indices are now local.
+                    for (&(dst, src), &instead) in &swapped {
+                        if dst == ni && &mainline.ingredients[dst].domain() == domain {
+                            let old =
+                                remap.insert(src.into(),
+                                             *mainline.ingredients[instead].local_addr());
+                            assert_eq!(old, None);
+                        }
+                    }
+
                     trace!(log, "initializing new node"; "node" => ni.index());
                     mainline
                         .ingredients
