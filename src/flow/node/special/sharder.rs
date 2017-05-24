@@ -89,7 +89,6 @@ impl Sharder {
                     unreachable!()
                 };
 
-                println!("shard: {}", shard);
                 let tx = &mut self.txs[shard];
                 m.link_mut().src = index.into();
                 m.link_mut().dst = tx.0;
