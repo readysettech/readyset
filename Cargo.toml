@@ -123,11 +123,6 @@ path = "benchmarks/vote/vote-client.rs"
 required-features = ["binaries"]
 
 [[bin]]
-name = "multitail"
-path = "benchmarks/multitail/multitail.rs"
-required-features = ["binaries"]
-
-[[bin]]
 name = "tpc_w"
 path = "benchmarks/tpc_w/tpc_w.rs"
 required-features = ["binaries"]
