@@ -1,7 +1,7 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
 use rustful::server::Global;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use flow::Blender;
 use flow::prelude::DataType;
@@ -26,13 +26,14 @@ struct PutEndpoint<Mutator> {
 /// All nodes are available for reading by GETing from `localhost:8080/<view>?key=<key>`. A JSON
 /// array with all matching records is returned. Each record is represented as a JSON object with
 /// field names as dictated by those passed to `new()` for the view being queried.
-pub fn run(soup: Blender) -> HttpResult<Listening> {
+pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
     use rustful::header::ContentType;
 
     let mut router = TreeRouter::new();
 
     // Figure out what inputs and outputs to expose
     let (ins, outs) = {
+        let soup = soup.lock().unwrap();
         let ins: Vec<_> = soup.inputs()
             .into_iter()
             .map(|(ni, n)| {
@@ -112,9 +113,29 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
     insert_routes! {
         &mut router => {
             "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
-                let m: &Mutex<Blender> = ctx.global.get().unwrap();
+                let m: &Arc<Mutex<Blender>> = ctx.global.get().unwrap();
                 res.headers_mut().set(ContentType::plaintext());
                 res.send(format!("{}", *m.lock().unwrap()));
+            }) as Box<Handler>,
+            "graph.html" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::html());
+                res.send(include_str!("graph.html"));
+            }) as Box<Handler>,
+            "js/dot-checker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::plaintext());
+                res.send(include_str!("js/dot-checker.js"));
+            }) as Box<Handler>,
+            "js/layout-worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::plaintext());
+                res.send(include_str!("js/layout-worker.js"));
+            }) as Box<Handler>,
+            "js/renderer.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::plaintext());
+                res.send(include_str!("js/renderer.js"));
+            }) as Box<Handler>,
+            "js/worker.js" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::plaintext());
+                res.send(include_str!("js/worker.js"));
             }) as Box<Handler>,
         }
     };
@@ -122,7 +143,7 @@ pub fn run(soup: Blender) -> HttpResult<Listening> {
     Server {
             handlers: router,
             host: 8080.into(),
-            global: Global::from(Box::new(Mutex::new(soup))),
+            global: Global::from(Box::new(soup)),
             ..Server::default()
         }
         .run()

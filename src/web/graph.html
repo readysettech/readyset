@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.15/require.min.js"></script>
+<div id="graph"><div /></div>
+<script>
+
+  requirejs.config({
+	//By default load any module IDs from js/lib
+	baseUrl: 'js',
+	//except, if the module ID starts with "app",
+	//load it from the js/app directory. paths
+	//config is relative to the baseUrl, and
+	//never includes a ".js" extension since
+	//the paths config could be for a directory.
+	paths: {
+		d3: 'https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min',
+		"dot-checker": 'dot-checker',
+		"layout-worker": 'layout-worker',
+		worker: 'worker',
+        renderer: 'renderer',
+        jquery: 'https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min',
+	}
+  });
+
+require(["renderer", "jquery"], function (renderer, $) {
+	renderer.init("#graph");
+
+	$.ajax({
+		url: "graph",
+		dataType: "text",
+		success: function(data) {
+			renderer.render(data);
+		},
+		error: function(e) {
+			renderer.render('digraph {}');
+		}
+	});
+
+	setInterval(function(){
+		$.ajax({
+			url: "graph",
+			dataType: "text",
+			success: function(data) {
+				renderer.render(data);
+			},
+		});
+	}, 1000);
+});
+</script>
+

@@ -1,6 +1,8 @@
 #[cfg(feature="web")]
 extern crate distributary;
 
+use std::sync::{Arc, Mutex};
+
 #[cfg(feature="web")]
 fn main() {
     use distributary::*;
@@ -46,7 +48,7 @@ fn main() {
         mig.commit();
     }
 
-    web::run(g).unwrap();
+    web::run(Arc::new(Mutex::new(g))).unwrap();
     loop {}
 }
 

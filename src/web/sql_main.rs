@@ -1,6 +1,8 @@
 #[cfg(feature="web")]
 extern crate distributary;
 
+use std::sync::{Arc, Mutex};
+
 #[cfg(feature="web")]
 fn main() {
     use distributary::*;
@@ -61,7 +63,7 @@ fn main() {
     println!("{}", g);
 
     // run the application
-    web::run(g).unwrap();
+    web::run(Arc::new(Mutex::new(g))).unwrap();
 }
 
 #[cfg(not(feature="web"))]
