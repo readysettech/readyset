@@ -1,5 +1,6 @@
 use flow::domain;
 use flow::prelude::*;
+use flow::payload::{IngressFromBase, EgressForBase};
 
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -13,7 +14,7 @@ use slog::Logger;
 fn count_base_ingress(graph: &Graph,
                       source: NodeIndex,
                       nodes: &[(NodeIndex, bool)])
-                      -> HashMap<NodeIndex, usize> {
+                      -> IngressFromBase {
 
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
@@ -43,28 +44,59 @@ fn count_base_ingress(graph: &Graph,
         .collect()
 }
 
+fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]) -> EgressForBase {
+
+    let output_nodes: Vec<_> = nodes
+        .into_iter()
+        .map(|&(ni, _)| ni)
+        .filter(|&ni| graph[ni].is_output())
+        //.filter(|&ni| graph[ni].is_transactional())
+        .collect();
+
+    graph
+        .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
+        .map(|ingress| {
+                 graph
+                     .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
+                     .next()
+                     .expect("source ingress must have a base child")
+             })
+        .map(|base| {
+            let outs = output_nodes
+                .iter()
+                .filter(|&&out| petgraph::algo::has_path_connecting(graph, base, out, None))
+                .map(|&out| *graph[out].local_addr())
+                .collect();
+            (base, outs)
+        })
+        .collect()
+}
+
 pub fn analyze_graph(graph: &Graph,
                      source: NodeIndex,
                      domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>)
-                     -> (HashMap<domain::Index, HashMap<NodeIndex, usize>>) {
+                     -> HashMap<domain::Index, (IngressFromBase, EgressForBase)> {
     domain_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
-                 (domain, count_base_ingress(graph, source, &nodes[..]))
+                 (domain,
+                  (count_base_ingress(graph, source, &nodes[..]),
+                   base_egress_map(graph, source, &nodes[..])))
              })
         .collect()
 }
 
-pub fn finalize(ingresses_from_base: HashMap<domain::Index, HashMap<NodeIndex, usize>>,
+pub fn finalize(deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
                 log: &Logger,
                 txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
                 at: i64) {
-    for (domain, ingress_from_base) in ingresses_from_base {
+    for (domain, (ingress_from_base, egress_for_base)) in deps {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ctx = txs.get_mut(&domain).unwrap();
         let _ = ctx.send(box Packet::CompleteMigration {
-                             at: at,
-                             ingress_from_base: ingress_from_base,
+                             at,
+                             ingress_from_base,
+                             egress_for_base,
                          });
     }
 }

@@ -333,11 +333,11 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let (ts, tracer) = if let Some(&box Packet::Transaction {
-                                           state: ref ts @ TransactionState::Committed(..),
-                                           ref tracer,
-                                           ..
-                                       }) = messages.iter().next() {
+        let (ts, tracer) = if let Packet::Transaction {
+                   state: ref ts @ TransactionState::Committed(..),
+                   ref tracer,
+                   ..
+               } = *messages[0] {
             (ts.clone(), tracer.clone())
         } else {
             unreachable!();
@@ -354,7 +354,14 @@ impl Domain {
             }
         }
 
-        for n in self.nodes.values().filter(|n| n.borrow().is_output()) {
+        let base = if let TransactionState::Committed(_, base, _) = ts {
+            base
+        } else {
+            unreachable!()
+        };
+
+        for n in self.transaction_state.egress_for(base) {
+            let n = &self.nodes[n.as_local()];
             let data = match egress_messages.entry(*n.borrow().local_addr()) {
                 Entry::Occupied(entry) => entry.remove().into(),
                 _ => Records::default(),

@@ -89,6 +89,8 @@ pub enum PacketEvent {
 }
 
 pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
+pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
+pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<NodeAddress>>;
 
 //#[warn(variant_size_differences)]
 pub enum Packet {
@@ -240,11 +242,12 @@ pub enum Packet {
     /// Once this message is received, the domain may continue processing transactions with
     /// timestamps following the given one.
     ///
-    /// The update also includes the new ingress_from_base counts the domain should use going
-    /// forward.
+    /// The update also includes the new ingress_from_base counts and egress_from_base map the
+    /// domain should use going forward.
     CompleteMigration {
         at: i64,
-        ingress_from_base: HashMap<petgraph::graph::NodeIndex, usize>,
+        ingress_from_base: IngressFromBase,
+        egress_for_base: EgressForBase,
     },
 
     /// Request that a domain send usage statistics on the given sender.

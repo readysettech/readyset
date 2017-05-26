@@ -875,14 +875,11 @@ impl<'a> Migration<'a> {
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
-                                                                       mainline.source,
-                                                                       domain_nodes);
-        let (start_ts, end_ts, prevs) = mainline
-            .checktable
-            .lock()
-            .unwrap()
-            .perform_migration(&ingresses_from_base);
+        let deps = migrate::transactions::analyze_graph(&mainline.ingredients,
+                                                        mainline.source,
+                                                        domain_nodes);
+        let (start_ts, end_ts, prevs) =
+            mainline.checktable.lock().unwrap().perform_migration(&deps);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -978,7 +975,7 @@ impl<'a> Migration<'a> {
             .unwrap()
             .add_replay_paths(domains_on_path);
 
-        migrate::transactions::finalize(ingresses_from_base, &log, &mut mainline.txs, end_ts);
+        migrate::transactions::finalize(deps, &log, &mut mainline.txs, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }
