@@ -53,9 +53,11 @@ pub fn assign(log: &Logger,
                 // TODO: this is stupid -- assign to some domain that already exists under the
                 // sharder if possible.
                 next_domain()
-            } else if n.is_sharder() ||
-                      (n.sharded_by() == Sharding::None &&
-                       ps.iter().any(|p| p.sharded_by() != Sharding::None)) {
+            } else if n.is_sharder() {
+                // sharder belongs to parent domain
+                ps[0].domain().index()
+            } else if n.sharded_by() == Sharding::None &&
+                      ps.iter().any(|p| p.sharded_by() != Sharding::None) {
                 // shard merger
                 next_domain()
             } else if n.is_reader() {
