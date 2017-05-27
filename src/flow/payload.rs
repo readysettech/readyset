@@ -89,6 +89,8 @@ pub enum PacketEvent {
 }
 
 pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
+pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
+pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<NodeAddress>>;
 
 //#[warn(variant_size_differences)]
 pub enum Packet {
@@ -154,6 +156,14 @@ pub enum Packet {
         node: LocalNodeIndex,
         new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
         new_tag: Option<(Tag, NodeAddress)>,
+    },
+
+    /// Add a shard to a Sharder node.
+    ///
+    /// Note that this *must* be done *before* the sharder starts being used!
+    UpdateSharder {
+        node: LocalNodeIndex,
+        new_tx: (NodeAddress, mpsc::SyncSender<Box<Packet>>),
     },
 
     /// Add a streamer to an existing reader node.
@@ -232,11 +242,12 @@ pub enum Packet {
     /// Once this message is received, the domain may continue processing transactions with
     /// timestamps following the given one.
     ///
-    /// The update also includes the new ingress_from_base counts the domain should use going
-    /// forward.
+    /// The update also includes the new ingress_from_base counts and egress_from_base map the
+    /// domain should use going forward.
     CompleteMigration {
         at: i64,
-        ingress_from_base: HashMap<petgraph::graph::NodeIndex, usize>,
+        ingress_from_base: IngressFromBase,
+        egress_for_base: EgressForBase,
     },
 
     /// Request that a domain send usage statistics on the given sender.
@@ -318,13 +329,15 @@ impl Packet {
         }
     }
 
-    pub fn take_data(self) -> Records {
-        match self {
-            Packet::Message { data, .. } => data,
-            Packet::Transaction { data, .. } => data,
-            Packet::ReplayPiece { data, .. } => data,
+    pub fn take_data(&mut self) -> Records {
+        use std::mem;
+        let inner = match *self {
+            Packet::Message { ref mut data, .. } => data,
+            Packet::Transaction { ref mut data, .. } => data,
+            Packet::ReplayPiece { ref mut data, .. } => data,
             _ => unreachable!(),
-        }
+        };
+        mem::replace(inner, Records::default())
     }
 
     pub fn clone_data(&self) -> Self {
@@ -351,6 +364,21 @@ impl Packet {
                     data: data.clone(),
                     state: state.clone(),
                     tracer: tracer.clone(),
+                }
+            }
+            Packet::ReplayPiece {
+                ref link,
+                ref tag,
+                ref data,
+                context: ref context @ ReplayPieceContext::Regular { .. },
+                ref transaction_state,
+            } => {
+                Packet::ReplayPiece {
+                    link: link.clone(),
+                    tag: tag.clone(),
+                    data: data.clone(),
+                    context: context.clone(),
+                    transaction_state: transaction_state.clone(),
                 }
             }
             _ => unreachable!(),

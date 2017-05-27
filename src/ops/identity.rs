@@ -35,8 +35,14 @@ impl Ingredient for Identity {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        self.src = remap[&self.src];
+    fn on_commit(&mut self, me: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+        // an identity is sometimes injected into the graph (to de-shard), which causes its src
+        // address to be remapped to its address in  all of its (new) children. unfortunately, this
+        // means that *we* will also be told to remap our parent to ourselves, which is
+        // non-sensical and should be ignored.
+        if remap[&self.src] != me {
+            self.src = remap[&self.src];
+        }
     }
 
     fn on_input(&mut self,

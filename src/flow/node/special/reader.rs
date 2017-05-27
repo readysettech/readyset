@@ -33,20 +33,24 @@ pub struct Reader {
     streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
     state: Option<usize>,
     token_generator: Option<checktable::TokenGenerator>,
+    for_node: NodeAddress,
 }
 
-impl Default for Reader {
-    fn default() -> Self {
+impl Reader {
+    pub fn new(for_node: NodeAddress) -> Self {
         Reader {
             writer: None,
             streamers: Some(Vec::new()),
             state: None,
             token_generator: None,
+            for_node,
         }
     }
-}
 
-impl Reader {
+    pub fn is_for(&self) -> &NodeAddress {
+        &self.for_node
+    }
+
     pub fn writer(&self) -> Option<&backlog::WriteHandle> {
         self.writer.as_ref()
     }
@@ -61,6 +65,7 @@ impl Reader {
             streamers: self.streamers.take(),
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
+            for_node: self.for_node,
         }
     }
 

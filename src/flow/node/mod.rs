@@ -27,6 +27,8 @@ pub struct Node {
     children: Vec<NodeAddress>,
     inner: NodeType,
     taken: bool,
+
+    sharded_by: Sharding,
 }
 
 // constructors
@@ -48,6 +50,8 @@ impl Node {
             children: Vec::new(),
             inner: inner.into(),
             taken: false,
+
+            sharded_by: Sharding::None,
         }
     }
 
@@ -91,6 +95,11 @@ impl Node {
         DanglingDomainNode(n)
     }
 
+    /// Set this node's sharding property.
+    pub fn shard_by(&mut self, s: Sharding) {
+        self.sharded_by = s;
+    }
+
     pub fn on_commit(&mut self, remap: &HashMap<NodeAddress, NodeAddress>) {
         // this is *only* overwritten for these asserts.
         assert!(self.addr.is_some());
@@ -104,6 +113,15 @@ impl Node {
 
 // derefs
 impl Node {
+    pub fn with_sharder_mut<F>(&mut self, f: F)
+        where F: FnOnce(&mut special::Sharder)
+    {
+        match self.inner {
+            NodeType::Sharder(ref mut s) => f(s),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn with_egress_mut<F>(&mut self, f: F)
         where F: FnOnce(&mut special::Egress)
     {
@@ -183,6 +201,10 @@ impl Node {
 
 // attributes
 impl Node {
+    pub fn sharded_by(&self) -> Sharding {
+        self.sharded_by
+    }
+
     pub fn add_child(&mut self, child: NodeAddress) {
         assert!(child.is_local());
         self.children.push(child);
@@ -265,6 +287,14 @@ impl Node {
         }
     }
 
+    pub fn is_sharder(&self) -> bool {
+        if let NodeType::Sharder { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_reader(&self) -> bool {
         if let NodeType::Reader { .. } = self.inner {
             true
@@ -289,12 +319,21 @@ impl Node {
         }
     }
 
+    pub fn is_sender(&self) -> bool {
+        match self.inner {
+            NodeType::Egress { .. } |
+            NodeType::Sharder(..) => true,
+            _ => false,
+        }
+    }
+
     /// A node is considered to be an output node if changes to its state are visible outside of
     /// its domain.
     pub fn is_output(&self) -> bool {
         match self.inner {
             NodeType::Egress { .. } |
             NodeType::Reader(..) |
+            NodeType::Sharder(..) |
             NodeType::Hook(..) => true,
             _ => false,
         }

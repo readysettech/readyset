@@ -31,7 +31,6 @@ arccstr = "0.4.0"
 vec_map = "0.8.0"
 lazy_static = "0.2.8"
 
-spmc = "0.2.1"
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "aafa7ad49617aca9928dc09ec324f13bd8081ff7" }
 
 # for benchmarks
@@ -120,11 +119,6 @@ required-features = ["binaries"]
 [[bin]]
 name = "vote-client"
 path = "benchmarks/vote/vote-client.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "multitail"
-path = "benchmarks/multitail/multitail.rs"
 required-features = ["binaries"]
 
 [[bin]]

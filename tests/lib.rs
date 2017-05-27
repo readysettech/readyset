@@ -331,11 +331,6 @@ fn shared_interdomain_ancestor() {
         let c = mig.add_ingredient("c", &["a", "b"], u);
         let cq = mig.stream(c);
 
-        let domain = mig.add_domain();
-        mig.assign_domain(b, domain);
-        mig.assign_domain(c, domain);
-        // domain now has two incoming edges from the same node in a different domain
-
         mig.commit();
         (a, bq, cq)
     };
@@ -1119,14 +1114,12 @@ fn independent_domain_migration() {
 
     // set up graph
     let mut g = distributary::Blender::new();
-    let (a, domain) = {
+    let a = {
         let mut mig = g.start_migration();
-        let domain = mig.add_domain();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
-        mig.assign_domain(a, domain);
         mig.maintain(a, 0);
         mig.commit();
-        (a, domain)
+        a
     };
 
     let aq = g.get_getter(a).unwrap();
@@ -1145,7 +1138,6 @@ fn independent_domain_migration() {
     let b = {
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
-        mig.assign_domain(b, domain);
         mig.maintain(b, 0);
         mig.commit();
         b
@@ -1153,8 +1145,6 @@ fn independent_domain_migration() {
 
     let bq = g.get_getter(b).unwrap();
     let mutb = g.get_mutator(b);
-
-    // TODO: check that b is actually running in `domain`
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]);
@@ -1170,15 +1160,12 @@ fn independent_domain_migration() {
 fn domain_amend_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let (a, b, domain) = {
+    let (a, b) = {
         let mut mig = g.start_migration();
-        let domain = mig.add_domain();
         let a = mig.add_ingredient("a", &["a", "b"], distributary::Base::default());
         let b = mig.add_ingredient("b", &["a", "b"], distributary::Base::default());
-        mig.assign_domain(a, domain);
-        mig.assign_domain(b, domain);
         mig.commit();
-        (a, b, domain)
+        (a, b)
     };
     let muta = g.get_mutator(a);
     let mutb = g.get_mutator(b);
@@ -1189,12 +1176,9 @@ fn domain_amend_migration() {
     emits.insert(b, vec![0, 1]);
     let u = distributary::Union::new(emits);
     let c = mig.add_ingredient("c", &["a", "b"], u);
-    mig.assign_domain(c, domain);
     let cq = mig.stream(c);
 
     mig.commit();
-
-    // TODO: check that c is actually running in `domain`
 
     let id: distributary::DataType = 1.into();
 
@@ -1248,11 +1232,6 @@ fn state_replay_migration_stream() {
                                         distributary::JoinType::Inner,
                                         vec![B(0, 0), L(1), R(1)]);
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
-
-        // for predictability, ensure the new nodes are in the same domain
-        let domain = mig.add_domain();
-        mig.assign_domain(b, domain);
-        mig.assign_domain(j, domain);
 
         // we want to observe what comes out of the join
         let out = mig.stream(j);
@@ -1322,12 +1301,7 @@ fn migration_depends_on_unchanged_domain() {
                                     distributary::JoinType::Inner,
                                     vec![distributary::JoinSource::B(0, 0),
                                          distributary::JoinSource::R(1)]);
-    let j = mig.add_ingredient("join", &["a", "b"], j);
-
-    // we assign tmp and j to the same domain just to make the graph less complex
-    let d = mig.add_domain();
-    mig.assign_domain(tmp, d);
-    mig.assign_domain(j, d);
+    mig.add_ingredient("join", &["a", "b"], j);
 
     // start processing
     mig.commit();
@@ -1364,13 +1338,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
             use distributary::JoinSource::*;
             let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
             end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
-
-            let ad = mig.add_domain();
-            mig.assign_domain(article, ad);
-            mig.assign_domain(end, ad);
-            let vd = mig.add_domain();
-            mig.assign_domain(vote, vd);
-            mig.assign_domain(vc, vd);
 
             mig.maintain(end, 0);
 
@@ -1411,8 +1378,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let (rating, last) = {
             let mut mig = g.start_migration();
 
-            let domain = mig.add_domain();
-
             // add new "ratings" base table
             let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
 
@@ -1425,10 +1390,6 @@ fn do_full_vote_migration(old_puts_after: bool) {
             use distributary::JoinSource::*;
             let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
             let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
-
-            mig.assign_domain(rating, domain);
-            mig.assign_domain(rs, domain);
-            mig.assign_domain(total, domain);
 
             // finally, produce end result
             let j = Join::new(article,
@@ -1570,10 +1531,6 @@ fn state_replay_migration_query() {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a", &["x", "y"], distributary::Base::default());
         let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
-
-        let domain = mig.add_domain();
-        mig.assign_domain(a, domain);
-        mig.assign_domain(b, domain);
         mig.commit();
 
         (a, b)

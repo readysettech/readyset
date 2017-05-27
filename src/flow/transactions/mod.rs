@@ -1,5 +1,5 @@
 use petgraph::graph::NodeIndex;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 
@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::mem;
 
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState};
+use flow::payload::{TransactionState, ReplayTransactionState, IngressFromBase, EgressForBase};
 use flow::domain;
 
 use checktable;
@@ -17,7 +17,7 @@ use checktable;
 enum BufferedTransaction {
     Transaction(NodeIndex, Box<Packet>),
     MigrationStart(mpsc::SyncSender<()>),
-    MigrationEnd(HashMap<NodeIndex, usize>),
+    MigrationEnd(IngressFromBase, EgressForBase),
     Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
@@ -51,7 +51,7 @@ enum Bundle {
     Empty,
     Messages(usize, Vec<Box<Packet>>),
     MigrationStart(mpsc::SyncSender<()>),
-    MigrationEnd(HashMap<NodeIndex, usize>),
+    MigrationEnd(IngressFromBase, EgressForBase),
     Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
 }
@@ -79,6 +79,9 @@ pub struct DomainState {
     /// Number of ingress nodes in the domain that receive updates from each base node. Base nodes
     /// that are only connected by timestamp ingress nodes are not included.
     ingress_from_base: Vec<usize>,
+
+    /// Reachable egress (or rather, output) nodes from a given base inside this domain.
+    egress_for_base: EgressForBase,
 
     /// Timestamp that the domain has seen all transactions up to.
     ts: i64,
@@ -118,8 +121,13 @@ impl DomainState {
             buffer: BinaryHeap::new(),
             next_transaction: Bundle::Empty,
             ingress_from_base: Vec::new(),
+            egress_for_base: Default::default(),
             ts: ts,
         }
+    }
+
+    pub fn egress_for(&self, base: NodeIndex) -> &[NodeAddress] {
+        &self.egress_for_base[&base][..]
     }
 
     fn assign_ts(&mut self, packet: &mut Box<Packet>) -> bool {
@@ -223,10 +231,27 @@ impl DomainState {
                 Bundle::Empty => {
                     let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                     let bundle = match m {
-                        box Packet::Transaction { .. } => Bundle::Messages(count, vec![m]),
+                        box Packet::Transaction { .. } => {
+                            if count == 0 {
+                                println!("{:?} got transaction from base {:?}, which it shouldn't",
+                                         self.domain_index,
+                                         base);
+                                unreachable!();
+                            }
+                            Bundle::Messages(count, vec![m])
+                        }
                         box Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
-                        box Packet::CompleteMigration { ingress_from_base, .. } => {
-                            Bundle::MigrationEnd(ingress_from_base)
+                        box Packet::CompleteMigration { .. } => {
+                            let m = *m; // workaround for #16223
+                            if let Packet::CompleteMigration {
+                                       ingress_from_base,
+                                       egress_for_base,
+                                       ..
+                                   } = m {
+                                Bundle::MigrationEnd(ingress_from_base, egress_for_base)
+                            } else {
+                                unreachable!()
+                            }
                         }
                         box Packet::ReplayPiece { .. } => Bundle::Replay(m),
                         _ => unreachable!(),
@@ -243,8 +268,17 @@ impl DomainState {
                     BufferedTransaction::Transaction(base.unwrap(), m)
                 }
                 box Packet::StartMigration { ack, .. } => BufferedTransaction::MigrationStart(ack),
-                box Packet::CompleteMigration { ingress_from_base, .. } => {
-                    BufferedTransaction::MigrationEnd(ingress_from_base)
+                box Packet::CompleteMigration { .. } => {
+                    let m = *m; // workaround for #16223
+                    if let Packet::CompleteMigration {
+                               ingress_from_base,
+                               egress_for_base,
+                               ..
+                           } = m {
+                        BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base)
+                    } else {
+                        unreachable!()
+                    }
                 }
                 box Packet::ReplayPiece { .. } => BufferedTransaction::Replay(m),
                 _ => unreachable!(),
@@ -292,8 +326,9 @@ impl DomainState {
                 BufferedTransaction::MigrationStart(sender) => {
                     self.next_transaction = Bundle::MigrationStart(sender)
                 }
-                BufferedTransaction::MigrationEnd(ingress_from_base) => {
-                    self.next_transaction = Bundle::MigrationEnd(ingress_from_base);
+                BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base) => {
+                    self.next_transaction = Bundle::MigrationEnd(ingress_from_base,
+                                                                 egress_for_base);
                 }
                 BufferedTransaction::Replay(packet) => {
                     self.next_transaction = Bundle::Replay(packet);
@@ -319,7 +354,7 @@ impl DomainState {
                 self.update_next_transaction();
                 Event::StartMigration
             }
-            Bundle::MigrationEnd(ingress_from_base) => {
+            Bundle::MigrationEnd(ingress_from_base, egress_for_base) => {
                 let max_index = ingress_from_base
                     .keys()
                     .map(|ni| ni.index())
@@ -329,6 +364,7 @@ impl DomainState {
                 for (ni, count) in ingress_from_base.into_iter() {
                     self.ingress_from_base[ni.index()] = count;
                 }
+                self.egress_for_base = egress_for_base;
 
                 self.ts += 1;
                 self.update_next_transaction();

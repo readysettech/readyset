@@ -13,6 +13,7 @@ use std::io;
 
 use slog;
 use petgraph;
+use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
 pub mod domain;
@@ -166,19 +167,35 @@ impl Blender {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                if self.ingredients[n].is_reader() {
+                self.ingredients[n].with_reader(|r| {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
-                    let src = self.ingredients
-                        .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
-                        .next()
-                        .unwrap();
-                    Some((src.into(), &self.ingredients[src]))
-                } else {
-                    None
-                }
+                    let src = r.is_for().clone();
+                    (src, &self.ingredients[*src.as_global()])
+                })
             })
             .collect()
+    }
+
+    fn find_getter_for(&self, node: &core::NodeAddress) -> Option<NodeIndex> {
+        // reader should be a child of the given node. however, due to sharding, it may not be an
+        // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
+        // *unrelated* reader node. to account for this, readers keep track of what node they are
+        // "for", and we simply search for the appropriate reader by that metric. since we know
+        // that the reader must be relatively close, a BFS search is the way to go.
+        // presumably only
+        let mut bfs = Bfs::new(&self.ingredients, *node.as_global());
+        let mut reader = None;
+        while let Some(child) = bfs.next(&self.ingredients) {
+            if self.ingredients[child]
+                   .with_reader(|r| r.is_for() == node)
+                   .unwrap_or(false) {
+                reader = Some(child);
+                break;
+            }
+        }
+
+        reader
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
@@ -187,14 +204,8 @@ impl Blender {
          node: core::NodeAddress)
          -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
-        // reader should be a child of the given node
-        let reader = self.ingredients
-            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter(|&ni| self.ingredients[ni].is_reader())
-            .next(); // there should be at most one
-
         // look up the read handle, clone it, and construct the read closure
-        reader.and_then(|r| {
+        self.find_getter_for(&node).and_then(|r| {
             let vr = VIEW_READERS.lock().unwrap();
             let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
             rh.map(|rh| {
@@ -226,15 +237,10 @@ impl Blender {
             return Err(());
         }
 
-        // reader should be a child of the given node
-        let reader = self.ingredients
-            .neighbors_directed(*node.as_global(), petgraph::EdgeDirection::Outgoing)
-            .filter_map(|ni| self.ingredients[ni].with_reader(|r| (ni, r)))
-            .next(); // there should be at most one
-
         // look up the read handle, clone it, and construct the read closure
-        reader
-            .and_then(|(r, inner)| {
+        self.find_getter_for(&node)
+            .and_then(|r| {
+                let inner = self.ingredients[r].with_reader(|r| r).unwrap();
                 let vr = VIEW_READERS.lock().unwrap();
                 let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
                 rh.map(|rh| {
@@ -363,7 +369,7 @@ enum ColumnChange {
 /// graph until the `Migration` is committed (using `Migration::commit`).
 pub struct Migration<'a> {
     mainline: &'a mut Blender,
-    added: HashMap<NodeIndex, Option<domain::Index>>,
+    added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
@@ -373,13 +379,6 @@ pub struct Migration<'a> {
 }
 
 impl<'a> Migration<'a> {
-    /// Add a new (empty) domain to the graph
-    pub fn add_domain(&mut self) -> domain::Index {
-        trace!(self.log, "creating new domain"; "domain" => self.mainline.ndomains);
-        self.mainline.ndomains += 1;
-        (self.mainline.ndomains - 1).into()
-    }
-
     /// Add the given `Ingredient` to the Soup.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
@@ -415,7 +414,7 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.insert(ni, None);
+        self.added.push(ni);
         // insert it into the graph
         if parents.is_empty() {
             self.mainline
@@ -456,7 +455,7 @@ impl<'a> Migration<'a> {
         );
 
         // keep track of the fact that it's new
-        self.added.insert(ni, None);
+        self.added.push(ni);
         // insert it into the graph
         self.mainline
             .ingredients
@@ -475,7 +474,7 @@ impl<'a> Migration<'a> {
                                    default: prelude::DataType)
                                    -> usize {
         // not allowed to add columns to new nodes
-        assert!(!self.added.contains_key(node.as_global()));
+        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
 
         let field = field.to_string();
         let base = &mut self.mainline.ingredients[*node.as_global()];
@@ -503,7 +502,7 @@ impl<'a> Migration<'a> {
     /// Drop a column from a base node.
     pub fn drop_column(&mut self, node: core::NodeAddress, column: usize) {
         // not allowed to drop columns from new nodes
-        assert!(!self.added.contains_key(node.as_global()));
+        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
 
         let base = &mut self.mainline.ingredients[*node.as_global()];
         assert!(base.is_internal() && base.get_base().is_some());
@@ -553,23 +552,10 @@ impl<'a> Migration<'a> {
         }
     }
 
-    /// Assign the ingredient with identifier `n` to the thread domain `d`.
-    ///
-    /// `n` must be have been added in this migration.
-    pub fn assign_domain(&mut self, n: core::NodeAddress, d: domain::Index) {
-        // TODO: what if a node is added to an *existing* domain?
-        debug!(self.log,
-               "node manually assigned to domain";
-               "node" => n.as_global().index(),
-               "domain" => d.index()
-        );
-        assert_eq!(self.added.insert(*n.as_global(), Some(d)).unwrap(), None);
-    }
-
     fn ensure_reader_for(&mut self, n: core::NodeAddress) {
         if !self.readers.contains_key(n.as_global()) {
             // make a reader
-            let r = node::special::Reader::default();
+            let r = node::special::Reader::new(n);
             let r = self.mainline.ingredients[*n.as_global()].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
             self.mainline.ingredients.add_edge(*n.as_global(), r, false);
@@ -690,42 +676,74 @@ impl<'a> Migration<'a> {
     /// new updates should be sent to introduce them into the Soup.
     pub fn commit(self) {
         info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
-        let mut new = HashSet::new();
 
         let log = self.log;
         let start = self.start;
         let mainline = self.mainline;
-
-        // Make sure all new nodes are assigned to a domain
-        for (node, domain) in self.added {
-            let domain = domain.unwrap_or_else(|| {
-                // new node that doesn't belong to a domain
-                // create a new domain just for that node
-                // NOTE: this is the same code as in add_domain(), but we can't use self here
-                trace!(log,
-                       "node automatically added to domain";
-                       "node" => node.index(),
-                       "domain" => mainline.ndomains
-                );
-                mainline.ndomains += 1;
-                (mainline.ndomains - 1).into()
-
-            });
-            mainline.ingredients[node].add_to(domain);
-            new.insert(node);
-        }
+        let mut new: HashSet<_> = self.added.into_iter().collect();
 
         // Readers are nodes too.
-        // And they should be assigned the same domain as their parents
-        for (parent, reader) in self.readers {
-            let domain = mainline.ingredients[parent].domain();
-            mainline.ingredients[reader].add_to(domain);
+        for (_parent, reader) in self.readers {
             new.insert(reader);
         }
 
+        // Shard the graph as desired
+        let mut swapped0 =
+            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
+
+        // Assign domains
+        migrate::assignment::assign(&log,
+                                    &mut mainline.ingredients,
+                                    mainline.source,
+                                    &new,
+                                    &mut mainline.ndomains);
+
         // Set up ingress and egress nodes
-        let mut swapped =
+        let swapped1 =
             migrate::routing::add(&log, &mut mainline.ingredients, mainline.source, &mut new);
+
+        // Merge the swap lists
+        for ((dst, src), instead) in swapped1 {
+            use std::collections::hash_map::Entry;
+            match swapped0.entry((dst, src)) {
+                Entry::Occupied(mut instead0) => {
+                    if &instead != instead0.get() {
+                        // This can happen if sharding decides to add a Sharder *under* a node,
+                        // and routing decides to add an ingress/egress pair between that node
+                        // and the Sharder. It's perfectly okay, but we should prefer the
+                        // "bottommost" swap to take place (i.e., the node that is *now*
+                        // closest to the dst node). This *should* be the sharding node, unless
+                        // routing added an ingress *under* the Sharder. We resolve the
+                        // collision by looking at which translation currently has an adge from
+                        // `src`, and then picking the *other*, since that must then be node
+                        // below.
+                        if mainline.ingredients.find_edge(src, instead).is_some() {
+                            // src -> instead -> instead0 -> [children]
+                            // from [children]'s perspective, we should use instead0 for from, so
+                            // we can just ignore the `instead` swap.
+                        } else {
+                            // src -> instead0 -> instead -> [children]
+                            // from [children]'s perspective, we should use instead for src, so we
+                            // need to prefer the `instead` swap.
+                            *instead0.get_mut() = instead;
+                        }
+                    }
+                }
+                Entry::Vacant(hole) => {
+                    hole.insert(instead);
+                }
+            }
+
+            // we may also already have swapped the parents of some node *to* `src`. in
+            // swapped0. we want to change that mapping as well, since lookups in swapped
+            // aren't recursive.
+            for (_, instead0) in swapped0.iter_mut() {
+                if *instead0 == src {
+                    *instead0 = instead;
+                }
+            }
+        }
+        let swapped = swapped0;
 
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<_> = new.iter()
@@ -786,20 +804,31 @@ impl<'a> Migration<'a> {
             }
 
             // Figure out all the remappings that have happened
+            // NOTE: this has to be *per node*, since a shared parent may be remapped differently
+            // to different children (due to sharding for example). we just allocate it once
+            // though.
             let mut remap = HashMap::new();
-            // The global address of each node in this domain is now a local one
-            for &(ni, _) in nodes.iter() {
-                remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
-            }
-            // Parents in other domains have been swapped for ingress nodes.
-            // Those ingress nodes' indices are now local.
-            for (from, to) in swapped.remove(domain).unwrap_or_else(HashMap::new) {
-                remap.insert(from.into(), *mainline.ingredients[to].local_addr());
-            }
 
             // Initialize each new node
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
+                    // The global address of each node in this domain is now a local one
+                    remap.clear();
+                    for &(ni, _) in nodes.iter() {
+                        remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
+                    }
+
+                    // Parents in other domains have been swapped for ingress nodes.
+                    // Those ingress nodes' indices are now local.
+                    for (&(dst, src), &instead) in &swapped {
+                        if dst == ni && &mainline.ingredients[dst].domain() == domain {
+                            let old =
+                                remap.insert(src.into(),
+                                             *mainline.ingredients[instead].local_addr());
+                            assert_eq!(old, None);
+                        }
+                    }
+
                     trace!(log, "initializing new node"; "node" => ni.index());
                     mainline
                         .ingredients
@@ -846,14 +875,11 @@ impl<'a> Migration<'a> {
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let ingresses_from_base = migrate::transactions::analyze_graph(&mainline.ingredients,
-                                                                       mainline.source,
-                                                                       domain_nodes);
-        let (start_ts, end_ts, prevs) = mainline
-            .checktable
-            .lock()
-            .unwrap()
-            .perform_migration(&ingresses_from_base);
+        let deps = migrate::transactions::analyze_graph(&mainline.ingredients,
+                                                        mainline.source,
+                                                        domain_nodes);
+        let (start_ts, end_ts, prevs) =
+            mainline.checktable.lock().unwrap().perform_migration(&deps);
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -949,7 +975,7 @@ impl<'a> Migration<'a> {
             .unwrap()
             .add_replay_paths(domains_on_path);
 
-        migrate::transactions::finalize(ingresses_from_base, &log, &mut mainline.txs, end_ts);
+        migrate::transactions::finalize(deps, &log, &mut mainline.txs, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }

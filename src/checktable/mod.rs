@@ -12,6 +12,7 @@ use std::fmt::Debug;
 
 use flow::domain;
 use flow::prelude::*;
+use flow::payload::{IngressFromBase, EgressForBase};
 use flow::migrate::materialization::Tag as ReplayPath;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -284,8 +285,7 @@ impl CheckTable {
     /// Transition to using `new_domain_dependencies`, and reserve a pair of
     /// timestamps for the migration to happen between.
     pub fn perform_migration(&mut self,
-                             ingresses_from_base: &HashMap<domain::Index,
-                                                           HashMap<NodeIndex, usize>>)
+                             deps: &HashMap<domain::Index, (IngressFromBase, EgressForBase)>)
                              -> (i64, i64, Option<Box<HashMap<domain::Index, i64>>>) {
         let ts = self.next_timestamp;
         let prevs = self.compute_previous_timestamps(None);
@@ -293,9 +293,8 @@ impl CheckTable {
         self.last_base = None;
         self.next_timestamp += 2;
         self.last_migration = Some(ts + 1);
-        self.domain_dependencies = ingresses_from_base
-            .iter()
-            .map(|(domain, ingress_from_base)| {
+        self.domain_dependencies = deps.iter()
+            .map(|(domain, &(ref ingress_from_base, _))| {
                      (*domain,
                       ingress_from_base
                           .iter()

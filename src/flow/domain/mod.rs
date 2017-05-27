@@ -163,34 +163,41 @@ impl Domain {
             return;
         }
 
-        // how do we replay to miss?
-        let tags = self.replay_paths
-            .iter_mut()
-            .filter(|&(_, ref info)| match info.trigger {
-                        TriggerEndpoint::End(..) |
-                        TriggerEndpoint::Local(..) => {
-                            info.path.last().unwrap().0.as_local() == &miss
-                        }
-                        _ => false,
-                    });
+        let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
+        for tag in tags {
+            if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
+                continue;
+            }
+            if self.replay_paths[&tag].path.last().unwrap().0.as_local() != &miss {
+                continue;
+            }
 
-        for (&tag, replay) in tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
             let key = key.clone(); // :(
-            match replay.trigger {
-                TriggerEndpoint::Local(..) => {
-                    unimplemented!();
+            if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
+                if self.already_requested(&tag, &key[..]) {
+                    return;
                 }
-                TriggerEndpoint::End(ref mut trigger) => {
-                    if trigger
-                           .send(box Packet::RequestPartialReplay { tag, key })
-                           .is_err() {
-                        // we're shutting down -- it's fine.
-                    }
+
+                trace!(self.log,
+                       "got replay request";
+                       "tag" => tag.id(),
+                       "key" => format!("{:?}", key)
+                );
+                self.seed_replay(tag, &key[..], None);
+                continue;
+            }
+
+            if let TriggerEndpoint::End(ref mut trigger) =
+                self.replay_paths.get_mut(&tag).unwrap().trigger {
+                if trigger
+                       .send(box Packet::RequestPartialReplay { tag, key })
+                       .is_err() {
+                    // we're shutting down -- it's fine.
                 }
-                TriggerEndpoint::Start(..) => unreachable!(),
-                TriggerEndpoint::None => unreachable!("asked to replay along non-existing path"),
+            } else {
+                unreachable!("asked to replay along non-existing path")
             }
         }
     }
@@ -326,11 +333,11 @@ impl Domain {
         assert!(!messages.is_empty());
 
         let mut egress_messages = HashMap::new();
-        let (ts, tracer) = if let Some(&box Packet::Transaction {
-                                           state: ref ts @ TransactionState::Committed(..),
-                                           ref tracer,
-                                           ..
-                                       }) = messages.iter().next() {
+        let (ts, tracer) = if let Packet::Transaction {
+                   state: ref ts @ TransactionState::Committed(..),
+                   ref tracer,
+                   ..
+               } = *messages[0] {
             (ts.clone(), tracer.clone())
         } else {
             unreachable!();
@@ -347,7 +354,14 @@ impl Domain {
             }
         }
 
-        for n in self.nodes.values().filter(|n| n.borrow().is_output()) {
+        let base = if let TransactionState::Committed(_, base, _) = ts {
+            base
+        } else {
+            unreachable!()
+        };
+
+        for n in self.transaction_state.egress_for(base) {
+            let n = &self.nodes[n.as_local()];
             let data = match egress_messages.entry(*n.borrow().local_addr()) {
                 Entry::Occupied(entry) => entry.remove().into(),
                 _ => Records::default(),
@@ -400,6 +414,53 @@ impl Domain {
                 transactions::Event::Replay(m) => self.handle_replay(m),
                 transactions::Event::None => break,
             }
+        }
+    }
+
+    fn already_requested(&mut self, tag: &Tag, key: &[DataType]) -> bool {
+        match self.replay_paths.get(tag).unwrap() {
+            &ReplayPath {
+                trigger: TriggerEndpoint::End(..),
+                ref path,
+                ..
+            } |
+            &ReplayPath {
+                trigger: TriggerEndpoint::Local(..),
+                ref path,
+                ..
+            } => {
+                // a miss in a reader! make sure we don't re-do work
+                let addr = path.last().unwrap().0.as_local();
+                let n = self.nodes[addr].borrow();
+                let mut already_replayed = false;
+                n.with_reader(|r| {
+                                  if let Some(wh) = r.writer() {
+                                      if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
+                                          // key has already been replayed!
+                                          already_replayed = true;
+                                      }
+                                  }
+                              });
+                if already_replayed {
+                    return true;
+                }
+
+                let mut had = false;
+                if let Some(ref mut prev) = self.reader_triggered.get_mut(addr) {
+                    if prev.contains(&key[0]) {
+                        // we've already requested a replay of this key
+                        return true;
+                    }
+                    prev.insert(key[0].clone());
+                    had = true;
+                }
+
+                if !had {
+                    self.reader_triggered.insert(*addr, HashSet::new());
+                }
+                false
+            }
+            _ => false,
         }
     }
 
@@ -472,6 +533,10 @@ impl Domain {
                                                   e.add_tag(new_tag.0, new_tag.1);
                                               }
                                           });
+                    }
+                    Packet::UpdateSharder { node, new_tx } => {
+                        let mut n = self.nodes[&node].borrow_mut();
+                        n.with_sharder_mut(move |s| { s.add_shard(new_tx.0, new_tx.1); });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -572,48 +637,8 @@ impl Domain {
                                                  });
                     }
                     Packet::RequestPartialReplay { tag, key } => {
-                        match self.replay_paths.get(&tag).unwrap() {
-                            &ReplayPath {
-                                trigger: TriggerEndpoint::End(..),
-                                ref path,
-                                ..
-                            } |
-                            &ReplayPath {
-                                trigger: TriggerEndpoint::Local(..),
-                                ref path,
-                                ..
-                            } => {
-                                // a miss in a reader! make sure we don't re-do work
-                                let addr = path.last().unwrap().0.as_local();
-                                let n = self.nodes[addr].borrow();
-                                let mut already_replayed = false;
-                                n.with_reader(|r| {
-                                    if let Some(wh) = r.writer() {
-                                        if wh.try_find_and(&key[0], |_| ()).unwrap().0.is_some() {
-                                            // key has already been replayed!
-                                            already_replayed = true;
-                                        }
-                                    }
-                                });
-                                if already_replayed {
-                                    return;
-                                }
-
-                                let mut had = false;
-                                if let Some(ref mut prev) = self.reader_triggered.get_mut(addr) {
-                                    if prev.contains(&key[0]) {
-                                        // we've already requested a replay of this key
-                                        return;
-                                    }
-                                    prev.insert(key[0].clone());
-                                    had = true;
-                                }
-
-                                if !had {
-                                    self.reader_triggered.insert(*addr, HashSet::new());
-                                }
-                            }
-                            _ => {}
+                        if self.already_requested(&tag, &key) {
+                            return;
                         }
 
                         if let &mut ReplayPath {

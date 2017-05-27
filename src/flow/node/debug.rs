@@ -9,6 +9,7 @@ impl fmt::Debug for Node {
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
+            NodeType::Sharder { .. } => write!(f, "sharder"),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
             NodeType::Hook(..) => write!(f, "hook node"),
@@ -29,9 +30,30 @@ impl Node {
 
         match self.inner {
             NodeType::Source => write!(f, "(source)"),
-            NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", idx.index()),
-            NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", idx.index()),
-            NodeType::Hook(..) => write!(f, "{{ {} | (hook) }}", idx.index()),
+            NodeType::Ingress => {
+                write!(f,
+                       "{{ {} / {} | (ingress) }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap())
+            }
+            NodeType::Egress { .. } => {
+                write!(f,
+                       "{{ {} / {} | (egress) }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap())
+            }
+            NodeType::Sharder { .. } => {
+                write!(f,
+                       "{{ {} / {} | (sharder) }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap())
+            }
+            NodeType::Hook(..) => {
+                write!(f,
+                       "{{ {} / {} | (hook) }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap())
+            }
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
@@ -47,8 +69,9 @@ impl Node {
                     Some(s) => format!("{} distinct keys", s),
                 };
                 write!(f,
-                       "{{ {} | (reader / key: {}) | {} }}",
-                       idx.index(),
+                       "{{ {} / {} | (reader / key: {}) | {} }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap(),
                        key,
                        size)
             }
@@ -57,8 +80,9 @@ impl Node {
 
                 // Output node name and description. First row.
                 write!(f,
-                       "{{ {} / {} | {} }}",
-                       idx.index(),
+                       "{{ {} / {} / {} | {} }}",
+                       self.index.unwrap(),
+                       self.addr.unwrap(),
                        Self::escape(self.name()),
                        Self::escape(&i.description()))?;
 
