@@ -109,6 +109,18 @@ impl Sharder {
             p.map_data(|rs| rs.push(record));
         }
 
+        if let Packet::ReplayPiece {
+                   context: payload::ReplayPieceContext::Regular { last: true }, ..
+               } = *m {
+            // this is the last replay piece for a full replay
+            // we need to make sure it gets to every shard so they know to ready the node
+            for shard in 0..self.txs.len() {
+                self.sharded
+                    .entry(shard)
+                    .or_insert_with(|| box m.clone_data());
+            }
+        }
+
         for (i, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
             if let Some(mut shard) = self.sharded.remove(i) {
                 shard.link_mut().src = index.into();
