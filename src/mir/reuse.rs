@@ -166,16 +166,21 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::Column;
+    use nom_sql::{Column, ColumnSpecification, SqlType};
     use mir::{MirNode, MirNodeRef, MirNodeType};
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
+        let cspec = |n: &str| -> ColumnSpecification {
+            ColumnSpecification::new(Column::from(n), SqlType::Text)
+        };
         let a = MirNode::new("a",
                              0,
                              vec![Column::from("aa"), Column::from("ab")],
                              MirNodeType::Base {
+                                 column_specs: vec![cspec("aa"), cspec("ab")],
                                  keys: vec![Column::from("aa")],
                                  transactional: false,
+                                 adapted_over: None,
                              },
                              vec![],
                              vec![]);
@@ -183,8 +188,10 @@ mod tests {
                              0,
                              vec![Column::from("ba"), Column::from("bb")],
                              MirNodeType::Base {
+                                 column_specs: vec![cspec("ba"), cspec("bb")],
                                  keys: vec![Column::from("ba")],
                                  transactional: false,
+                                 adapted_over: None,
                              },
                              vec![],
                              vec![]);
