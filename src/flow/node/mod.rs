@@ -56,9 +56,7 @@ impl Node {
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
-        let mut n = Self::new(&*self.name, &self.fields, n, self.transactional);
-        n.domain = self.domain;
-        n
+        Self::new(&*self.name, &self.fields, n, self.transactional)
     }
 }
 
@@ -90,6 +88,7 @@ impl Node {
         let mut n = self.mirror(inner);
         n.addr = self.addr;
         n.index = self.index;
+        n.domain = self.domain;
         self.taken = true;
 
         DanglingDomainNode(n)
@@ -223,6 +222,10 @@ impl Node {
         &self.fields[..]
     }
 
+    pub fn has_domain(&self) -> bool {
+        self.domain.is_some()
+    }
+
     pub fn domain(&self) -> domain::Index {
         match self.domain {
             Some(domain) => domain,
@@ -256,11 +259,6 @@ impl Node {
 
     pub fn add_to(&mut self, domain: domain::Index) {
         assert_eq!(self.domain, None);
-        self.domain = Some(domain);
-    }
-
-    pub fn reassign_domain_for_ingress(&mut self, domain: domain::Index) {
-        assert!(self.domain.is_some());
         self.domain = Some(domain);
     }
 

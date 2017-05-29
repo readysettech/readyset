@@ -113,11 +113,7 @@ pub fn add(log: &Logger,
                 let mut i = graph[parent].mirror(node::special::Ingress);
 
                 // it belongs to this domain, not that of the parent
-                if parent == source {
-                    i.add_to(domain);
-                } else {
-                    i.reassign_domain_for_ingress(domain);
-                }
+                i.add_to(domain);
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
@@ -213,7 +209,8 @@ pub fn add(log: &Logger,
                 // need to inject an egress above us
 
                 // NOTE: technically, this doesn't need to mirror its parent, but meh
-                let egress = graph[sender].mirror(node::special::Egress::default());
+                let mut egress = graph[sender].mirror(node::special::Egress::default());
+                egress.add_to(graph[sender].domain());
                 let egress = graph.add_node(egress);
                 graph.add_edge(sender, egress, false);
 
