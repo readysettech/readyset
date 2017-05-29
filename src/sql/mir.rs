@@ -305,10 +305,41 @@ impl SqlToMirConverter {
                     if columns_unchanged.len() > 0 &&
                        (columns_added.len() > 0 || columns_removed.len() > 0) {
                         error!(self.log,
-                               "base {} add {} columns, remove {} columns",
+                               "base {}: add columns {:?}, remove columns {:?} over v{}",
                                name,
-                               columns_added.len(),
-                               columns_removed.len());
+                               columns_added,
+                               columns_removed,
+                               existing_sv);
+                        let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
+
+                        let mut columns: Vec<ColumnSpecification> = existing_node
+                            .borrow()
+                            .column_specifications()
+                            .iter()
+                            .cloned()
+                            .collect();
+                        for added in &columns_added {
+                            columns.push((*added).clone());
+                        }
+                        for removed in &columns_removed {
+                            let pos = columns.iter().position(|cc| cc == *removed).unwrap();
+                            columns.remove(pos);
+                        }
+
+                        // remember the schema for this version
+                        let mut base_schemas = self.base_schemas
+                            .entry(String::from(name))
+                            .or_insert(Vec::new());
+                        base_schemas.push((self.schema_version, columns.clone()));
+
+                        // TODO(malte): manufacture appropriate MIR node to represent base
+                        // table adaptation
+                        let _ = existing_node.borrow();
+                        unimplemented!();
+                    } else {
+                        info!(self.log, "base table has complex schema change");
+                        break;
+
                     }
                 }
             }
@@ -354,8 +385,10 @@ impl SqlToMirConverter {
                                  self.schema_version,
                                  cols.iter().map(|cs| cs.column.clone()).collect(),
                                  MirNodeType::Base {
+                                     column_specs: cols.clone(),
                                      keys: key_cols.clone(),
                                      transactional,
+                                     adapted_over: None,
                                  },
                                  vec![],
                                  vec![])
@@ -367,8 +400,10 @@ impl SqlToMirConverter {
                          self.schema_version,
                          cols.iter().map(|cs| cs.column.clone()).collect(),
                          MirNodeType::Base {
+                             column_specs: cols.clone(),
                              keys: vec![],
                              transactional,
+                             adapted_over: None,
                          },
                          vec![],
                          vec![])
@@ -403,7 +438,6 @@ impl SqlToMirConverter {
 
         new_nodes
     }
-
 
     fn make_function_node(&mut self,
                           name: &str,

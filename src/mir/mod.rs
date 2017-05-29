@@ -1,4 +1,4 @@
-use nom_sql::{Column, Operator, OrderType};
+use nom_sql::{Column, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug, Display};
@@ -333,6 +333,13 @@ impl MirNode {
         self.columns.as_slice()
     }
 
+    pub fn column_specifications(&self) -> &[ColumnSpecification] {
+        match self.inner {
+            MirNodeType::Base { ref column_specs, .. } => column_specs.as_slice(),
+            _ => panic!("non-base MIR nodes don't have column specifications!"),
+        }
+    }
+
     fn flow_node_addr(&self) -> Result<NodeAddress, String> {
         match self.flow_node {
             Some(FlowNode::New(na)) |
@@ -434,6 +441,7 @@ impl MirNode {
                     MirNodeType::Base {
                         ref keys,
                         transactional,
+                        ..
                     } => make_base_node(&name, self.columns.as_slice(), keys, mig, transactional),
                     MirNodeType::Extremum {
                         ref on,
@@ -600,6 +608,14 @@ impl MirNode {
     }
 }
 
+/// Specifies the adapatation of an existing base node by column addition/removal.
+/// `over` is a `MirNode` of type `Base`.
+pub struct BaseNodeAdaptation {
+    over: MirNodeRef,
+    columns_added: Vec<ColumnSpecification>,
+    columns_removed: Vec<ColumnSpecification>,
+}
+
 pub enum MirNodeType {
     /// over column, group_by columns
     Aggregation {
@@ -607,10 +623,12 @@ pub enum MirNodeType {
         group_by: Vec<Column>,
         kind: AggregationKind,
     },
-    /// columns, keys (non-compound)
+    /// column specifications, keys (non-compound), tx flag, adapted base
     Base {
+        column_specs: Vec<ColumnSpecification>,
         keys: Vec<Column>,
         transactional: bool,
+        adapted_over: Option<BaseNodeAdaptation>,
     },
     /// over column, group_by columns
     Extremum {
@@ -749,16 +767,22 @@ impl MirNodeType {
                 }
             }
             MirNodeType::Base {
+                column_specs: ref our_column_specs,
                 keys: ref our_keys,
                 transactional: our_transactional,
+                ..
             } => {
                 match *other {
                     MirNodeType::Base {
+                        ref column_specs,
                         ref keys,
                         transactional,
+                        ..
                     } => {
                         assert_eq!(our_transactional, transactional);
-                        our_keys == keys
+                        // note that we do *not* need `adapted_over` to match, since current reuse
+                        // does not depend on how base node was created from an earlier one
+                        our_column_specs == column_specs && our_keys == keys
                     }
                     _ => false,
                 }
@@ -882,12 +906,19 @@ impl Debug for MirNodeType {
 
             }
             MirNodeType::Base {
+                ref column_specs,
                 ref keys,
                 transactional,
+                ..
             } => {
                 write!(f,
-                       "B{} [⚷: {}]",
+                       "B{} [{}; ⚷: {}]",
                        if transactional { "*" } else { "" },
+                       column_specs
+                           .iter()
+                           .map(|cs| cs.column.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "),
                        keys.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
