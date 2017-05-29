@@ -1,5 +1,7 @@
 use arccstr::ArcCStr;
 
+use nom_sql::Literal;
+
 #[cfg(feature="web")]
 use serde_json::Value;
 
@@ -99,6 +101,17 @@ impl From<f64> for DataType {
         }
 
         DataType::Real(i, frac)
+    }
+}
+
+impl<'a> From<&'a Literal> for DataType {
+    fn from(l: &'a Literal) -> Self {
+        match *l {
+            Literal::Null => DataType::None,
+            Literal::Integer(i) => i.into(),
+            Literal::String(ref s) => s.as_str().into(),
+            _ => unimplemented!(),
+        }
     }
 }
 

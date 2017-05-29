@@ -1,4 +1,4 @@
-use nom_sql::{Column, ColumnSpecification, Operator, OrderType};
+use nom_sql::{Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug, Display};
@@ -439,10 +439,11 @@ impl MirNode {
                                           mig)
                     }
                     MirNodeType::Base {
+                        ref column_specs,
                         ref keys,
                         transactional,
                         ..
-                    } => make_base_node(&name, self.columns.as_slice(), keys, mig, transactional),
+                    } => make_base_node(&name, column_specs.as_slice(), keys, mig, transactional),
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -1080,24 +1081,36 @@ impl Debug for MirNodeType {
 }
 
 fn make_base_node(name: &str,
-                  columns: &[Column],
+                  column_specs: &[ColumnSpecification],
                   pkey_columns: &Vec<Column>,
                   mut mig: &mut Migration,
                   transactional: bool)
                   -> FlowNode {
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let column_names = column_specs.iter().map(|cs| &cs.column.name).collect::<Vec<_>>();
+
+    // note that this defaults to a "None" (= NULL) default value for columns that do not have one
+    // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
+    let default_values = column_specs.iter().map(|cs| {
+        for c in &cs.constraints {
+            match *c {
+                ColumnConstraint::DefaultValue(ref dv) => return dv.into(),
+                _ => (),
+            }
+        }
+        return DataType::None;
+    }).collect::<Vec<DataType>>();
 
     let base = if pkey_columns.len() > 0 {
         let pkey_column_ids = pkey_columns
             .iter()
             .map(|pkc| {
                      //assert_eq!(pkc.table.as_ref().unwrap(), name);
-                     columns.iter().position(|c| c == pkc).unwrap()
+                     column_specs.iter().position(|cs| cs.column == *pkc).unwrap()
                  })
             .collect();
-        ops::base::Base::new(vec![]).with_key(pkey_column_ids)
+        ops::base::Base::new(default_values).with_key(pkey_column_ids)
     } else {
-        ops::base::Base::new(vec![])
+        ops::base::Base::new(default_values)
     };
 
     if transactional {
