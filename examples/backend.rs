@@ -26,7 +26,7 @@ impl Backend {
             .entry(String::from(kind))
             .or_insert(self.soup.get_mutator(self.recipe.node_addr_for(kind)?));
 
-        mtr.put(data);
+        mtr.put(data).unwrap();
         Ok(())
     }
 

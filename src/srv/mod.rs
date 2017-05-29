@@ -86,7 +86,9 @@ pub fn main(stream: TcpStream, s: Server) {
                 }
             }
             Ok(Method::Insert { view, args }) => {
-                s.put[view].2.put(args);
+                if let Err(e) = s.put[view].2.put(args) {
+                    println!("Error executing client insert request: {:?}", e);
+                }
                 if let Err(e) = bincode::serialize_into(&mut stream, &0i64, bincode::Infinite) {
                     println!("client left prematurely: {:?}", e);
                     break;

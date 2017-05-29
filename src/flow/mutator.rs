@@ -7,6 +7,15 @@ use std::sync::mpsc;
 use std::thread;
 use std::time;
 
+/// Indicates why a Mutator operation failed.
+#[derive(Serialize, Deserialize, Debug)]
+pub enum MutatorError {
+    /// Incorrect number of columns specified for operations: (expected, got).
+    WrongColumnCount(usize, usize),
+    /// Transaction was unable to complete due to a conflict.
+    TransactionFailed,
+}
+
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
     pub(crate) src: NodeAddress,
@@ -17,6 +26,7 @@ pub struct Mutator {
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
     pub(crate) tracer: Tracer,
+    pub(crate) expected_columns: usize,
 }
 
 impl Clone for Mutator {
@@ -30,6 +40,7 @@ impl Clone for Mutator {
             transactional: self.transactional,
             dropped: self.dropped.clone(),
             tracer: None,
+            expected_columns: self.expected_columns,
         }
     }
 }
@@ -136,60 +147,79 @@ impl Mutator {
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
-    pub fn put<V>(&self, u: V)
+    pub fn put<V>(&self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
-        self.send(vec![u.into()].into())
+        let data = vec![u.into()];
+        if data[0].len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(self.expected_columns, data[0].len()));
+        }
+
+        Ok(self.send(data.into()))
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> Result<i64, ()>
+    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
-        self.tx_send(vec![u.into()].into(), t)
+        let data = vec![u.into()];
+        if data[0].len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(self.expected_columns, data[0].len()));
+        }
+
+        self.tx_send(data.into(), t).map_err(|()|MutatorError::TransactionFailed)
     }
 
-    /// Perform a non-transactional delete frome the base node this Mutator was generated for.
-    pub fn delete<I>(&self, key: I)
+    /// Perform a non-transactional delete from the base node this Mutator was generated for.
+    pub fn delete<I>(&self, key: I) -> Result<(), MutatorError>
         where I: Into<Vec<DataType>>
     {
-        self.send(vec![Record::DeleteRequest(key.into())].into())
+        Ok(self.send(vec![Record::DeleteRequest(key.into())].into()))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete<I>(&self, key: I, t: checktable::Token) -> Result<i64, ()>
+    pub fn transactional_delete<I>(&self, key: I, t: checktable::Token) -> Result<i64, MutatorError>
         where I: Into<Vec<DataType>>
     {
         self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
+            .map_err(|()|MutatorError::TransactionFailed)
     }
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
-    pub fn update<V>(&self, u: V)
+    pub fn update<V>(&self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
         assert!(!self.primary_key.is_empty(),
                 "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
-        self.send(vec![Record::DeleteRequest(self.primary_key
-                                                 .iter()
-                                                 .map(|&col| &u[col])
-                                                 .cloned()
-                                                 .collect()),
-                       u.into()]
-                      .into())
+        if u.len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
+        }
+
+        Ok(self.send(vec![Record::DeleteRequest(self.primary_key
+                                                    .iter()
+                                                    .map(|&col| &u[col])
+                                                    .cloned()
+                                                    .collect()),
+                          u.into()]
+                         .into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
     /// generated for.
-    pub fn transactional_update<V>(&self, u: V, t: checktable::Token) -> Result<i64, ()>
+    pub fn transactional_update<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
         assert!(!self.primary_key.is_empty(),
                 "update operations can only be applied to base nodes with key columns");
 
-        let u = u.into();
+        let u: Vec<_> = u.into();
+        if u.len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
+        }
+
         let m = vec![Record::DeleteRequest(self.primary_key
                                                .iter()
                                                .map(|&col| &u[col])
@@ -197,7 +227,7 @@ impl Mutator {
                                                .collect()),
                      u.into()]
             .into();
-        self.tx_send(m, t)
+        self.tx_send(m, t).map_err(|()|MutatorError::TransactionFailed)
     }
 
     /// Attach a tracer to all packets sent until `stop_tracing` is called. The tracer will cause

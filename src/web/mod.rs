@@ -65,7 +65,7 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                 path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
 
-                    let ts: () = put.lock().unwrap().put((args.iter().map(|arg| {
+                    let result = put.lock().unwrap().put((args.iter().map(|arg| {
                         if let Some(num) = json[&**arg].as_i64() {
                             num.into()
                         } else {
@@ -73,7 +73,7 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                         }
                     })).collect::<Vec<DataType>>());
                     res.headers_mut().set(ContentType::json());
-                    res.send(json!(ts).to_string()); // TODO this is always `null`
+                    res.send(json!(result).to_string()); // TODO this is always `null`
                 }) as Box<Handler>,
             }
         };

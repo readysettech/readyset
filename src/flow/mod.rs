@@ -30,7 +30,7 @@ pub mod prelude;
 use self::prelude::Ingredient;
 
 mod mutator;
-pub use self::mutator::Mutator;
+pub use self::mutator::{Mutator, MutatorError};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -280,8 +280,9 @@ impl Blender {
 
         trace!(self.log, "creating mutator"; "for" => n.index());
 
-        let base_n = self.ingredients[*base.as_global()]
-            .get_base()
+        let ref b = self.ingredients[*base.as_global()];
+        let num_fields = b.fields().len();
+        let base_n = b.get_base()
             .expect("asked to get mutator for non-base node");
         Mutator {
             src: self.source.into(),
@@ -295,6 +296,7 @@ impl Blender {
             transactional: self.ingredients[*base.as_global()].is_transactional(),
             dropped: base_n.get_dropped(),
             tracer: None,
+            expected_columns: num_fields - base_n.get_dropped().len(),
         }
     }
 

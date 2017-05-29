@@ -37,7 +37,7 @@ fn it_works() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -46,7 +46,7 @@ fn it_works() {
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -57,7 +57,7 @@ fn it_works() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // Delete first record
-    muta.delete(vec![id.clone()]);
+    muta.delete(vec![id.clone()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -66,7 +66,7 @@ fn it_works() {
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
 
     // Update second record
-    mutb.update(vec![id.clone(), 6.into()]);
+    mutb.update(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -113,7 +113,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -122,7 +122,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
@@ -133,7 +133,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
 
     // Delete first record
-    muta.delete(vec![id.clone()]);
+    muta.delete(vec![id.clone()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
@@ -142,7 +142,7 @@ fn it_propagates_writes_w_durability_sync_immediately() {
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
 
     // Update second record
-    mutb.update(vec![id.clone(), 6.into()]);
+    mutb.update(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
@@ -190,7 +190,7 @@ fn it_propagates_writes_w_durability_buffered() {
     // Send less values than what Base's buffer will hold before flushing.
     let base_buffer_capacity = 512;
     for i in 0..(base_buffer_capacity - 1) {
-        muta.put(vec![id.clone(), i.into()]);
+        muta.put(vec![id.clone(), i.into()]).unwrap();
     }
 
     // Give it some time to propagate.
@@ -200,7 +200,8 @@ fn it_propagates_writes_w_durability_buffered() {
     assert_eq!(cq(&id, true), Ok(vec![]));
 
     // Send one more value so that we go over what Base's buffer will hold before flushing.
-    muta.put(vec![id.clone(), base_buffer_capacity.into()]);
+    muta.put(vec![id.clone(), base_buffer_capacity.into()])
+        .unwrap();
 
     // Give it some time to propagate.
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
@@ -251,7 +252,7 @@ fn it_propagates_writes_w_durability_buffered_flush_interval() {
 
     // Send less values than what Base's buffer will hold before flushing.
     let base_buffer_flush_interval_ms = 1000;
-    muta.put(vec![id.clone(), 0.into()]);
+    muta.put(vec![id.clone(), 0.into()]).unwrap();
 
     assert!(SETTLE_TIME_MS < base_buffer_flush_interval_ms);
 
@@ -266,7 +267,7 @@ fn it_propagates_writes_w_durability_buffered_flush_interval() {
 
     // Send one more value to force a flush.
     // TODO: Remove this put once Base's buffer flush is triggered by a Flush Packet instead.
-    muta.put(vec![id.clone(), 1.into()]);
+    muta.put(vec![id.clone(), 1.into()]).unwrap();
 
     // Give it some time to propagate.
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
@@ -302,12 +303,12 @@ fn it_works_streaming() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
@@ -339,14 +340,14 @@ fn shared_interdomain_ancestor() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 2.into()].into()]));
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
-    muta.put(vec![id.clone(), 4.into()]);
+    muta.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 4.into()].into()]));
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
@@ -378,9 +379,9 @@ fn it_works_w_mat() {
     let id: distributary::DataType = 1.into();
 
     // send a few values on a
-    muta.put(vec![id.clone(), 1.into()]);
-    muta.put(vec![id.clone(), 2.into()]);
-    muta.put(vec![id.clone(), 3.into()]);
+    muta.put(vec![id.clone(), 1.into()]).unwrap();
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
+    muta.put(vec![id.clone(), 3.into()]).unwrap();
 
     // give them some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -394,9 +395,9 @@ fn it_works_w_mat() {
     assert!(res.iter().any(|r| r == &vec![id.clone(), 3.into()]));
 
     // update value again (and again send some secondary updates)
-    mutb.put(vec![id.clone(), 4.into()]);
-    mutb.put(vec![id.clone(), 5.into()]);
-    mutb.put(vec![id.clone(), 6.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
+    mutb.put(vec![id.clone(), 5.into()]).unwrap();
+    mutb.put(vec![id.clone(), 6.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -439,19 +440,19 @@ fn it_works_deletion() {
     let mutb = g.get_mutator(b);
 
     // send a value on a
-    muta.put(vec![1.into(), 2.into()]);
+    muta.put(vec![1.into(), 2.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![1.into(), 2.into()].into()]));
 
     // update value again
-    mutb.put(vec![0.into(), 1.into(), 4.into()]);
+    mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![1.into(), 4.into()].into()]));
 
     // delete first value
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
-    muta.delete(vec![2.into()]);
+    muta.delete(vec![2.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
 }
@@ -509,7 +510,7 @@ fn votes() {
     let a2: distributary::DataType = 2.into();
 
     // make one article
-    mut1.put(vec![a1.clone(), 2.into()]);
+    mut1.put(vec![a1.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -518,7 +519,7 @@ fn votes() {
     assert_eq!(articleq(&a1, true), Ok(vec![vec![a1.clone(), 2.into()]]));
 
     // make another article
-    mut2.put(vec![a2.clone(), 4.into()]);
+    mut2.put(vec![a2.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -529,7 +530,7 @@ fn votes() {
     assert_eq!(articleq(&a2, true), Ok(vec![vec![a2.clone(), 4.into()]]));
 
     // create a vote (user 1 votes for article 1)
-    mutv.put(vec![1.into(), a1.clone()]);
+    mutv.put(vec![1.into(), a1.clone()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -729,7 +730,7 @@ fn empty_migration() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -738,7 +739,7 @@ fn empty_migration() {
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -767,7 +768,7 @@ fn simple_migration() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -788,7 +789,7 @@ fn simple_migration() {
     let mutb = g.get_mutator(b);
 
     // send a value on b
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -815,7 +816,7 @@ fn add_columns() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.put(vec![id.clone(), "y".into()]);
+    muta.put(vec![id.clone(), "y".into()]).unwrap();
 
     // check that a got it
     assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
@@ -829,14 +830,15 @@ fn add_columns() {
     }
 
     // send another (old) value on a
-    muta.put(vec![id.clone(), "z".into()]);
+    muta.put(vec![id.clone(), "z".into()]).unwrap();
 
     // check that a got it, and added the new, third column's default
     assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()]));
 
-    // send a new value on a
-    muta.put(vec![id.clone(), "a".into(), 10.into()]);
+    // get a new muta and send a new value on it
+    let muta = g.get_mutator(a);
+    muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // check that a got it, and included the third column
     assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
@@ -860,7 +862,7 @@ fn migrate_added_columns() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.put(vec![id.clone(), "y".into()]);
+    muta.put(vec![id.clone(), "y".into()]).unwrap();
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a third column to a, and a view that uses it
@@ -876,9 +878,10 @@ fn migrate_added_columns() {
     let bq = g.get_getter(b).unwrap();
 
     // send another (old) value on a
-    muta.put(vec![id.clone(), "z".into()]);
+    muta.put(vec![id.clone(), "z".into()]).unwrap();
     // and an entirely new value
-    muta.put(vec![id.clone(), "a".into(), 10.into()]);
+    let muta = g.get_mutator(a);
+    muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -912,7 +915,7 @@ fn migrate_drop_columns() {
     let muta1 = g.get_mutator(a);
 
     // send a value on a
-    muta1.put(vec![id.clone(), "bx".into()]);
+    muta1.put(vec![id.clone(), "bx".into()]).unwrap();
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // drop a column
@@ -925,7 +928,7 @@ fn migrate_drop_columns() {
     // new mutator should only require one column
     // and should inject default for a.b
     let muta2 = g.get_mutator(a);
-    muta2.put(vec![id.clone()]);
+    muta2.put(vec![id.clone()]).unwrap();
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // add a new column
@@ -937,13 +940,13 @@ fn migrate_drop_columns() {
 
     // new mutator allows putting two values, and injects default for a.b
     let muta3 = g.get_mutator(a);
-    muta3.put(vec![id.clone(), "cy".into()]);
+    muta3.put(vec![id.clone(), "cy".into()]).unwrap();
 
     // using an old putter now should add default for c
-    muta1.put(vec![id.clone(), "bz".into()]);
+    muta1.put(vec![id.clone(), "bz".into()]).unwrap();
 
     // using putter that knows of neither b nor c should result in defaults for both
-    muta2.put(vec![id.clone()]);
+    muta2.put(vec![id.clone()]).unwrap();
 
     assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), "bx".into()].into()]));
@@ -1098,12 +1101,12 @@ fn crossing_migration() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
@@ -1126,7 +1129,7 @@ fn independent_domain_migration() {
     let muta = g.get_mutator(a);
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -1147,7 +1150,7 @@ fn independent_domain_migration() {
     let mutb = g.get_mutator(b);
 
     // send a value on b
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -1183,12 +1186,12 @@ fn domain_amend_migration() {
     let id: distributary::DataType = 1.into();
 
     // send a value on a
-    muta.put(vec![id.clone(), 2.into()]);
+    muta.put(vec![id.clone(), 2.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 2.into()].into()]));
 
     // update value again
-    mutb.put(vec![id.clone(), 4.into()]);
+    mutb.put(vec![id.clone(), 4.into()]).unwrap();
     assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![id.clone(), 4.into()].into()]));
 }
@@ -1218,9 +1221,9 @@ fn state_replay_migration_stream() {
     let muta = g.get_mutator(a);
 
     // make a couple of records
-    muta.put(vec![1.into(), "a".into()]);
-    muta.put(vec![1.into(), "b".into()]);
-    muta.put(vec![2.into(), "c".into()]);
+    muta.put(vec![1.into(), "a".into()]).unwrap();
+    muta.put(vec![1.into(), "b".into()]).unwrap();
+    muta.put(vec![2.into(), "c".into()]).unwrap();
 
     let (out, b) = {
         // add a new base and a join
@@ -1248,7 +1251,7 @@ fn state_replay_migration_stream() {
     // should see joined output records.
 
     // there are (/should be) two records in a with x == 1
-    mutb.put(vec![1.into(), "n".into()]);
+    mutb.put(vec![1.into(), "n".into()]).unwrap();
     // they may arrive in any order
     let res = out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS))
         .unwrap();
@@ -1258,7 +1261,7 @@ fn state_replay_migration_stream() {
                 .any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
 
     // there are (/should be) one record in a with x == 2
-    mutb.put(vec![2.into(), "o".into()]);
+    mutb.put(vec![2.into(), "o".into()]).unwrap();
     assert_eq!(out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
                Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
 
@@ -1354,10 +1357,10 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let raten: DataType = 5.into();
 
         for i in 0..n {
-            muta.put(vec![i.into(), title.clone()]);
+            muta.put(vec![i.into(), title.clone()]).unwrap();
         }
         for i in 0..n {
-            mutv.put(vec![1.into(), i.into()]);
+            mutv.put(vec![1.into(), i.into()]).unwrap();
         }
 
         let last = g.get_getter(end).unwrap();
@@ -1409,9 +1412,9 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let mutr = g.get_mutator(rating);
         for i in 0..n {
             if old_puts_after {
-                mutv.put(vec![1.into(), i.into()]);
+                mutv.put(vec![1.into(), i.into()]).unwrap();
             }
-            mutr.put(vec![1.into(), i.into(), raten.clone()]);
+            mutr.put(vec![1.into(), i.into(), raten.clone()]).unwrap();
         }
 
         thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -1482,7 +1485,7 @@ fn live_writes() {
                                let user: DataType = 0.into();
                                for _ in 0..votes {
                                    for i in 0..ids {
-                                       add.put(vec![user.clone(), i.into()]);
+                                       add.put(vec![user.clone(), i.into()]).unwrap();
                                    }
                                }
                            });
@@ -1539,11 +1542,11 @@ fn state_replay_migration_query() {
     let mutb = g.get_mutator(b);
 
     // make a couple of records
-    muta.put(vec![1.into(), "a".into()]);
-    muta.put(vec![1.into(), "b".into()]);
-    muta.put(vec![2.into(), "c".into()]);
-    mutb.put(vec![1.into(), "n".into()]);
-    mutb.put(vec![2.into(), "o".into()]);
+    muta.put(vec![1.into(), "a".into()]).unwrap();
+    muta.put(vec![1.into(), "b".into()]).unwrap();
+    muta.put(vec![2.into(), "c".into()]).unwrap();
+    mutb.put(vec![1.into(), "n".into()]).unwrap();
+    mutb.put(vec![2.into(), "o".into()]).unwrap();
 
     let out = {
         // add join and a reader node
