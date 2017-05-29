@@ -255,6 +255,12 @@ impl Node {
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
+        assert_eq!(self.domain, None);
+        self.domain = Some(domain);
+    }
+
+    pub fn reassign_domain_for_ingress(&mut self, domain: domain::Index) {
+        assert!(self.domain.is_some());
         self.domain = Some(domain);
     }
 

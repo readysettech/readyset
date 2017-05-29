@@ -113,7 +113,11 @@ pub fn add(log: &Logger,
                 let mut i = graph[parent].mirror(node::special::Ingress);
 
                 // it belongs to this domain, not that of the parent
-                i.add_to(domain);
+                if parent == source {
+                    i.add_to(domain);
+                } else {
+                    i.reassign_domain_for_ingress(domain);
+                }
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
