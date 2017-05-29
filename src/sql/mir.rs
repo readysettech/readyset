@@ -258,6 +258,8 @@ impl SqlToMirConverter {
             let mut existing_schemas: Vec<(usize, Vec<ColumnSpecification>)> =
                 self.base_schemas[name].clone();
             existing_schemas.sort_by_key(|&(sv, _)| sv);
+            // newest schema first
+            existing_schemas.reverse();
 
             for (existing_sv, ref schema) in existing_schemas {
                 // TODO(malte): check the keys too
