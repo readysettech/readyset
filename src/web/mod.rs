@@ -141,10 +141,9 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
     };
 
     Server {
-            handlers: router,
-            host: 8080.into(),
-            global: Global::from(Box::new(soup)),
-            ..Server::default()
-        }
-        .run()
+        handlers: router,
+        host: 8080.into(),
+        global: Global::from(Box::new(soup)),
+        ..Server::default()
+    }.run()
 }

@@ -114,7 +114,7 @@ impl Ingredient for Filter {
                     .collect::<Vec<_>>()
                     .as_slice()
                     .join(", "))
-                .into()
+            .into()
     }
 
     fn can_query_through(&self) -> bool {

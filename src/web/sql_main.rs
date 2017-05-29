@@ -37,8 +37,8 @@ fn main() {
 
         // add vote count
         inc.add_query("SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
-                       Some("vc".into()),
-                       &mut mig)
+                      Some("vc".into()),
+                      &mut mig)
             .unwrap();
 
         println!("done vc");
@@ -46,8 +46,8 @@ fn main() {
         // add final join -- joins on first field of each input
         inc.add_query("SELECT article.id, article.user, title, url, vc.votes FROM article, \
                             vc WHERE article.id = vc.id;",
-                       Some("awvc".into()),
-                       &mut mig)
+                      Some("awvc".into()),
+                      &mut mig)
             .unwrap();
 
         println!("done awvc");

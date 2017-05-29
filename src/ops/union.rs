@@ -164,11 +164,10 @@ impl Ingredient for Union {
                 if self.replay_key.is_none() {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
-                    self.replay_key =
-                        Some(self.emit
-                                 .iter()
-                                 .map(|(src, emit)| (*src.as_local(), emit[key_col]))
-                                 .collect());
+                    self.replay_key = Some(self.emit
+                                               .iter()
+                                               .map(|(src, emit)| (*src.as_local(), emit[key_col]))
+                                               .collect());
                 }
 
                 let finished = {

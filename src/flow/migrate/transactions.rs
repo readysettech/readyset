@@ -62,13 +62,13 @@ fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]
                      .expect("source ingress must have a base child")
              })
         .map(|base| {
-            let outs = output_nodes
-                .iter()
-                .filter(|&&out| petgraph::algo::has_path_connecting(graph, base, out, None))
-                .map(|&out| *graph[out].local_addr())
-                .collect();
-            (base, outs)
-        })
+                 let outs = output_nodes
+                     .iter()
+                     .filter(|&&out| petgraph::algo::has_path_connecting(graph, base, out, None))
+                     .map(|&out| *graph[out].local_addr())
+                     .collect();
+                 (base, outs)
+             })
         .collect()
 }
 

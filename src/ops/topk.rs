@@ -170,19 +170,18 @@ impl Ingredient for TopK {
     fn take(&mut self) -> NodeOperator {
         // Necessary because cmp_rows can't be cloned.
         Self {
-                src: self.src,
+            src: self.src,
 
-                us: self.us,
-                cols: self.cols,
+            us: self.us,
+            cols: self.cols,
 
-                group_by: self.group_by.clone(),
+            group_by: self.group_by.clone(),
 
-                cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_, _| Ordering::Equal)),
-                k: self.k,
+            cmp_rows: mem::replace(&mut self.cmp_rows, Box::new(|_, _| Ordering::Equal)),
+            k: self.k,
 
-                counts: self.counts.clone(),
-            }
-            .into()
+            counts: self.counts.clone(),
+        }.into()
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
@@ -302,8 +301,8 @@ impl Ingredient for TopK {
     fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
         vec![(this, self.group_by.clone()),
              (self.src, self.group_by.clone())]
-                .into_iter()
-                .collect()
+            .into_iter()
+            .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {

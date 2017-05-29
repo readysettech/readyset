@@ -70,9 +70,9 @@ pub fn inform(log: &Logger,
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(box Packet::AddNode {
-                          node: node,
-                          parents: old_parents,
-                      })
+                         node: node,
+                         parents: old_parents,
+                     })
                 .unwrap();
         }
     }

@@ -232,7 +232,7 @@ impl Ingredient for Join {
                         ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
                             let foo: Records = vec![(self.generate_null(r), !positive),
                                                     (self.generate_row(r, &row), positive)]
-                                    .into();
+                                .into();
                             foo.into()
                         }));
                         continue;
@@ -353,7 +353,8 @@ mod tests {
         j.one_row(r, r_z2.clone(), false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        let null = vec![((vec![3.into(), "c".into(), DataType::None], true))].into();
+        let null = vec![((vec![3.into(), "c".into(), DataType::None], true))]
+            .into();
         j.seed(l, l_c3.clone());
         let rs = j.one_row(l, l_c3.clone(), false);
         assert_eq!(rs, null);
@@ -371,13 +372,14 @@ mod tests {
                         ((vec![3.into(), "c".into(), "w".into()], true)),
                         ((vec![3.into(), "c".into(), DataType::None], false)),
                         ((vec![3.into(), "c".into(), "w".into()], true))]
-                           .into());
+                       .into());
 
         // forward from left with single matching record on right
         j.seed(l, l_b2.clone());
         let rs = j.one_row(l, l_b2.clone(), false);
         assert_eq!(rs,
-                   vec![((vec![2.into(), "b".into(), "z".into()], true))].into());
+                   vec![((vec![2.into(), "b".into(), "z".into()], true))]
+                       .into());
 
         // forward from left with two matching records on right
         j.seed(l, l_a1.clone());
@@ -385,7 +387,7 @@ mod tests {
         assert_eq!(rs,
                    vec![((vec![1.into(), "a".into(), "x".into()], true)),
                         ((vec![1.into(), "a".into(), "y".into()], true))]
-                           .into());
+                       .into());
 
         // forward from right with two matching records on left (and one more on right)
         j.seed(r, r_w3.clone());
@@ -393,7 +395,7 @@ mod tests {
         assert_eq!(rs,
                    vec![((vec![3.into(), "c".into(), "w".into()], true)),
                         ((vec![3.into(), "c".into(), "w".into()], true))]
-                           .into());
+                       .into());
 
         // unmatched forward from right should have no effect
         j.seed(r, r_v4.clone());
@@ -408,8 +410,8 @@ mod tests {
         let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
                                      (r, vec![0]) /* join column for right */]
-                .into_iter()
-                .collect();
+            .into_iter()
+            .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);
     }
 

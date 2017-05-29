@@ -138,7 +138,8 @@ impl Base {
             Some(BaseDurabilityLevel::Buffered) |
             Some(BaseDurabilityLevel::SyncImmediately) => {
                 self.ensure_log_writer();
-                serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records).unwrap();
+                serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &records)
+                    .unwrap();
                 // XXX(malte): we must deconstruct the BufWriter in order to get at the contained
                 // File (on which we can invoke sync_data(), only to then reassemble it
                 // immediately. I suspect this will work best if we flush after accumulating

@@ -178,7 +178,7 @@ impl Mutator {
                                                  .cloned()
                                                  .collect()),
                        u.into()]
-                          .into())
+                      .into())
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
@@ -196,7 +196,7 @@ impl Mutator {
                                                .cloned()
                                                .collect()),
                      u.into()]
-                .into();
+            .into();
         self.tx_send(m, t)
     }
 

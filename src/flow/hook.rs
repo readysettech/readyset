@@ -67,9 +67,7 @@ impl Hook {
                      Record::Negative(a) => {
                          a.iter()
                              .enumerate()
-                             .filter_map(|(i, v)| if self.key_columns.iter().any(|col| {
-                                                                                     col == &i
-                                                                                 }) {
+                             .filter_map(|(i, v)| if self.key_columns.iter().any(|col| col == &i) {
                                              Some(v)
                                          } else {
                                              None
@@ -102,7 +100,7 @@ impl Hook {
                                           Value::Array(row.iter().map(DataType::to_json).collect())
                                       })
                                  .collect())
-                        .to_string();
+                    .to_string();
             let flags = 0xdeadbeef;
             (self.client.0)
                 .set(k.as_bytes(), v.as_bytes(), flags, 0)
@@ -128,7 +126,7 @@ mod tests {
         let mut h = Hook::new(String::from("table_1"),
                               &[("tcp://127.0.0.1:11211", 1)],
                               vec![0])
-                .unwrap();
+            .unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 2.into()]].into());
@@ -141,7 +139,8 @@ mod tests {
         assert_eq!(String::from_utf8(row).unwrap(), "[]");
 
         // Insert two more rows
-        h.on_input(vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]].into());
+        h.on_input(vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]]
+                       .into());
         let row = h.get_row(vec![2.into()]).unwrap().0;
         assert_eq!(String::from_utf8(row).unwrap(), "[[2,3],[2,4]]");
 
@@ -157,7 +156,7 @@ mod tests {
         let mut h = Hook::new(String::from("table_2"),
                               &[("tcp://127.0.0.1:11211", 1)],
                               vec![0, 2])
-                .unwrap();
+            .unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 5.into(), 3.into()]].into());
@@ -172,7 +171,7 @@ mod tests {
         // Insert two more rows
         h.on_input(vec![vec![2.into(), 6.into(), 3.into()],
                         vec![2.into(), "xyz".into(), 3.into()]]
-                           .into());
+                       .into());
         let row = h.get_row(vec![2.into(), 3.into()]).unwrap().0;
         assert_eq!(String::from_utf8(row).unwrap(), "[[2,6,3],[2,\"xyz\",3]]");
 

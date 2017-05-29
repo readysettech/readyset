@@ -276,8 +276,7 @@ mod tests {
         // CREATE TABLE address (address.addr_id, address.addr_street1);
         let q = CreateTableStatement {
             table: Table::from("address"),
-            fields:
-                vec![ColumnSpecification::new(Column::from("addr_id"), SqlType::Text),
+            fields: vec![ColumnSpecification::new(Column::from("addr_id"), SqlType::Text),
                          ColumnSpecification::new(Column::from("addr_street1"), SqlType::Text)],
             ..Default::default()
         };

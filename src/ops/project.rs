@@ -198,7 +198,8 @@ mod tests {
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(p.narrow_one_row(rec, false),
-                   vec![vec!["c".into(), "a".into(), "hello".into(), 42.into()]].into());
+                   vec![vec!["c".into(), "a".into(), "hello".into(), 42.into()]]
+                       .into());
     }
 
     #[test]
@@ -221,7 +222,7 @@ mod tests {
                              "c".into(),
                              "hello".into(),
                              42.into()]]
-                           .into());
+                       .into());
     }
 
     #[test]
