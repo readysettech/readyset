@@ -38,9 +38,10 @@ pub struct Join {
     // right
     emit: Vec<(bool, usize)>,
 
-    // Stores number of records on the right with each key. Used to avoid creating a new HashMap for
-    // every call to `on_input()`, but is empty except for in that function.
-    right_counts: HashMap<DataType, usize>,
+    // Stores number of records on the right with each key before and after applying the new records
+    // within `on_input()`. Used to avoid creating a new HashMap for every call to `on_input()`, but
+    // is never used except for in that function.
+    right_counts: HashMap<DataType, (usize, usize)>,
 
     kind: JoinType,
 }
@@ -81,6 +82,7 @@ impl Join {
             kind: kind,
         }
     }
+
     fn generate_row(&self, left: &Arc<Vec<DataType>>, right: &Arc<Vec<DataType>>) -> Vec<DataType> {
         self.emit
             .iter()
@@ -162,7 +164,7 @@ impl Ingredient for Join {
                 let ref key = r.rec()[self.on.1];
                 let adjust = |rc| if r.is_positive() { rc - 1 } else { rc + 1 };
 
-                if let Some(rc) = self.right_counts.get_mut(&key) {
+                if let Some(&mut (ref mut rc, _)) = self.right_counts.get_mut(&key) {
                     *rc = adjust(*rc);
                     continue;
                 }
@@ -177,9 +179,11 @@ impl Ingredient for Join {
                     // we got something from right, but that row's key is not in right??
                     unreachable!();
                 }
-                self.right_counts
-                    .insert(key.clone(), adjust(rc.unwrap().count()));
+                let rc = rc.unwrap().count();
+                self.right_counts.insert(key.clone(), (adjust(rc), rc));
             }
+
+            self.right_counts.retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
         let (other, from_key, other_key) = if from == self.left {
@@ -218,24 +222,27 @@ impl Ingredient for Join {
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
                 if from == self.right {
-                    let rc = {
-                        let rc = self.right_counts.get_mut(&row[self.on.0]).unwrap();
+                    let rc = if let Some(&mut (ref mut rc, _)) = self.right_counts.get_mut(&row[self.on.0]) {
                         if positive {
                             *rc += 1;
                         } else {
                             *rc -= 1;
                         }
-                        *rc
+                        Some(*rc)
+                    } else {
+                        None
                     };
 
-                    if (positive && rc == 1) || (!positive && rc == 0) {
-                        ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
-                            let foo: Records = vec![(self.generate_null(r), !positive),
-                                                    (self.generate_row(r, &row), positive)]
-                                .into();
-                            foo.into()
-                        }));
-                        continue;
+                    if let Some(rc) = rc {
+                        if (positive && rc == 1) || (!positive && rc == 0) {
+                            ret.extend(other_rows.flat_map(|r| -> Vec<Record> {
+                                let foo: Records = vec![(self.generate_null(r), !positive),
+                                                        (self.generate_row(r, &row), positive)]
+                                    .into();
+                                foo.into()
+                            }));
+                            continue;
+                        }
                     }
                 } else if other_rows.peek().is_none() {
                     ret.push((self.generate_null(&row), positive).into());
@@ -344,6 +351,9 @@ mod tests {
         let r_w3 = vec![3.into(), "w".into()];
         let r_v4 = vec![4.into(), "w".into()];
 
+        let r_nop: Vec<Record> = vec![(vec![3.into(), "w".into()], false).into(),
+                                      (vec![3.into(), "w".into()], true).into()];
+
         j.seed(r, r_x1.clone());
         j.seed(r, r_y1.clone());
         j.seed(r, r_z2.clone());
@@ -368,10 +378,20 @@ mod tests {
         j.seed(r, r_w3.clone());
         let rs = j.one_row(r, r_w3.clone(), false);
         assert_eq!(rs,
-                   vec![((vec![3.into(), "c".into(), DataType::None], false)),
-                        ((vec![3.into(), "c".into(), "w".into()], true)),
-                        ((vec![3.into(), "c".into(), DataType::None], false)),
-                        ((vec![3.into(), "c".into(), "w".into()], true))]
+                   vec![(vec![3.into(), "c".into(), DataType::None], false),
+                        (vec![3.into(), "c".into(), "w".into()], true),
+                        (vec![3.into(), "c".into(), DataType::None], false),
+                        (vec![3.into(), "c".into(), "w".into()], true)]
+                       .into());
+
+        // Negative followed by positive should not trigger nulls.
+        // TODO: it shouldn't trigger any updates at all...
+        let rs = j.one(r, r_nop, false);
+        assert_eq!(rs,
+                   vec![(vec![3.into(), "c".into(), "w".into()], false),
+                        (vec![3.into(), "c".into(), "w".into()], false),
+                        (vec![3.into(), "c".into(), "w".into()], true),
+                        (vec![3.into(), "c".into(), "w".into()], true)]
                        .into());
 
         // forward from left with single matching record on right
