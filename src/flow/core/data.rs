@@ -7,11 +7,14 @@ use std::ops::{Deref, DerefMut};
 use std::sync;
 use std::fmt;
 
+const TINYTEXT_WIDTH: usize = 15;
+
 /// The main type used for user data throughout the codebase.
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
 #[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone, Serialize, Deserialize)]
+#[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
     None,
@@ -25,7 +28,7 @@ pub enum DataType {
     /// A reference-counted string-like value.
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
-    TinyText([u8; 8]),
+    TinyText([u8; TINYTEXT_WIDTH]),
 }
 
 #[cfg(feature="web")]
@@ -108,7 +111,7 @@ impl<'a> Into<Cow<'a, str>> for &'a DataType {
         match *self {
             DataType::Text(ref s) => s.to_string_lossy(),
             DataType::TinyText(ref bts) => {
-                if bts[7] == 0 {
+                if bts[TINYTEXT_WIDTH - 1] == 0 {
                     // NULL terminated CStr
                     use std::ffi::CStr;
                     let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
@@ -151,8 +154,8 @@ impl Into<i64> for DataType {
 impl From<String> for DataType {
     fn from(s: String) -> Self {
         let len = s.as_bytes().len();
-        if len <= 8 {
-            let mut bytes = [0; 8];
+        if len <= TINYTEXT_WIDTH {
+            let mut bytes = [0; TINYTEXT_WIDTH];
             if len != 0 {
                 let bts = &mut bytes[0..len];
                 bts.copy_from_slice(s.as_bytes());
