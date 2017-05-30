@@ -15,7 +15,7 @@ profiling = ["timekeeper/default"]
 binaries = ["default"]
 
 [dependencies]
-chrono = "0.3.0"
+chrono = { version = "0.3.0", features = ["serde"] }
 itertools = "0.6.0"
 petgraph = "0.4.4"
 regex = "0.2.1"

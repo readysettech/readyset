@@ -93,6 +93,7 @@ impl GroupConcat {
                         DataType::Int(ref n) => s.push_str(&n.to_string()),
                         DataType::BigInt(ref n) => s.push_str(&n.to_string()),
                         DataType::Real(..) => s.push_str(&rec[i].to_string()),
+                        DataType::Timestamp(ref ts) => s.push_str(&ts.format("%+").to_string()),
                         DataType::None => unreachable!(),
                     }
                 }
