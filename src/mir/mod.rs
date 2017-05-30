@@ -442,11 +442,24 @@ impl MirNode {
                         ref column_specs,
                         ref keys,
                         transactional,
-                        ref adapted_over
-                    } => match *adapted_over {
-                        None => make_base_node(&name, column_specs.as_slice(), keys, mig, transactional),
-                        Some(ref bna) => adapt_base_node(bna.over.clone(), mig, &bna.columns_added, &bna.columns_removed),
-                    },
+                        ref adapted_over,
+                    } => {
+                        match *adapted_over {
+                            None => {
+                                make_base_node(&name,
+                                               column_specs.as_slice(),
+                                               keys,
+                                               mig,
+                                               transactional)
+                            }
+                            Some(ref bna) => {
+                                adapt_base_node(bna.over.clone(),
+                                                mig,
+                                                &bna.columns_added,
+                                                &bna.columns_removed)
+                            }
+                        }
+                    }
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -1094,17 +1107,25 @@ fn adapt_base_node(over_node: MirNodeRef,
     };
 
     for a in add.iter() {
-        let default_value = match a.constraints.iter().filter_map(|c| match *c {
-            ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
-            _ => None,
-        }).next() {
+        let default_value = match a.constraints
+                  .iter()
+                  .filter_map(|c| match *c {
+                                  ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
+                                  _ => None,
+                              })
+                  .next() {
             None => DataType::None,
             Some(dv) => dv,
         };
         mig.add_column(na, &a.column.name, default_value);
     }
     for r in remove.iter() {
-        let pos = over_node.borrow().columns().iter().position(|ec| *ec == r.column).unwrap();
+        let pos = over_node
+            .borrow()
+            .columns()
+            .iter()
+            .position(|ec| *ec == r.column)
+            .unwrap();
         mig.drop_column(na, pos);
     }
 
@@ -1117,29 +1138,39 @@ fn make_base_node(name: &str,
                   mut mig: &mut Migration,
                   transactional: bool)
                   -> FlowNode {
-    let column_names = column_specs.iter().map(|cs| &cs.column.name).collect::<Vec<_>>();
+    let column_names = column_specs
+        .iter()
+        .map(|cs| &cs.column.name)
+        .collect::<Vec<_>>();
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
-    let default_values = column_specs.iter().map(|cs| {
-        for c in &cs.constraints {
-            match *c {
-                ColumnConstraint::DefaultValue(ref dv) => return dv.into(),
-                _ => (),
+    let default_values = column_specs
+        .iter()
+        .map(|cs| {
+            for c in &cs.constraints {
+                match *c {
+                    ColumnConstraint::DefaultValue(ref dv) => return dv.into(),
+                    _ => (),
+                }
             }
-        }
-        return DataType::None;
-    }).collect::<Vec<DataType>>();
+            return DataType::None;
+        })
+        .collect::<Vec<DataType>>();
 
     let base = if pkey_columns.len() > 0 {
         let pkey_column_ids = pkey_columns
             .iter()
             .map(|pkc| {
                      //assert_eq!(pkc.table.as_ref().unwrap(), name);
-                     column_specs.iter().position(|cs| cs.column == *pkc).unwrap()
+                     column_specs
+                         .iter()
+                         .position(|cs| cs.column == *pkc)
+                         .unwrap()
                  })
             .collect();
-        ops::base::Base::new(default_values).with_key(pkey_column_ids)
+        ops::base::Base::new(default_values)
+            .with_key(pkey_column_ids)
     } else {
         ops::base::Base::new(default_values)
     };

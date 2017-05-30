@@ -119,7 +119,7 @@ impl<'a> From<&'a Literal> for DataType {
             Literal::CurrentTimestamp => {
                 let ts = chrono::Local::now().naive_local();
                 DataType::Timestamp(ts)
-            },
+            }
             _ => unimplemented!(),
         }
     }
