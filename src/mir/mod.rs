@@ -442,8 +442,11 @@ impl MirNode {
                         ref column_specs,
                         ref keys,
                         transactional,
-                        ..
-                    } => make_base_node(&name, column_specs.as_slice(), keys, mig, transactional),
+                        ref adapted_over
+                    } => match *adapted_over {
+                        None => make_base_node(&name, column_specs.as_slice(), keys, mig, transactional),
+                        Some(ref bna) => adapt_base_node(bna.over.clone(), mig, &bna.columns_added, &bna.columns_removed),
+                    },
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -1078,6 +1081,28 @@ impl Debug for MirNodeType {
             }
         }
     }
+}
+
+fn adapt_base_node(over_node: MirNodeRef,
+                   mut mig: &mut Migration,
+                   add: &Vec<ColumnSpecification>,
+                   remove: &Vec<ColumnSpecification>)
+                   -> FlowNode {
+    let na = match over_node.borrow().flow_node {
+        None => panic!("adapted base node must have a flow node already!"),
+        Some(ref flow_node) => flow_node.address(),
+    };
+
+    for a in add.iter() {
+        // XXX(malte): fix default value
+        mig.add_column(na, &a.column.name, DataType::None);
+    }
+    for r in remove.iter() {
+        let pos = over_node.borrow().columns().iter().position(|ec| *ec == r.column).unwrap();
+        mig.drop_column(na, pos);
+    }
+
+    FlowNode::Existing(na)
 }
 
 fn make_base_node(name: &str,
