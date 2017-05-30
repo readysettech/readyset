@@ -1094,8 +1094,14 @@ fn adapt_base_node(over_node: MirNodeRef,
     };
 
     for a in add.iter() {
-        // XXX(malte): fix default value
-        mig.add_column(na, &a.column.name, DataType::None);
+        let default_value = match a.constraints.iter().filter_map(|c| match *c {
+            ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
+            _ => None,
+        }).next() {
+            None => DataType::None,
+            Some(dv) => dv,
+        };
+        mig.add_column(na, &a.column.name, default_value);
     }
     for r in remove.iter() {
         let pos = over_node.borrow().columns().iter().position(|ec| *ec == r.column).unwrap();
