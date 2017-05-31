@@ -250,18 +250,6 @@ impl MirNode {
         rc_mn
     }
 
-    pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
-        let mut have_all_columns = true;
-        for c in &for_node.columns {
-            if !self.columns.contains(c) {
-                have_all_columns = false;
-                break;
-            }
-        }
-
-        have_all_columns && self.inner.can_reuse_as(&for_node.inner)
-    }
-
     /// Wraps an existing MIR node into a `Reuse` node.
     /// Note that this does *not* wire the reuse node into ancestors or children of the original
     /// node; if required, this is the responsibility of the caller.
@@ -281,6 +269,18 @@ impl MirNode {
         let rc_mn = Rc::new(RefCell::new(mn));
 
         rc_mn
+    }
+
+    pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
+        let mut have_all_columns = true;
+        for c in &for_node.columns {
+            if !self.columns.contains(c) {
+                have_all_columns = false;
+                break;
+            }
+        }
+
+        have_all_columns && self.inner.can_reuse_as(&for_node.inner)
     }
 
     // currently unused
