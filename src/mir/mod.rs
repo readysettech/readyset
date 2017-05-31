@@ -315,7 +315,6 @@ impl MirNode {
         }
     }
 
-
     pub fn add_column(&mut self, c: Column) {
         self.columns.push(c.clone());
         self.inner.add_column(c);
