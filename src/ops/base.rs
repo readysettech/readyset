@@ -89,7 +89,7 @@ impl Base {
 
     /// Whether this base node should delete its durable log on drop.  Used when durable log is not
     /// intended to be used for future recovery, e.g., on tests.
-    pub fn delete_log_on_drop(mut self) -> Base {
+    pub fn delete_log_on_drop(self) -> Base {
         self
     }
 }
