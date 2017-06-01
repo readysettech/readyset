@@ -1548,6 +1548,8 @@ fn state_replay_migration_query() {
     mutb.put(vec![1.into(), "n".into()]).unwrap();
     mutb.put(vec![2.into(), "o".into()]).unwrap();
 
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
     let out = {
         // add join and a reader node
         let mut mig = g.start_migration();

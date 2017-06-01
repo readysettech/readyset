@@ -8,6 +8,7 @@ use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext};
 use flow::statistics;
 use flow::transactions;
+use flow::persistence;
 use checktable;
 use slog::Logger;
 use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
@@ -92,6 +93,7 @@ pub struct Domain {
     not_ready: HashSet<LocalNodeIndex>,
 
     transaction_state: transactions::DomainState,
+    group_commit_queue: persistence::GroupCommitQueue,
 
     mode: DomainMode,
     waiting: local::Map<Waiting>,
@@ -120,9 +122,34 @@ impl Domain {
             .map(|n| *n.borrow().local_addr().as_local())
             .collect();
 
+        let log_filename = {
+            use time;
+            let now = time::now();
+            let today = time::strftime("%F", &now).unwrap();
+            format!("soup-log-{}-{}.json", today, index.index())
+        };
+
+        let base_nodes: HashSet<NodeAddress> = nodes
+            .iter()
+            .filter(|&(_, n)| n.borrow().is_internal())
+            .filter_map(|(na, n)| if let NodeOperator::Base(_) = **n.borrow() {
+                        Some(na)
+                    } else {
+                        None
+                    })
+            .collect();
+
+        let ingress_above_base: HashSet<NodeAddress> = nodes
+            .values()
+            .filter(|n| n.borrow().is_ingress())
+            .filter(|n| n.borrow().children().iter().any(|c| base_nodes.contains(c)))
+            .map(|n| n.borrow().local_addr().clone())
+                .collect();
+
         Domain {
             _index: index,
             transaction_state: transactions::DomainState::new(index, &nodes, checktable, ts),
+            group_commit_queue: persistence::GroupCommitQueue::new(&log_filename, ingress_above_base),
             nodes: nodes,
             state: StateMap::default(),
             log: log,
@@ -174,7 +201,7 @@ impl Domain {
 
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            let key = key.clone(); // :(
+let key = key.clone();// :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 if self.already_requested(&tag, &key[..]) {
                     return;
@@ -483,7 +510,7 @@ impl Domain {
                 self.handle_replay(m);
             }
             consumed => {
-                match consumed { // workaround #16223
+match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
@@ -970,7 +997,7 @@ impl Domain {
             }
 
             // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
-            let m = *m; // workaround for #16223
+let m = *m;// workaround for #16223
             match m {
                 Packet::FullReplay { tag, link, state } => {
                     if can_handle_directly && done_tx.is_some() {
@@ -992,7 +1019,7 @@ impl Domain {
                             // forward the state to the next domain without doing anything with it.
                             let mut p = Some(box Packet::FullReplay {
                                                  tag: tag,
-                                                 link: link, // the egress node will fix this up
+link: link,// the egress node will fix this up
                                                  state: state,
                                              });
                             debug!(self.log, "doing bulk egress forward");
@@ -1073,7 +1100,7 @@ impl Domain {
                                     let last = iter.peek().is_none();
                                     let p = box Packet::ReplayPiece {
                                         tag: tag,
-                                        link: link.clone(), // to will be overwritten by receiver
+link: link.clone(),// to will be overwritten by receiver
                                         context: ReplayPieceContext::Regular { last },
                                         data: chunk,
                                         transaction_state: None,
@@ -1229,7 +1256,7 @@ impl Domain {
                                         // domains don't end up waiting forever for the timestamp we
                                         // claimed.
                                         let m = box Packet::ReplayPiece {
-                                            link: link, // TODO: use dummy link instead
+link: link,// TODO: use dummy link instead
                                             tag,
                                             data: Vec::<Record>::new().into(),
                                             context: ReplayPieceContext::Partial {
@@ -1574,10 +1601,14 @@ impl Domain {
                 self.total_ptime.start();
                 let mut packet = None;
                 loop {
-                    // try to avoid going to sleep if there's more work to be done.
-                    // sleeps and wakeups are expensive. but limit to 10ms to avoid spinning.
+                    let duration_until_flush = self.group_commit_queue.duration_until_flush();
+                    let spin_duration = duration_until_flush.unwrap_or(time::Duration::from_millis(1));
+
+                    // If a flush is needed at some point then spin waiting for packets until
+                    // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
+                    // and wakeups are expensive.
                     let start = time::Instant::now();
-                    while start.elapsed() < time::Duration::from_millis(1) {
+                    while start.elapsed() < spin_duration {
                         if let Ok(p) = inject_rx
                                .try_recv()
                                .or_else(|_| back_rx.try_recv())
@@ -1588,7 +1619,16 @@ impl Domain {
                         }
                     }
 
-                    // block for the next
+                    // If no packet was received and we were waiting until it was time for a flush,
+                    // then do the flush now.
+                    if packet.is_none() && duration_until_flush.is_some() {
+                        for m in self.group_commit_queue.flush() {
+                            self.handle(m);
+                        }
+                        continue;
+                    }
+
+                    // Block until the next packet arrives.
                     if packet.is_none() {
                         self.wait_time.start();
                         let id = sel.wait();
@@ -1619,7 +1659,15 @@ impl Domain {
                         Ok(box Packet::RequestUnboundedTx(ack)) => {
                             ack.send(back_tx.clone()).unwrap();
                         }
-                        Ok(m) => self.handle(m),
+                        Ok(m) => {
+                            if self.group_commit_queue.should_persist(&m) {
+                                for m in self.group_commit_queue.append(m) {
+                                    self.handle(m);
+                                }
+                            } else {
+                                self.handle(m);
+                            }
+                        }
                     }
                 }
             })

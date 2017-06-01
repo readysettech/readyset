@@ -16,20 +16,22 @@ use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
+pub mod core;
 pub mod domain;
+pub mod hook;
+pub mod keys;
+pub mod migrate;
 pub mod node;
 pub mod payload;
-pub mod statistics;
-pub mod keys;
-pub mod core;
-pub mod migrate;
-mod transactions;
-pub mod hook;
-
 pub mod prelude;
-use self::prelude::Ingredient;
+pub mod statistics;
 
 mod mutator;
+mod persistence;
+mod transactions;
+
+use self::prelude::Ingredient;
+
 pub use self::mutator::{Mutator, MutatorError};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
