@@ -515,11 +515,22 @@ let key = key.clone();// :(
                 self.handle_replay(m);
             }
             consumed => {
-match consumed {// workaround #16223
+                match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
                         self.not_ready.insert(addr);
+
+                        if self.group_commit_queue.is_some() && node.is_internal() {
+                            if let NodeOperator::Base(_) = *node {
+                                for p in &parents {
+                                    self.group_commit_queue
+                                        .as_mut()
+                                        .unwrap()
+                                        .add_persisted_ingress(p.clone().into());
+                                }
+                            };
+                        }
 
                         for p in parents {
                             self.nodes

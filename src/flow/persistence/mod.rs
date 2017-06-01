@@ -88,6 +88,10 @@ impl GroupCommitQueue {
         }
     }
 
+    pub fn add_persisted_ingress(&mut self, na: NodeAddress) {
+        self.persisted_ingress.insert(na);
+    }
+
     /// Returns whether the given packet should be persisted.
     pub fn should_persist(&self, p: &Box<Packet>) -> bool {
         match **p {
