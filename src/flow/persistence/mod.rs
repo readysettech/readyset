@@ -67,11 +67,13 @@ impl GroupCommitQueue {
     }
 
     /// Sets the capacity to the indicated size.
+    #[allow(unused)]
     pub fn set_capacity(&mut self, capacity: usize) {
         self.capacity = capacity;
     }
 
     /// Sets the timeout to the indicated length.
+    #[allow(unused)]
     pub fn set_timeout(&mut self, timeout: time::Duration) {
         self.timeout = timeout;
     }
