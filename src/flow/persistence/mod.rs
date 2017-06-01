@@ -5,6 +5,7 @@ use buf_redux::strategy::WhenFull;
 use serde_json;
 
 use std::collections::HashSet;
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
 use std::path::PathBuf;
@@ -12,26 +13,44 @@ use std::time;
 
 use flow::prelude::*;
 
+/// Parameters to control the operation of GroupCommitQueue.
+pub struct Parameters {
+    /// Number of elements to buffer before flushing.
+    pub queue_capacity: usize,
+    /// Amount of time to wait before flushing despite not reaching `queue_capacity`.
+    pub flush_timeout: time::Duration,
+    /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
+    pub delete_on_drop: bool,
+}
+
 pub struct GroupCommitQueue {
     /// Ingress nodes whose incoming packets should be persisted. These should be the ingress nodes
     /// that are above base nodes.
     persisted_ingress: HashSet<NodeAddress>,
 
+    /// Packets that are queued to be persisted.
     pending_packets: Vec<Box<Packet>>,
+
     /// Time when the first packet was inserted into pending_packets, or none if pending_packets is
     /// empty. A flush should occur on or before wait_start + timeout.
     wait_start: Option<time::Instant>,
 
+    /// Handle to the file that packets should be written to. Outside of flush() it should never be
+    /// None.
     durable_log: Option<BufWriter<File, WhenFull>>,
+    durable_log_path: PathBuf,
 
     timeout: time::Duration,
     capacity: usize,
+    delete_on_drop: bool,
 }
 
 impl GroupCommitQueue {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(log_filename: &str, ingress_above_base: HashSet<NodeAddress>) -> Self {
-        let capacity = 128;
+    pub fn new(log_filename: &str,
+               ingress_above_base: HashSet<NodeAddress>,
+               params: &Parameters)
+               -> Self {
         let durable_log_path = PathBuf::from(&log_filename);
 
         // TODO(jmftrindade): Current semantics is to overwrite an existing log.
@@ -42,7 +61,7 @@ impl GroupCommitQueue {
                   .append(false)
                   .write(true)
                   .create(true)
-                  .open(durable_log_path) {
+                  .open(durable_log_path.clone()) {
             Err(reason) => {
                 panic!("Unable to open durable log file {}, reason: {}",
                        log_filename,
@@ -51,40 +70,29 @@ impl GroupCommitQueue {
             Ok(file) => file,
         };
 
-        let durable_log = BufWriter::with_capacity_and_strategy(capacity * 1024, file, WhenFull);
+        let durable_log =
+            BufWriter::with_capacity_and_strategy(params.queue_capacity * 1024, file, WhenFull);
 
         Self {
             persisted_ingress: ingress_above_base,
 
-            pending_packets: Vec::with_capacity(capacity),
+            pending_packets: Vec::with_capacity(params.queue_capacity),
             wait_start: None,
 
             durable_log: Some(durable_log),
+            durable_log_path,
 
-            timeout: time::Duration::from_millis(10),
-            capacity,
+            timeout: params.flush_timeout,
+            capacity: params.queue_capacity,
+            delete_on_drop: params.delete_on_drop,
         }
-    }
-
-    /// Sets the capacity to the indicated size.
-    #[allow(unused)]
-    pub fn set_capacity(&mut self, capacity: usize) {
-        self.capacity = capacity;
-    }
-
-    /// Sets the timeout to the indicated length.
-    #[allow(unused)]
-    pub fn set_timeout(&mut self, timeout: time::Duration) {
-        self.timeout = timeout;
     }
 
     /// Returns whether the given packet should be persisted.
     pub fn should_persist(&self, p: &Box<Packet>) -> bool {
         match **p {
-            Packet::Message {ref link, ..} |
-            Packet::Transaction {ref link, ..} => {
-                self.persisted_ingress.contains(&link.dst)
-            }
+            Packet::Message { ref link, .. } |
+            Packet::Transaction { ref link, .. } => self.persisted_ingress.contains(&link.dst),
             _ => false,
         }
     }
@@ -139,5 +147,13 @@ impl GroupCommitQueue {
                                     .checked_sub(i.elapsed())
                                     .unwrap_or(time::Duration::from_millis(0))
                             })
+    }
+}
+
+impl Drop for GroupCommitQueue {
+    fn drop(&mut self) {
+        if self.delete_on_drop {
+            fs::remove_file(self.durable_log_path.clone()).unwrap();
+        }
     }
 }

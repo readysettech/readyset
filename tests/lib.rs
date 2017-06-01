@@ -12,6 +12,7 @@ const SETTLE_TIME_MS: u64 = 750;
 fn it_works() {
     // set up graph
     let mut g = distributary::Blender::new();
+    g.enable_temporary_persistence(128, time::Duration::from_millis(1));
     let (a, b, c) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a",

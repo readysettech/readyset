@@ -93,7 +93,7 @@ pub struct Domain {
     not_ready: HashSet<LocalNodeIndex>,
 
     transaction_state: transactions::DomainState,
-    group_commit_queue: persistence::GroupCommitQueue,
+    group_commit_queue: Option<persistence::GroupCommitQueue>,
 
     mode: DomainMode,
     waiting: local::Map<Waiting>,
@@ -113,6 +113,7 @@ impl Domain {
     pub fn new(log: Logger,
                index: Index,
                nodes: DomainNodes,
+               persistence: &Option<persistence::Parameters>,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
@@ -122,38 +123,42 @@ impl Domain {
             .map(|n| *n.borrow().local_addr().as_local())
             .collect();
 
-        let log_filename = {
-            use time;
-            let now = time::now();
-            let today = time::strftime("%F", &now).unwrap();
-            format!("soup-log-{}-{}.json", today, index.index())
-        };
+        let group_commit_queue = persistence.as_ref().map(|params| {
+            let log_filename = {
+                use time;
+                let now = time::now();
+                let today = time::strftime("%F", &now).unwrap();
+                format!("soup-log-{}-{}.json", today, index.index())
+            };
 
-        let base_nodes: HashSet<NodeAddress> = nodes
-            .iter()
-            .filter(|&(_, n)| n.borrow().is_internal())
-            .filter_map(|(na, n)| if let NodeOperator::Base(_) = **n.borrow() {
-                        Some(na)
-                    } else {
-                        None
-                    })
-            .collect();
-
-        let ingress_above_base: HashSet<NodeAddress> = nodes
-            .values()
-            .filter(|n| n.borrow().is_ingress())
-            .filter(|n| n.borrow().children().iter().any(|c| base_nodes.contains(c)))
-            .map(|n| n.borrow().local_addr().clone())
+            let base_nodes: HashSet<NodeAddress> = nodes
+                .iter()
+                .filter(|&(_, n)| n.borrow().is_internal())
+                .filter_map(|(na, n)| if let NodeOperator::Base(_) = **n.borrow() {
+                                Some(na)
+                            } else {
+                                None
+                            })
                 .collect();
+
+            let ingress_above_base: HashSet<NodeAddress> = nodes
+                .values()
+                .filter(|n| n.borrow().is_ingress())
+                .filter(|n| n.borrow().children().iter().any(|c| base_nodes.contains(c)))
+                .map(|n| n.borrow().local_addr().clone())
+                .collect();
+
+            persistence::GroupCommitQueue::new(&log_filename, ingress_above_base, params)
+        });
 
         Domain {
             _index: index,
             transaction_state: transactions::DomainState::new(index, &nodes, checktable, ts),
-            group_commit_queue: persistence::GroupCommitQueue::new(&log_filename, ingress_above_base),
-            nodes: nodes,
+            group_commit_queue,
+            nodes,
             state: StateMap::default(),
-            log: log,
-            not_ready: not_ready,
+            log,
+            not_ready,
             mode: DomainMode::Forwarding,
             waiting: local::Map::new(),
             reader_triggered: local::Map::new(),
@@ -1601,8 +1606,10 @@ link: link,// TODO: use dummy link instead
                 self.total_ptime.start();
                 let mut packet = None;
                 loop {
-                    let duration_until_flush = self.group_commit_queue.duration_until_flush();
-                    let spin_duration = duration_until_flush.unwrap_or(time::Duration::from_millis(1));
+                    let duration_until_flush =
+                        self.group_commit_queue.as_ref().and_then(|q| q.duration_until_flush());
+                    let spin_duration = duration_until_flush
+                        .unwrap_or(time::Duration::from_millis(1));
 
                     // If a flush is needed at some point then spin waiting for packets until
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
@@ -1622,7 +1629,7 @@ link: link,// TODO: use dummy link instead
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        for m in self.group_commit_queue.flush() {
+                        for m in self.group_commit_queue.as_mut().unwrap().flush() {
                             self.handle(m);
                         }
                         continue;
@@ -1660,8 +1667,9 @@ link: link,// TODO: use dummy link instead
                             ack.send(back_tx.clone()).unwrap();
                         }
                         Ok(m) => {
-                            if self.group_commit_queue.should_persist(&m) {
-                                for m in self.group_commit_queue.append(m) {
+                            if self.group_commit_queue.is_some() &&
+                               self.group_commit_queue.as_mut().unwrap().should_persist(&m) {
+                                for m in self.group_commit_queue.as_mut().unwrap().append(m) {
                                     self.handle(m);
                                 }
                             } else {
