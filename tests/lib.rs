@@ -365,11 +365,11 @@ fn transactional_vote() {
         let article1 =
             mig.add_transactional_base("article1",
                                        &["id", "title"],
-                                       Base::default().delete_log_on_drop());
+                                       Base::default());
         let article2 =
             mig.add_transactional_base("article1",
                                        &["id", "title"],
-                                       Base::default().delete_log_on_drop());
+                                       Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -382,7 +382,7 @@ fn transactional_vote() {
         // add vote base table
         let vote = mig.add_transactional_base("vote",
                                               &["user", "id"],
-                                              Base::default().delete_log_on_drop());
+                                              Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -795,7 +795,7 @@ fn transactional_migration() {
         let a =
             mig.add_transactional_base("a",
                                        &["a", "b"],
-                                       distributary::Base::default().delete_log_on_drop());
+                                       distributary::Base::default());
         mig.maintain(a, 0);
         mig.commit();
         a
@@ -820,7 +820,7 @@ fn transactional_migration() {
         let b =
             mig.add_transactional_base("b",
                                        &["a", "b"],
-                                       distributary::Base::default().delete_log_on_drop());
+                                       distributary::Base::default());
         mig.maintain(b, 0);
         mig.commit();
         b

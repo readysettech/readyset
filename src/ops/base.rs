@@ -8,9 +8,7 @@ use vec_map::VecMap;
 /// type corresponding to the node's type.
 #[derive(Debug)]
 pub struct Base {
-    durability: Option<BaseDurabilityLevel>,
     primary_key: Option<Vec<usize>>,
-
     us: Option<NodeAddress>,
 
     defaults: Vec<DataType>,
@@ -18,19 +16,6 @@ pub struct Base {
     unmodified: bool,
 }
 
-/// Specifies the level of durability that this base node should offer. Stronger guarantees imply a
-/// reduced write performance.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BaseDurabilityLevel {
-    /// Buffered writes: records are accumulated in an in-memory buffer and occasionally flushed to
-    /// the durable log, which may itself buffer in the file system. Results in large batched
-    /// writes, but offers no durability guarantees on crashes.
-    Buffered,
-    /// Synchronous writes: forces every record to be written to disk before it is emitted further
-    /// into the data-flow graph. Strong guarantees (writes are never lost), but high performance
-    /// penalty.
-    SyncImmediately,
-}
 
 impl Base {
     /// Create a non-durable base node operator.
@@ -43,12 +28,6 @@ impl Base {
     /// Builder with a known primary key.
     pub fn with_key(mut self, primary_key: Vec<usize>) -> Base {
         self.primary_key = Some(primary_key);
-        self
-    }
-
-    /// Builder with a durability level.
-    pub fn with_durability(mut self, durability: BaseDurabilityLevel) -> Base {
-        self.durability = Some(durability);
         self
     }
 
@@ -86,12 +65,6 @@ impl Base {
     pub(crate) fn is_unmodified(&self) -> bool {
         self.unmodified
     }
-
-    /// Whether this base node should delete its durable log on drop.  Used when durable log is not
-    /// intended to be used for future recovery, e.g., on tests.
-    pub fn delete_log_on_drop(self) -> Base {
-        self
-    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
@@ -100,7 +73,6 @@ impl Base {
 impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
-            durability: self.durability,
             primary_key: self.primary_key.clone(),
             us: self.us,
 
@@ -114,7 +86,6 @@ impl Clone for Base {
 impl Default for Base {
     fn default() -> Self {
         Base {
-            durability: None,
             primary_key: None,
             us: None,
 
@@ -261,7 +232,6 @@ mod tests {
     fn it_works_default() {
         let b = Base::default();
 
-        assert!(b.durability.is_none());
         assert!(b.primary_key.is_none());
         assert!(b.us.is_none());
 
@@ -274,33 +244,6 @@ mod tests {
     fn it_works_new() {
         let b = Base::new(vec![]);
 
-        assert!(b.durability.is_none());
-        assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
-
-        assert_eq!(b.defaults.len(), 0);
-        assert_eq!(b.dropped.len(), 0);
-        assert_eq!(b.unmodified, true);
-    }
-
-    #[test]
-    fn it_works_durability_buffered() {
-        let b = Base::new(vec![]).with_durability(BaseDurabilityLevel::Buffered);
-
-        assert_eq!(b.durability, Some(BaseDurabilityLevel::Buffered));
-        assert!(b.primary_key.is_none());
-        assert!(b.us.is_none());
-
-        assert_eq!(b.defaults.len(), 0);
-        assert_eq!(b.dropped.len(), 0);
-        assert_eq!(b.unmodified, true);
-    }
-
-    #[test]
-    fn it_works_durability_sync_immediately() {
-        let b = Base::new(vec![]).with_durability(BaseDurabilityLevel::SyncImmediately);
-
-        assert_eq!(b.durability, Some(BaseDurabilityLevel::SyncImmediately));
         assert!(b.primary_key.is_none());
         assert!(b.us.is_none());
 
