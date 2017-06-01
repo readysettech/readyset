@@ -250,6 +250,44 @@ impl MirNode {
         rc_mn
     }
 
+    /// Adapts an existing `Base`-type MIR Node with the specified column additions and removals.
+    pub fn adapt_base(node: MirNodeRef,
+                      added_cols: Vec<&ColumnSpecification>,
+                      removed_cols: Vec<&ColumnSpecification>)
+                      -> MirNodeRef {
+        let over_node = node.borrow();
+        match over_node.inner {
+            MirNodeType::Base {
+                ref column_specs,
+                ref keys,
+                transactional,
+                ..
+            } => {
+                let new_inner = MirNodeType::Base {
+                    column_specs: column_specs.clone(),
+                    keys: keys.clone(),
+                    transactional: transactional,
+                    adapted_over: Some(BaseNodeAdaptation {
+                                           over: node.clone(),
+                                           columns_added: added_cols.into_iter().cloned().collect(),
+                                           columns_removed: removed_cols
+                                               .into_iter()
+                                               .cloned()
+                                               .collect(),
+                                       }),
+                };
+                return MirNode::new(&over_node.name,
+                                    over_node.from_version,
+                                    // XXX: incorrect!
+                                    over_node.columns.clone(),
+                                    new_inner,
+                                    vec![],
+                                    over_node.children.clone());
+            }
+            _ => unreachable!(),
+        }
+    }
+
     /// Wraps an existing MIR node into a `Reuse` node.
     /// Note that this does *not* wire the reuse node into ancestors or children of the original
     /// node; if required, this is the responsibility of the caller.

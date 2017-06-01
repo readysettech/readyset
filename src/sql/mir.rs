@@ -332,14 +332,10 @@ impl SqlToMirConverter {
                             .or_insert(Vec::new());
                         base_schemas.push((self.schema_version, columns.clone()));
 
-                        // TODO(malte): manufacture appropriate MIR node to represent base
-                        // table adaptation
-                        let _ = existing_node.borrow();
-                        unimplemented!();
+                        return MirNode::adapt_base(existing_node, columns_added, columns_removed);
                     } else {
                         info!(self.log, "base table has complex schema change");
                         break;
-
                     }
                 }
             }
