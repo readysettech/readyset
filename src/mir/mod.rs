@@ -840,7 +840,7 @@ impl MirNodeType {
                 column_specs: ref our_column_specs,
                 keys: ref our_keys,
                 transactional: our_transactional,
-                ..
+                adapted_over: ref our_adapted_over,
             } => {
                 match *other {
                     MirNodeType::Base {
@@ -850,7 +850,17 @@ impl MirNodeType {
                         ..
                     } => {
                         assert_eq!(our_transactional, transactional);
-                        // note that we do *not* need `adapted_over` to match, since current reuse
+                        // if we are instructed to adapt an earlier base node, we cannot reuse
+                        // anything directly; we'll have to keep a new MIR node here.
+                        if our_adapted_over.is_some() {
+                            // TODO(malte): this is a bit more conservative than it needs to be, since
+                            // base node adaptation actually *changes* the underlying base node, so we
+                            // will actually reuse. However, returning false here terminates the
+                            // reuse search unnecessarily. We should handle this special case.
+                            return false;
+                        }
+                        // note that as long as we are not adapting a previous base node,
+                        // we do *not* need `adapted_over` to *match*, since current reuse
                         // does not depend on how base node was created from an earlier one
                         our_column_specs == column_specs && our_keys == keys
                     }
