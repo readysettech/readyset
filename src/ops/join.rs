@@ -183,7 +183,8 @@ impl Ingredient for Join {
                 self.right_counts.insert(key.clone(), (adjust(rc), rc));
             }
 
-            self.right_counts.retain(|_, &mut (before, after)| (before == 0) != (after == 0));
+            self.right_counts
+                .retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
         let (other, from_key, other_key) = if from == self.left {
@@ -222,7 +223,8 @@ impl Ingredient for Join {
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
                 if from == self.right {
-                    let rc = if let Some(&mut (ref mut rc, _)) = self.right_counts.get_mut(&row[self.on.0]) {
+                    let rc = if let Some(&mut (ref mut rc, _)) =
+                        self.right_counts.get_mut(&row[self.on.0]) {
                         if positive {
                             *rc += 1;
                         } else {

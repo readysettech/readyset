@@ -206,7 +206,7 @@ impl Domain {
 
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-let key = key.clone();// :(
+            let key = key.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 if self.already_requested(&tag, &key[..]) {
                     return;
@@ -515,7 +515,7 @@ let key = key.clone();// :(
                 self.handle_replay(m);
             }
             consumed => {
-match consumed {// workaround #16223
+                match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
@@ -1014,7 +1014,7 @@ match consumed {// workaround #16223
             }
 
             // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
-let m = *m;// workaround for #16223
+            let m = *m; // workaround for #16223
             match m {
                 Packet::FullReplay { tag, link, state } => {
                     if can_handle_directly && done_tx.is_some() {
@@ -1036,7 +1036,7 @@ let m = *m;// workaround for #16223
                             // forward the state to the next domain without doing anything with it.
                             let mut p = Some(box Packet::FullReplay {
                                                  tag: tag,
-link: link,// the egress node will fix this up
+                                                 link: link, // the egress node will fix this up
                                                  state: state,
                                              });
                             debug!(self.log, "doing bulk egress forward");
@@ -1117,7 +1117,7 @@ link: link,// the egress node will fix this up
                                     let last = iter.peek().is_none();
                                     let p = box Packet::ReplayPiece {
                                         tag: tag,
-link: link.clone(),// to will be overwritten by receiver
+                                        link: link.clone(), // to will be overwritten by receiver
                                         context: ReplayPieceContext::Regular { last },
                                         data: chunk,
                                         transaction_state: None,
@@ -1273,7 +1273,7 @@ link: link.clone(),// to will be overwritten by receiver
                                         // domains don't end up waiting forever for the timestamp we
                                         // claimed.
                                         let m = box Packet::ReplayPiece {
-link: link,// TODO: use dummy link instead
+                                            link: link, // TODO: use dummy link instead
                                             tag,
                                             data: Vec::<Record>::new().into(),
                                             context: ReplayPieceContext::Partial {
@@ -1619,8 +1619,9 @@ link: link,// TODO: use dummy link instead
                 let mut packet = None;
                 let mut durable_packets = Vec::new();
                 loop {
-                    let duration_until_flush =
-                        self.group_commit_queue.as_ref().and_then(|q| q.duration_until_flush());
+                    let duration_until_flush = self.group_commit_queue
+                        .as_ref()
+                        .and_then(|q| q.duration_until_flush());
                     let spin_duration = duration_until_flush
                         .unwrap_or(time::Duration::from_millis(1));
 
@@ -1642,7 +1643,10 @@ link: link,// TODO: use dummy link instead
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        self.group_commit_queue.as_mut().unwrap().flush(&mut durable_packets);
+                        self.group_commit_queue
+                            .as_mut()
+                            .unwrap()
+                            .flush(&mut durable_packets);
                         for m in durable_packets.drain(..) {
                             self.handle(m);
                         }

@@ -362,14 +362,8 @@ fn transactional_vote() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 =
-            mig.add_transactional_base("article1",
-                                       &["id", "title"],
-                                       Base::default());
-        let article2 =
-            mig.add_transactional_base("article1",
-                                       &["id", "title"],
-                                       Base::default());
+        let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -380,9 +374,7 @@ fn transactional_vote() {
         mig.maintain(article, 0);
 
         // add vote base table
-        let vote = mig.add_transactional_base("vote",
-                                              &["user", "id"],
-                                              Base::default());
+        let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -792,10 +784,7 @@ fn transactional_migration() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a =
-            mig.add_transactional_base("a",
-                                       &["a", "b"],
-                                       distributary::Base::default());
+        let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
         mig.maintain(a, 0);
         mig.commit();
         a
@@ -817,10 +806,7 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let b = {
         let mut mig = g.start_migration();
-        let b =
-            mig.add_transactional_base("b",
-                                       &["a", "b"],
-                                       distributary::Base::default());
+        let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
         mig.maintain(b, 0);
         mig.commit();
         b

@@ -210,37 +210,35 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node =
-        |rel: String, preds: Vec<ConditionTree>, st: &SelectStatement| -> QueryGraphNode {
-            QueryGraphNode {
-                rel_name: rel.clone(),
-                predicates: preds,
-                columns: st.fields
-                    .iter()
-                    .filter_map(|field| match field {
-                                    &FieldExpression::All => unimplemented!(),
-                                    &FieldExpression::AllInTable(_) => unimplemented!(),
-                                    &FieldExpression::Col(ref c) => {
-                                        match c.table.as_ref() {
-                                            None => {
-                            match c.function {
-                                // XXX(malte): don't drop aggregation columns
-                                Some(_) => None,
-                                None => {
-                                    panic!("No table name set for column {} on {}", c.name, rel)
-                                }
-                            }
+    let new_node = |rel: String,
+                    preds: Vec<ConditionTree>,
+                    st: &SelectStatement|
+     -> QueryGraphNode {
+        QueryGraphNode {
+            rel_name: rel.clone(),
+            predicates: preds,
+            columns: st.fields
+                .iter()
+                .filter_map(|field| match field {
+                                &FieldExpression::All => unimplemented!(),
+                                &FieldExpression::AllInTable(_) => unimplemented!(),
+                                &FieldExpression::Col(ref c) => {
+                                    match c.table.as_ref() {
+                                        None => {
+                        match c.function {
+                            // XXX(malte): don't drop aggregation columns
+                            Some(_) => None,
+                            None => panic!("No table name set for column {} on {}", c.name, rel),
                         }
-                                            Some(t) => {
-                                                if *t == rel { Some(c.clone()) } else { None }
-                                            }
-                                        }
+                    }
+                                        Some(t) => if *t == rel { Some(c.clone()) } else { None },
                                     }
-                                })
-                    .collect(),
-                parameters: Vec::new(),
-            }
-        };
+                                }
+                            })
+                .collect(),
+            parameters: Vec::new(),
+        }
+    };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
