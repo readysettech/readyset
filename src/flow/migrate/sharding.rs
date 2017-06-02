@@ -1,4 +1,5 @@
 use flow::prelude::*;
+use flow::node;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use slog::Logger;
@@ -293,15 +294,126 @@ pub fn shard(log: &Logger,
         }
     }
 
+    // the code above can do some stupid things, such as adding a sharder after a new, unsharded
+    // node. we want to "flatten" such cases so that we shard as early as we can.
+    let mut new_sharders: Vec<_> = new.iter()
+        .filter(|&&n| graph[n].is_sharder())
+        .cloned()
+        .collect();
+    let mut stable = false;
+    while !stable {
+        stable = true;
+        for n in new_sharders.split_off(0) {
+            let ps: Vec<_> = graph
+                .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
+                .collect();
+            let by = graph[graph
+                .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
+                .next()
+                .unwrap()]
+                    .sharded_by();
+            // *technically* we could also push sharding up even if some parents are already
+            // sharded, but let's leave that for another day.
+            //
+            // TODO: p could have changed in previous iterations, so we should re-check here
+            // whether p.sharded_by() == n.sharded_by() now.
+            if ps.iter()
+                   .all(|&p| new.contains(&p) && graph[p].sharded_by() == Sharding::None) {
+                'parents: for p in ps {
+                    if p == source {
+                        continue;
+                    }
+
+                    let col = match by {
+                        Sharding::ByColumn(c) => c,
+                        Sharding::Random => continue,
+                        Sharding::None => continue,
+                    };
+
+                    let src_cols = graph[p].parent_columns(col);
+                    if src_cols.len() != 1 {
+                        continue;
+                    }
+                    let (grandp, src_col) = src_cols[0];
+                    if src_col.is_none() {
+                        continue;
+                    }
+                    let src_col = src_col.unwrap();
+                    let grandp = *grandp.as_global();
+
+                    let mut cs = 0;
+                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                        // if p has other children, it is only safe to push up the Sharder if
+                        // those other children are also sharded by the same key.
+                        if !graph[c].is_sharder() {
+                            continue 'parents;
+                        }
+                        let sibling_sharder_child = graph
+                            .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
+                            .next()
+                            .unwrap();
+                        if graph[sibling_sharder_child].sharded_by() != by {
+                            continue 'parents;
+                        }
+                        cs += 1;
+                    }
+
+                    // it's safe to push up the Sharder.
+                    // to do so, we need to undo all the changes we made to `swaps` when
+                    // introducing the Sharders below this parent in the first place
+                    let mut remove = Vec::with_capacity(cs);
+                    let mut children = Vec::new();
+                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                        for grandchild in
+                            graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                            // undo the swap that inserting the Sharder generated
+                            swaps.remove(&(p, grandchild));
+                            children.push(grandchild);
+                        }
+                        if c != n {
+                            remove.push(c);
+                        }
+                    }
+                    // we then need to wire in the Sharder above the parent instead
+                    let new = graph[p].mirror(node::special::Sharder::new(src_col));
+                    *graph.node_weight_mut(n).unwrap() = new;
+                    let e = graph.find_edge(p, n).unwrap();
+                    graph.remove_edge(e);
+                    let e = graph.find_edge(grandp, p).unwrap();
+                    let w = graph.remove_edge(e).unwrap();
+                    graph.add_edge(grandp, n, w);
+                    for &child in &children {
+                        if let Some(e) = graph.find_edge(n, child) {
+                            graph.remove_edge(e);
+                        }
+                        // TODO: materialized edges?
+                        graph.add_edge(n, child, false);
+                    }
+                    // and finally, we need to remove any Sharders that were added for other
+                    // children. unfortunately, we can't remove nodes from the graph, because
+                    // petgraph doesn't guarantee that NodeIndexes are stable when nodes are
+                    // removed from the graph.
+                    for r in remove {
+                        let e = graph.find_edge(p, r).unwrap();
+                        graph.remove_edge(e);
+                        // ugh:
+                        for &child in &children {
+                            if let Some(e) = graph.find_edge(r, child) {
+                                graph.remove_edge(e);
+                            }
+                        }
+                        // r is now entirely disconnected from the graph
+                    }
+                }
+            }
+        }
+    }
+
     // TODO
     // how do we actually split a sharded node?
     // ideally we want to keep the graph representation unchanged, and instead just *instantiate*
     // multiple copies of the given node. but that probably has very deep-reaching consequences in
     // the code...
-
-    // TODO
-    // maybe we can "flatten" shuffles here? if we detect a node that is unsharded that is
-    // immediately followed by a sharder, we can push the sharder up?
 
     swaps
 }
