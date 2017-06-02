@@ -263,8 +263,25 @@ impl MirNode {
                 transactional,
                 ..
             } => {
+                let new_column_specs: Vec<ColumnSpecification> = column_specs
+                    .iter()
+                    .cloned()
+                    .filter(|cs| !removed_cols.contains(&cs))
+                    .chain(added_cols
+                               .iter()
+                               .map(|c| (*c).clone())
+                               .collect::<Vec<ColumnSpecification>>())
+                    .collect();
+                let new_columns: Vec<Column> = new_column_specs
+                    .iter()
+                    .map(|cs| cs.column.clone())
+                    .collect();
+
+                assert_eq!(new_column_specs.len(),
+                           over_node.columns.len() + added_cols.len() - removed_cols.len());
+
                 let new_inner = MirNodeType::Base {
-                    column_specs: column_specs.clone(),
+                    column_specs: new_column_specs,
                     keys: keys.clone(),
                     transactional: transactional,
                     adapted_over: Some(BaseNodeAdaptation {
@@ -278,8 +295,7 @@ impl MirNode {
                 };
                 return MirNode::new(&over_node.name,
                                     over_node.from_version,
-                                    // XXX: incorrect!
-                                    over_node.columns.clone(),
+                                    new_columns,
                                     new_inner,
                                     vec![],
                                     over_node.children.clone());
