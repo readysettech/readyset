@@ -329,6 +329,9 @@ impl SqlToMirConverter {
                                                  removed));
                             columns.remove(pos);
                         }
+                        assert_eq!(columns.len(),
+                                   existing_node.borrow().columns().len() + columns_added.len() -
+                                   columns_removed.len());
 
                         // remember the schema for this version
                         let mut base_schemas = self.base_schemas
