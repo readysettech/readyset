@@ -415,12 +415,6 @@ pub fn shard(log: &Logger,
         }
     }
 
-    // TODO
-    // how do we actually split a sharded node?
-    // ideally we want to keep the graph representation unchanged, and instead just *instantiate*
-    // multiple copies of the given node. but that probably has very deep-reaching consequences in
-    // the code...
-
     swaps
 }
 

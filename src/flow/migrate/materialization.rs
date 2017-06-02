@@ -348,6 +348,8 @@ pub fn initialize(log: &Logger,
     for node in topo_list {
         let addr = *graph[node].local_addr();
         let d = graph[node].domain();
+        // FIXME: if node is sharded we must tell all the shard domains!
+        assert_eq!(graph[node].sharded_by(), Sharding::None);
 
         let index_on = materialize
             .get_mut(&d)
@@ -584,6 +586,8 @@ pub fn reconstruct(log: &Logger,
         partial.insert(node);
     }
 
+    // FIXME: if node is sharded must send to all shards
+    assert_eq!(graph[node].sharded_by(), Sharding::None);
     let domain = graph[node].domain();
     let addr = *graph[node].local_addr();
     let cols = graph[node].fields().len();

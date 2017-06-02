@@ -251,6 +251,8 @@ pub fn connect(log: &Logger,
         } else {
             continue;
         }
+        // FIXME: if ingress is sharded we need to send multiple txs to egress
+        assert_eq!(n.sharded_by(), Sharding::None);
 
         for sender in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             let sender_node = &graph[sender];
@@ -260,6 +262,8 @@ pub fn connect(log: &Logger,
                            "egress" => sender.index(),
                            "ingress" => node.index()
                     );
+                // FIXME: if sender is sharded we need to tell all of them
+                assert_eq!(sender_node.sharded_by(), Sharding::None);
                 main_txs[&sender_node.domain()]
                     .send(box Packet::UpdateEgress {
                               node: sender_node.local_addr().as_local().clone(),
@@ -275,6 +279,8 @@ pub fn connect(log: &Logger,
                            "sharder" => sender.index(),
                            "ingress" => node.index()
                     );
+                // FIXME: if sender is sharded we need to tell all of them
+                assert_eq!(sender_node.sharded_by(), Sharding::None);
                 main_txs[&sender_node.domain()]
                     .send(box Packet::UpdateSharder {
                               node: sender_node.local_addr().as_local().clone(),

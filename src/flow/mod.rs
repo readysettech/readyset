@@ -69,6 +69,8 @@ pub struct Blender {
     in_txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
     domains: Vec<thread::JoinHandle<()>>,
 
+    shard_domains: HashMap<domain::Index, Vec<domain::Index>>,
+
     log: slog::Logger,
 }
 
@@ -92,6 +94,8 @@ impl Default for Blender {
             txs: HashMap::default(),
             in_txs: HashMap::default(),
             domains: Vec::new(),
+
+            shard_domains: Default::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -775,18 +779,51 @@ impl<'a> Migration<'a> {
         }
         let swapped = swapped0;
 
+        // Find all sharded domains
+        for &n in &new {
+            if mainline.ingredients[n].sharded_by() != prelude::Sharding::None {
+                let ndomains = &mut mainline.ndomains;
+                let graph = &mainline.ingredients;
+                mainline
+                    .shard_domains
+                    .entry(graph[n].domain())
+                    .or_insert_with(|| {
+                        // TODO: add more than one shard
+                        *ndomains += 1;
+                        let domains = vec![(*ndomains - 1).into()];
+                        info!(log, "setting up new shard domain set";
+                              "sdomain" => ?graph[n].domain(),
+                              "domains" => ?domains);
+                        domains
+                    });
+            }
+        }
+
         // Find all nodes for domains that have changed
-        let changed_domains: HashSet<_> = new.iter()
+        let changed_domains: HashSet<domain::Index> = new.iter()
             .map(|&ni| mainline.ingredients[ni].domain())
+            .flat_map(|d| {
+                          mainline
+                              .shard_domains
+                              .get(&d)
+                              .map(|v| v.clone().into_iter())
+                              .unwrap_or(vec![d].into_iter())
+                      })
             .collect();
         let mut domain_nodes = mainline
             .ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
-            .map(|ni| {
-                     let domain = mainline.ingredients[ni].domain();
-                     (domain, ni, new.contains(&ni))
-                 })
+            .flat_map(|ni| {
+                let domain = mainline.ingredients[ni].domain();
+                let new = &new;
+                mainline
+                    .shard_domains
+                    .get(&domain)
+                    .map(|v| v.clone().into_iter())
+                    .unwrap_or(vec![domain].into_iter())
+                    .map(move |d| (d, ni, new.contains(&ni)))
+            })
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -818,6 +855,8 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
+            //
+            // FIXME: iteration order needs to be the same for all shard domains!
             for &(ni, new) in nodes.iter() {
                 if new {
                     debug!(log,
@@ -842,8 +881,8 @@ impl<'a> Migration<'a> {
             // Initialize each new node
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
-                    // The global address of each node in this domain is now a local one
                     remap.clear();
+                    // The global address of each node in this domain is now a local one
                     for &(ni, _) in nodes.iter() {
                         remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
                     }
@@ -851,12 +890,15 @@ impl<'a> Migration<'a> {
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
                     for (&(dst, src), &instead) in &swapped {
-                        if dst == ni && &mainline.ingredients[dst].domain() == domain {
-                            let old =
-                                remap.insert(src.into(),
-                                             *mainline.ingredients[instead].local_addr());
-                            assert_eq!(old, None);
+                        if dst != ni {
+                            // ignore mappings for other nodes
+                            continue;
                         }
+
+                        // NOTE: assumes equal assignment of local addresses across shard domains!
+                        let old =
+                            remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
+                        assert_eq!(old, None);
                     }
 
                     trace!(log, "initializing new node"; "node" => ni.index());
@@ -891,6 +933,7 @@ impl<'a> Migration<'a> {
 
         // Determine what nodes to materialize
         // NOTE: index will also contain the materialization information for *existing* domains
+        // TODO: this should re-use materialization decisions across shard domains
         debug!(log, "calculating materializations");
         let index = domain_nodes
             .iter()
@@ -969,8 +1012,22 @@ impl<'a> Migration<'a> {
                         }
                     }
                 };
-                mainline.txs[&n.domain()].send(m).unwrap();
-                rx
+
+                let d = n.domain();
+                match mainline.shard_domains.get(&d) {
+                    None => {
+                        mainline.txs[&n.domain()].send(m).unwrap();
+                        rx
+                    }
+                    Some(ref ds) if ds.len() == 1 => {
+                        mainline.txs[&n.domain()].send(m).unwrap();
+                        rx
+                    }
+                    Some(ref ds) => {
+                        // need to inform all shards of that base
+                        unimplemented!();
+                    }
+                }
             })
             .collect();
         // wait for all domains to ack. otherwise, we could have one domain request a replay from
