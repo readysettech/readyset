@@ -515,7 +515,7 @@ let key = key.clone();// :(
                 self.handle_replay(m);
             }
             consumed => {
-                match consumed {// workaround #16223
+match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
@@ -523,6 +523,7 @@ let key = key.clone();// :(
 
                         if self.group_commit_queue.is_some() && node.is_internal() {
                             if let NodeOperator::Base(_) = *node {
+                                assert_eq!(parents.len(), 1);
                                 for p in &parents {
                                     self.group_commit_queue
                                         .as_mut()
@@ -1616,6 +1617,7 @@ link: link,// TODO: use dummy link instead
                 self.total_time.start();
                 self.total_ptime.start();
                 let mut packet = None;
+                let mut durable_packets = Vec::new();
                 loop {
                     let duration_until_flush =
                         self.group_commit_queue.as_ref().and_then(|q| q.duration_until_flush());
@@ -1640,7 +1642,8 @@ link: link,// TODO: use dummy link instead
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        for m in self.group_commit_queue.as_mut().unwrap().flush() {
+                        self.group_commit_queue.as_mut().unwrap().flush(&mut durable_packets);
+                        for m in durable_packets.drain(..) {
                             self.handle(m);
                         }
                         continue;
@@ -1680,7 +1683,11 @@ link: link,// TODO: use dummy link instead
                         Ok(m) => {
                             if self.group_commit_queue.is_some() &&
                                self.group_commit_queue.as_mut().unwrap().should_persist(&m) {
-                                for m in self.group_commit_queue.as_mut().unwrap().append(m) {
+                                self.group_commit_queue
+                                    .as_mut()
+                                    .unwrap()
+                                    .append(m, &mut durable_packets);
+                                for m in durable_packets.drain(..) {
                                     self.handle(m);
                                 }
                             } else {

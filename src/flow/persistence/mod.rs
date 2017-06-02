@@ -116,7 +116,9 @@ impl GroupCommitQueue {
 
     /// Flush any pending packets to disk, and return an iterator over the packets that were
     /// written.
-    pub fn flush(&mut self) -> Vec<Box<Packet>> {
+    pub fn flush(&mut self, durable_packets: &mut Vec<Box<Packet>>) {
+        assert_eq!(durable_packets.len(), 0);
+
         if !self.pending_packets.is_empty() {
             self.write_packets();
             let file = self.durable_log.take().unwrap().into_inner().unwrap();
@@ -124,24 +126,20 @@ impl GroupCommitQueue {
             self.durable_log =
                 Some(BufWriter::with_capacity_and_strategy(self.capacity * 1024, file, WhenFull));
             self.wait_start = None;
+            mem::swap(&mut self.pending_packets, durable_packets)
         }
-        mem::replace(&mut self.pending_packets, Vec::with_capacity(self.capacity))
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append(&mut self, p: Box<Packet>) -> Vec<Box<Packet>> {
+    pub fn append(&mut self, p: Box<Packet>, durable_packets: &mut Vec<Box<Packet>>) {
         self.pending_packets.push(p);
 
         if self.pending_packets.len() >= self.capacity {
-            return self.flush();
-        }
-
-        if self.wait_start.is_none() {
+            self.flush(durable_packets);
+        } else if self.wait_start.is_none() {
             self.wait_start = Some(time::Instant::now());
         }
-
-        Vec::new()
     }
 
     /// Returns how long until a flush should occur.
