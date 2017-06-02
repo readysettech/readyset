@@ -1183,6 +1183,9 @@ fn adapt_base_node(over_node: MirNodeRef,
         mig.add_column(na, &a.column.name, default_value);
     }
     for r in remove.iter() {
+        // FIXME(malte): this is incorrect! the *current* position of a column in the current base
+        // table schema is NOT the column ID we need to use to delete the column; instead, this has
+        // to be the monotonically increasing unique ID returned when the column was first added.
         let pos = over_node
             .borrow()
             .columns()
