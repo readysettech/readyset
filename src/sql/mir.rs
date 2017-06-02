@@ -322,7 +322,11 @@ impl SqlToMirConverter {
                             columns.push((*added).clone());
                         }
                         for removed in &columns_removed {
-                            let pos = columns.iter().position(|cc| cc == *removed).unwrap();
+                            let pos = columns
+                                .iter()
+                                .position(|cc| cc == *removed)
+                                .expect(&format!("couldn't find column \"{:#?}\", which we're removing",
+                                                 removed));
                             columns.remove(pos);
                         }
 
