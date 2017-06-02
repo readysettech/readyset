@@ -11,11 +11,16 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
 
     let mut trace_nodes = VecDeque::new();
     for old_base in &old_query.roots {
+        let mut found = false;
         for new_base in &new_query.roots {
             if old_base.borrow().can_reuse_as(&*new_base.borrow()) {
+                found = true;
                 trace!(log, "tracing from reusable base {:?}", old_base);
                 trace_nodes.push_back((old_base.clone(), new_base.clone()));
             }
+        }
+        if !found {
+            trace!(log, "no reuseable base found for {:?}", old_base);
         }
     }
 
