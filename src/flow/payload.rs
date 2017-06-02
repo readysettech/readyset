@@ -92,7 +92,6 @@ pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<NodeAddress>>;
 
-//#[warn(variant_size_differences)]
 pub enum Packet {
     // Data messages
     //

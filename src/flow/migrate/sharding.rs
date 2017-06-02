@@ -83,7 +83,7 @@ pub fn shard(log: &Logger,
         // output column resolves to.
         if let Some(want_sharding) = need_sharding.remove(&node.into()) {
             if want_sharding.len() != 1 {
-                // no supported yet -- force no sharding
+                // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
