@@ -175,8 +175,8 @@ mod tests {
     use mir::{MirNode, MirNodeRef, MirNodeType};
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
-        let cspec = |n: &str| -> ColumnSpecification {
-            ColumnSpecification::new(Column::from(n), SqlType::Text)
+        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+            (ColumnSpecification::new(Column::from(n), SqlType::Text), None)
         };
         let a = MirNode::new("a",
                              0,
