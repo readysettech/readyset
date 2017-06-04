@@ -263,18 +263,18 @@ impl MirNode {
                 transactional,
                 ..
             } => {
-                let new_column_specs: Vec<ColumnSpecification> = column_specs
-                    .iter()
+                let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
+                    .into_iter()
                     .cloned()
-                    .filter(|cs| !removed_cols.contains(&cs))
+                    .filter(|&(ref cs, _)| !removed_cols.contains(&cs))
                     .chain(added_cols
                                .iter()
-                               .map(|c| (*c).clone())
-                               .collect::<Vec<ColumnSpecification>>())
+                               .map(|c| ((*c).clone(), None))
+                               .collect::<Vec<(ColumnSpecification, Option<usize>)>>())
                     .collect();
                 let new_columns: Vec<Column> = new_column_specs
                     .iter()
-                    .map(|cs| cs.column.clone())
+                    .map(|&(ref cs, _)| cs.column.clone())
                     .collect();
 
                 assert_eq!(new_column_specs.len(),
@@ -386,7 +386,7 @@ impl MirNode {
         self.columns.as_slice()
     }
 
-    pub fn column_specifications(&self) -> &[ColumnSpecification] {
+    pub fn column_specifications(&self) -> &[(ColumnSpecification, Option<usize>)] {
         match self.inner {
             MirNodeType::Base { ref column_specs, .. } => column_specs.as_slice(),
             _ => panic!("non-base MIR nodes don't have column specifications!"),
@@ -492,7 +492,7 @@ impl MirNode {
                                           mig)
                     }
                     MirNodeType::Base {
-                        ref column_specs,
+                        ref mut column_specs,
                         ref keys,
                         transactional,
                         ref adapted_over,
@@ -500,7 +500,7 @@ impl MirNode {
                         match *adapted_over {
                             None => {
                                 make_base_node(&name,
-                                               column_specs.as_slice(),
+                                               column_specs.as_mut_slice(),
                                                keys,
                                                mig,
                                                transactional)
@@ -508,6 +508,7 @@ impl MirNode {
                             Some(ref bna) => {
                                 adapt_base_node(bna.over.clone(),
                                                 mig,
+                                                column_specs.as_mut_slice(),
                                                 &bna.columns_added,
                                                 &bna.columns_removed)
                             }
@@ -695,7 +696,7 @@ pub enum MirNodeType {
     },
     /// column specifications, keys (non-compound), tx flag, adapted base
     Base {
-        column_specs: Vec<ColumnSpecification>,
+        column_specs: Vec<(ColumnSpecification, Option<usize>)>,
         keys: Vec<Column>,
         transactional: bool,
         adapted_over: Option<BaseNodeAdaptation>,
@@ -995,8 +996,8 @@ impl Debug for MirNodeType {
                        "B{} [{}; ⚷: {}]",
                        if transactional { "*" } else { "" },
                        column_specs
-                           .iter()
-                           .map(|cs| cs.column.name.as_str())
+                           .into_iter()
+                           .map(|&(ref cs, _)| cs.column.name.as_str())
                            .collect::<Vec<_>>()
                            .join(", "),
                        keys.iter()
@@ -1161,6 +1162,7 @@ impl Debug for MirNodeType {
 
 fn adapt_base_node(over_node: MirNodeRef,
                    mut mig: &mut Migration,
+                   mut column_specs: &mut [(ColumnSpecification, Option<usize>)],
                    add: &Vec<ColumnSpecification>,
                    remove: &Vec<ColumnSpecification>)
                    -> FlowNode {
@@ -1180,40 +1182,53 @@ fn adapt_base_node(over_node: MirNodeRef,
             None => DataType::None,
             Some(dv) => dv,
         };
-        mig.add_column(na, &a.column.name, default_value);
+        let column_id = mig.add_column(na, &a.column.name, default_value);
+
+        // store the new column ID in the column specs for this node
+        for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
+            if cs == a {
+                assert_eq!(*cid, None);
+                *cid = Some(column_id);
+            }
+        }
     }
     for r in remove.iter() {
-        // FIXME(malte): this is incorrect! the *current* position of a column in the current base
-        // table schema is NOT the column ID we need to use to delete the column; instead, this has
-        // to be the monotonically increasing unique ID returned when the column was first added.
+        let over_node = over_node.borrow();
         let pos = over_node
-            .borrow()
-            .columns()
+            .column_specifications()
             .iter()
-            .position(|ec| *ec == r.column)
+            .position(|&(ref ecs, _)| ecs == r)
             .unwrap();
-        mig.drop_column(na, pos);
+        let cid = over_node.column_specifications()[pos]
+            .1
+            .expect("base column ID must be set to remove column");
+        mig.drop_column(na, cid);
     }
 
     FlowNode::Existing(na)
 }
 
 fn make_base_node(name: &str,
-                  column_specs: &[ColumnSpecification],
+                  column_specs: &mut [(ColumnSpecification, Option<usize>)],
                   pkey_columns: &Vec<Column>,
                   mut mig: &mut Migration,
                   transactional: bool)
                   -> FlowNode {
+    // remember the absolute base column ID for potential later removal
+    for (i, mut cs) in column_specs.iter_mut().enumerate() {
+        cs.1 = Some(i);
+    }
+
     let column_names = column_specs
         .iter()
-        .map(|cs| &cs.column.name)
+        .map(|&(ref cs, _)| &cs.column.name)
         .collect::<Vec<_>>();
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
     let default_values = column_specs
         .iter()
-        .map(|cs| {
+        .map(|&(ref cs, _)| {
             for c in &cs.constraints {
                 match *c {
                     ColumnConstraint::DefaultValue(ref dv) => return dv.into(),
@@ -1231,7 +1246,7 @@ fn make_base_node(name: &str,
                      //assert_eq!(pkc.table.as_ref().unwrap(), name);
                      column_specs
                          .iter()
-                         .position(|cs| cs.column == *pkc)
+                         .position(|&(ref cs, _)| cs.column == *pkc)
                          .unwrap()
                  })
             .collect();
