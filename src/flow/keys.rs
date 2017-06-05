@@ -36,6 +36,12 @@ fn trace<F>(graph: &Graph,
     }
 
     let n = &graph[node];
+
+    // have we reached a base node?
+    if n.is_internal() && n.get_base().is_some() {
+        return vec![path];
+    }
+
     let mut local_to_global = HashMap::new();
     if n.is_localized() {
         let domain = n.domain();
@@ -47,11 +53,6 @@ fn trace<F>(graph: &Graph,
                                                                  None
                                                              }
                                                          }));
-    }
-
-    // have we reached a base node?
-    if n.is_internal() && n.get_base().is_some() {
-        return vec![path];
     }
 
     // if the column isn't known, our job is trivial -- just map to all ancestors

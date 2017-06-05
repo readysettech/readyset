@@ -122,7 +122,7 @@ impl Domain {
 
         Domain {
             _index: index,
-            transaction_state: transactions::DomainState::new(index, &nodes, checktable, ts),
+            transaction_state: transactions::DomainState::new(index, checktable, ts),
             nodes: nodes,
             state: StateMap::default(),
             log: log,
@@ -475,7 +475,7 @@ impl Domain {
             Packet::StartMigration { .. } |
             Packet::CompleteMigration { .. } |
             Packet::ReplayPiece { transaction_state: Some(_), .. } => {
-                self.transaction_state.handle(m);
+                self.transaction_state.handle(m, &self.nodes);
                 self.process_transactions();
             }
             Packet::ReplayPiece { .. } |
