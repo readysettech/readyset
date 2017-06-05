@@ -70,6 +70,8 @@ fn try_add_node_to_chain(node: &MirNodeRef, chained_filters: &mut Vec<MirNodeRef
 }
 
 fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
+    use std::cmp::max;
+
     if chained_filters.len() < 2 {
         chained_filters.clear();
         return;
@@ -89,7 +91,15 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
 
         let prev_node = first_node.borrow().ancestors.first().unwrap().clone();
         let fields: Vec<_> = prev_node.borrow().columns().iter().cloned().collect();
-        let merged_conditions = to_conditions(chained_filters, fields.len());
+        let width = chained_filters.iter().fold(0, |mut acc, ref node| {
+            let w = match node.borrow().inner {
+                MirNodeType::Filter { ref conditions } => conditions.len(),
+                _ => 0,
+            };
+            acc = max(acc, w);
+            acc
+        });
+        let merged_conditions = to_conditions(chained_filters, width);
 
         let merged_filter =
             MirNode::new(name.as_str(),
@@ -124,6 +134,8 @@ fn to_conditions(chained_filters: &Vec<MirNodeRef>,
     for filter in chained_filters {
         match filter.borrow().inner {
             MirNodeType::Filter { ref conditions } => {
+                // Note that this assumes that there is only ever one column being filtered on for
+                // each filter that is being merged.
                 let i = conditions.iter().position(|c| c.is_some()).unwrap();
                 merged_conditions[i] = conditions[i].clone();
             }

@@ -70,13 +70,14 @@ impl SqlToMirConverter {
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
-    /// and adds its to a vector of conditions that `shortcut` understands.
-    /// Returns true if condition is sucessfully added.
+    /// and adds its to a vector of conditions.
     fn to_conditions(&self,
                      ct: &ConditionTree,
                      mut columns: &mut Vec<Column>,
                      n: &MirNodeRef)
                      -> Vec<Option<(Operator, DataType)>> {
+        use std::cmp::max;
+
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
@@ -92,17 +93,24 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
 
-        let num_columns = columns.len();
+        let absolute_column_ids: Vec<usize> = columns
+            .iter()
+            .map(|c| n.borrow().column_id_for_column(c))
+            .collect();
+        let max_column_id = *absolute_column_ids.iter().max().unwrap();
+        let num_columns = max(columns.len(), max_column_id + 1);
         let mut filters = vec![None; num_columns];
 
         let f = Some((ct.operator.clone(), DataType::from(r)));
-        match n.borrow().columns().iter().position(|c| *c == l) {
+        match columns.iter().rposition(|c| *c == l) {
             None => {
+                // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
+                // We assume that the column is appended at the end.
                 columns.push(l);
                 filters.push(f);
             }
-            Some(cid) => {
-                filters[cid] = f;
+            Some(pos) => {
+                filters[absolute_column_ids[pos]] = f;
             }
         }
 
