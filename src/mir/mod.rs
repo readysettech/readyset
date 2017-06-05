@@ -386,6 +386,35 @@ impl MirNode {
         self.columns.as_slice()
     }
 
+    pub fn column_id_for_column(&self, c: &Column) -> usize {
+        match self.inner {
+            // if we're a base, translate to absolute column ID (taking into account deleted
+            // columns). We use the column specifications here, which track a tuple of (column
+            // spec, absolute column ID).
+            // Note that `rposition` is required because multiple columns of the same name might
+            // exist if a column has been removed and re-added. We always use the latest column,
+            // and assume that only one column of the same name ever exists at the same time.
+            MirNodeType::Base { ref column_specs, .. } => {
+                match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    Some(id) => {
+                        column_specs[id]
+                            .1
+                            .expect("must have an absolute column ID on base")
+                    }
+                }
+            }
+            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
+            // otherwise, just look up in the column set
+            _ => {
+                match self.columns.iter().position(|cc| cc == c) {
+                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    Some(id) => id,
+                }
+            }
+        }
+    }
+
     pub fn column_specifications(&self) -> &[(ColumnSpecification, Option<usize>)] {
         match self.inner {
             MirNodeType::Base { ref column_specs, .. } => column_specs.as_slice(),
@@ -1296,24 +1325,10 @@ fn make_grouped_node(name: &str,
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
-    let over_col_indx = parent
-        .borrow()
-        .columns()
-        .iter()
-        .position(|c| c == on)
-        .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
-                         on,
-                         parent.borrow().columns()));
+    let over_col_indx = parent.borrow().column_id_for_column(on);
     let group_col_indx = group_by
         .iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns()
-                     .iter()
-                     .position(|pc| pc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     assert!(group_col_indx.len() > 0);
@@ -1387,14 +1402,8 @@ fn make_join_node(name: &str,
     assert_eq!(projected_cols_left.len() + projected_cols_right.len(),
                proj_cols.len());
 
-    let find_column_id = |n: &MirNodeRef, col: &Column| -> usize {
-        let name = n.borrow().versioned_name();
-        n.borrow()
-            .columns
-            .iter()
-            .position(|ref nc| *nc == col)
-            .expect(&format!("column {:?} not found on {}!", col, name))
-    };
+    let find_column_id =
+        |n: &MirNodeRef, col: &Column| -> usize { n.borrow().column_id_for_column(col) };
 
     let join_config = proj_cols
         .iter()
@@ -1442,14 +1451,7 @@ fn make_latest_node(name: &str,
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns()
-                     .iter()
-                     .position(|pc| pc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let na = mig.add_ingredient(String::from(name),
@@ -1468,14 +1470,7 @@ fn make_permute_node(name: &str,
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
     let projected_column_ids = emit.iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns
-                     .iter()
-                     .position(|ref nc| *nc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let n = mig.add_ingredient(String::from(name),
@@ -1495,16 +1490,7 @@ fn make_project_node(name: &str,
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
     let projected_column_ids = emit.iter()
-        .map(|c| {
-            parent
-                .borrow()
-                .columns
-                .iter()
-                .position(|ref nc| *nc == c)
-                .expect(&format!("column {:?} not found on {}",
-                                 c,
-                                 parent.borrow().versioned_name()))
-        })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
@@ -1538,14 +1524,7 @@ fn make_topk_node(name: &str,
     } else {
         group_by
             .iter()
-            .map(|c| {
-                     parent
-                         .borrow()
-                         .columns
-                         .iter()
-                         .position(|ref nc| *nc == c)
-                         .unwrap()
-                 })
+            .map(|c| parent.borrow().column_id_for_column(c))
             .collect::<Vec<_>>()
     };
 
@@ -1555,14 +1534,8 @@ fn make_topk_node(name: &str,
 
             let columns: Vec<_> = o.iter()
                 .map(|&(ref c, ref order_type)| {
-                    (order_type.clone(),
-                     parent
-                         .borrow()
-                         .columns()
-                         .iter()
-                         .position(|pc| pc == c)
-                         .unwrap())
-                })
+                         (order_type.clone(), parent.borrow().column_id_for_column(c))
+                     })
                 .collect();
 
             Box::new(move |a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>| {
@@ -1608,10 +1581,7 @@ fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mu
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
         let first_key_col_id = node.borrow()
-            .columns()
-            .iter()
-            .position(|pc| pc == key_cols.iter().next().unwrap())
-            .unwrap();
+            .column_id_for_column(key_cols.iter().next().unwrap());
         mig.maintain(na, first_key_col_id);
     } else {
         // if no key specified, default to the first column
