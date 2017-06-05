@@ -139,8 +139,7 @@ mod tests {
         assert_eq!(String::from_utf8(row).unwrap(), "[]");
 
         // Insert two more rows
-        h.on_input(vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]]
-                       .into());
+        h.on_input(vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]].into());
         let row = h.get_row(vec![2.into()]).unwrap().0;
         assert_eq!(String::from_utf8(row).unwrap(), "[[2,3],[2,4]]");
 

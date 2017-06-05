@@ -89,8 +89,8 @@ pub fn add(log: &Logger,
                     graph.neighbors_directed(parent, petgraph::EdgeDirection::Outgoing) {
                     if graph[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
-                        for i in graph.neighbors_directed(pchild,
-                                                          petgraph::EdgeDirection::Outgoing) {
+                        for i in
+                            graph.neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing) {
                             assert!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D

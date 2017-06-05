@@ -1203,10 +1203,8 @@ impl Domain {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
                                     n.with_reader_mut(|r| {
-                                                          r.writer_mut().map(|wh| {
-                                            wh.mark_hole(&partial_key[0])
-                                        });
-                                                      });
+                                        r.writer_mut().map(|wh| wh.mark_hole(&partial_key[0]));
+                                    });
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.

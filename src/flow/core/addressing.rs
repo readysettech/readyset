@@ -45,13 +45,16 @@ impl<'de> Deserialize<'de> for NodeAddress_ {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de>
     {
-        NodeAddressDef::deserialize(deserializer)
-            .map(|def| match def {
-                     NodeAddressDef::Local(idx) => NodeAddress_::Local(LocalNodeIndex { id: idx }),
-                     NodeAddressDef::Global(idx) => {
+        NodeAddressDef::deserialize(deserializer).map(|def| match def {
+                                                          NodeAddressDef::Local(idx) => {
+                                                              NodeAddress_::Local(LocalNodeIndex {
+                                                                                      id: idx,
+                                                                                  })
+                                                          }
+                                                          NodeAddressDef::Global(idx) => {
                          NodeAddress_::Global(NodeIndex::new(idx as usize))
                      }
-                 })
+                                                      })
     }
 }
 

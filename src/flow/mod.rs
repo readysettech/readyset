@@ -203,13 +203,13 @@ impl Blender {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
-                            self.ingredients[n].with_reader(|r| {
+                self.ingredients[n].with_reader(|r| {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
                     let src = r.is_for().clone();
                     (src, &self.ingredients[*src.as_global()])
                 })
-                        })
+            })
             .collect()
     }
 
@@ -248,13 +248,15 @@ impl Blender {
                 Box::new(move |q: &prelude::DataType,
                                block: bool|
                                -> Result<prelude::Datas, ()> {
-                    rh.find_and(q,
-                                |rs| {
-                        rs.into_iter()
-                            .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
-                            .collect()
-                    },
-                                block)
+                    rh.find_and(
+                        q,
+                        |rs| {
+                            rs.into_iter()
+                                .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
+                                .collect()
+                        },
+                        block,
+                    )
                         .map(|r| r.0.unwrap_or_else(Vec::new))
                 }) as Box<_>
             })
@@ -637,9 +639,8 @@ impl<'a> Migration<'a> {
             .unwrap()
             .track(&token_generator);
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-                                                          r.set_token_generator(token_generator);
-                                                      });
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| { r.set_token_generator(token_generator); });
     }
 
     /// Set up the given node such that its output can be efficiently queried.

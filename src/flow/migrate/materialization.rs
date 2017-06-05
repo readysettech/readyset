@@ -261,15 +261,15 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
-                                                                                |mut acc, nc| {
-                            if let Some(p_cols) = nc {
-                                for (pn, pc) in p_cols {
-                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                        let cols_to_index_per_node =
+                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
+                                if let Some(p_cols) = nc {
+                                    for (pn, pc) in p_cols {
+                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                                    }
                                 }
-                            }
-                            acc
-                        });
+                                acc
+                            });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
                         // Note that this, and the semantics of node.resolve(), imply that each
