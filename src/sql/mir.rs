@@ -396,7 +396,9 @@ impl SqlToMirConverter {
                                  self.schema_version,
                                  cols.iter().map(|cs| cs.column.clone()).collect(),
                                  MirNodeType::Base {
-                                     column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
+                                     column_specs: cols.iter()
+                                         .map(|cs| (cs.clone(), None))
+                                         .collect(),
                                      keys: key_cols.clone(),
                                      transactional,
                                      adapted_over: None,
