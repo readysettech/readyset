@@ -13,9 +13,9 @@ use slog::Logger;
 
 fn count_base_ingress(graph: &Graph,
                       source: NodeIndex,
-                      nodes: &[(NodeIndex, bool)])
+                      nodes: &[(NodeIndex, bool)],
+                      domain: &domain::Index)
                       -> IngressFromBase {
-
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
         .map(|&(ni, _)| ni)
@@ -25,20 +25,18 @@ fn count_base_ingress(graph: &Graph,
 
     graph
         .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
-        .map(|ingress| {
-                 graph
-                     .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-                     .next()
-                     .expect("source ingress must have a base child")
-             })
         .map(|base| {
-            let num_paths = ingress_nodes
+            let mut num_paths = ingress_nodes
                 .iter()
-                .filter(|&&ingress| {
-                            petgraph::algo::has_path_connecting(graph, base, ingress, None) ||
-                            petgraph::algo::has_path_connecting(graph, ingress, base, None)
-                        })
+                .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
                 .count();
+
+            // Domains containing a base node will get a single copy of each packet sent to it.
+            if graph[base].domain() == *domain {
+                assert_eq!(num_paths, 0);
+                num_paths = 1;
+            }
+
             (base, num_paths)
         })
         .collect()
@@ -55,12 +53,6 @@ fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]
 
     graph
         .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
-        .map(|ingress| {
-                 graph
-                     .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-                     .next()
-                     .expect("source ingress must have a base child")
-             })
         .map(|base| {
                  let outs = output_nodes
                      .iter()
@@ -80,7 +72,7 @@ pub fn analyze_graph(graph: &Graph,
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
                  (domain,
-                  (count_base_ingress(graph, source, &nodes[..]),
+                  (count_base_ingress(graph, source, &nodes[..], &domain),
                    base_egress_map(graph, source, &nodes[..])))
              })
         .collect()

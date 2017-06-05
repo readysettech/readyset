@@ -4,7 +4,6 @@ use buf_redux::strategy::WhenFull;
 
 use serde_json;
 
-use std::collections::HashSet;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
@@ -24,10 +23,6 @@ pub struct Parameters {
 }
 
 pub struct GroupCommitQueue {
-    /// Ingress nodes whose incoming packets should be persisted. These should be the ingress nodes
-    /// that are above base nodes.
-    persisted_ingress: HashSet<NodeAddress>,
-
     /// Packets that are queued to be persisted.
     pending_packets: Vec<Box<Packet>>,
 
@@ -47,10 +42,7 @@ pub struct GroupCommitQueue {
 
 impl GroupCommitQueue {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(log_filename: &str,
-               ingress_above_base: HashSet<NodeAddress>,
-               params: &Parameters)
-               -> Self {
+    pub fn new(log_filename: &str, params: &Parameters) -> Self {
         let durable_log_path = PathBuf::from(&log_filename);
 
         // TODO(jmftrindade): Current semantics is to overwrite an existing log.
@@ -74,8 +66,6 @@ impl GroupCommitQueue {
             BufWriter::with_capacity_and_strategy(params.queue_capacity * 1024, file, WhenFull);
 
         Self {
-            persisted_ingress: ingress_above_base,
-
             pending_packets: Vec::with_capacity(params.queue_capacity),
             wait_start: None,
 
@@ -88,15 +78,14 @@ impl GroupCommitQueue {
         }
     }
 
-    pub fn add_persisted_ingress(&mut self, na: NodeAddress) {
-        self.persisted_ingress.insert(na);
-    }
-
     /// Returns whether the given packet should be persisted.
-    pub fn should_persist(&self, p: &Box<Packet>) -> bool {
+    pub fn should_persist(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         match **p {
             Packet::Message { ref link, .. } |
-            Packet::Transaction { ref link, .. } => self.persisted_ingress.contains(&link.dst),
+            Packet::Transaction { ref link, .. } => {
+                let node = &nodes[&link.dst.as_local()].borrow();
+                node.is_internal() && node.get_base().is_some()
+            }
             _ => false,
         }
     }

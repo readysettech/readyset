@@ -78,7 +78,7 @@ pub fn add(log: &Logger,
         // domain of the current node. if there aren't any, we make one. if there are, we only need
         // to redirect the node's parent edge to the ingress.
         for parent in parents {
-            if !graph[parent].is_source() && graph[parent].domain() == domain {
+            if graph[parent].is_source() || graph[parent].domain() == domain {
                 continue;
             }
 

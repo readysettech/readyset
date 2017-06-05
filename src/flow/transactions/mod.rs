@@ -68,9 +68,6 @@ pub enum Event {
 pub struct DomainState {
     domain_index: domain::Index,
 
-    // The base node associated with each ingress.
-    base_for_ingress: domain::local::Map<NodeIndex>,
-
     checktable: Arc<Mutex<checktable::CheckTable>>,
     buffer: BinaryHeap<BufferEntry>,
 
@@ -89,34 +86,12 @@ pub struct DomainState {
 
 impl DomainState {
     pub fn new(domain_index: domain::Index,
-               nodes: &DomainNodes,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
 
-        // Look through nodes to find all that have a child who is a base node.
-        let base_for_ingress = nodes
-            .values()
-            .filter_map(|n| {
-                if !n.borrow().has_children() {
-                    return None;
-                }
-
-                let child = nodes[n.borrow().child(0).as_local()].borrow();
-                if !child.is_internal() || !child.get_base().is_some() {
-                    return None;
-                }
-
-                let lid = *n.borrow().local_addr().as_local();
-                let gid = *child.global_addr().as_global();
-
-                Some((lid, gid))
-            })
-            .collect();
-
         Self {
             domain_index: domain_index,
-            base_for_ingress: base_for_ingress,
             checktable: checktable,
             buffer: BinaryHeap::new(),
             next_transaction: Bundle::Empty,
@@ -130,7 +105,7 @@ impl DomainState {
         &self.egress_for_base[&base][..]
     }
 
-    fn assign_ts(&mut self, packet: &mut Box<Packet>) -> bool {
+    fn assign_ts(&mut self, packet: &mut Box<Packet>, nodes: &DomainNodes) -> bool {
         // all this is for #16223
         let mut unsafe_state_ref_mut = None;
         if let Packet::Transaction { ref mut state, .. } = **packet {
@@ -148,9 +123,13 @@ impl DomainState {
                 let state: &mut TransactionState = unsafe { &mut *unsafe_state_ref_mut.unwrap() };
                 let empty = TransactionState::Committed(0, 0.into(), None);
                 let pending = ::std::mem::replace(state, empty);
+                let base_node = nodes[link.dst.as_local()]
+                    .borrow()
+                    .global_addr()
+                    .as_global()
+                    .clone();
                 match pending {
                     TransactionState::Pending(token, send) => {
-                        let base_node = self.base_for_ingress[link.dst.as_local()];
                         let result = self.checktable
                             .lock()
                             .unwrap()
@@ -171,7 +150,6 @@ impl DomainState {
                         }
                     }
                     TransactionState::WillCommit => {
-                        let base_node = self.base_for_ingress[link.dst.as_local()];
                         let (ts, prevs) = self.checktable
                             .lock()
                             .unwrap()
@@ -229,9 +207,10 @@ impl DomainState {
 
             match self.next_transaction {
                 Bundle::Empty => {
-                    let count = base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                     let bundle = match m {
                         box Packet::Transaction { .. } => {
+                            let count = base.map(|b| self.ingress_from_base[b.index()])
+                                .unwrap_or(1);
                             if count == 0 {
                                 println!("{:?} got transaction from base {:?}, which it shouldn't",
                                          self.domain_index,
@@ -292,8 +271,8 @@ impl DomainState {
         }
     }
 
-    pub fn handle(&mut self, mut m: Box<Packet>) {
-        if self.assign_ts(&mut m) {
+    pub fn handle(&mut self, mut m: Box<Packet>, nodes: &DomainNodes) {
+        if self.assign_ts(&mut m, nodes) {
             self.buffer_transaction(m);
         }
     }

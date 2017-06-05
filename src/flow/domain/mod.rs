@@ -131,29 +131,12 @@ impl Domain {
                 format!("soup-log-{}-{}.json", today, index.index())
             };
 
-            let base_nodes: HashSet<NodeAddress> = nodes
-                .iter()
-                .filter(|&(_, n)| n.borrow().is_internal())
-                .filter_map(|(na, n)| if let NodeOperator::Base(_) = **n.borrow() {
-                                Some(na)
-                            } else {
-                                None
-                            })
-                .collect();
-
-            let ingress_above_base: HashSet<NodeAddress> = nodes
-                .values()
-                .filter(|n| n.borrow().is_ingress())
-                .filter(|n| n.borrow().children().iter().any(|c| base_nodes.contains(c)))
-                .map(|n| n.borrow().local_addr().clone())
-                .collect();
-
-            persistence::GroupCommitQueue::new(&log_filename, ingress_above_base, params)
+            persistence::GroupCommitQueue::new(&log_filename, params)
         });
 
         Domain {
             _index: index,
-            transaction_state: transactions::DomainState::new(index, &nodes, checktable, ts),
+            transaction_state: transactions::DomainState::new(index, checktable, ts),
             group_commit_queue,
             nodes,
             state: StateMap::default(),
@@ -507,7 +490,7 @@ impl Domain {
             Packet::StartMigration { .. } |
             Packet::CompleteMigration { .. } |
             Packet::ReplayPiece { transaction_state: Some(_), .. } => {
-                self.transaction_state.handle(m);
+                self.transaction_state.handle(m, &self.nodes);
                 self.process_transactions();
             }
             Packet::ReplayPiece { .. } |
@@ -520,18 +503,6 @@ impl Domain {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
                         self.not_ready.insert(addr);
-
-                        if self.group_commit_queue.is_some() && node.is_internal() {
-                            if let NodeOperator::Base(_) = *node {
-                                assert_eq!(parents.len(), 1);
-                                for p in &parents {
-                                    self.group_commit_queue
-                                        .as_mut()
-                                        .unwrap()
-                                        .add_persisted_ingress(p.clone().into());
-                                }
-                            };
-                        }
 
                         for p in parents {
                             self.nodes
@@ -1686,7 +1657,7 @@ impl Domain {
                         }
                         Ok(m) => {
                             if self.group_commit_queue.is_some() &&
-                               self.group_commit_queue.as_mut().unwrap().should_persist(&m) {
+                               self.group_commit_queue.as_mut().unwrap().should_persist(&m, &self.nodes) {
                                 self.group_commit_queue
                                     .as_mut()
                                     .unwrap()

@@ -179,13 +179,12 @@ impl Blender {
     pub fn inputs(&self) -> Vec<(core::NodeAddress, &node::Node)> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
-            .flat_map(|ingress| {
-                          self.ingredients
-                              .neighbors_directed(ingress, petgraph::EdgeDirection::Outgoing)
-                      })
-            .map(|n| (n, &self.ingredients[n]))
-            .filter(|&(_, base)| base.is_internal() && base.get_base().is_some())
-            .map(|(n, base)| (n.into(), &*base))
+            .map(|n| {
+                     let base = &self.ingredients[n];
+                     assert!(base.is_internal());
+                     assert!(base.get_base().is_some());
+                     (n.into(), base)
+                 })
             .collect()
     }
 
@@ -304,18 +303,13 @@ impl Blender {
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: core::NodeAddress) -> Mutator {
-        let n = self.ingredients
-            .neighbors_directed(*base.as_global(), petgraph::EdgeDirection::Incoming)
-            .next()
-            .unwrap();
-        let node = &self.ingredients[n];
+        let node = &self.ingredients[*base.as_global()];
         let tx = self.in_txs[&node.domain()].clone();
 
-        trace!(self.log, "creating mutator"; "for" => n.index());
+        trace!(self.log, "creating mutator"; "for" => base.as_global().index());
 
-        let ref b = self.ingredients[*base.as_global()];
-        let num_fields = b.fields().len();
-        let base_n = b.get_base()
+        let num_fields = node.fields().len();
+        let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
         Mutator {
             src: self.source.into(),
@@ -327,9 +321,9 @@ impl Blender {
                 .unwrap_or_else(Vec::new),
             tx_reply_channel: mpsc::channel(),
             transactional: self.ingredients[*base.as_global()].is_transactional(),
-            dropped: base_n.get_dropped(),
+            dropped: base_operator.get_dropped(),
             tracer: None,
-            expected_columns: num_fields - base_n.get_dropped().len(),
+            expected_columns: num_fields - base_operator.get_dropped().len(),
         }
     }
 

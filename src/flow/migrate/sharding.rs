@@ -1,4 +1,5 @@
 use flow::prelude::*;
+use flow::node;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashSet, HashMap};
 use slog::Logger;
@@ -83,7 +84,7 @@ pub fn shard(log: &Logger,
         // output column resolves to.
         if let Some(want_sharding) = need_sharding.remove(&node.into()) {
             if want_sharding.len() != 1 {
-                // no supported yet -- force no sharding
+                // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
@@ -190,103 +191,219 @@ pub fn shard(log: &Logger,
             }
         }
 
-        if input_shardings.values().all(|s| s == &Sharding::None) {
+        if false && input_shardings.values().all(|s| s == &Sharding::None) {
             // none of our inputs are sharded, so we are also not sharded
+            // disabled because we want to eagerly reshard our inputs
             //
             // TODO: we kind of want to know if any of our children (transitively) *want* us to
             // sharded by a particular key. if they do, we could shard more of the computation,
             // which is probably good for us.
             info!(log, "preserving non-sharding of node"; "node" => ?node);
             continue;
-        } else {
-            // we do lookups into at least one view that is sharded. the safe thing to do here is
-            // to simply force all our ancestors to be unsharded. however, if a single output
-            // column resolves to the lookup column of *every* ancestor, we know that sharding by
-            // that column *should* be safe, so we mark the output as sharded by that key.
-            debug!(log, "testing for sharding opportunities"; "node" => ?node);
-            'outer: for col in 0..graph[node].fields().len() {
-                let srcs: Vec<_> = graph[node]
-                    .parent_columns(col)
-                    .into_iter()
-                    .filter_map(|(ni, src)| src.map(|src| (ni, src)))
-                    .collect();
+        }
 
-                if srcs.len() != input_shardings.len() {
-                    trace!(log, "column does not resolve to all inputs";
+        // the safe thing to do here is to simply force all our ancestors to be unsharded. however,
+        // if a single output column resolves to the lookup column of *every* ancestor, we know
+        // that sharding by that column *should* be safe, so we mark the output as sharded by that
+        // key. we then make sure all our inputs are sharded by that key too.
+        debug!(log, "testing for sharding opportunities"; "node" => ?node);
+        'outer: for col in 0..graph[node].fields().len() {
+            let srcs: Vec<_> = graph[node]
+                .parent_columns(col)
+                .into_iter()
+                .filter_map(|(ni, src)| src.map(|src| (ni, src)))
+                .collect();
+
+            if srcs.len() != input_shardings.len() {
+                trace!(log, "column does not resolve to all inputs";
                            "node" => ?node,
                            "col" => col,
                            "all" => input_shardings.len(),
                            "got" => srcs.len());
-                    continue;
-                }
+                continue;
+            }
 
-                // `col` resolved to all ancestors!
-                // does it match the key we're doing lookups based on?
-                for &(ni, src) in &srcs {
-                    match need_sharding.get(&ni) {
-                        Some(col) if col.len() != 1 => {
-                            // we're looking up by a compound key -- that's hard to shard
-                            trace!(log, "column traces to node looked up in by compound key";
+            // `col` resolved to all ancestors!
+            // does it match the key we're doing lookups based on?
+            for &(ni, src) in &srcs {
+                match need_sharding.get(&ni) {
+                    Some(col) if col.len() != 1 => {
+                        // we're looking up by a compound key -- that's hard to shard
+                        trace!(log, "column traces to node looked up in by compound key";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src);
-                            break 'outer;
-                        }
-                        Some(col) if col[0] != src => {
-                            // we're looking up by a different key. it's kind of weird that this
-                            // output column still resolved to a column in all our inputs...
-                            trace!(log, "column traces to node that is not looked up by";
+                        break 'outer;
+                    }
+                    Some(col) if col[0] != src => {
+                        // we're looking up by a different key. it's kind of weird that this
+                        // output column still resolved to a column in all our inputs...
+                        trace!(log, "column traces to node that is not looked up by";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src,
                                    "lookup" => col[0]);
-                            continue 'outer;
-                        }
-                        Some(_) => {
-                            // looking up by the same column -- that's fine
-                        }
-                        None => {
-                            // we're never looking up in this view. must mean that a given
-                            // column resolved to *two* columns in the *same* view?
-                            unreachable!()
-                        }
+                        continue 'outer;
+                    }
+                    Some(_) => {
+                        // looking up by the same column -- that's fine
+                    }
+                    None => {
+                        // we're never looking up in this view. must mean that a given
+                        // column resolved to *two* columns in the *same* view?
+                        unreachable!()
                     }
                 }
+            }
 
-                // `col` resolves to the same column we use to lookup in each ancestor,
-                // so it's safe for us to shard by `col`!
-                let s = Sharding::ByColumn(col);
-                info!(log, "sharding node with consistent lookup column";
+            // `col` resolves to the same column we use to lookup in each ancestor,
+            // so it's safe for us to shard by `col`!
+            let s = Sharding::ByColumn(col);
+            info!(log, "sharding node with consistent lookup column";
                       "node" => ?node,
                       "sharding" => ?s);
 
-                // we have to ensure that each input is also sharded by that key
-                for &(ni, src) in &srcs {
-                    let need_sharding = Sharding::ByColumn(src);
-                    if input_shardings[ni.as_global()] != need_sharding {
-                        reshard(log,
-                                new,
-                                &mut swaps,
-                                graph,
-                                *ni.as_global(),
-                                node,
-                                need_sharding);
-                        input_shardings.insert(*ni.as_global(), need_sharding);
-                    }
+            // we have to ensure that each input is also sharded by that key
+            for &(ni, src) in &srcs {
+                let need_sharding = Sharding::ByColumn(src);
+                if input_shardings[ni.as_global()] != need_sharding {
+                    reshard(log,
+                            new,
+                            &mut swaps,
+                            graph,
+                            *ni.as_global(),
+                            node,
+                            need_sharding);
+                    input_shardings.insert(*ni.as_global(), need_sharding);
                 }
-                graph.node_weight_mut(node).unwrap().shard_by(s);
-                continue 'nodes;
             }
+            graph.node_weight_mut(node).unwrap().shard_by(s);
+            continue 'nodes;
+        }
 
-            // we couldn't use our heuristic :(
-            // force everything to be unsharded...
-            let sharding = Sharding::None;
-            warn!(log, "forcing de-sharding"; "node" => ?node);
-            for ni in need_sharding.keys() {
-                if input_shardings[ni.as_global()] != sharding {
-                    // ancestor must be forced to right sharding
-                    reshard(log, new, &mut swaps, graph, *ni.as_global(), node, sharding);
-                    input_shardings.insert(*ni.as_global(), sharding);
+        // we couldn't use our heuristic :(
+        // force everything to be unsharded...
+        let sharding = Sharding::None;
+        warn!(log, "forcing de-sharding"; "node" => ?node);
+        for ni in need_sharding.keys() {
+            if input_shardings[ni.as_global()] != sharding {
+                // ancestor must be forced to right sharding
+                reshard(log, new, &mut swaps, graph, *ni.as_global(), node, sharding);
+                input_shardings.insert(*ni.as_global(), sharding);
+            }
+        }
+    }
+
+    // the code above can do some stupid things, such as adding a sharder after a new, unsharded
+    // node. we want to "flatten" such cases so that we shard as early as we can.
+    let mut new_sharders: Vec<_> = new.iter()
+        .filter(|&&n| graph[n].is_sharder())
+        .cloned()
+        .collect();
+    let mut stable = false;
+    while !stable {
+        stable = true;
+        for n in new_sharders.split_off(0) {
+            let ps: Vec<_> = graph
+                .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
+                .collect();
+            let by = graph[graph
+                .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
+                .next()
+                .unwrap()]
+                    .sharded_by();
+            // *technically* we could also push sharding up even if some parents are already
+            // sharded, but let's leave that for another day.
+            //
+            // TODO: p could have changed in previous iterations, so we should re-check here
+            // whether p.sharded_by() == n.sharded_by() now.
+            if ps.iter()
+                   .all(|&p| new.contains(&p) && graph[p].sharded_by() == Sharding::None) {
+                'parents: for p in ps {
+                    if p == source {
+                        continue;
+                    }
+
+                    let col = match by {
+                        Sharding::ByColumn(c) => c,
+                        Sharding::Random => continue,
+                        Sharding::None => continue,
+                    };
+
+                    let src_cols = graph[p].parent_columns(col);
+                    if src_cols.len() != 1 {
+                        continue;
+                    }
+                    let (grandp, src_col) = src_cols[0];
+                    if src_col.is_none() {
+                        continue;
+                    }
+                    let src_col = src_col.unwrap();
+                    let grandp = *grandp.as_global();
+
+                    let mut cs = 0;
+                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                        // if p has other children, it is only safe to push up the Sharder if
+                        // those other children are also sharded by the same key.
+                        if !graph[c].is_sharder() {
+                            continue 'parents;
+                        }
+                        let sibling_sharder_child = graph
+                            .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
+                            .next()
+                            .unwrap();
+                        if graph[sibling_sharder_child].sharded_by() != by {
+                            continue 'parents;
+                        }
+                        cs += 1;
+                    }
+
+                    // it's safe to push up the Sharder.
+                    // to do so, we need to undo all the changes we made to `swaps` when
+                    // introducing the Sharders below this parent in the first place
+                    let mut remove = Vec::with_capacity(cs);
+                    let mut children = Vec::new();
+                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                        for grandchild in
+                            graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                            // undo the swap that inserting the Sharder generated
+                            swaps.remove(&(p, grandchild));
+                            children.push(grandchild);
+                        }
+                        if c != n {
+                            remove.push(c);
+                        }
+                    }
+                    // we then need to wire in the Sharder above the parent instead
+                    let new = graph[p].mirror(node::special::Sharder::new(src_col));
+                    *graph.node_weight_mut(n).unwrap() = new;
+                    let e = graph.find_edge(p, n).unwrap();
+                    graph.remove_edge(e);
+                    let e = graph.find_edge(grandp, p).unwrap();
+                    let w = graph.remove_edge(e).unwrap();
+                    graph.add_edge(grandp, n, w);
+                    for &child in &children {
+                        if let Some(e) = graph.find_edge(n, child) {
+                            graph.remove_edge(e);
+                        }
+                        // TODO: materialized edges?
+                        graph.add_edge(n, child, false);
+                    }
+                    // and finally, we need to remove any Sharders that were added for other
+                    // children. unfortunately, we can't remove nodes from the graph, because
+                    // petgraph doesn't guarantee that NodeIndexes are stable when nodes are
+                    // removed from the graph.
+                    for r in remove {
+                        let e = graph.find_edge(p, r).unwrap();
+                        graph.remove_edge(e);
+                        // ugh:
+                        for &child in &children {
+                            if let Some(e) = graph.find_edge(r, child) {
+                                graph.remove_edge(e);
+                            }
+                        }
+                        // r is now entirely disconnected from the graph
+                    }
                 }
             }
         }
@@ -297,10 +414,6 @@ pub fn shard(log: &Logger,
     // ideally we want to keep the graph representation unchanged, and instead just *instantiate*
     // multiple copies of the given node. but that probably has very deep-reaching consequences in
     // the code...
-
-    // TODO
-    // maybe we can "flatten" shuffles here? if we detect a node that is unsharded that is
-    // immediately followed by a sharder, we can push the sharder up?
 
     swaps
 }
