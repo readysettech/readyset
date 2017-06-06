@@ -1531,7 +1531,7 @@ fn make_topk_node(name: &str,
 
             let columns: Vec<_> = o.iter()
                 .map(|&(ref c, ref order_type)| {
-                         (order_type.clone(), parent.borrow().column_id_for_column(c))
+                         (parent.borrow().column_id_for_column(c), order_type.clone())
                      })
                 .collect();
 
