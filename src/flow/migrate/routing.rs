@@ -240,7 +240,7 @@ pub fn add(log: &Logger,
 
 pub fn connect(log: &Logger,
                graph: &mut Graph,
-               main_txs: &HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
+               domains: &mut HashMap<domain::Index, domain::DomainHandle>,
                new: &HashSet<NodeIndex>) {
 
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -262,14 +262,16 @@ pub fn connect(log: &Logger,
                            "egress" => sender.index(),
                            "ingress" => node.index()
                     );
-                // FIXME: if sender is sharded we need to tell all of them
-                assert_eq!(sender_node.sharded_by(), Sharding::None);
-                main_txs[&sender_node.domain()]
+                // FIXME: make sure a sharded egress only sends to corresponding
+                // sharded other domain.
+                let mut txs = domains[&n.domain()].get_txs();
+                assert_eq!(txs.len(), 1);
+                domains
+                    .get_mut(&sender_node.domain())
+                    .unwrap()
                     .send(box Packet::UpdateEgress {
                               node: sender_node.local_addr().as_local().clone(),
-                              new_tx: Some((node.into(),
-                                            *n.local_addr(),
-                                            main_txs[&n.domain()].clone())),
+                              new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
                               new_tag: None,
                           })
                     .unwrap();
@@ -279,12 +281,14 @@ pub fn connect(log: &Logger,
                            "sharder" => sender.index(),
                            "ingress" => node.index()
                     );
-                // FIXME: if sender is sharded we need to tell all of them
-                assert_eq!(sender_node.sharded_by(), Sharding::None);
-                main_txs[&sender_node.domain()]
+
+                let txs = domains[&n.domain()].get_txs();
+                domains
+                    .get_mut(&sender_node.domain())
+                    .unwrap()
                     .send(box Packet::UpdateSharder {
                               node: sender_node.local_addr().as_local().clone(),
-                              new_tx: (*n.local_addr(), main_txs[&n.domain()].clone()),
+                              new_txs: (*n.local_addr(), txs),
                           })
                     .unwrap();
             } else if sender_node.is_source() {

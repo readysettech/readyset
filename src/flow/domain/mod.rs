@@ -47,6 +47,8 @@ impl Index {
 }
 
 pub mod local;
+mod handle;
+pub use self::handle::DomainHandle;
 
 enum DomainMode {
     Forwarding,
@@ -538,9 +540,9 @@ impl Domain {
                                               }
                                           });
                     }
-                    Packet::UpdateSharder { node, new_tx } => {
+                    Packet::UpdateSharder { node, new_txs } => {
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_sharder_mut(move |s| { s.add_shard(new_tx.0, new_tx.1); });
+                        n.with_sharder_mut(move |s| { s.add_sharded_child(new_txs.0, new_txs.1); });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -573,19 +575,18 @@ impl Domain {
                                 cols,
                                 key,
                                 tag,
-                                trigger_tx,
+                                trigger_txs,
                             } => {
                                 use flow;
                                 use backlog;
-                                let tx = Mutex::new(trigger_tx);
+                                let txs = Mutex::new(trigger_txs);
                                 let (r_part, w_part) =
-                                    backlog::new_partial(cols, key, move |key| {
-                                        tx.lock()
-                                            .unwrap()
-                                            .send(box Packet::RequestPartialReplay {
-                                                      key: vec![key.clone()],
-                                                      tag: tag,
-                                                  })
+                                    backlog::new_partial(cols, key, move |key| for tx in
+                                        &mut *txs.lock().unwrap() {
+                                        tx.send(box Packet::RequestPartialReplay {
+                                                    key: vec![key.clone()],
+                                                    tag: tag,
+                                                })
                                             .unwrap();
                                     });
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);

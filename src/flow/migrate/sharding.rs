@@ -435,6 +435,7 @@ fn reshard(log: &Logger,
     let node = match to {
         Sharding::None => {
             // an identity node that is *not* marked as sharded will end up acting like a union!
+            // FIXME: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(Sharding::None);

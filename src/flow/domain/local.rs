@@ -18,6 +18,15 @@ impl<T> Default for Map<T> {
     }
 }
 
+impl<T: Clone> Clone for Map<T> {
+    fn clone(&self) -> Self {
+        Map {
+            n: self.n,
+            things: self.things.clone(),
+        }
+    }
+}
+
 impl<T> Map<T> {
     pub fn new() -> Self {
         Self::default()

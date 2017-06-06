@@ -39,8 +39,12 @@ impl Sharder {
         }
     }
 
-    pub fn add_shard(&mut self, dst: NodeAddress, tx: mpsc::SyncSender<Box<Packet>>) {
-        self.txs.push((dst, tx));
+    pub fn add_sharded_child(&mut self, dst: NodeAddress, txs: Vec<mpsc::SyncSender<Box<Packet>>>) {
+        assert_eq!(self.txs.len(), 0);
+        // TODO: add support for "shared" sharder?
+        for tx in txs {
+            self.txs.push((dst, tx));
+        }
     }
 
     #[inline]

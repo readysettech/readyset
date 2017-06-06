@@ -266,7 +266,7 @@ impl DomainState {
 
         match mem::replace(&mut self.next_transaction, Bundle::Empty) {
             Bundle::MigrationStart(channel) => {
-                channel.send(()).unwrap();
+                drop(channel);
                 self.ts += 1;
                 self.update_next_transaction();
                 Event::StartMigration

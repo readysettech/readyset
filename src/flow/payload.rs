@@ -47,7 +47,7 @@ pub enum InitialState {
         cols: usize,
         key: usize,
         tag: Tag,
-        trigger_tx: mpsc::SyncSender<Box<Packet>>,
+        trigger_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -167,7 +167,7 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_tx: (NodeAddress, mpsc::SyncSender<Box<Packet>>),
+        new_txs: (NodeAddress, Vec<mpsc::SyncSender<Box<Packet>>>),
     },
 
     /// Add a streamer to an existing reader node.

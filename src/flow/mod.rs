@@ -65,11 +65,7 @@ pub struct Blender {
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
 
-    txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
-    in_txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
-    domains: Vec<thread::JoinHandle<()>>,
-
-    shard_domains: HashMap<domain::Index, Vec<domain::Index>>,
+    domains: HashMap<domain::Index, domain::DomainHandle>,
 
     log: slog::Logger,
 }
@@ -91,11 +87,7 @@ impl Default for Blender {
 
             persistence: persistence::Parameters::default(),
 
-            txs: HashMap::default(),
-            in_txs: HashMap::default(),
-            domains: Vec::new(),
-
-            shard_domains: Default::default(),
+            domains: Default::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -310,7 +302,7 @@ impl Blender {
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: core::NodeAddress) -> Mutator {
         let node = &self.ingredients[*base.as_global()];
-        let tx = self.in_txs[&node.domain()].clone();
+        let tx = self.domains[&node.domain()].clone();
 
         trace!(self.log, "creating mutator"; "for" => base.as_global().index());
 
@@ -336,13 +328,15 @@ impl Blender {
     /// Get statistics about the time spent processing different parts of the graph.
     pub fn get_statistics(&mut self) -> statistics::GraphStats {
         // TODO: request stats from domains in parallel.
-        let domains = self.txs
-            .iter()
+        let domains = self.domains
+            .iter_mut()
             .map(|(di, s)| {
                 let (tx, rx) = mpsc::sync_channel(1);
                 s.send(box payload::Packet::GetStatistics(tx)).unwrap();
 
                 let (domain_stats, node_stats) = rx.recv().unwrap();
+                // FIXME: can get multiple responses from sharded domains
+                assert!(rx.recv().is_err());
                 let node_map = node_stats
                     .into_iter()
                     .map(|(ni, ns)| (ni.into(), ns))
@@ -680,7 +674,10 @@ impl<'a> Migration<'a> {
 
         // Otherwise, send a message to the reader's domain to have it add the streamer.
         let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
-        self.mainline.txs[&reader.domain()]
+        self.mainline
+            .domains
+            .get_mut(&reader.domain())
+            .unwrap()
             .send(box payload::Packet::AddStreamer {
                       node: reader.local_addr().as_local().clone(),
                       new_streamer: tx,
@@ -714,7 +711,7 @@ impl<'a> Migration<'a> {
 
         let log = self.log;
         let start = self.start;
-        let mainline = self.mainline;
+        let mut mainline = self.mainline;
         let mut new: HashSet<_> = self.added.into_iter().collect();
 
         // Readers are nodes too.
@@ -780,68 +777,19 @@ impl<'a> Migration<'a> {
         }
         let swapped = swapped0;
 
-        // Find all sharded domains
-        for &n in &new {
-            if mainline.ingredients[n].sharded_by() != prelude::Sharding::None {
-                let ndomains = &mut mainline.ndomains;
-                let graph = &mainline.ingredients;
-                mainline
-                    .shard_domains
-                    .entry(graph[n].domain())
-                    .or_insert_with(|| {
-                        // TODO: add more than one shard
-                        *ndomains += 1;
-                        let domains = vec![(*ndomains - 1).into()];
-                        info!(log, "setting up new shard domain set";
-                              "sdomain" => ?graph[n].domain(),
-                              "domains" => ?domains);
-                        domains
-                    });
-            }
-        }
-
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<domain::Index> = new.iter()
             .map(|&ni| mainline.ingredients[ni].domain())
-            .flat_map(|d| {
-                          mainline
-                              .shard_domains
-                              .get(&d)
-                              .map(|v| v.clone().into_iter())
-                              .unwrap_or(vec![d].into_iter())
-                      })
             .collect();
         let mut domain_nodes = mainline
             .ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
-            .flat_map(|ni| {
-                let domain = mainline.ingredients[ni].domain();
-                let new = &new;
-                mainline
-                    .shard_domains
-                    .get(&domain)
-                    .map(|v| v.clone().into_iter())
-                    .unwrap_or(vec![domain].into_iter())
-                    .map(move |d| (d, ni, new.contains(&ni)))
-            })
+            .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
             });
-
-        let mut rxs = HashMap::new();
-
-        // Set up input channels for new domains
-        for domain in domain_nodes.keys() {
-            if !mainline.txs.contains_key(domain) {
-                let (in_tx, in_rx) = mpsc::sync_channel(256);
-                let (tx, rx) = mpsc::sync_channel(1);
-                rxs.insert(*domain, (rx, in_rx));
-                mainline.txs.insert(*domain, tx);
-                mainline.in_txs.insert(*domain, in_tx);
-            }
-        }
 
         // Assign local addresses to all new nodes, and initialize them
         for (domain, nodes) in &mut domain_nodes {
@@ -960,32 +908,25 @@ impl<'a> Migration<'a> {
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
         for domain in changed_domains {
-            if !rxs.contains_key(&domain) {
+            if !mainline.domains.contains_key(&domain) {
                 // this is not a new domain
                 continue;
             }
 
-            // Start up new domain
-            let (rx, in_rx) = rxs.remove(&domain).unwrap();
-            let jh = migrate::booting::boot_new(log.new(o!("domain" => domain.index())),
-                                                domain.index().into(),
-                                                &mut mainline.ingredients,
-                                                uninformed_domain_nodes.remove(&domain).unwrap(),
-                                                mainline.persistence.clone(),
-                                                mainline.checktable.clone(),
-                                                rx,
-                                                in_rx,
-                                                start_ts);
-            mainline.domains.push(jh);
+            let mut d = domain::DomainHandle::new(domain);
+            d.boot(&log,
+                   &mut mainline.ingredients,
+                   uninformed_domain_nodes.remove(&domain).unwrap(),
+                   mainline.persistence.clone(),
+                   mainline.checktable.clone(),
+                   start_ts);
+            mainline.domains.insert(domain, d);
         }
-        drop(rxs);
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");
         migrate::augmentation::inform(&log,
-                                      &mut mainline.ingredients,
-                                      mainline.source,
-                                      &mut mainline.txs,
+                                      &mut mainline,
                                       uninformed_domain_nodes,
                                       start_ts,
                                       prevs.unwrap());
@@ -1014,21 +955,13 @@ impl<'a> Migration<'a> {
                     }
                 };
 
-                let d = n.domain();
-                match mainline.shard_domains.get(&d) {
-                    None => {
-                        mainline.txs[&n.domain()].send(m).unwrap();
-                        rx
-                    }
-                    Some(ref ds) if ds.len() == 1 => {
-                        mainline.txs[&n.domain()].send(m).unwrap();
-                        rx
-                    }
-                    Some(ref ds) => {
-                        // need to inform all shards of that base
-                        unimplemented!();
-                    }
-                }
+                mainline
+                    .domains
+                    .get_mut(&n.domain())
+                    .unwrap()
+                    .send(m)
+                    .unwrap();
+                rx
             })
             .collect();
         // wait for all domains to ack. otherwise, we could have one domain request a replay from
@@ -1040,18 +973,11 @@ impl<'a> Migration<'a> {
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
         info!(log, "bringing up inter-domain connections");
-        migrate::routing::connect(&log, &mut mainline.ingredients, &mainline.txs, &new);
+        migrate::routing::connect(&log, &mut mainline.ingredients, &mut mainline.domains, &new);
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        let domains_on_path = migrate::materialization::initialize(&log,
-                                                                   &mut mainline.ingredients,
-                                                                   mainline.source,
-                                                                   &new,
-                                                                   &mut mainline.partial,
-                                                                   mainline.partial_enabled,
-                                                                   index,
-                                                                   &mut mainline.txs);
+        let domains_on_path = migrate::materialization::initialize(&log, mainline, &new, index);
 
         info!(log, "finalizing migration");
 
@@ -1064,7 +990,7 @@ impl<'a> Migration<'a> {
             .unwrap()
             .add_replay_paths(domains_on_path);
 
-        migrate::transactions::finalize(deps, &log, &mut mainline.txs, end_ts);
+        migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 
         warn!(log, "migration completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
     }
@@ -1072,12 +998,12 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
-        for (_, tx) in &mut self.txs {
+        for (_, mut d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
-            drop(tx.send(box payload::Packet::Quit));
+            drop(d.send(box payload::Packet::Quit));
         }
-        for d in self.domains.drain(..) {
-            d.join().unwrap();
+        for (_, mut d) in self.domains.drain() {
+            d.wait();
         }
     }
 }

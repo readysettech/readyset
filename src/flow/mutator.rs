@@ -1,3 +1,4 @@
+use flow;
 use flow::prelude::*;
 use checktable;
 
@@ -19,7 +20,7 @@ pub enum MutatorError {
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
     pub(crate) src: NodeAddress,
-    pub(crate) tx: mpsc::SyncSender<Box<Packet>>,
+    pub(crate) tx: flow::domain::DomainHandle,
     pub(crate) addr: NodeAddress,
     pub(crate) primary_key: Vec<usize>,
     pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
