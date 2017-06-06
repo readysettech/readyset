@@ -1,14 +1,10 @@
 use flow::domain;
 use flow::prelude::*;
 use flow::payload::{IngressFromBase, EgressForBase};
-
 use petgraph;
 use petgraph::graph::NodeIndex;
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::sync::mpsc;
-
 use slog::Logger;
 
 fn count_base_ingress(graph: &Graph,

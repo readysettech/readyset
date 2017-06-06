@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::cell;
 use std::thread;
 use slog::Logger;
-use flow::prelude::*;
 
 pub struct DomainHandle {
     idx: domain::Index,
@@ -107,8 +106,8 @@ impl DomainHandle {
         // types (all of which are clone-able). We deal with those here:
         let p = self.tx_buf.as_ref().unwrap();
         match **p {
-            Packet::Message { ref data, .. } => box p.clone_data(),
-            Packet::Transaction { ref data, .. } => box p.clone_data(),
+            Packet::Message { .. } => box p.clone_data(),
+            Packet::Transaction { .. } => box p.clone_data(),
             Packet::AddNode {
                 ref node,
                 ref parents,

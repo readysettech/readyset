@@ -9,13 +9,9 @@
 use flow::prelude::*;
 use flow::domain;
 use flow::node;
-
 use petgraph;
 use petgraph::graph::NodeIndex;
-
 use std::collections::{HashSet, HashMap};
-use std::sync::mpsc;
-
 use slog::Logger;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain

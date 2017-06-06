@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
-use std::thread;
 use std::time;
 use std::fmt;
 use std::io;
