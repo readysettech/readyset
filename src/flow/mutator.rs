@@ -137,7 +137,7 @@ impl Mutator {
             }
         };
 
-        self.tx.clone().send(m).unwrap();
+        self.tx.send(m).unwrap();
     }
 
     fn tx_send(&self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
@@ -151,7 +151,7 @@ impl Mutator {
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),
         };
-        self.tx.clone().send(m).unwrap();
+        self.tx.send(m).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
