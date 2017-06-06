@@ -70,13 +70,14 @@ impl SqlToMirConverter {
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
-    /// and adds its to a vector of conditions that `shortcut` understands.
-    /// Returns true if condition is sucessfully added.
+    /// and adds its to a vector of conditions.
     fn to_conditions(&self,
                      ct: &ConditionTree,
                      mut columns: &mut Vec<Column>,
                      n: &MirNodeRef)
                      -> Vec<Option<(Operator, DataType)>> {
+        use std::cmp::max;
+
         // TODO(malte): we only support one level of condition nesting at this point :(
         let l = match *ct.left.as_ref() {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
@@ -92,17 +93,24 @@ impl SqlToMirConverter {
             _ => unimplemented!(),
         };
 
-        let num_columns = columns.len();
+        let absolute_column_ids: Vec<usize> = columns
+            .iter()
+            .map(|c| n.borrow().column_id_for_column(c))
+            .collect();
+        let max_column_id = *absolute_column_ids.iter().max().unwrap();
+        let num_columns = max(columns.len(), max_column_id + 1);
         let mut filters = vec![None; num_columns];
 
         let f = Some((ct.operator.clone(), DataType::from(r)));
-        match n.borrow().columns().iter().position(|c| *c == l) {
+        match columns.iter().rposition(|c| *c == l) {
             None => {
+                // Might occur if the column doesn't exist in the parent; e.g., for aggregations.
+                // We assume that the column is appended at the end.
                 columns.push(l);
                 filters.push(f);
             }
-            Some(cid) => {
-                filters[cid] = f;
+            Some(pos) => {
+                filters[absolute_column_ids[pos]] = f;
             }
         }
 
@@ -305,10 +313,44 @@ impl SqlToMirConverter {
                     if columns_unchanged.len() > 0 &&
                        (columns_added.len() > 0 || columns_removed.len() > 0) {
                         error!(self.log,
-                               "base {} add {} columns, remove {} columns",
+                               "base {}: add columns {:?}, remove columns {:?} over v{}",
                                name,
-                               columns_added.len(),
-                               columns_removed.len());
+                               columns_added,
+                               columns_removed,
+                               existing_sv);
+                        let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
+
+                        let mut columns: Vec<ColumnSpecification> = existing_node
+                            .borrow()
+                            .column_specifications()
+                            .iter()
+                            .map(|&(ref cs, _)| cs.clone())
+                            .collect();
+                        for added in &columns_added {
+                            columns.push((*added).clone());
+                        }
+                        for removed in &columns_removed {
+                            let pos = columns
+                                .iter()
+                                .position(|cc| cc == *removed)
+                                .expect(&format!("couldn't find column \"{:#?}\", which we're removing",
+                                                 removed));
+                            columns.remove(pos);
+                        }
+                        assert_eq!(columns.len(),
+                                   existing_node.borrow().columns().len() + columns_added.len() -
+                                   columns_removed.len());
+
+                        // remember the schema for this version
+                        let mut base_schemas = self.base_schemas
+                            .entry(String::from(name))
+                            .or_insert(Vec::new());
+                        base_schemas.push((self.schema_version, columns.clone()));
+
+                        return MirNode::adapt_base(existing_node, columns_added, columns_removed);
+                    } else {
+                        info!(self.log, "base table has complex schema change");
+                        break;
                     }
                 }
             }
@@ -354,8 +396,12 @@ impl SqlToMirConverter {
                                  self.schema_version,
                                  cols.iter().map(|cs| cs.column.clone()).collect(),
                                  MirNodeType::Base {
+                                     column_specs: cols.iter()
+                                         .map(|cs| (cs.clone(), None))
+                                         .collect(),
                                      keys: key_cols.clone(),
                                      transactional,
+                                     adapted_over: None,
                                  },
                                  vec![],
                                  vec![])
@@ -367,8 +413,10 @@ impl SqlToMirConverter {
                          self.schema_version,
                          cols.iter().map(|cs| cs.column.clone()).collect(),
                          MirNodeType::Base {
+                             column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
                              keys: vec![],
                              transactional,
+                             adapted_over: None,
                          },
                          vec![],
                          vec![])
@@ -403,7 +451,6 @@ impl SqlToMirConverter {
 
         new_nodes
     }
-
 
     fn make_function_node(&mut self,
                           name: &str,

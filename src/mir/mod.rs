@@ -1,4 +1,4 @@
-use nom_sql::{Column, Operator, OrderType};
+use nom_sql::{Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Error, Formatter, Debug, Display};
@@ -250,16 +250,58 @@ impl MirNode {
         rc_mn
     }
 
-    pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
-        let mut have_all_columns = true;
-        for c in &for_node.columns {
-            if !self.columns.contains(c) {
-                have_all_columns = false;
-                break;
-            }
-        }
+    /// Adapts an existing `Base`-type MIR Node with the specified column additions and removals.
+    pub fn adapt_base(node: MirNodeRef,
+                      added_cols: Vec<&ColumnSpecification>,
+                      removed_cols: Vec<&ColumnSpecification>)
+                      -> MirNodeRef {
+        let over_node = node.borrow();
+        match over_node.inner {
+            MirNodeType::Base {
+                ref column_specs,
+                ref keys,
+                transactional,
+                ..
+            } => {
+                let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
+                    .into_iter()
+                    .cloned()
+                    .filter(|&(ref cs, _)| !removed_cols.contains(&cs))
+                    .chain(added_cols
+                               .iter()
+                               .map(|c| ((*c).clone(), None))
+                               .collect::<Vec<(ColumnSpecification, Option<usize>)>>())
+                    .collect();
+                let new_columns: Vec<Column> = new_column_specs
+                    .iter()
+                    .map(|&(ref cs, _)| cs.column.clone())
+                    .collect();
 
-        have_all_columns && self.inner.can_reuse_as(&for_node.inner)
+                assert_eq!(new_column_specs.len(),
+                           over_node.columns.len() + added_cols.len() - removed_cols.len());
+
+                let new_inner = MirNodeType::Base {
+                    column_specs: new_column_specs,
+                    keys: keys.clone(),
+                    transactional: transactional,
+                    adapted_over: Some(BaseNodeAdaptation {
+                                           over: node.clone(),
+                                           columns_added: added_cols.into_iter().cloned().collect(),
+                                           columns_removed: removed_cols
+                                               .into_iter()
+                                               .cloned()
+                                               .collect(),
+                                       }),
+                };
+                return MirNode::new(&over_node.name,
+                                    over_node.from_version,
+                                    new_columns,
+                                    new_inner,
+                                    vec![],
+                                    over_node.children.clone());
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Wraps an existing MIR node into a `Reuse` node.
@@ -281,6 +323,18 @@ impl MirNode {
         let rc_mn = Rc::new(RefCell::new(mn));
 
         rc_mn
+    }
+
+    pub fn can_reuse_as(&self, for_node: &MirNode) -> bool {
+        let mut have_all_columns = true;
+        for c in &for_node.columns {
+            if !self.columns.contains(c) {
+                have_all_columns = false;
+                break;
+            }
+        }
+
+        have_all_columns && self.inner.can_reuse_as(&for_node.inner)
     }
 
     // currently unused
@@ -315,7 +369,6 @@ impl MirNode {
         }
     }
 
-
     pub fn add_column(&mut self, c: Column) {
         self.columns.push(c.clone());
         self.inner.add_column(c);
@@ -331,6 +384,42 @@ impl MirNode {
 
     pub fn columns(&self) -> &[Column] {
         self.columns.as_slice()
+    }
+
+    pub fn column_id_for_column(&self, c: &Column) -> usize {
+        match self.inner {
+            // if we're a base, translate to absolute column ID (taking into account deleted
+            // columns). We use the column specifications here, which track a tuple of (column
+            // spec, absolute column ID).
+            // Note that `rposition` is required because multiple columns of the same name might
+            // exist if a column has been removed and re-added. We always use the latest column,
+            // and assume that only one column of the same name ever exists at the same time.
+            MirNodeType::Base { ref column_specs, .. } => {
+                match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    Some(id) => {
+                        column_specs[id]
+                            .1
+                            .expect("must have an absolute column ID on base")
+                    }
+                }
+            }
+            MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
+            // otherwise, just look up in the column set
+            _ => {
+                match self.columns.iter().position(|cc| cc == c) {
+                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    Some(id) => id,
+                }
+            }
+        }
+    }
+
+    pub fn column_specifications(&self) -> &[(ColumnSpecification, Option<usize>)] {
+        match self.inner {
+            MirNodeType::Base { ref column_specs, .. } => column_specs.as_slice(),
+            _ => panic!("non-base MIR nodes don't have column specifications!"),
+        }
     }
 
     fn flow_node_addr(&self) -> Result<NodeAddress, String> {
@@ -432,9 +521,28 @@ impl MirNode {
                                           mig)
                     }
                     MirNodeType::Base {
+                        ref mut column_specs,
                         ref keys,
                         transactional,
-                    } => make_base_node(&name, self.columns.as_slice(), keys, mig, transactional),
+                        ref adapted_over,
+                    } => {
+                        match *adapted_over {
+                            None => {
+                                make_base_node(&name,
+                                               column_specs.as_mut_slice(),
+                                               keys,
+                                               mig,
+                                               transactional)
+                            }
+                            Some(ref bna) => {
+                                adapt_base_node(bna.over.clone(),
+                                                mig,
+                                                column_specs.as_mut_slice(),
+                                                &bna.columns_added,
+                                                &bna.columns_removed)
+                            }
+                        }
+                    }
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -600,6 +708,14 @@ impl MirNode {
     }
 }
 
+/// Specifies the adapatation of an existing base node by column addition/removal.
+/// `over` is a `MirNode` of type `Base`.
+pub struct BaseNodeAdaptation {
+    over: MirNodeRef,
+    columns_added: Vec<ColumnSpecification>,
+    columns_removed: Vec<ColumnSpecification>,
+}
+
 pub enum MirNodeType {
     /// over column, group_by columns
     Aggregation {
@@ -607,10 +723,12 @@ pub enum MirNodeType {
         group_by: Vec<Column>,
         kind: AggregationKind,
     },
-    /// columns, keys (non-compound)
+    /// column specifications, keys (non-compound), tx flag, adapted base
     Base {
+        column_specs: Vec<(ColumnSpecification, Option<usize>)>,
         keys: Vec<Column>,
         transactional: bool,
+        adapted_over: Option<BaseNodeAdaptation>,
     },
     /// over column, group_by columns
     Extremum {
@@ -749,16 +867,32 @@ impl MirNodeType {
                 }
             }
             MirNodeType::Base {
+                column_specs: ref our_column_specs,
                 keys: ref our_keys,
                 transactional: our_transactional,
+                adapted_over: ref our_adapted_over,
             } => {
                 match *other {
                     MirNodeType::Base {
+                        ref column_specs,
                         ref keys,
                         transactional,
+                        ..
                     } => {
                         assert_eq!(our_transactional, transactional);
-                        our_keys == keys
+                        // if we are instructed to adapt an earlier base node, we cannot reuse
+                        // anything directly; we'll have to keep a new MIR node here.
+                        if our_adapted_over.is_some() {
+                            // TODO(malte): this is a bit more conservative than it needs to be, since
+                            // base node adaptation actually *changes* the underlying base node, so we
+                            // will actually reuse. However, returning false here terminates the
+                            // reuse search unnecessarily. We should handle this special case.
+                            return false;
+                        }
+                        // note that as long as we are not adapting a previous base node,
+                        // we do *not* need `adapted_over` to *match*, since current reuse
+                        // does not depend on how base node was created from an earlier one
+                        our_column_specs == column_specs && our_keys == keys
                     }
                     _ => false,
                 }
@@ -882,12 +1016,19 @@ impl Debug for MirNodeType {
 
             }
             MirNodeType::Base {
+                ref column_specs,
                 ref keys,
                 transactional,
+                ..
             } => {
                 write!(f,
-                       "B{} [⚷: {}]",
+                       "B{} [{}; ⚷: {}]",
                        if transactional { "*" } else { "" },
+                       column_specs
+                           .into_iter()
+                           .map(|&(ref cs, _)| cs.column.name.as_str())
+                           .collect::<Vec<_>>()
+                           .join(", "),
                        keys.iter()
                            .map(|c| c.name.as_str())
                            .collect::<Vec<_>>()
@@ -1048,25 +1189,100 @@ impl Debug for MirNodeType {
     }
 }
 
+fn adapt_base_node(over_node: MirNodeRef,
+                   mut mig: &mut Migration,
+                   mut column_specs: &mut [(ColumnSpecification, Option<usize>)],
+                   add: &Vec<ColumnSpecification>,
+                   remove: &Vec<ColumnSpecification>)
+                   -> FlowNode {
+    let na = match over_node.borrow().flow_node {
+        None => panic!("adapted base node must have a flow node already!"),
+        Some(ref flow_node) => flow_node.address(),
+    };
+
+    for a in add.iter() {
+        let default_value = match a.constraints
+                  .iter()
+                  .filter_map(|c| match *c {
+                                  ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
+                                  _ => None,
+                              })
+                  .next() {
+            None => DataType::None,
+            Some(dv) => dv,
+        };
+        let column_id = mig.add_column(na, &a.column.name, default_value);
+
+        // store the new column ID in the column specs for this node
+        for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
+            if cs == a {
+                assert_eq!(*cid, None);
+                *cid = Some(column_id);
+            }
+        }
+    }
+    for r in remove.iter() {
+        let over_node = over_node.borrow();
+        let pos = over_node
+            .column_specifications()
+            .iter()
+            .position(|&(ref ecs, _)| ecs == r)
+            .unwrap();
+        let cid = over_node.column_specifications()[pos]
+            .1
+            .expect("base column ID must be set to remove column");
+        mig.drop_column(na, cid);
+    }
+
+    FlowNode::Existing(na)
+}
+
 fn make_base_node(name: &str,
-                  columns: &[Column],
+                  column_specs: &mut [(ColumnSpecification, Option<usize>)],
                   pkey_columns: &Vec<Column>,
                   mut mig: &mut Migration,
                   transactional: bool)
                   -> FlowNode {
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    // remember the absolute base column ID for potential later removal
+    for (i, mut cs) in column_specs.iter_mut().enumerate() {
+        cs.1 = Some(i);
+    }
+
+    let column_names = column_specs
+        .iter()
+        .map(|&(ref cs, _)| &cs.column.name)
+        .collect::<Vec<_>>();
+
+    // note that this defaults to a "None" (= NULL) default value for columns that do not have one
+    // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
+    let default_values = column_specs
+        .iter()
+        .map(|&(ref cs, _)| {
+            for c in &cs.constraints {
+                match *c {
+                    ColumnConstraint::DefaultValue(ref dv) => return dv.into(),
+                    _ => (),
+                }
+            }
+            return DataType::None;
+        })
+        .collect::<Vec<DataType>>();
 
     let base = if pkey_columns.len() > 0 {
         let pkey_column_ids = pkey_columns
             .iter()
             .map(|pkc| {
                      //assert_eq!(pkc.table.as_ref().unwrap(), name);
-                     columns.iter().position(|c| c == pkc).unwrap()
+                     column_specs
+                         .iter()
+                         .position(|&(ref cs, _)| cs.column == *pkc)
+                         .unwrap()
                  })
             .collect();
-        ops::base::Base::new(vec![]).with_key(pkey_column_ids)
+        ops::base::Base::new(default_values)
+            .with_key(pkey_column_ids)
     } else {
-        ops::base::Base::new(vec![])
+        ops::base::Base::new(default_values)
     };
 
     if transactional {
@@ -1109,24 +1325,10 @@ fn make_grouped_node(name: &str,
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
-    let over_col_indx = parent
-        .borrow()
-        .columns()
-        .iter()
-        .position(|c| c == on)
-        .expect(&format!("\"over\" column {:?} not found in parent, which has {:?}",
-                         on,
-                         parent.borrow().columns()));
+    let over_col_indx = parent.borrow().column_id_for_column(on);
     let group_col_indx = group_by
         .iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns()
-                     .iter()
-                     .position(|pc| pc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     assert!(group_col_indx.len() > 0);
@@ -1200,14 +1402,8 @@ fn make_join_node(name: &str,
     assert_eq!(projected_cols_left.len() + projected_cols_right.len(),
                proj_cols.len());
 
-    let find_column_id = |n: &MirNodeRef, col: &Column| -> usize {
-        let name = n.borrow().versioned_name();
-        n.borrow()
-            .columns
-            .iter()
-            .position(|ref nc| *nc == col)
-            .expect(&format!("column {:?} not found on {}!", col, name))
-    };
+    let find_column_id =
+        |n: &MirNodeRef, col: &Column| -> usize { n.borrow().column_id_for_column(col) };
 
     let join_config = proj_cols
         .iter()
@@ -1255,14 +1451,7 @@ fn make_latest_node(name: &str,
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns()
-                     .iter()
-                     .position(|pc| pc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let na = mig.add_ingredient(String::from(name),
@@ -1281,14 +1470,7 @@ fn make_permute_node(name: &str,
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
     let projected_column_ids = emit.iter()
-        .map(|c| {
-                 parent
-                     .borrow()
-                     .columns
-                     .iter()
-                     .position(|ref nc| *nc == c)
-                     .unwrap()
-             })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let n = mig.add_ingredient(String::from(name),
@@ -1308,16 +1490,7 @@ fn make_project_node(name: &str,
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
 
     let projected_column_ids = emit.iter()
-        .map(|c| {
-            parent
-                .borrow()
-                .columns
-                .iter()
-                .position(|ref nc| *nc == c)
-                .expect(&format!("column {:?} not found on {}",
-                                 c,
-                                 parent.borrow().versioned_name()))
-        })
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
@@ -1348,14 +1521,7 @@ fn make_topk_node(name: &str,
     } else {
         group_by
             .iter()
-            .map(|c| {
-                     parent
-                         .borrow()
-                         .columns
-                         .iter()
-                         .position(|ref nc| *nc == c)
-                         .unwrap()
-                 })
+            .map(|c| parent.borrow().column_id_for_column(c))
             .collect::<Vec<_>>()
     };
 
@@ -1365,14 +1531,8 @@ fn make_topk_node(name: &str,
 
             let columns: Vec<_> = o.iter()
                 .map(|&(ref c, ref order_type)| {
-                    (parent
-                         .borrow()
-                         .columns()
-                         .iter()
-                         .position(|pc| pc == c)
-                         .unwrap(),
-                     order_type.clone())
-                })
+                         (order_type.clone(), parent.borrow().column_id_for_column(c))
+                     })
                 .collect();
 
             columns
@@ -1403,10 +1563,7 @@ fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mu
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
         let first_key_col_id = node.borrow()
-            .columns()
-            .iter()
-            .position(|pc| pc == key_cols.iter().next().unwrap())
-            .unwrap();
+            .column_id_for_column(key_cols.iter().next().unwrap());
         mig.maintain(na, first_key_col_id);
     } else {
         // if no key specified, default to the first column

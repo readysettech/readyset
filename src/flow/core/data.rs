@@ -1,5 +1,9 @@
 use arccstr::ArcCStr;
 
+use chrono::{self, NaiveDateTime};
+
+use nom_sql::Literal;
+
 #[cfg(feature="web")]
 use serde_json::Value;
 
@@ -29,6 +33,8 @@ pub enum DataType {
     Text(ArcCStr),
     /// A tiny string that fits in a pointer
     TinyText([u8; TINYTEXT_WIDTH]),
+    /// A timestamp for date/time types.
+    Timestamp(NaiveDateTime),
 }
 
 #[cfg(feature="web")]
@@ -42,6 +48,7 @@ impl DataType {
             DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
             DataType::Text(..) |
             DataType::TinyText(..) => Value::String(self.into()),
+            DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
         }
     }
 }
@@ -67,6 +74,7 @@ impl PartialEq for DataType {
             (&DataType::Real(ref ai, ref af), &DataType::Real(ref bi, ref bf)) => {
                 ai == bi && af == bf
             }
+            (&DataType::Timestamp(ref tsa), &DataType::Timestamp(ref tsb)) => *tsa == *tsb,
             (&DataType::None, &DataType::None) => true,
             _ => false,
         }
@@ -102,6 +110,21 @@ impl From<f64> for DataType {
         }
 
         DataType::Real(i, frac)
+    }
+}
+
+impl<'a> From<&'a Literal> for DataType {
+    fn from(l: &'a Literal) -> Self {
+        match *l {
+            Literal::Null => DataType::None,
+            Literal::Integer(i) => i.into(),
+            Literal::String(ref s) => s.as_str().into(),
+            Literal::CurrentTimestamp => {
+                let ts = chrono::Local::now().naive_local();
+                DataType::Timestamp(ts)
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -193,6 +216,7 @@ impl fmt::Display for DataType {
                     write!(f, "{}", format!("{}.{:09}", i, frac.abs()))
                 }
             }
+            DataType::Timestamp(ts) => write!(f, "{}", format!("{}", ts.format("%c"))),
         }
     }
 }

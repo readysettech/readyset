@@ -11,11 +11,16 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
 
     let mut trace_nodes = VecDeque::new();
     for old_base in &old_query.roots {
+        let mut found = false;
         for new_base in &new_query.roots {
             if old_base.borrow().can_reuse_as(&*new_base.borrow()) {
+                found = true;
                 trace!(log, "tracing from reusable base {:?}", old_base);
                 trace_nodes.push_back((old_base.clone(), new_base.clone()));
             }
+        }
+        if !found {
+            trace!(log, "no reuseable base found for {:?}", old_base);
         }
     }
 
@@ -166,16 +171,21 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::Column;
+    use nom_sql::{Column, ColumnSpecification, SqlType};
     use mir::{MirNode, MirNodeRef, MirNodeType};
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
+        let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
+            (ColumnSpecification::new(Column::from(n), SqlType::Text), None)
+        };
         let a = MirNode::new("a",
                              0,
                              vec![Column::from("aa"), Column::from("ab")],
                              MirNodeType::Base {
+                                 column_specs: vec![cspec("aa"), cspec("ab")],
                                  keys: vec![Column::from("aa")],
                                  transactional: false,
+                                 adapted_over: None,
                              },
                              vec![],
                              vec![]);
@@ -183,8 +193,10 @@ mod tests {
                              0,
                              vec![Column::from("ba"), Column::from("bb")],
                              MirNodeType::Base {
+                                 column_specs: vec![cspec("ba"), cspec("bb")],
                                  keys: vec![Column::from("ba")],
                                  transactional: false,
+                                 adapted_over: None,
                              },
                              vec![],
                              vec![]);

@@ -42,7 +42,9 @@ impl Ingredient for Filter {
 
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[*self.src.as_global()];
-        assert_eq!(self.filter.len(), srcn.fields().len());
+        // N.B.: <= because the adjacent node might be a base with a suffix of removed columns.
+        // It's okay to just ignore those.
+        assert!(self.filter.len() <= srcn.fields().len());
     }
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
