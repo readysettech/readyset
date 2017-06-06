@@ -5,7 +5,7 @@ pub use nom_sql::Operator;
 use flow::prelude::*;
 
 /// Filters incoming records according to some filter.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: NodeAddress,
     filter: sync::Arc<Vec<Option<(Operator, DataType)>>>,

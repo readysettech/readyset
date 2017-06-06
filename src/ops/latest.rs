@@ -6,7 +6,7 @@ use flow::prelude::*;
 ///
 /// Whenever a new record arrives for a group, the latest operator will negative the previous
 /// latest for that group.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Latest {
     us: Option<NodeAddress>,
     src: NodeAddress,

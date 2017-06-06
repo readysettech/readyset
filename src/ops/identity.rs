@@ -4,7 +4,7 @@ use flow::prelude::*;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     src: NodeAddress,
 }

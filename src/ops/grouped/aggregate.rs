@@ -4,7 +4,7 @@ use ops::grouped::GroupedOperator;
 use flow::prelude::*;
 
 /// Supported aggregation operators.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Aggregation {
     /// Count the number of records for each group. The value for the `over` column is ignored.
     COUNT,
@@ -47,7 +47,7 @@ impl Aggregation {
 /// identifying the group, and appending the aggregated value. For example, for a sum with
 /// `self.over == 1`, a previous sum of `3`, and an incoming record with `[a, 1, x]`, the output
 /// would be `[a, x, 4]`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Aggregator {
     op: Aggregation,
     over: usize,

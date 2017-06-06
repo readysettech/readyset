@@ -31,7 +31,7 @@ arccstr = "0.4.0"
 vec_map = "0.8.0"
 lazy_static = "0.2.8"
 
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "aafa7ad49617aca9928dc09ec324f13bd8081ff7" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "1b79ea9978fd1a348fb6dcac72bfa6bdad34711d" }
 
 # for benchmarks
 # cli

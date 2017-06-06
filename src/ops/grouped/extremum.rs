@@ -4,7 +4,7 @@ use ops::grouped::GroupedOperator;
 use flow::prelude::*;
 
 /// Supported kinds of extremum operators.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Extremum {
     /// The minimum value that occurs in the `over` column in each group.
     MIN,
@@ -46,7 +46,7 @@ impl Extremum {
 /// incoming record. The output record is constructed by concatenating the columns identifying the
 /// group, and appending the aggregated value. For example, for a sum with `self.over == 1`, a
 /// previous sum of `3`, and an incoming record with `[a, 1, x]`, the output would be `[a, x, 4]`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtremumOperator {
     op: Extremum,
     over: usize,

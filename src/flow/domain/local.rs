@@ -3,6 +3,7 @@ use std::ops::Index;
 use std::iter::FromIterator;
 use std::collections::hash_map::Entry;
 
+#[derive(Serialize, Deserialize)]
 pub struct Map<T> {
     n: usize,
     things: Vec<Option<T>>,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use flow::prelude::*;
 
 /// Kind of join
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum JoinType {
     /// Left join between two views
     Left,
@@ -26,7 +26,7 @@ pub enum JoinSource {
 }
 
 /// Join provides a left outer join between two views.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Join {
     left: NodeAddress,
     right: NodeAddress,

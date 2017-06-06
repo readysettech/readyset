@@ -56,7 +56,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn description(&self) -> String;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupedOperator<T: GroupedOperation> {
     src: NodeAddress,
     inner: T,

@@ -4,7 +4,7 @@ use std::sync;
 use flow::prelude::*;
 
 /// Permutes or omits columns from its source node, or adds additional literal value columns.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     us: Option<NodeAddress>,
     emit: Option<Vec<usize>>,

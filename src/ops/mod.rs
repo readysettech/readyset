@@ -11,10 +11,10 @@ pub mod permute;
 pub mod project;
 pub mod union;
 pub mod identity;
-pub mod gatedid;
 pub mod filter;
 pub mod topk;
 
+#[derive(Serialize, Deserialize)]
 pub enum NodeOperator {
     Base(base::Base),
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
@@ -26,7 +26,6 @@ pub enum NodeOperator {
     Project(project::Project),
     Union(union::Union),
     Identity(identity::Identity),
-    GatedId(gatedid::GatedIdentity),
     Filter(filter::Filter),
     TopK(topk::TopK),
 }
@@ -54,7 +53,6 @@ nodeop_from_impl!(NodeOperator::Permute, permute::Permute);
 nodeop_from_impl!(NodeOperator::Project, project::Project);
 nodeop_from_impl!(NodeOperator::Union, union::Union);
 nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
-nodeop_from_impl!(NodeOperator::GatedId, gatedid::GatedIdentity);
 nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
 nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
 
@@ -71,7 +69,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::GatedId(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
         }
@@ -91,7 +88,6 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Project(ref i) => i.$fn($($arg),*),
             NodeOperator::Union(ref i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref i) => i.$fn($($arg),*),
-            NodeOperator::GatedId(ref i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
         }

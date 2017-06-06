@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 
 use nom_sql::OrderType;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Order(Vec<(usize, OrderType)>);
 impl Order {
     fn cmp(&self, a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>) -> Ordering {
@@ -35,6 +35,7 @@ impl From<Vec<(usize, OrderType)>> for Order {
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
 /// queries. It is also worth noting that due the nature of Soup, the results of this operator are
 /// unordered.
+#[derive(Serialize, Deserialize)]
 pub struct TopK {
     src: NodeAddress,
 

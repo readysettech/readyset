@@ -6,14 +6,15 @@ use std::collections::HashSet;
 use flow::prelude::*;
 
 /// Designator for what a given position in a group concat output should contain.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TextComponent {
     /// Emit a literal string.
-    Literal(&'static str),
+    Literal(String),
     /// Emit the string representation of the given column in the current record.
     Column(usize),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Modify {
     Add(String),
     Remove(String),
@@ -38,7 +39,7 @@ pub enum Modify {
 /// is the primary reason for the "separator as sentinel" behavior mentioned above, and may be made
 /// optional in the future such that more efficient incremental updating and relaxed separator
 /// semantics can be implemented.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupConcat {
     components: Vec<TextComponent>,
     separator: String,
@@ -79,20 +80,20 @@ impl GroupConcat {
         let mut s = String::with_capacity(self.slen);
         for tc in &self.components {
             match *tc {
-                TextComponent::Literal(l) => {
+                TextComponent::Literal(ref l) => {
                     s.push_str(l);
                 }
-                TextComponent::Column(i) => {
-                    match rec[i] {
+                TextComponent::Column(ref i) => {
+                    match rec[*i] {
                         DataType::Text(..) |
                         DataType::TinyText(..) => {
                             use std::borrow::Cow;
-                            let text: Cow<str> = (&rec[i]).into();
+                            let text: Cow<str> = (&rec[*i]).into();
                             s.push_str(&*text);
                         }
                         DataType::Int(ref n) => s.push_str(&n.to_string()),
                         DataType::BigInt(ref n) => s.push_str(&n.to_string()),
-                        DataType::Real(..) => s.push_str(&rec[i].to_string()),
+                        DataType::Real(..) => s.push_str(&rec[*i].to_string()),
                         DataType::Timestamp(ref ts) => s.push_str(&ts.format("%+").to_string()),
                         DataType::None => unreachable!(),
                     }
@@ -125,7 +126,7 @@ impl GroupedOperation for GroupConcat {
         self.slen = 0;
         // well, the length of all literal components
         for tc in &self.components {
-            if let TextComponent::Literal(l) = *tc {
+            if let TextComponent::Literal(ref l) = *tc {
                 self.slen += l.len();
             }
         }
@@ -196,8 +197,8 @@ impl GroupedOperation for GroupConcat {
         let fields = self.components
             .iter()
             .map(|c| match *c {
-                     TextComponent::Literal(s) => format!("\"{}\"", s),
-                     TextComponent::Column(i) => i.to_string(),
+                     TextComponent::Literal(ref s) => format!("\"{}\"", s),
+                     TextComponent::Column(ref i) => i.to_string(),
                  })
             .collect::<Vec<_>>()
             .join(", ");
@@ -229,9 +230,9 @@ mod tests {
         let s = g.add_base("source", &["x", "y"]);
 
         let c = GroupConcat::new(s,
-                                 vec![TextComponent::Literal("."),
+                                 vec![TextComponent::Literal(".".to_owned()),
                                       TextComponent::Column(1),
-                                      TextComponent::Literal(";")],
+                                      TextComponent::Literal(";".to_owned())],
                                  String::from("#"));
         g.set_op("concat", &["x", "ys"], c, mat);
         g
