@@ -8,6 +8,7 @@ use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext};
 use flow::statistics;
 use flow::transactions;
+use flow::persistence;
 use checktable;
 use slog::Logger;
 use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
@@ -92,6 +93,7 @@ pub struct Domain {
     not_ready: HashSet<LocalNodeIndex>,
 
     transaction_state: transactions::DomainState,
+    persistence_parameters: Option<persistence::Parameters>,
 
     mode: DomainMode,
     waiting: local::Map<Waiting>,
@@ -111,6 +113,7 @@ impl Domain {
     pub fn new(log: Logger,
                index: Index,
                nodes: DomainNodes,
+               persistence_parameters: Option<persistence::Parameters>,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
@@ -123,10 +126,11 @@ impl Domain {
         Domain {
             _index: index,
             transaction_state: transactions::DomainState::new(index, checktable, ts),
-            nodes: nodes,
+            persistence_parameters,
+            nodes,
             state: StateMap::default(),
-            log: log,
-            not_ready: not_ready,
+            log,
+            not_ready,
             mode: DomainMode::Forwarding,
             waiting: local::Map::new(),
             reader_triggered: local::Map::new(),
@@ -483,7 +487,7 @@ impl Domain {
                 self.handle_replay(m);
             }
             consumed => {
-                match consumed { // workaround #16223
+                match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr().as_local();
@@ -1570,14 +1574,32 @@ impl Domain {
 
                 self.inject_tx = Some(inject_tx);
 
+                let mut group_commit_queue = self.persistence_parameters.as_ref().map(|params| {
+                    let log_filename = {
+                        use time;
+                        let now = time::now();
+                        let today = time::strftime("%F", &now).unwrap();
+                        format!("soup-log-{}-{}.json", today, self._index.index())
+                    };
+
+                    persistence::GroupCommitQueue::new(&log_filename, params)
+                });
+
                 self.total_time.start();
                 self.total_ptime.start();
                 let mut packet = None;
                 loop {
-                    // try to avoid going to sleep if there's more work to be done.
-                    // sleeps and wakeups are expensive. but limit to 10ms to avoid spinning.
+                    let duration_until_flush = group_commit_queue
+                        .as_ref()
+                        .and_then(|q| q.duration_until_flush());
+                    let spin_duration = duration_until_flush
+                        .unwrap_or(time::Duration::from_millis(1));
+
+                    // If a flush is needed at some point then spin waiting for packets until
+                    // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
+                    // and wakeups are expensive.
                     let start = time::Instant::now();
-                    while start.elapsed() < time::Duration::from_millis(1) {
+                    while start.elapsed() < spin_duration {
                         if let Ok(p) = inject_rx
                                .try_recv()
                                .or_else(|_| back_rx.try_recv())
@@ -1588,7 +1610,16 @@ impl Domain {
                         }
                     }
 
-                    // block for the next
+                    // If no packet was received and we were waiting until it was time for a flush,
+                    // then do the flush now.
+                    if packet.is_none() && duration_until_flush.is_some() {
+                        for m in group_commit_queue.as_mut().unwrap().flush() {
+                            self.handle(m);
+                        }
+                        continue;
+                    }
+
+                    // Block until the next packet arrives.
                     if packet.is_none() {
                         self.wait_time.start();
                         let id = sel.wait();
@@ -1619,7 +1650,19 @@ impl Domain {
                         Ok(box Packet::RequestUnboundedTx(ack)) => {
                             ack.send(back_tx.clone()).unwrap();
                         }
-                        Ok(m) => self.handle(m),
+                        Ok(m) => {
+                            if group_commit_queue.is_some() &&
+                               group_commit_queue
+                                   .as_mut()
+                                   .unwrap()
+                                   .should_persist(&m, &self.nodes) {
+                                for m in group_commit_queue.as_mut().unwrap().append(m) {
+                                    self.handle(m);
+                                }
+                            } else {
+                                self.handle(m);
+                            }
+                        }
                     }
                 }
             })

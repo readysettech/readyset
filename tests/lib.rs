@@ -12,6 +12,7 @@ const SETTLE_TIME_MS: u64 = 750;
 fn it_works() {
     // set up graph
     let mut g = distributary::Blender::new();
+    g.enable_temporary_persistence(128, time::Duration::from_millis(1));
     let (a, b, c) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a",
@@ -73,210 +74,6 @@ fn it_works() {
 
     // send a query to c
     assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 6.into()]]));
-}
-
-#[test]
-fn it_propagates_writes_w_durability_sync_immediately() {
-    use distributary::{Base, BaseDurabilityLevel};
-
-    // set up graph
-    let mut g = distributary::Blender::new();
-    let d = BaseDurabilityLevel::SyncImmediately;
-    let (a, b, c) = {
-        let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-        let b = mig.add_ingredient("b",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
-        mig.commit();
-        (a, b, c)
-    };
-
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
-    let cq = g.get_getter(c).unwrap();
-    let id: distributary::DataType = 1.into();
-
-    // send a value on a
-    muta.put(vec![id.clone(), 2.into()]).unwrap();
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
-
-    // send a query to c
-    assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 2.into()]]));
-
-    // update value again
-    mutb.put(vec![id.clone(), 4.into()]).unwrap();
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // check that value was updated again
-    let res = cq(&id, true).unwrap();
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 4.into()]));
-
-    // Delete first record
-    muta.delete(vec![id.clone()]).unwrap();
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // send a query to c
-    assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 4.into()]]));
-
-    // Update second record
-    mutb.update(vec![id.clone(), 6.into()]).unwrap();
-
-    // give it some time to propagate
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // send a query to c
-    assert_eq!(cq(&id, true), Ok(vec![vec![1.into(), 6.into()]]));
-}
-
-#[test]
-fn it_propagates_writes_w_durability_buffered() {
-    use distributary::{Base, BaseDurabilityLevel};
-
-    // set up graph
-    let mut g = distributary::Blender::new();
-    let d = BaseDurabilityLevel::Buffered;
-    let (a, _, c) = {
-        let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-        let b = mig.add_ingredient("b",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
-        mig.commit();
-        (a, b, c)
-    };
-
-    let muta = g.get_mutator(a);
-    let cq = g.get_getter(c).unwrap();
-    let id: distributary::DataType = 1.into();
-
-    // Send less values than what Base's buffer will hold before flushing.
-    let base_buffer_capacity = 512;
-    for i in 0..(base_buffer_capacity - 1) {
-        muta.put(vec![id.clone(), i.into()]).unwrap();
-    }
-
-    // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // Send a query to check that we do not see our updates yet, as they're still buffered.
-    assert_eq!(cq(&id, true), Ok(vec![]));
-
-    // Send one more value so that we go over what Base's buffer will hold before flushing.
-    muta.put(vec![id.clone(), base_buffer_capacity.into()])
-        .unwrap();
-
-    // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // Check that we see our writes.
-    let res = cq(&id, true).unwrap();
-    assert_eq!(res.iter().len(), 512);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
-    assert!(res.iter()
-                .any(|r| r == &vec![id.clone(), base_buffer_capacity.into()]));
-}
-
-#[test]
-fn it_propagates_writes_w_durability_buffered_flush_interval() {
-    use distributary::{Base, BaseDurabilityLevel};
-
-    // set up graph
-    let mut g = distributary::Blender::new();
-    let d = BaseDurabilityLevel::Buffered;
-    let (a, _, c) = {
-        let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-        let b = mig.add_ingredient("b",
-                                   &["a", "b"],
-                                   Base::new(vec![])
-                                       .with_key(vec![0])
-                                       .with_durability(d)
-                                       .delete_log_on_drop());
-
-        let mut emits = HashMap::new();
-        emits.insert(a, vec![0, 1]);
-        emits.insert(b, vec![0, 1]);
-        let u = distributary::Union::new(emits);
-        let c = mig.add_ingredient("c", &["a", "b"], u);
-        mig.maintain(c, 0);
-        mig.commit();
-        (a, b, c)
-    };
-
-    let muta = g.get_mutator(a);
-    let cq = g.get_getter(c).unwrap();
-    let id: distributary::DataType = 1.into();
-
-    // Send less values than what Base's buffer will hold before flushing.
-    let base_buffer_flush_interval_ms = 1000;
-    muta.put(vec![id.clone(), 0.into()]).unwrap();
-
-    assert!(SETTLE_TIME_MS < base_buffer_flush_interval_ms);
-
-    // Give it some time to propagate, but do not cross the Base buffer's flush interval.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // Send a query to check that we do not see our updates yet.
-    assert_eq!(cq(&id, true), Ok(vec![]));
-
-    // Wait a little longer, enough so that we cross the Base buffer's flush interval.
-    thread::sleep(time::Duration::from_millis(base_buffer_flush_interval_ms));
-
-    // Send one more value to force a flush.
-    // TODO: Remove this put once Base's buffer flush is triggered by a Flush Packet instead.
-    muta.put(vec![id.clone(), 1.into()]).unwrap();
-
-    // Give it some time to propagate.
-    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS * 2));
-
-    // Check that we see our two writes.
-    let res = cq(&id, true).unwrap();
-    assert_eq!(res.iter().len(), 2);
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 0.into()]));
-    assert!(res.iter().any(|r| r == &vec![id.clone(), 1.into()]));
 }
 
 #[test]
@@ -565,14 +362,8 @@ fn transactional_vote() {
         let mut mig = g.start_migration();
 
         // add article base nodes (we use two so we can exercise unions too)
-        let article1 =
-            mig.add_transactional_base("article1",
-                                       &["id", "title"],
-                                       Base::default().delete_log_on_drop());
-        let article2 =
-            mig.add_transactional_base("article1",
-                                       &["id", "title"],
-                                       Base::default().delete_log_on_drop());
+        let article1 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
+        let article2 = mig.add_transactional_base("article1", &["id", "title"], Base::default());
 
         // add a (stupid) union of article1 + article2
         let mut emits = HashMap::new();
@@ -583,9 +374,7 @@ fn transactional_vote() {
         mig.maintain(article, 0);
 
         // add vote base table
-        let vote = mig.add_transactional_base("vote",
-                                              &["user", "id"],
-                                              Base::default().delete_log_on_drop());
+        let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
 
         // add vote count
         let vc = mig.add_ingredient("vc",
@@ -995,10 +784,7 @@ fn transactional_migration() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a =
-            mig.add_transactional_base("a",
-                                       &["a", "b"],
-                                       distributary::Base::default().delete_log_on_drop());
+        let a = mig.add_transactional_base("a", &["a", "b"], distributary::Base::default());
         mig.maintain(a, 0);
         mig.commit();
         a
@@ -1020,10 +806,7 @@ fn transactional_migration() {
     // add unrelated node b in a migration
     let b = {
         let mut mig = g.start_migration();
-        let b =
-            mig.add_transactional_base("b",
-                                       &["a", "b"],
-                                       distributary::Base::default().delete_log_on_drop());
+        let b = mig.add_transactional_base("b", &["a", "b"], distributary::Base::default());
         mig.maintain(b, 0);
         mig.commit();
         b
@@ -1566,8 +1349,8 @@ fn state_replay_migration_query() {
 
         j
     };
-
     let out = g.get_getter(out).unwrap();
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // if all went according to plan, the join should now be fully populated!
     // there are (/should be) two records in a with x == 1

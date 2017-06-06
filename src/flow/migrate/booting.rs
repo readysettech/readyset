@@ -6,6 +6,7 @@
 use flow::prelude::*;
 use flow::domain;
 use flow::checktable;
+use flow::persistence;
 
 use petgraph::graph::NodeIndex;
 
@@ -31,12 +32,13 @@ pub fn boot_new(log: Logger,
                 index: domain::Index,
                 graph: &mut Graph,
                 nodes: Vec<(NodeIndex, bool)>,
+                persistence_params: Option<persistence::Parameters>,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 rx: mpsc::Receiver<Box<Packet>>,
                 input_rx: mpsc::Receiver<Box<Packet>>,
                 ts: i64)
                 -> thread::JoinHandle<()> {
     let nodes = build_descriptors(graph, nodes);
-    let domain = domain::Domain::new(log, index, nodes, checktable, ts);
+    let domain = domain::Domain::new(log, index, nodes, persistence_params, checktable, ts);
     domain.boot(rx, input_rx)
 }

@@ -16,20 +16,22 @@ use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
+pub mod core;
 pub mod domain;
+pub mod hook;
+pub mod keys;
+pub mod migrate;
 pub mod node;
 pub mod payload;
-pub mod statistics;
-pub mod keys;
-pub mod core;
-pub mod migrate;
-mod transactions;
-pub mod hook;
-
 pub mod prelude;
-use self::prelude::Ingredient;
+pub mod statistics;
 
 mod mutator;
+mod persistence;
+mod transactions;
+
+use self::prelude::Ingredient;
+
 pub use self::mutator::{Mutator, MutatorError};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -60,6 +62,9 @@ pub struct Blender {
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
 
+    /// Parameters for persistence code. None means run in memory only mode.
+    persistence: Option<persistence::Parameters>,
+
     txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
     in_txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
     domains: Vec<thread::JoinHandle<()>>,
@@ -82,6 +87,8 @@ impl Default for Blender {
             partial: Default::default(),
             partial_enabled: true,
 
+            persistence: None,
+
             txs: HashMap::default(),
             in_txs: HashMap::default(),
             domains: Vec::new(),
@@ -100,6 +107,32 @@ impl Blender {
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.partial_enabled = false;
+    }
+
+    /// All writes to base nodes should be written to disk. `queue_capacity` indicates the number of
+    /// packets that should be buffered until flushing, and `flush_timeout` indicates the length of
+    /// time to wait before flushing anyway.
+    ///
+    /// Must be called before any domains have been created.
+    pub fn enable_persistence(&mut self, queue_capacity: usize, flush_timeout: time::Duration) {
+        assert_eq!(self.ndomains, 0);
+        self.persistence = Some(persistence::Parameters {
+                                    queue_capacity,
+                                    flush_timeout,
+                                    delete_on_drop: false,
+                                });
+    }
+
+    /// Same as `enable_persistence`, except that the log file(s) should be deleted on exit.
+    pub fn enable_temporary_persistence(&mut self,
+                                        queue_capacity: usize,
+                                        flush_timeout: time::Duration) {
+        assert_eq!(self.ndomains, 0);
+        self.persistence = Some(persistence::Parameters {
+                                    queue_capacity,
+                                    flush_timeout,
+                                    delete_on_drop: true,
+                                });
     }
 
     /// Set the `Logger` to use for internal log messages.
@@ -894,6 +927,7 @@ impl<'a> Migration<'a> {
                                                 domain.index().into(),
                                                 &mut mainline.ingredients,
                                                 uninformed_domain_nodes.remove(&domain).unwrap(),
+                                                mainline.persistence.clone(),
                                                 mainline.checktable.clone(),
                                                 rx,
                                                 in_rx,

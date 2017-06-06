@@ -125,6 +125,12 @@ impl From<usize> for NodeAddress {
     }
 }
 
+impl From<LocalNodeIndex> for NodeAddress {
+    fn from(o: LocalNodeIndex) -> Self {
+        NodeAddress { addr: NodeAddress_::Local(o) }
+    }
+}
+
 impl fmt::Display for NodeAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.addr {
