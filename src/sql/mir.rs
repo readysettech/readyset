@@ -946,9 +946,8 @@ impl SqlToMirConverter {
                         // Function columns without GROUP BY
                         for computed_col in &computed_cols_cgn.columns {
 
-                            let agg_node_name = &format!("q_{:x}_n{}",
-                                                         qg.signature().hash,
-                                                         new_node_count);
+                            let agg_node_name =
+                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
                             let over_col = target_columns_from_computed_column(computed_col);
 
@@ -1090,12 +1089,11 @@ impl SqlToMirConverter {
                 v
             });
 
-            let leaf_project_node = self.make_project_node(&format!("q_{:x}_n{}",
-                                                                    qg.signature().hash,
-                                                                    new_node_count),
-                                                           final_node,
-                                                           projected_columns,
-                                                           vec![]);
+            let leaf_project_node =
+                self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                                       final_node,
+                                       projected_columns,
+                                       vec![]);
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a
