@@ -94,9 +94,13 @@ impl Ingredient for Project {
                 for i in e {
                     new_r.push(r[*i].clone());
                 }
-                let a = self.additional.as_ref().unwrap();
-                for i in a {
-                    new_r.push(i.clone());
+                match self.additional {
+                    Some(ref a) => {
+                        for i in a {
+                            new_r.push(i.clone());
+                        }
+                    }
+                    None => (),
                 }
                 **r = sync::Arc::new(new_r);
             }
