@@ -910,10 +910,12 @@ impl<'a> Migration<'a> {
                 continue;
             }
 
-            let mut d = domain::DomainHandle::new(domain);
+            let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
+            let mut d = domain::DomainHandle::new(domain,
+                                                  mainline.ingredients[nodes[0].0].sharded_by());
             d.boot(&log,
                    &mut mainline.ingredients,
-                   uninformed_domain_nodes.remove(&domain).unwrap(),
+                   nodes,
                    mainline.persistence.clone(),
                    mainline.checktable.clone(),
                    start_ts);

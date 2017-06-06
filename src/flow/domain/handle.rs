@@ -38,16 +38,38 @@ impl Clone for DomainHandle {
 }
 
 impl DomainHandle {
-    pub fn new(domain: domain::Index) -> Self {
-        let (in_tx, in_rx) = mpsc::sync_channel(256);
-        let (tx, rx) = mpsc::sync_channel(1);
+    pub fn new(domain: domain::Index, sharded_by: Sharding) -> Self {
+        let mut txs = Vec::new();
+        let mut in_txs = Vec::new();
+        let mut rxs = Vec::new();
+        {
+            let mut add = || {
+                let (in_tx, in_rx) = mpsc::sync_channel(256);
+                let (tx, rx) = mpsc::sync_channel(1);
+                txs.push(tx);
+                in_txs.push(in_tx);
+                rxs.push((rx, in_rx));
+            };
+            add();
+            match sharded_by {
+                Sharding::None => {}
+                _ => {
+                    // NOTE: warning to future self
+                    // the code currently relies on the fact that two domains that are sharded by
+                    // the same key *also* have the same number of shards. if this no longer holds,
+                    // we actually need to do a shuffle, otherwise writes will end up on the wrong
+                    // shard. keep that in mind.
+                    add();
+                }
+            }
+        }
         DomainHandle {
+            txs,
+            in_txs,
+            rxs,
             idx: domain,
-            txs: vec![tx],
-            in_txs: vec![in_tx],
-            threads: Vec::new(),
-            rxs: vec![(rx, in_rx)],
             tx_buf: None,
+            threads: Vec::new(),
         }
     }
 
