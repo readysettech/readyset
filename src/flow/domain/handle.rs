@@ -73,14 +73,19 @@ impl DomainHandle {
                 persistence_params: persistence::Parameters,
                 checktable: Arc<Mutex<checktable::CheckTable>>,
                 ts: i64) {
-        let nodes = Self::build_descriptors(graph, nodes);
-        for (rx, in_rx) in self.rxs.drain(..) {
+        let mut nodes = Some(Self::build_descriptors(graph, nodes));
+        let n = self.rxs.len();
+        for (i, (rx, in_rx)) in self.rxs.drain(..).enumerate() {
             // XXX: also log which shard
             let logger = log.new(o!("domain" => self.idx.index()));
-            // XXX: avoid cloning on last shard?
+            let nodes = if i == n - 1 {
+                nodes.take().unwrap()
+            } else {
+                nodes.clone().unwrap()
+            };
             let domain = domain::Domain::new(logger,
                                              self.idx,
-                                             nodes.clone(),
+                                             nodes,
                                              persistence_params.clone(),
                                              checktable.clone(),
                                              ts);

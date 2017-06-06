@@ -803,8 +803,6 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
-            //
-            // FIXME: iteration order needs to be the same for all shard domains!
             for &(ni, new) in nodes.iter() {
                 if new {
                     debug!(log,
@@ -907,7 +905,7 @@ impl<'a> Migration<'a> {
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
         for domain in changed_domains {
-            if !mainline.domains.contains_key(&domain) {
+            if mainline.domains.contains_key(&domain) {
                 // this is not a new domain
                 continue;
             }
