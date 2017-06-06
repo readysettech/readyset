@@ -87,6 +87,7 @@ struct Waiting {
 
 pub struct Domain {
     index: Index,
+    _shard: usize,
 
     nodes: DomainNodes,
     state: StateMap,
@@ -114,6 +115,7 @@ pub struct Domain {
 impl Domain {
     pub fn new(log: Logger,
                index: Index,
+               shard: usize,
                nodes: DomainNodes,
                persistence_parameters: persistence::Parameters,
                checktable: Arc<Mutex<checktable::CheckTable>>,
@@ -127,6 +129,7 @@ impl Domain {
 
         Domain {
             index,
+            _shard: shard,
             transaction_state: transactions::DomainState::new(index, checktable, ts),
             persistence_parameters,
             nodes,
@@ -1574,7 +1577,9 @@ impl Domain {
                 self.inject_tx = Some(inject_tx);
 
                 let mut group_commit_queues =
-                    persistence::GroupCommitQueueSet::new(self.index, &self.persistence_parameters);
+                    persistence::GroupCommitQueueSet::new(self.index,
+                                                          self._shard,
+                                                          &self.persistence_parameters);
 
                 self.total_time.start();
                 self.total_ptime.start();

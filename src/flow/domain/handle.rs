@@ -76,8 +76,11 @@ impl DomainHandle {
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
         let n = self.rxs.len();
         for (i, (rx, in_rx)) in self.rxs.drain(..).enumerate() {
-            // XXX: also log which shard
-            let logger = log.new(o!("domain" => self.idx.index()));
+            let logger = if n == 1 {
+                log.new(o!("domain" => self.idx.index()))
+            } else {
+                log.new(o!("domain" => format!("{}.{}", self.idx.index(), i)))
+            };
             let nodes = if i == n - 1 {
                 nodes.take().unwrap()
             } else {
@@ -85,6 +88,7 @@ impl DomainHandle {
             };
             let domain = domain::Domain::new(logger,
                                              self.idx,
+                                             i,
                                              nodes,
                                              persistence_params.clone(),
                                              checktable.clone(),
