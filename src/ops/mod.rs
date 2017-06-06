@@ -7,7 +7,6 @@ pub mod base;
 pub mod grouped;
 pub mod join;
 pub mod latest;
-pub mod permute;
 pub mod project;
 pub mod union;
 pub mod identity;
@@ -22,7 +21,6 @@ pub enum NodeOperator {
     Concat(grouped::GroupedOperator<grouped::concat::GroupConcat>),
     Join(join::Join),
     Latest(latest::Latest),
-    Permute(permute::Permute),
     Project(project::Project),
     Union(union::Union),
     Identity(identity::Identity),
@@ -49,7 +47,6 @@ nodeop_from_impl!(NodeOperator::Concat,
                   grouped::GroupedOperator<grouped::concat::GroupConcat>);
 nodeop_from_impl!(NodeOperator::Join, join::Join);
 nodeop_from_impl!(NodeOperator::Latest, latest::Latest);
-nodeop_from_impl!(NodeOperator::Permute, permute::Permute);
 nodeop_from_impl!(NodeOperator::Project, project::Project);
 nodeop_from_impl!(NodeOperator::Union, union::Union);
 nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
@@ -65,7 +62,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Permute(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
@@ -84,7 +80,6 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
             NodeOperator::Join(ref i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref i) => i.$fn($($arg),*),
-            NodeOperator::Permute(ref i) => i.$fn($($arg),*),
             NodeOperator::Project(ref i) => i.$fn($($arg),*),
             NodeOperator::Union(ref i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref i) => i.$fn($($arg),*),

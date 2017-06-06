@@ -12,7 +12,6 @@ use ops::grouped::extremum::Extremum as ExtremumKind;
 use ops::join::{Join, JoinType};
 use ops::latest::Latest;
 use ops::project::Project;
-use ops::permute::Permute;
 use sql::QueryFlowParts;
 
 pub mod reuse;
@@ -474,8 +473,7 @@ impl MirNode {
                     }
                 }
             }
-            MirNodeType::Project { ref emit, .. } |
-            MirNodeType::Permute { ref emit } => {
+            MirNodeType::Project { ref emit, .. } => {
                 for c in emit {
                     if !columns.contains(&c) {
                         columns.push(c.clone());
@@ -650,11 +648,6 @@ impl MirNode {
                                           literals,
                                           mig)
                     }
-                    MirNodeType::Permute { ref emit } => {
-                        assert_eq!(self.ancestors.len(), 1);
-                        let parent = self.ancestors[0].clone();
-                        make_permute_node(&name, parent, self.columns.as_slice(), emit, mig)
-                    }
                     MirNodeType::Reuse { ref node } => {
                         match *node.borrow()
                            .flow_node
@@ -765,10 +758,6 @@ pub enum MirNodeType {
         emit: Vec<Column>,
         literals: Vec<(String, DataType)>,
     },
-    /// emit columns
-    // currently unused
-    #[allow(dead_code)]
-    Permute { emit: Vec<Column> },
     /// emit columns left, emit columns right
     // currently unused
     #[allow(dead_code)]
@@ -810,8 +799,7 @@ impl MirNodeType {
             MirNodeType::LeftJoin { ref mut project, .. } => {
                 project.push(c);
             }
-            MirNodeType::Project { ref mut emit, .. } |
-            MirNodeType::Permute { ref mut emit } => {
+            MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
             MirNodeType::Union { .. } => unimplemented!(),
@@ -1138,14 +1126,6 @@ impl Debug for MirNodeType {
                     .join(", ");
                 write!(f, "⧖ γ[{}]", key_cols)
             }
-            MirNodeType::Permute { ref emit } => {
-                write!(f,
-                       "π [{}]",
-                       emit.iter()
-                           .map(|c| c.name.as_str())
-                           .collect::<Vec<_>>()
-                           .join(", "))
-            }
             MirNodeType::Project {
                 ref emit,
                 ref literals,
@@ -1458,25 +1438,6 @@ fn make_latest_node(name: &str,
                                 column_names.as_slice(),
                                 Latest::new(parent_na, group_col_indx));
     FlowNode::New(na)
-}
-
-fn make_permute_node(name: &str,
-                     parent: MirNodeRef,
-                     columns: &[Column],
-                     emit: &Vec<Column>,
-                     mut mig: &mut Migration)
-                     -> FlowNode {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
-
-    let projected_column_ids = emit.iter()
-        .map(|c| parent.borrow().column_id_for_column(c))
-        .collect::<Vec<_>>();
-
-    let n = mig.add_ingredient(String::from(name),
-                               column_names.as_slice(),
-                               Permute::new(parent_na, projected_column_ids.as_slice()));
-    FlowNode::New(n)
 }
 
 fn make_project_node(name: &str,

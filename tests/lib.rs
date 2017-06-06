@@ -658,7 +658,9 @@ fn migrate_added_columns() {
     let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 0]));
+        let b = mig.add_ingredient("x",
+                                   &["c", "b"],
+                                   distributary::Project::new(a, &[2, 0], None));
         mig.maintain(b, 1);
         mig.commit();
         b
@@ -767,7 +769,9 @@ fn key_on_added() {
     let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient("x", &["c", "b"], distributary::Permute::new(a, &[2, 1]));
+        let b = mig.add_ingredient("x",
+                                   &["c", "b"],
+                                   distributary::Project::new(a, &[2, 1], None));
         mig.maintain(b, 0);
         mig.commit();
         b
