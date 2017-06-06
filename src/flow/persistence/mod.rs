@@ -101,7 +101,7 @@ impl GroupCommitQueue {
             .iter()
             .map(|p| match **p {
                      Packet::Transaction { ref data, ref link, .. } |
-                     Packet::Message { ref data, ref link, .. } => (link, data),
+                     Packet::Message { ref data, ref link, .. } => (link.dst, data),
                      _ => unreachable!(),
                  })
             .collect();

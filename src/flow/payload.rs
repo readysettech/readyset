@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use std::time;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Link {
     pub src: NodeAddress,
     pub dst: NodeAddress,
