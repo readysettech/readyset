@@ -13,7 +13,7 @@ pub mod identity;
 pub mod filter;
 pub mod topk;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
     Base(base::Base),
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use flow::prelude::*;
 use petgraph::graph::NodeIndex;
 
+#[derive(Clone)]
 pub struct Egress {
     txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
     tags: HashMap<Tag, NodeAddress>,

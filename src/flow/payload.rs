@@ -29,6 +29,8 @@ impl fmt::Debug for Link {
         write!(f, "{:?} -> {:?}", self.src, self.dst)
     }
 }
+
+#[derive(Clone)]
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
@@ -36,6 +38,7 @@ pub enum TriggerEndpoint {
     Local(Vec<usize>),
 }
 
+#[derive(Clone)]
 pub enum InitialState {
     PartialLocal(usize),
     IndexedLocal(Vec<Vec<usize>>),

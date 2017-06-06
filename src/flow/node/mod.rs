@@ -16,6 +16,7 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
+#[derive(Clone)]
 pub struct Node {
     name: String,
     index: Option<NodeAddress>,

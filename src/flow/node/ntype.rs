@@ -3,6 +3,7 @@ use flow::hook;
 use flow::node::special;
 use flow::core::processing::Ingredient;
 
+#[derive(Clone)]
 pub enum NodeType {
     Ingress,
     Internal(ops::NodeOperator),

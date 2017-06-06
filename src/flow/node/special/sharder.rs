@@ -10,6 +10,16 @@ pub struct Sharder {
     shard_by: usize,
 }
 
+impl Clone for Sharder {
+    fn clone(&self) -> Self {
+        Sharder {
+            txs: self.txs.clone(),
+            sharded: Default::default(),
+            shard_by: self.shard_by,
+        }
+    }
+}
+
 impl Sharder {
     pub fn new(by: usize) -> Self {
         Self {

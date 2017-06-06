@@ -22,6 +22,12 @@ pub struct Hook {
     state: State,
 }
 
+impl Clone for Hook {
+    fn clone(&self) -> Self {
+        unreachable!("hooks should never be sharded, and hence never cloned");
+    }
+}
+
 impl Hook {
     /// Create a new Hook which is connected to some number of Memcached servers
     ///
