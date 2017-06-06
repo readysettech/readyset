@@ -47,12 +47,13 @@ impl Clone for Mutator {
 
 impl Mutator {
     fn inject_dropped_cols(&self, rs: &mut Records) {
-        // NOTE: this is pretty expensive until https://github.com/contain-rs/vec-map/pull/33 lands
         let ndropped = self.dropped.len();
         if ndropped != 0 {
             // inject defaults for dropped columns
             let dropped = self.dropped.iter().rev();
             for r in rs.iter_mut() {
+                use std::mem;
+
                 // get a handle to the underlying data vector
                 use std::sync::Arc;
                 let v = match *r {
@@ -74,6 +75,16 @@ impl Mutator {
                 let mut free = r.len() + ndropped;
                 let mut last_unmoved = r.len() - 1;
                 unsafe { r.set_len(free) };
+                // *technically* we should set all the extra elements just in case we get a panic
+                // below, because otherwise we might call drop() on uninitialized memory. we would
+                // do that like this (note the ::forget() on the swapped-out value):
+                //
+                //   for i in (free - ndropped)..r.len() {
+                //       mem::forget(mem::replace(r.get_mut(i).unwrap(), DataType::None));
+                //   }
+                //
+                // but for efficiency we dont' do that, and just make sure that the code below
+                // doesn't panic. what's the worst that could happen, right?
 
                 // keep trying to insert the next dropped column
                 'next: for (next_insert, default) in dropped {
@@ -81,8 +92,7 @@ impl Mutator {
                     // we just hoist it here to avoid underflow if we ever insert at 0
                     free -= 1;
 
-                    // the next free slot is not one we want to insert into
-                    // keep shifting elements until it is
+                    // shift elements until the next free slot is the one we want to insert into
                     while free > next_insert {
                         // shift another element so we the free slot is at a lower index
                         r.swap(last_unmoved, free);
@@ -97,7 +107,11 @@ impl Mutator {
                     }
 
                     // we're at the right index -- insert the dropped value
-                    *r.get_mut(next_insert).unwrap() = default.clone();
+                    let current = r.get_mut(next_insert).unwrap();
+                    let old = mem::replace(current, default.clone());
+                    // the old value is uninitialized memory!
+                    // (remember how we called set_len above?)
+                    mem::forget(old);
 
                     // here, I'll help:
                     // free -= 1;
