@@ -247,8 +247,6 @@ pub fn connect(log: &Logger,
         } else {
             continue;
         }
-        // FIXME: if ingress is sharded we need to send multiple txs to egress
-        assert_eq!(n.sharded_by(), Sharding::None);
 
         for sender in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             let sender_node = &graph[sender];
@@ -258,19 +256,33 @@ pub fn connect(log: &Logger,
                            "egress" => sender.index(),
                            "ingress" => node.index()
                     );
-                // FIXME: make sure a sharded egress only sends to corresponding
-                // sharded other domain.
+
+                // we need to be a bit careful here in the particular case where we have a sharded
+                // egress that sends to another domain sharded by the same key. specifically, in
+                // that case we shouldn't have each shard of domain A send to all the shards of B.
+                // instead A[0] should send to B[0], A[1] to B[1], etc.
                 let mut txs = domains[&n.domain()].get_txs();
-                assert_eq!(txs.len(), 1);
-                domains
-                    .get_mut(&sender_node.domain())
-                    .unwrap()
-                    .send(box Packet::UpdateEgress {
-                              node: sender_node.local_addr().as_local().clone(),
-                              new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
-                              new_tag: None,
-                          })
-                    .unwrap();
+                let domain = domains.get_mut(&sender_node.domain()).unwrap();
+                if sender_node.sharded_by() != Sharding::None && txs.len() != 1 {
+                    for (i, tx) in txs.into_iter().enumerate() {
+                        domain
+                            .send_to_shard(i,
+                                           box Packet::UpdateEgress {
+                                               node: sender_node.local_addr().as_local().clone(),
+                                               new_tx: Some((node.into(), *n.local_addr(), tx)),
+                                               new_tag: None,
+                                           })
+                            .unwrap();
+                    }
+                } else {
+                    domain
+                        .send(box Packet::UpdateEgress {
+                                  node: sender_node.local_addr().as_local().clone(),
+                                  new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
+                                  new_tag: None,
+                              })
+                        .unwrap();
+                }
             } else if sender_node.is_sharder() {
                 trace!(log,
                            "connecting";

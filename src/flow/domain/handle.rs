@@ -244,6 +244,13 @@ impl DomainHandle {
         Ok(())
     }
 
+    pub fn send_to_shard(&mut self,
+                         i: usize,
+                         p: Box<Packet>)
+                         -> Result<(), mpsc::SendError<Box<Packet>>> {
+        self.txs[i].send(p)
+    }
+
     pub fn base_send(&mut self, p: Box<Packet>) -> Result<(), mpsc::SendError<Box<Packet>>> {
         self.tx_buf = Some(p);
         let txs = self.in_txs.len();
