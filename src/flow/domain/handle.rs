@@ -239,4 +239,14 @@ impl DomainHandle {
         }
         Ok(())
     }
+
+    pub fn base_send(&mut self, p: Box<Packet>) -> Result<(), mpsc::SendError<Box<Packet>>> {
+        self.tx_buf = Some(p);
+        let txs = self.in_txs.len();
+        for i in 0..txs {
+            let p = self.nextp(i, txs);
+            self.in_txs[i].send(p)?;
+        }
+        Ok(())
+    }
 }

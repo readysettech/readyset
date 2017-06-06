@@ -121,7 +121,7 @@ impl Mutator {
         }
     }
 
-    fn send(&self, mut rs: Records) {
+    fn send(&mut self, mut rs: Records) {
         self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
             box Packet::Transaction {
@@ -138,10 +138,10 @@ impl Mutator {
             }
         };
 
-        self.tx.send(m).unwrap();
+        self.tx.base_send(m).unwrap();
     }
 
-    fn tx_send(&self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
+    fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
         self.inject_dropped_cols(&mut rs);
@@ -152,7 +152,7 @@ impl Mutator {
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),
         };
-        self.tx.send(m).unwrap();
+        self.tx.base_send(m).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
@@ -162,7 +162,7 @@ impl Mutator {
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
-    pub fn put<V>(&self, u: V) -> Result<(), MutatorError>
+    pub fn put<V>(&mut self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
         let data = vec![u.into()];
@@ -174,7 +174,7 @@ impl Mutator {
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_put<V>(&mut self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
         let data = vec![u.into()];
@@ -186,14 +186,17 @@ impl Mutator {
     }
 
     /// Perform a non-transactional delete from the base node this Mutator was generated for.
-    pub fn delete<I>(&self, key: I) -> Result<(), MutatorError>
+    pub fn delete<I>(&mut self, key: I) -> Result<(), MutatorError>
         where I: Into<Vec<DataType>>
     {
         Ok(self.send(vec![Record::DeleteRequest(key.into())].into()))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete<I>(&self, key: I, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_delete<I>(&mut self,
+                                   key: I,
+                                   t: checktable::Token)
+                                   -> Result<i64, MutatorError>
         where I: Into<Vec<DataType>>
     {
         self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
@@ -202,7 +205,7 @@ impl Mutator {
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
-    pub fn update<V>(&self, u: V) -> Result<(), MutatorError>
+    pub fn update<V>(&mut self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
         assert!(!self.primary_key.is_empty(),
@@ -213,18 +216,20 @@ impl Mutator {
             return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
         }
 
-        Ok(self.send(vec![Record::DeleteRequest(self.primary_key
-                                                    .iter()
-                                                    .map(|&col| &u[col])
-                                                    .cloned()
-                                                    .collect()),
-                          u.into()]
-                         .into()))
+        let pkey = self.primary_key
+            .iter()
+            .map(|&col| &u[col])
+            .cloned()
+            .collect();
+        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
     /// generated for.
-    pub fn transactional_update<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_update<V>(&mut self,
+                                   u: V,
+                                   t: checktable::Token)
+                                   -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
         assert!(!self.primary_key.is_empty(),

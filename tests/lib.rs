@@ -33,8 +33,8 @@ fn it_works() {
     };
 
     let cq = g.get_getter(c).unwrap();
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
@@ -95,8 +95,8 @@ fn it_works_streaming() {
         (a, b, cq)
     };
 
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
@@ -133,7 +133,7 @@ fn shared_interdomain_ancestor() {
         (a, bq, cq)
     };
 
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
@@ -171,8 +171,8 @@ fn it_works_w_mat() {
     };
 
     let cq = g.get_getter(c).unwrap();
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a few values on a
@@ -233,8 +233,8 @@ fn it_works_deletion() {
         (a, b, cq)
     };
 
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
 
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
@@ -299,9 +299,9 @@ fn votes() {
     let vcq = g.get_getter(vc).unwrap();
     let endq = g.get_getter(end).unwrap();
 
-    let mut1 = g.get_mutator(article1);
-    let mut2 = g.get_mutator(article2);
-    let mutv = g.get_mutator(vote);
+    let mut mut1 = g.get_mutator(article1);
+    let mut mut2 = g.get_mutator(article2);
+    let mut mutv = g.get_mutator(vote);
 
     let a1: distributary::DataType = 1.into();
     let a2: distributary::DataType = 2.into();
@@ -404,9 +404,9 @@ fn transactional_vote() {
     let endq_title = g.get_transactional_getter(end_title).unwrap();
     let endq_votes = g.get_transactional_getter(end_votes).unwrap();
 
-    let mut1 = g.get_mutator(article1);
-    let mut2 = g.get_mutator(article2);
-    let mutv = g.get_mutator(vote);
+    let mut mut1 = g.get_mutator(article1);
+    let mut mut2 = g.get_mutator(article2);
+    let mut mutv = g.get_mutator(vote);
 
     let a1: distributary::DataType = 1.into();
     let a2: distributary::DataType = 2.into();
@@ -514,8 +514,8 @@ fn empty_migration() {
     };
 
     let cq = g.get_getter(c).unwrap();
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
     let id: distributary::DataType = 1.into();
 
     // send a value on a
@@ -554,7 +554,7 @@ fn simple_migration() {
     };
 
     let aq = g.get_getter(a).unwrap();
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -575,7 +575,7 @@ fn simple_migration() {
     };
 
     let bq = g.get_getter(b).unwrap();
-    let mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b);
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -602,7 +602,7 @@ fn add_columns() {
         mig.commit();
         (a, aq)
     };
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
@@ -626,7 +626,7 @@ fn add_columns() {
                Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()]));
 
     // get a new muta and send a new value on it
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // check that a got it, and included the third column
@@ -648,7 +648,7 @@ fn migrate_added_columns() {
         mig.commit();
         a
     };
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // send a value on a
     muta.put(vec![id.clone(), "y".into()]).unwrap();
@@ -671,7 +671,7 @@ fn migrate_added_columns() {
     // send another (old) value on a
     muta.put(vec![id.clone(), "z".into()]).unwrap();
     // and an entirely new value
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // give it some time to propagate
@@ -703,7 +703,7 @@ fn migrate_drop_columns() {
         mig.commit();
         (a, stream)
     };
-    let muta1 = g.get_mutator(a);
+    let mut muta1 = g.get_mutator(a);
 
     // send a value on a
     muta1.put(vec![id.clone(), "bx".into()]).unwrap();
@@ -718,7 +718,7 @@ fn migrate_drop_columns() {
 
     // new mutator should only require one column
     // and should inject default for a.b
-    let muta2 = g.get_mutator(a);
+    let mut muta2 = g.get_mutator(a);
     muta2.put(vec![id.clone()]).unwrap();
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
@@ -730,7 +730,7 @@ fn migrate_drop_columns() {
     }
 
     // new mutator allows putting two values, and injects default for a.b
-    let muta3 = g.get_mutator(a);
+    let mut muta3 = g.get_mutator(a);
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
@@ -797,7 +797,7 @@ fn transactional_migration() {
     };
 
     let aq = g.get_transactional_getter(a).unwrap();
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // send a value on a
     muta.transactional_put(vec![1.into(), 2.into()], distributary::Token::empty())
@@ -819,7 +819,7 @@ fn transactional_migration() {
     };
 
     let bq = g.get_transactional_getter(b).unwrap();
-    let mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b);
 
     // send a value on b
     mutb.transactional_put(vec![2.into(), 4.into()], distributary::Token::empty())
@@ -874,8 +874,8 @@ fn crossing_migration() {
         mig.commit();
         (a, b)
     };
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
 
     let mut mig = g.start_migration();
     let mut emits = HashMap::new();
@@ -915,7 +915,7 @@ fn independent_domain_migration() {
     };
 
     let aq = g.get_getter(a).unwrap();
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
@@ -936,7 +936,7 @@ fn independent_domain_migration() {
     };
 
     let bq = g.get_getter(b).unwrap();
-    let mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b);
 
     // send a value on b
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
@@ -959,8 +959,8 @@ fn domain_amend_migration() {
         mig.commit();
         (a, b)
     };
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
 
     let mut mig = g.start_migration();
     let mut emits = HashMap::new();
@@ -1007,7 +1007,7 @@ fn state_replay_migration_stream() {
         mig.commit();
         a
     };
-    let muta = g.get_mutator(a);
+    let mut muta = g.get_mutator(a);
 
     // make a couple of records
     muta.put(vec![1.into(), "a".into()]).unwrap();
@@ -1033,7 +1033,7 @@ fn state_replay_migration_stream() {
 
         (out, b)
     };
-    let mutb = g.get_mutator(b);
+    let mut mutb = g.get_mutator(b);
 
     // if all went according to plan, the ingress to j's domains hould now contain all the records
     // that we initially inserted into a. thus, when we forward matching things through j, we
@@ -1138,8 +1138,8 @@ fn do_full_vote_migration(old_puts_after: bool) {
 
             (article, vote)
         };
-        let muta = g.get_mutator(article);
-        let mutv = g.get_mutator(vote);
+        let mut muta = g.get_mutator(article);
+        let mut mutv = g.get_mutator(vote);
 
         let n = 1000i64;
         let title: DataType = "foo".into();
@@ -1198,7 +1198,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
         };
 
         let last = g.get_getter(last).unwrap();
-        let mutr = g.get_mutator(rating);
+        let mut mutr = g.get_mutator(rating);
         for i in 0..n {
             if old_puts_after {
                 mutv.put(vec![1.into(), i.into()]).unwrap();
@@ -1264,7 +1264,7 @@ fn live_writes() {
     }
 
     let vc_state = g.get_getter(vc).unwrap();
-    let add = g.get_mutator(vote);
+    let mut add = g.get_mutator(vote);
 
     let ids = 1000;
     let votes = 7;
@@ -1327,8 +1327,8 @@ fn state_replay_migration_query() {
 
         (a, b)
     };
-    let muta = g.get_mutator(a);
-    let mutb = g.get_mutator(b);
+    let mut muta = g.get_mutator(a);
+    let mut mutb = g.get_mutator(b);
 
     // make a couple of records
     muta.put(vec![1.into(), "a".into()]).unwrap();
