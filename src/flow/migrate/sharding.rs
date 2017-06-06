@@ -79,20 +79,28 @@ pub fn shard(log: &Logger,
             continue;
         }
 
+        let mut complex = false;
+        for (_, lookup_col) in &need_sharding {
+            if lookup_col.len() != 1 {
+                complex = true;
+            }
+        }
+        if complex {
+            // not supported yet -- force no sharding
+            // TODO: if we're sharding by a two-part key and need sharding by the *first* part
+            // of that key, we can probably re-use the existing sharding?
+            error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
+            for (&ni, _) in &input_shardings {
+                reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+            }
+            continue;
+        }
+
         // if a node does a lookup into itself by a given key, it must be sharded by that key (or
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
         if let Some(want_sharding) = need_sharding.remove(&node.into()) {
-            if want_sharding.len() != 1 {
-                // not supported yet -- force no sharding
-                // TODO: if we're sharding by a two-part key and need sharding by the *first* part
-                // of that key, we can probably re-use the existing sharding?
-                error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
-                for (&ni, _) in &input_shardings {
-                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
-                }
-                continue;
-            }
+            assert_eq!(want_sharding.len(), 1);
             let want_sharding = want_sharding[0];
 
             let resolved = if graph[node].is_internal() {
@@ -136,9 +144,7 @@ pub fn shard(log: &Logger,
                     // force no sharding :(
                     let mut ok = true;
                     for (ni, lookup_col) in &need_sharding {
-                        if lookup_col.len() != 1 {
-                            unimplemented!();
-                        }
+                        assert_eq!(lookup_col.len(), 1);
                         let lookup_col = lookup_col[0];
 
                         if let Some(&in_shard_col) = want_sharding_input.get(ni) {
@@ -308,10 +314,10 @@ pub fn shard(log: &Logger,
                 .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
                 .collect();
             let by = graph[graph
-                .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
-                .next()
-                .unwrap()]
-                    .sharded_by();
+                               .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
+                               .next()
+                               .unwrap()]
+                .sharded_by();
             // *technically* we could also push sharding up even if some parents are already
             // sharded, but let's leave that for another day.
             //
