@@ -927,7 +927,7 @@ impl<'a> Migration<'a> {
                                                 domain.index().into(),
                                                 &mut mainline.ingredients,
                                                 uninformed_domain_nodes.remove(&domain).unwrap(),
-                                                &mainline.persistence,
+                                                mainline.persistence.clone(),
                                                 mainline.checktable.clone(),
                                                 rx,
                                                 in_rx,

@@ -93,7 +93,7 @@ pub struct Domain {
     not_ready: HashSet<LocalNodeIndex>,
 
     transaction_state: transactions::DomainState,
-    group_commit_queue: Option<persistence::GroupCommitQueue>,
+    persistence_parameters: Option<persistence::Parameters>,
 
     mode: DomainMode,
     waiting: local::Map<Waiting>,
@@ -113,7 +113,7 @@ impl Domain {
     pub fn new(log: Logger,
                index: Index,
                nodes: DomainNodes,
-               persistence: &Option<persistence::Parameters>,
+               persistence_parameters: Option<persistence::Parameters>,
                checktable: Arc<Mutex<checktable::CheckTable>>,
                ts: i64)
                -> Self {
@@ -123,21 +123,10 @@ impl Domain {
             .map(|n| *n.borrow().local_addr().as_local())
             .collect();
 
-        let group_commit_queue = persistence.as_ref().map(|params| {
-            let log_filename = {
-                use time;
-                let now = time::now();
-                let today = time::strftime("%F", &now).unwrap();
-                format!("soup-log-{}-{}.json", today, index.index())
-            };
-
-            persistence::GroupCommitQueue::new(&log_filename, params)
-        });
-
         Domain {
             _index: index,
             transaction_state: transactions::DomainState::new(index, checktable, ts),
-            group_commit_queue,
+            persistence_parameters,
             nodes,
             state: StateMap::default(),
             log,
@@ -1585,12 +1574,22 @@ impl Domain {
 
                 self.inject_tx = Some(inject_tx);
 
+                let mut group_commit_queue = self.persistence_parameters.as_ref().map(|params| {
+                    let log_filename = {
+                        use time;
+                        let now = time::now();
+                        let today = time::strftime("%F", &now).unwrap();
+                        format!("soup-log-{}-{}.json", today, self._index.index())
+                    };
+
+                    persistence::GroupCommitQueue::new(&log_filename, params)
+                });
+
                 self.total_time.start();
                 self.total_ptime.start();
                 let mut packet = None;
-                let mut durable_packets = Vec::new();
                 loop {
-                    let duration_until_flush = self.group_commit_queue
+                    let duration_until_flush = group_commit_queue
                         .as_ref()
                         .and_then(|q| q.duration_until_flush());
                     let spin_duration = duration_until_flush
@@ -1614,11 +1613,7 @@ impl Domain {
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        self.group_commit_queue
-                            .as_mut()
-                            .unwrap()
-                            .flush(&mut durable_packets);
-                        for m in durable_packets.drain(..) {
+                        for m in group_commit_queue.as_mut().unwrap().flush() {
                             self.handle(m);
                         }
                         continue;
@@ -1656,13 +1651,12 @@ impl Domain {
                             ack.send(back_tx.clone()).unwrap();
                         }
                         Ok(m) => {
-                            if self.group_commit_queue.is_some() &&
-                               self.group_commit_queue.as_mut().unwrap().should_persist(&m, &self.nodes) {
-                                self.group_commit_queue
-                                    .as_mut()
-                                    .unwrap()
-                                    .append(m, &mut durable_packets);
-                                for m in durable_packets.drain(..) {
+                            if group_commit_queue.is_some() &&
+                               group_commit_queue
+                                   .as_mut()
+                                   .unwrap()
+                                   .should_persist(&m, &self.nodes) {
+                                for m in group_commit_queue.as_mut().unwrap().append(m) {
                                     self.handle(m);
                                 }
                             } else {

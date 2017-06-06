@@ -9,10 +9,12 @@ use std::fs::{File, OpenOptions};
 use std::mem;
 use std::path::PathBuf;
 use std::time;
+use std::vec::Drain;
 
 use flow::prelude::*;
 
 /// Parameters to control the operation of GroupCommitQueue.
+#[derive(Clone)]
 pub struct Parameters {
     /// Number of elements to buffer before flushing.
     pub queue_capacity: usize,
@@ -25,6 +27,9 @@ pub struct Parameters {
 pub struct GroupCommitQueue {
     /// Packets that are queued to be persisted.
     pending_packets: Vec<Box<Packet>>,
+
+    /// Packets that have already been persisted, and should now be handled by the domain.
+    durable_packets: Vec<Box<Packet>>,
 
     /// Time when the first packet was inserted into pending_packets, or none if pending_packets is
     /// empty. A flush should occur on or before wait_start + timeout.
@@ -67,6 +72,7 @@ impl GroupCommitQueue {
 
         Self {
             pending_packets: Vec::with_capacity(params.queue_capacity),
+            durable_packets: Vec::with_capacity(params.queue_capacity),
             wait_start: None,
 
             durable_log: Some(durable_log),
@@ -105,8 +111,8 @@ impl GroupCommitQueue {
 
     /// Flush any pending packets to disk, and return an iterator over the packets that were
     /// written.
-    pub fn flush(&mut self, durable_packets: &mut Vec<Box<Packet>>) {
-        assert_eq!(durable_packets.len(), 0);
+    pub fn flush(&mut self) -> Drain<Box<Packet>> {
+        assert_eq!(self.durable_packets.len(), 0);
 
         if !self.pending_packets.is_empty() {
             self.write_packets();
@@ -115,20 +121,23 @@ impl GroupCommitQueue {
             self.durable_log =
                 Some(BufWriter::with_capacity_and_strategy(self.capacity * 1024, file, WhenFull));
             self.wait_start = None;
-            mem::swap(&mut self.pending_packets, durable_packets)
+            mem::swap(&mut self.pending_packets, &mut self.durable_packets)
         }
+        self.durable_packets.drain(..)
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append(&mut self, p: Box<Packet>, durable_packets: &mut Vec<Box<Packet>>) {
+    pub fn append(&mut self, p: Box<Packet>) -> Drain<Box<Packet>> {
         self.pending_packets.push(p);
 
         if self.pending_packets.len() >= self.capacity {
-            self.flush(durable_packets);
+            return self.flush();
         } else if self.wait_start.is_none() {
             self.wait_start = Some(time::Instant::now());
         }
+
+        self.durable_packets.drain(..)
     }
 
     /// Returns how long until a flush should occur.
