@@ -84,7 +84,7 @@ struct Waiting {
 }
 
 pub struct Domain {
-    _index: Index,
+    index: Index,
 
     nodes: DomainNodes,
     state: StateMap,
@@ -124,7 +124,7 @@ impl Domain {
             .collect();
 
         Domain {
-            _index: index,
+            index,
             transaction_state: transactions::DomainState::new(index, checktable, ts),
             persistence_parameters,
             nodes,
@@ -1574,22 +1574,16 @@ impl Domain {
 
                 self.inject_tx = Some(inject_tx);
 
-                let mut group_commit_queue = self.persistence_parameters.as_ref().map(|params| {
-                    let log_filename = {
-                        use time;
-                        let now = time::now();
-                        let today = time::strftime("%F", &now).unwrap();
-                        format!("soup-log-{}-{}.json", today, self._index.index())
-                    };
-
-                    persistence::GroupCommitQueue::new(&log_filename, params)
-                });
+                let mut group_commit_queues =
+                    self.persistence_parameters
+                        .as_ref()
+                        .map(|params| persistence::GroupCommitQueueSet::new(self.index, &params));
 
                 self.total_time.start();
                 self.total_ptime.start();
                 let mut packet = None;
                 loop {
-                    let duration_until_flush = group_commit_queue
+                    let duration_until_flush = group_commit_queues
                         .as_ref()
                         .and_then(|q| q.duration_until_flush());
                     let spin_duration = duration_until_flush
@@ -1613,7 +1607,7 @@ impl Domain {
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        for m in group_commit_queue.as_mut().unwrap().flush() {
+                        for m in group_commit_queues.as_mut().unwrap().flush() {
                             self.handle(m);
                         }
                         continue;
@@ -1651,12 +1645,12 @@ impl Domain {
                             ack.send(back_tx.clone()).unwrap();
                         }
                         Ok(m) => {
-                            if group_commit_queue.is_some() &&
-                               group_commit_queue
+                            if group_commit_queues.is_some() &&
+                               group_commit_queues
                                    .as_mut()
                                    .unwrap()
                                    .should_persist(&m, &self.nodes) {
-                                for m in group_commit_queue.as_mut().unwrap().append(m) {
+                                for m in group_commit_queues.as_mut().unwrap().append(m) {
                                     self.handle(m);
                                 }
                             } else {

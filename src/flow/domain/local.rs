@@ -1,5 +1,5 @@
 use flow::prelude::*;
-use std::ops::Index;
+use std::ops::{Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::hash_map::Entry;
 
@@ -78,6 +78,14 @@ impl<T> Map<T> {
                                                            }))
     }
 
+    pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (NodeAddress, &'a mut T)> + 'a> {
+        Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
+                                                                   t.as_mut().map(|v| {
+                (unsafe { NodeAddress::make_local(i as u32) }, v)
+            })
+                                                               }))
+    }
+
     pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {
         Box::new(self.things.iter().filter_map(|t| t.as_ref()))
     }
@@ -100,6 +108,11 @@ impl<'a, T> Index<&'a LocalNodeIndex> for Map<T> {
     type Output = T;
     fn index(&self, index: &LocalNodeIndex) -> &Self::Output {
         self.get(index).unwrap()
+    }
+}
+impl<'a, T> IndexMut<&'a LocalNodeIndex> for Map<T> {
+    fn index_mut(&mut self, index: &LocalNodeIndex) -> &mut Self::Output {
+        self.get_mut(index).unwrap()
     }
 }
 
