@@ -230,20 +230,41 @@ impl CheckTable {
         }
     }
 
-    pub fn claim_timestamp(&mut self,
-                           base: NodeIndex,
-                           rs: &Records)
-                           -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
-        // Take timestamp
-        let ts = self.next_timestamp;
-        self.next_timestamp += 1;
+    pub fn attempt_claim_merged_timestamp<'a, 'b, I>(&'a mut self,
+                                                     base: NodeIndex,
+                                                     writes: I,
+                                                     decisions: &mut Vec<bool>)
+                                                     -> TransactionResult
+        where I: Iterator<Item = (Option<&'a Token>, &'a Records)>
+    {
+        decisions.clear();
 
-        // Compute the previous timestamp that each domain will see before getting this one
-        let prev_times = self.compute_previous_timestamps(Some(base));
+        let mut result = TransactionResult::Aborted;
+        for (token, rs) in writes {
+            let committed = token.map(|t|self.validate_token(t)).unwrap_or(true);
+            decisions.push(committed);
 
-        // Update checktables
-        self.last_base = Some(base);
-        self.toplevel.insert(base, ts);
+            if !committed {
+                continue;
+            }
+
+            match result {
+                TransactionResult::Committed(ts, _) => {
+                    self.update_granular_checktables(base.clone(), ts, rs);
+                }
+                TransactionResult::Aborted => {
+                    let (ts, prevs) = self.claim_timestamp(base, rs);
+                    result = TransactionResult::Committed(ts, prevs);
+                }
+            };
+        }
+        result
+    }
+
+    fn update_granular_checktables(&mut self,
+                                   base: NodeIndex,
+                                   ts: i64,
+                                   rs: &Records) {
         let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
         for record in rs.iter() {
             for (i, value) in record.iter().enumerate() {
@@ -260,6 +281,23 @@ impl CheckTable {
                 }
             }
         }
+    }
+
+    pub fn claim_timestamp(&mut self,
+                           base: NodeIndex,
+                           rs: &Records)
+                           -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prev_times = self.compute_previous_timestamps(Some(base));
+
+        // Update checktables
+        self.last_base = Some(base);
+        self.toplevel.insert(base, ts);
+        self.update_granular_checktables(base, ts, rs);
         (ts, prev_times)
     }
 

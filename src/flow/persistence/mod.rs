@@ -9,11 +9,15 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::mem;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time;
 use std::vec::Drain;
 
+
 use flow::domain;
 use flow::prelude::*;
+use checktable;
+
 
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone)]
@@ -181,6 +185,143 @@ impl GroupCommitQueueSet {
                          .unwrap_or(time::Duration::from_millis(0))
                  })
             .min()
+    }
+
+    fn merge_committed_packets<I>(packets: I) -> Option<Box<Packet>>
+        where I: Iterator<Item = Box<Packet>>
+    {
+        packets.fold(None, |mut acc, p| {
+            if acc.is_none() {
+                return Some(p);
+            }
+
+            match (acc.as_mut().unwrap(), p) {
+                (&mut box Packet::Message {
+                     link: ref acc_link,
+                     data: ref mut acc_data,
+                     tracer: ref mut acc_tracer,
+                 },
+                 box Packet::Message {
+                     link: ref p_link,
+                     data: ref mut p_data,
+                     tracer: ref mut p_tracer,
+                 }) |
+                (&mut box Packet::Transaction {
+                     link: ref acc_link,
+                     data: ref mut acc_data,
+                     tracer: ref mut acc_tracer,
+                     ..
+                 },
+                 box Packet::Transaction {
+                     link: ref p_link,
+                     data: ref mut p_data,
+                     tracer: ref mut p_tracer,
+                     ..
+                 }) => {
+                    assert_eq!(*acc_link, *p_link);
+                    acc_data.append(p_data);
+
+                    if acc_tracer.is_some() && p_tracer.is_some() {
+                        p_tracer
+                            .as_mut()
+                            .unwrap()
+                            .send((time::Instant::now(), PacketEvent::Merged))
+                            .unwrap();
+                    } else if p_tracer.is_some() {
+                        *acc_tracer = p_tracer.take();
+                    }
+                }
+                _ => unreachable!(),
+            }
+            acc
+        })
+    }
+
+    fn merge_transactional_packets(packets: &mut Vec<Box<Packet>>,
+                                   nodes: &DomainNodes,
+                                   checktable: &Arc<Mutex<checktable::CheckTable>>)
+                                   -> Option<Box<Packet>> {
+        let mut decisions = Vec::with_capacity(packets.len());
+
+        let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
+            nodes[&link.dst.as_local()]
+                .borrow()
+                .global_addr()
+                .as_global()
+                .clone()
+        } else {
+            unreachable!()
+        };
+
+        let transaction_state = {
+            let mut writes = Vec::with_capacity(packets.len());
+            for p in packets.iter() {
+                if let box Packet::Transaction {
+                           ref data,
+                           ref state,
+                           ..
+                       } = *p {
+                    match *state {
+                        TransactionState::Pending(ref token, _) => writes.push((Some(token), data)),
+                        TransactionState::WillCommit => writes.push((None, data)),
+                        TransactionState::Committed(..) => unreachable!(),
+                    }
+                } else {
+                    unreachable!();
+                };
+            }
+
+            checktable
+                .lock()
+                .unwrap()
+                .attempt_claim_merged_timestamp(base, writes.into_iter(), &mut decisions)
+        };
+
+        let (ts, prevs) = match transaction_state {
+            checktable::TransactionResult::Aborted => return None,
+            checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
+        };
+
+        let committed_packets = packets
+            .drain(..)
+            .zip(decisions.into_iter())
+            .map(|(mut p, d)| {
+                if let box Packet::Transaction {
+                           state: TransactionState::Pending(_, ref mut sender), ..
+                       } = p {
+                    if d {
+                        sender.send(Ok(ts)).unwrap();
+                    } else {
+                        sender.send(Err(())).unwrap();
+                    }
+                }
+                (p, d)
+            })
+            .filter(|&(_, ref d)| *d)
+            .map(|(p, _)| p);
+
+        let mut merged = Self::merge_committed_packets(committed_packets);
+        if let Some(&mut box Packet::Transaction { ref mut state, .. }) = merged.as_mut() {
+            *state = TransactionState::Committed(ts, base, prevs);
+        }
+        merged
+    }
+
+    fn merge_packets(packets: &mut Vec<Box<Packet>>,
+                     nodes: &DomainNodes,
+                     checktable: &Arc<Mutex<checktable::CheckTable>>)
+                     -> Option<Box<Packet>> {
+        if packets.is_empty() {
+            return None;
+        }
+
+        match packets[0] {
+            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..)),
+            box Packet::Transaction { .. } => {
+                Self::merge_transactional_packets(packets, nodes, checktable)
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
