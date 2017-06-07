@@ -6,6 +6,7 @@ use serde_json;
 
 use std::fs;
 use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::mem;
 use std::path::PathBuf;
 use std::time;
@@ -37,7 +38,7 @@ pub struct GroupCommitQueue {
 
     /// Handle to the file that packets should be written to. Outside of flush() it should never be
     /// None.
-    durable_log: Option<BufWriter<File, WhenFull>>,
+    durable_log: BufWriter<File, WhenFull>,
     durable_log_path: PathBuf,
 
     timeout: time::Duration,
@@ -75,7 +76,7 @@ impl GroupCommitQueue {
             durable_packets: Vec::with_capacity(params.queue_capacity),
             wait_start: None,
 
-            durable_log: Some(durable_log),
+            durable_log,
             durable_log_path,
 
             timeout: params.flush_timeout,
@@ -105,8 +106,7 @@ impl GroupCommitQueue {
                      _ => unreachable!(),
                  })
             .collect();
-        serde_json::to_writer(&mut self.durable_log.as_mut().unwrap(), &data_to_flush)
-            .unwrap();
+        serde_json::to_writer(&mut self.durable_log, &data_to_flush).unwrap();
     }
 
     /// Flush any pending packets to disk, and return an iterator over the packets that were
@@ -116,10 +116,9 @@ impl GroupCommitQueue {
 
         if !self.pending_packets.is_empty() {
             self.write_packets();
-            let file = self.durable_log.take().unwrap().into_inner().unwrap();
-            file.sync_data().unwrap();
-            self.durable_log =
-                Some(BufWriter::with_capacity_and_strategy(self.capacity * 1024, file, WhenFull));
+            self.durable_log.flush().unwrap();
+            self.durable_log.get_mut().sync_data().unwrap();
+
             self.wait_start = None;
             mem::swap(&mut self.pending_packets, &mut self.durable_packets)
         }
