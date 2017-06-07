@@ -273,13 +273,44 @@ impl DomainHandle {
         self.txs[i].send(p)
     }
 
-    pub fn base_send(&mut self, p: Box<Packet>) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        self.tx_buf = Some(p);
-        let txs = self.in_txs.len();
-        for i in 0..txs {
-            let p = self.nextp(i, txs);
-            self.in_txs[i].send(p)?;
+    pub fn base_send(&mut self,
+                     p: Box<Packet>,
+                     key: &[usize])
+                     -> Result<(), mpsc::SendError<Box<Packet>>> {
+        if self.txs.len() == 1 {
+            self.in_txs[0].send(p)
+        } else {
+            if key.is_empty() {
+                unreachable!("sharded base without a key?");
+            }
+            if key.len() != 1 {
+                // base sharded by complex key
+                unimplemented!();
+            }
+            let key_col = key[0];
+            let shard = {
+                let key = match p.data()[0]{
+                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
+                    Record::DeleteRequest(ref k) => &k[0],
+                };
+                if !p.data().iter().all(|r| match *r {
+                                            Record::Positive(ref r) |
+                                            Record::Negative(ref r) => &r[key_col] == key,
+                                            Record::DeleteRequest(ref k) => {
+                                                k.len() == 1 && &k[0] == key
+                                            }
+                                        }) {
+                    // batch with different keys to sharded base
+                    unimplemented!();
+                }
+                // TODO: avoid duplicating sharding code from Sharder
+                match *key {
+                    DataType::Int(n) => n as usize % self.txs.len(),
+                    DataType::BigInt(n) => n as usize % self.txs.len(),
+                    _ => unimplemented!(),
+                }
+            };
+            self.in_txs[shard].send(p)
         }
-        Ok(())
     }
 }

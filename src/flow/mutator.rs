@@ -138,7 +138,7 @@ impl Mutator {
             }
         };
 
-        self.tx.base_send(m).unwrap();
+        self.tx.base_send(m, &self.primary_key[..]).unwrap();
     }
 
     fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
@@ -152,7 +152,7 @@ impl Mutator {
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),
         };
-        self.tx.base_send(m).unwrap();
+        self.tx.base_send(m, &self.primary_key[..]).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
