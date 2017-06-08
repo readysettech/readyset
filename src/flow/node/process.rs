@@ -8,7 +8,7 @@ impl Node {
                    keyed_by: Option<usize>,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
-                   on_shard: usize,
+                   on_shard: Option<usize>,
                    swap: bool)
                    -> Vec<Miss> {
         m.as_mut().unwrap().trace(PacketEvent::Process);
@@ -39,11 +39,11 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, on_shard);
+                e.process(m, on_shard.unwrap_or(0));
                 vec![]
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, *self.index.unwrap().as_global());
+                s.process(m, *self.index.unwrap().as_global(), on_shard.is_some());
                 vec![]
             }
             NodeType::Internal(ref mut i) => {

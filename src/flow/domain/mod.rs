@@ -87,7 +87,7 @@ struct Waiting {
 
 pub struct Domain {
     index: Index,
-    _shard: usize,
+    _shard: Option<usize>,
     nshards: usize,
 
     nodes: DomainNodes,
@@ -128,6 +128,8 @@ impl Domain {
             .values()
             .map(|n| *n.borrow().local_addr().as_local())
             .collect();
+
+        let shard = if nshards == 1 { None } else { Some(shard) };
 
         Domain {
             index,
@@ -235,7 +237,7 @@ impl Domain {
                 waiting: &mut local::Map<Waiting>,
                 states: &mut StateMap,
                 nodes: &DomainNodes,
-                shard: usize,
+                shard: Option<usize>,
                 paths: &mut HashMap<Tag, ReplayPath>,
                 process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
                 process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
@@ -1650,7 +1652,7 @@ impl Domain {
 
                 let mut group_commit_queues =
                     persistence::GroupCommitQueueSet::new(self.index,
-                                                          self._shard,
+                                                          self._shard.unwrap_or(0),
                                                           &self.persistence_parameters);
 
                 self.total_time.start();
@@ -1717,7 +1719,8 @@ impl Domain {
                         Err(_) => break,
                         Ok(box Packet::Quit) => break,
                         Ok(box Packet::RequestUnboundedTx(ack)) => {
-                            ack.send((self._shard, back_tx.clone())).unwrap();
+                            ack.send((self._shard.unwrap_or(0), back_tx.clone()))
+                                .unwrap();
                         }
                         Ok(m) => {
                             if group_commit_queues.should_append(&m, &self.nodes) {

@@ -61,7 +61,7 @@ impl Sharder {
         }
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex) {
+    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex, is_sharded: bool) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
 
@@ -139,6 +139,15 @@ impl Sharder {
             }
         }
 
+        if is_sharded {
+            // FIXME: we don't know how many shards in the destination domain our sibling Sharders
+            // sent to, so we don't know what to put here. we *could* put self.txs.len() and send
+            // empty messages to all other shards, which is probably pretty sensible, but that only
+            // solves half the problem. the destination shard domains will then recieve *multiple*
+            // replay pieces for each incoming replay piece, and needs to combine them somehow.
+            // it's unclear how we do that.
+            unimplemented!();
+        }
         if let Packet::ReplayPiece { ref mut nshards, .. } = *m {
             *nshards = self.sharded.len();
         }
