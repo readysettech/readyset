@@ -305,6 +305,20 @@ impl Blender {
 
         trace!(self.log, "creating mutator"; "for" => base.as_global().index());
 
+        let mut key = self.ingredients[*base.as_global()]
+            .suggest_indexes(base)
+            .remove(&base)
+            .unwrap_or_else(Vec::new);
+        let mut is_primary = false;
+        if key.is_empty() {
+            if let prelude::Sharding::ByColumn(col) =
+                self.ingredients[*base.as_global()].sharded_by() {
+                key = vec![col];
+            }
+        } else {
+            is_primary = true;
+        }
+
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
@@ -312,10 +326,8 @@ impl Blender {
             src: self.source.into(),
             tx: tx,
             addr: (*node.local_addr()).into(),
-            primary_key: self.ingredients[*base.as_global()]
-                .suggest_indexes(base)
-                .remove(&base)
-                .unwrap_or_else(Vec::new),
+            key: key,
+            key_is_primary: is_primary,
             tx_reply_channel: mpsc::channel(),
             transactional: self.ingredients[*base.as_global()].is_transactional(),
             dropped: base_operator.get_dropped(),

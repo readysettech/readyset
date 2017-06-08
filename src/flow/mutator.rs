@@ -22,7 +22,8 @@ pub struct Mutator {
     pub(crate) src: NodeAddress,
     pub(crate) tx: flow::domain::DomainHandle,
     pub(crate) addr: NodeAddress,
-    pub(crate) primary_key: Vec<usize>,
+    pub(crate) key_is_primary: bool,
+    pub(crate) key: Vec<usize>,
     pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
@@ -36,7 +37,8 @@ impl Clone for Mutator {
             src: self.src.clone(),
             tx: self.tx.clone(),
             addr: self.addr.clone(),
-            primary_key: self.primary_key.clone(),
+            key: self.key.clone(),
+            key_is_primary: self.key_is_primary.clone(),
             tx_reply_channel: mpsc::channel(),
             transactional: self.transactional,
             dropped: self.dropped.clone(),
@@ -138,7 +140,7 @@ impl Mutator {
             }
         };
 
-        self.tx.base_send(m, &self.primary_key[..]).unwrap();
+        self.tx.base_send(m, &self.key[..]).unwrap();
     }
 
     fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
@@ -152,7 +154,7 @@ impl Mutator {
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),
         };
-        self.tx.base_send(m, &self.primary_key[..]).unwrap();
+        self.tx.base_send(m, &self.key[..]).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
@@ -208,7 +210,7 @@ impl Mutator {
     pub fn update<V>(&mut self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
-        assert!(!self.primary_key.is_empty(),
+        assert!(!self.key.is_empty() && self.key_is_primary,
                 "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
@@ -216,11 +218,7 @@ impl Mutator {
             return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
         }
 
-        let pkey = self.primary_key
-            .iter()
-            .map(|&col| &u[col])
-            .cloned()
-            .collect();
+        let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
         Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
@@ -232,7 +230,7 @@ impl Mutator {
                                    -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
-        assert!(!self.primary_key.is_empty(),
+        assert!(!self.key.is_empty() && self.key_is_primary,
                 "update operations can only be applied to base nodes with key columns");
 
         let u: Vec<_> = u.into();
@@ -240,11 +238,7 @@ impl Mutator {
             return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
         }
 
-        let m = vec![Record::DeleteRequest(self.primary_key
-                                               .iter()
-                                               .map(|&col| &u[col])
-                                               .cloned()
-                                               .collect()),
+        let m = vec![Record::DeleteRequest(self.key.iter().map(|&col| &u[col]).cloned().collect()),
                      u.into()]
             .into();
         self.tx_send(m, t).map_err(|()|MutatorError::TransactionFailed)
