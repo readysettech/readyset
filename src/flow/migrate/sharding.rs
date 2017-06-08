@@ -86,12 +86,14 @@ pub fn shard(log: &Logger,
             }
         }
         if complex {
-            // not supported yet -- force no sharding
-            // TODO: if we're sharding by a two-part key and need sharding by the *first* part
-            // of that key, we can probably re-use the existing sharding?
-            error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
-            for (&ni, _) in &input_shardings {
-                reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+            if graph[node].get_base().is_none() {
+                // not supported yet -- force no sharding
+                // TODO: if we're sharding by a two-part key and need sharding by the *first* part
+                // of that key, we can probably re-use the existing sharding?
+                error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
+                for (&ni, _) in &input_shardings {
+                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+                }
             }
             continue;
         }
@@ -214,9 +216,12 @@ pub fn shard(log: &Logger,
         // key. we then make sure all our inputs are sharded by that key too.
         debug!(log, "testing for sharding opportunities"; "node" => ?node);
         'outer: for col in 0..graph[node].fields().len() {
-            let srcs: Vec<_> = graph[node]
-                .parent_columns(col)
-                .into_iter()
+            let srcs = if graph[node].get_base().is_some() {
+                vec![(node.into(), None)]
+            } else {
+                graph[node].parent_columns(col)
+            };
+            let srcs: Vec<_> = srcs.into_iter()
                 .filter_map(|(ni, src)| src.map(|src| (ni, src)))
                 .collect();
 
