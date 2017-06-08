@@ -59,6 +59,26 @@ impl<'a> From<&'a str> for Literal {
     }
 }
 
+impl ToString for Literal {
+    fn to_string(&self) -> String {
+        match *self {
+            Literal::Null => "NULL".to_string(),
+            Literal::Integer(ref i) => format!("{}", i),
+            Literal::String(ref s) => s.clone(),
+            Literal::Blob(ref bv) => {
+                format!("{}",
+                        bv.iter()
+                            .map(|v| format!("{:x}", v))
+                            .collect::<Vec<String>>()
+                            .join(" "))
+            }
+            Literal::CurrentTime => "CURRENT_TIME".to_string(),
+            Literal::CurrentDate => "CURRENT_DATE".to_string(),
+            Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Operator {
     Not,
