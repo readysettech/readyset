@@ -63,15 +63,10 @@ pub fn shard(log: &Logger,
             // non-internal nodes are always pass-through
             HashMap::new()
         };
-        if need_sharding.is_empty() {
-            // no shuffle necessary -- can re-use any existing sharding
-            let s = if input_shardings.len() == 1 ||
-                       input_shardings.iter().all(|(_, &s)| s == Sharding::None) {
-                input_shardings.into_iter().map(|(_, s)| s).next().unwrap()
-            } else {
-                // FIXME: if every shard unions with a Sharding::None, we'll get repeated rows :(
-                Sharding::Random
-            };
+        if need_sharding.is_empty() &&
+           (input_shardings.len() == 1 ||
+            input_shardings.iter().all(|(_, &s)| s == Sharding::None)) {
+            let s = input_shardings.into_iter().map(|(_, s)| s).next().unwrap();
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);
@@ -239,35 +234,51 @@ pub fn shard(log: &Logger,
                 continue;
             }
 
-            // `col` resolved to all ancestors!
-            // does it match the key we're doing lookups based on?
-            for &(ni, src) in &srcs {
-                match need_sharding.get(&ni) {
-                    Some(col) if col.len() != 1 => {
-                        // we're looking up by a compound key -- that's hard to shard
-                        trace!(log, "column traces to node looked up in by compound key";
+
+            if need_sharding.is_empty() {
+                // a node that doesn't need any sharding, yet has multiple parents. must be a
+                // union. if this single output column (which resolves to a column in all our
+                // inputs) matches what each ancestor is individually sharded by, then we know that
+                // the output of the union is also sharded by that key. this is sufficiently common
+                // that we want to make sure we don't accidentally shuffle in those cases.
+                for &(ni, src) in &srcs {
+                    if input_shardings[ni.as_global()] != Sharding::ByColumn(src) {
+                        // TODO: technically we could revert to Sharding::Random here, which is a
+                        // little better than forcing a de-shard, but meh.
+                        continue 'outer;
+                    }
+                }
+            } else {
+                // `col` resolved to all ancestors!
+                // does it match the key we're doing lookups based on?
+                for &(ni, src) in &srcs {
+                    match need_sharding.get(&ni) {
+                        Some(col) if col.len() != 1 => {
+                            // we're looking up by a compound key -- that's hard to shard
+                            trace!(log, "column traces to node looked up in by compound key";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src);
-                        break 'outer;
-                    }
-                    Some(col) if col[0] != src => {
-                        // we're looking up by a different key. it's kind of weird that this
-                        // output column still resolved to a column in all our inputs...
-                        trace!(log, "column traces to node that is not looked up by";
+                            break 'outer;
+                        }
+                        Some(col) if col[0] != src => {
+                            // we're looking up by a different key. it's kind of weird that this
+                            // output column still resolved to a column in all our inputs...
+                            trace!(log, "column traces to node that is not looked up by";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src,
                                    "lookup" => col[0]);
-                        continue 'outer;
-                    }
-                    Some(_) => {
-                        // looking up by the same column -- that's fine
-                    }
-                    None => {
-                        // we're never looking up in this view. must mean that a given
-                        // column resolved to *two* columns in the *same* view?
-                        unreachable!()
+                            continue 'outer;
+                        }
+                        Some(_) => {
+                            // looking up by the same column -- that's fine
+                        }
+                        None => {
+                            // we're never looking up in this view. must mean that a given
+                            // column resolved to *two* columns in the *same* view?
+                            unreachable!()
+                        }
                     }
                 }
             }
