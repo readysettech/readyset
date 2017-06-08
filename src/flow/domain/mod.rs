@@ -873,7 +873,8 @@ impl Domain {
             trace!(self.log,
                    "satisfied replay request";
                    "tag" => tag.id(),
-                   "key" => format!("{:?}", key)
+                   "data" => ?m.as_ref().unwrap().data(),
+                   "key" => ?key,
             );
         }
 
