@@ -43,6 +43,10 @@ pub struct GroupCommitQueueSet {
     /// on GroupCommitqueueSet.
     durable_packets: Vec<Box<Packet>>,
 
+    /// Passed to the checktable to learn which packets committed. Stored here to avoid an
+    /// allocation on the critical path.
+    commit_decisions: Vec<bool>,
+
     /// Name of, and handle to the files that packets should be persisted to.
     files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
 
@@ -60,6 +64,7 @@ impl GroupCommitQueueSet {
         Self {
             pending_packets: Map::default(),
             durable_packets: Vec::with_capacity(params.queue_capacity),
+            commit_decisions: Vec::with_capacity(params.queue_capacity),
             wait_start: Map::default(),
             files: Map::default(),
 
@@ -237,12 +242,11 @@ impl GroupCommitQueueSet {
         })
     }
 
-    fn merge_transactional_packets(packets: &mut Vec<Box<Packet>>,
+    fn merge_transactional_packets(&mut self,
+                                   packets: &mut Vec<Box<Packet>>,
                                    nodes: &DomainNodes,
                                    checktable: &Arc<Mutex<checktable::CheckTable>>)
                                    -> Option<Box<Packet>> {
-        let mut decisions = Vec::with_capacity(packets.len());
-
         let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
             nodes[&link.dst.as_local()]
                 .borrow()
@@ -253,61 +257,43 @@ impl GroupCommitQueueSet {
             unreachable!()
         };
 
-        let transaction_state = {
-            let mut writes = Vec::with_capacity(packets.len());
-            for p in packets.iter() {
-                if let box Packet::Transaction {
-                           ref data,
-                           ref state,
-                           ..
-                       } = *p {
-                    match *state {
-                        TransactionState::Pending(ref token, _) => writes.push((Some(token), data)),
-                        TransactionState::WillCommit => writes.push((None, data)),
-                        TransactionState::Committed(..) => unreachable!(),
-                    }
-                } else {
-                    unreachable!();
-                };
+        let (ts, prevs) = {
+            let mut checktable = checktable.lock().unwrap();
+            match checktable.apply_batch(base, packets, &mut self.commit_decisions) {
+                checktable::TransactionResult::Aborted => return None,
+                checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
             }
-
-            checktable
-                .lock()
-                .unwrap()
-                .attempt_claim_merged_timestamp(base, writes.into_iter(), &mut decisions)
-        };
-
-        let (ts, prevs) = match transaction_state {
-            checktable::TransactionResult::Aborted => return None,
-            checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
         };
 
         let committed_packets = packets
             .drain(..)
-            .zip(decisions.into_iter())
-            .map(|(mut p, d)| {
+            .zip(self.commit_decisions.iter())
+            .map(|(mut packet, committed)| {
                 if let box Packet::Transaction {
                            state: TransactionState::Pending(_, ref mut sender), ..
-                       } = p {
-                    if d {
+                       } = packet {
+                    if *committed {
                         sender.send(Ok(ts)).unwrap();
                     } else {
                         sender.send(Err(())).unwrap();
                     }
                 }
-                (p, d)
+                (packet, committed)
             })
-            .filter(|&(_, ref d)| *d)
-            .map(|(p, _)| p);
+            .filter(|&(_, committed)| *committed)
+            .map(|(packet, _)| packet);
 
         let mut merged = Self::merge_committed_packets(committed_packets);
         if let Some(&mut box Packet::Transaction { ref mut state, .. }) = merged.as_mut() {
             *state = TransactionState::Committed(ts, base, prevs);
+        } else {
+            unreachable!();
         }
         merged
     }
 
-    fn merge_packets(packets: &mut Vec<Box<Packet>>,
+    fn merge_packets(&mut self,
+                     packets: &mut Vec<Box<Packet>>,
                      nodes: &DomainNodes,
                      checktable: &Arc<Mutex<checktable::CheckTable>>)
                      -> Option<Box<Packet>> {
@@ -318,7 +304,7 @@ impl GroupCommitQueueSet {
         match packets[0] {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..)),
             box Packet::Transaction { .. } => {
-                Self::merge_transactional_packets(packets, nodes, checktable)
+                self.merge_transactional_packets(packets, nodes, checktable)
             }
             _ => unreachable!(),
         }

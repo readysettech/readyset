@@ -217,34 +217,40 @@ impl CheckTable {
                           .collect()))
     }
 
-    pub fn attempt_claim_timestamp(&mut self,
-                                   token: &Token,
-                                   base: NodeIndex,
-                                   rs: &Records)
-                                   -> TransactionResult {
+    pub fn apply(&mut self, token: &Token, base: NodeIndex, rs: &Records) -> TransactionResult {
         if self.validate_token(token) {
-            let (ts, prevs) = self.claim_timestamp(base, rs);
+            let (ts, prevs) = self.apply_unconditional(base, rs);
             TransactionResult::Committed(ts, prevs)
         } else {
             TransactionResult::Aborted
         }
     }
 
-    pub fn attempt_claim_merged_timestamp<'a, 'b, I>(&'a mut self,
-                                                     base: NodeIndex,
-                                                     writes: I,
-                                                     decisions: &mut Vec<bool>)
-                                                     -> TransactionResult
-        where I: Iterator<Item = (Option<&'a Token>, &'a Records)>
-    {
+    pub fn apply_batch(&mut self,
+                       base: NodeIndex,
+                       packets: &mut Vec<Box<Packet>>,
+                       decisions: &mut Vec<bool>)
+                       -> TransactionResult {
         decisions.clear();
 
         let mut result = TransactionResult::Aborted;
-        for (token, rs) in writes {
-            let committed = token.map(|t|self.validate_token(t)).unwrap_or(true);
-            decisions.push(committed);
+        for packet in packets.iter() {
+            let (commit, rs) = if let box Packet::Transaction {
+                       ref data,
+                       ref state,
+                       ..
+                   } = *packet {
+                match *state {
+                    TransactionState::Pending(ref token, _) => (self.validate_token(token), data),
+                    TransactionState::WillCommit => (true, data),
+                    TransactionState::Committed(..) => unreachable!(),
+                }
+            } else {
+                unreachable!();
+            };
 
-            if !committed {
+            decisions.push(commit);
+            if !commit {
                 continue;
             }
 
@@ -253,7 +259,7 @@ impl CheckTable {
                     self.update_granular_checktables(base.clone(), ts, rs);
                 }
                 TransactionResult::Aborted => {
-                    let (ts, prevs) = self.claim_timestamp(base, rs);
+                    let (ts, prevs) = self.apply_unconditional(base, rs);
                     result = TransactionResult::Committed(ts, prevs);
                 }
             };
@@ -261,10 +267,7 @@ impl CheckTable {
         result
     }
 
-    fn update_granular_checktables(&mut self,
-                                   base: NodeIndex,
-                                   ts: i64,
-                                   rs: &Records) {
+    fn update_granular_checktables(&mut self, base: NodeIndex, ts: i64, rs: &Records) {
         let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
         for record in rs.iter() {
             for (i, value) in record.iter().enumerate() {
@@ -283,10 +286,10 @@ impl CheckTable {
         }
     }
 
-    pub fn claim_timestamp(&mut self,
-                           base: NodeIndex,
-                           rs: &Records)
-                           -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+    pub fn apply_unconditional(&mut self,
+                               base: NodeIndex,
+                               rs: &Records)
+                               -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;

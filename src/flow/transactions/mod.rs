@@ -133,7 +133,7 @@ impl DomainState {
                         let result = self.checktable
                             .lock()
                             .unwrap()
-                            .attempt_claim_timestamp(&token, base_node, data);
+                            .apply(&token, base_node, data);
                         match result {
                             checktable::TransactionResult::Committed(ts, prevs) => {
                                 let _ = send.send(Ok(ts));
@@ -153,7 +153,7 @@ impl DomainState {
                         let (ts, prevs) = self.checktable
                             .lock()
                             .unwrap()
-                            .claim_timestamp(base_node, data);
+                            .apply_unconditional(base_node, data);
                         ::std::mem::replace(state,
                                             TransactionState::Committed(ts, base_node, prevs));
                         true
