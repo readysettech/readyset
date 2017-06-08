@@ -214,54 +214,67 @@ impl GroupCommitQueueSet {
             .min()
     }
 
-    fn merge_committed_packets<I>(packets: I) -> Option<Box<Packet>>
+    fn merge_committed_packets<I>(packets: I,
+                                  transaction_state: Option<TransactionState>)
+                                  -> Option<Box<Packet>>
         where I: Iterator<Item = Box<Packet>>
     {
-        packets.fold(None, |mut acc, p| {
-            if acc.is_none() {
-                return Some(p);
-            }
+        let mut packets = packets.peekable();
+        let merged_link = match **packets.peek().as_mut().unwrap() {
+            box Packet::Message { ref link, .. } |
+            box Packet::Transaction { ref link, .. } => link.clone(),
+            _ => unreachable!(),
+        };
+        let mut merged_tracer = None;
 
-            match (acc.as_mut().unwrap(), p) {
-                (&mut box Packet::Message {
-                     link: ref acc_link,
-                     data: ref mut acc_data,
-                     tracer: ref mut acc_tracer,
-                 },
-                 box Packet::Message {
-                     link: ref p_link,
-                     data: ref mut p_data,
-                     tracer: ref mut p_tracer,
-                 }) |
-                (&mut box Packet::Transaction {
-                     link: ref acc_link,
-                     data: ref mut acc_data,
-                     tracer: ref mut acc_tracer,
-                     ..
-                 },
-                 box Packet::Transaction {
-                     link: ref p_link,
-                     data: ref mut p_data,
-                     tracer: ref mut p_tracer,
-                     ..
-                 }) => {
-                    assert_eq!(*acc_link, *p_link);
-                    acc_data.append(p_data);
+        let merged_data = packets.fold(Records::default(), |mut acc, p| {
+            match (p,) {
+                (box Packet::Message {
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                },) |
+                (box Packet::Transaction {
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                    ..
+                },) => {
+                    assert_eq!(merged_link, *link);
+                    acc.append(data);
 
-                    if acc_tracer.is_some() && p_tracer.is_some() {
-                        p_tracer
+                    if merged_tracer.is_some() && tracer.is_some() {
+                        tracer
                             .as_mut()
                             .unwrap()
                             .send((time::Instant::now(), PacketEvent::Merged))
                             .unwrap();
-                    } else if p_tracer.is_some() {
-                        *acc_tracer = p_tracer.take();
+                    } else if tracer.is_some() {
+                        merged_tracer = tracer.take();
                     }
                 }
                 _ => unreachable!(),
             }
             acc
-        })
+        });
+
+        match transaction_state {
+            Some(merged_state) => {
+                Some(Box::new(Packet::Transaction {
+                             link: merged_link,
+                             data: merged_data,
+                             tracer: merged_tracer,
+                             state: merged_state,
+                         }))
+            }
+            None => {
+                Some(Box::new(Packet::Message {
+                             link: merged_link,
+                             data: merged_data,
+                             tracer: merged_tracer,
+                         }))
+            }
+        }
     }
 
     /// Merge the contents of packets into a single packet, emptying packets in the process. Panics
@@ -307,13 +320,8 @@ impl GroupCommitQueueSet {
             .filter(|&(_, committed)| *committed)
             .map(|(packet, _)| packet);
 
-        let mut merged = Self::merge_committed_packets(committed_packets);
-        if let Some(&mut box Packet::Transaction { ref mut state, .. }) = merged.as_mut() {
-            *state = TransactionState::Committed(ts, base, prevs);
-        } else {
-            unreachable!();
-        }
-        merged
+        Self::merge_committed_packets(committed_packets,
+                                      Some(TransactionState::Committed(ts, base, prevs)))
     }
 
     /// Merge the contents of packets into a single packet, emptying packets in the process.
@@ -327,7 +335,7 @@ impl GroupCommitQueueSet {
         }
 
         match packets[0] {
-            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..)),
+            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
             box Packet::Transaction { .. } => {
                 Self::merge_transactional_packets(packets, commit_decisions, nodes, checktable)
             }
