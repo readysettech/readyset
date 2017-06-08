@@ -52,6 +52,7 @@ pub struct SqlIncorporator {
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
+    enable_reuse: bool,
 }
 
 impl Default for SqlIncorporator {
@@ -65,6 +66,7 @@ impl Default for SqlIncorporator {
             schema_version: 0,
             view_schemas: HashMap::default(),
             transactional: false,
+            enable_reuse: true,
         }
     }
 }
@@ -83,6 +85,16 @@ impl SqlIncorporator {
     /// Make any future base nodes added be transactional.
     pub fn set_transactional(&mut self, transactional: bool) {
         self.transactional = transactional;
+    }
+
+    /// Disable node reuse for future migrations.
+    pub fn disable_reuse(&mut self) {
+        self.enable_reuse = false;
+    }
+
+    /// Disable node reuse for future migrations.
+    pub fn enable_reuse(&mut self) {
+        self.enable_reuse = true;
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -142,6 +154,11 @@ impl SqlIncorporator {
         };
 
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
+
+        // if reuse is disabled, we're done
+        if !self.enable_reuse {
+            return (qg, QueryGraphReuse::None);
+        }
 
         // Do we already have this exact query or a subset of it?
         // TODO(malte): make this an O(1) lookup by QG signature
@@ -708,6 +725,39 @@ mod tests {
         let edge_view = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge_view.fields(), &["votes"]);
         assert_eq!(edge_view.description(), format!("π[1]"));
+    }
+
+    #[test]
+    fn it_does_not_reuse_if_disabled() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        inc.disable_reuse();
+        let mut mig = g.start_migration();
+
+        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
+                              None,
+                              &mut mig)
+                    .is_ok());
+        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        let leaf = res.unwrap().query_leaf;
+
+        // Add the same query again; this should NOT reuse here.
+        let ncount = mig.graph().node_count();
+        let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
+                                None,
+                                &mut mig);
+        assert!(res.is_ok());
+        // should have added nodes for this query, too
+        let qfp = res.unwrap();
+        assert_eq!(qfp.new_nodes.len(), 2);
+        // expect three new nodes: filter, project, reader
+        assert_eq!(mig.graph().node_count(), ncount + 3);
+        // should have ended up with a different leaf node
+        assert_ne!(qfp.query_leaf, leaf);
     }
 
     #[test]
