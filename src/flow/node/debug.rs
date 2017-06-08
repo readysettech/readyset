@@ -2,6 +2,7 @@ use std::fmt;
 use petgraph::graph::NodeIndex;
 use flow::node::{Node, NodeType};
 use flow::core::processing::Ingredient;
+use flow::prelude::*;
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -20,8 +21,14 @@ impl fmt::Debug for Node {
 
 impl Node {
     pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
+        let border = if let Sharding::ByColumn(_) = self.sharded_by {
+            ",dotted"
+        } else {
+            ""
+        };
         write!(f,
-               " [style=filled, fillcolor={}, label=\"",
+               " [style=\"filled{}\", fillcolor={}, label=\"",
+               border,
                self.domain
                    .map(|d| -> usize { d.into() })
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
@@ -31,7 +38,7 @@ impl Node {
         let addr = self.index.unwrap_or(0.into());
         match self.inner {
             NodeType::Source => write!(f, "(source)"),
-            NodeType::Dropped => write!(f, "(✗)"),
+            NodeType::Dropped => write!(f, "✗"),
             NodeType::Ingress => write!(f, "{{ {} / {} | (ingress) }}", index, addr),
             NodeType::Egress { .. } => write!(f, "{{ {} / {} | (egress) }}", index, addr),
             NodeType::Sharder { .. } => write!(f, "{{ {} / {} | (sharder) }}", index, addr),
