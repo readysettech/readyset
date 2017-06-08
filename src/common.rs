@@ -412,7 +412,8 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                        }
                    )
                  | chain!(
-                     table: table_reference ~ tag!(".*"),
+                     table: table_reference ~
+                     tag!(".*"),
                      || {
                          FieldExpression::AllInTable(table.name.clone())
                      }
@@ -427,8 +428,8 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                opt!(
                    complete!(chain!(
                        multispace? ~
-                           tag!(",") ~
-                           multispace?,
+                       tag!(",") ~
+                       multispace?,
                        ||{}
                    ))
                ),
