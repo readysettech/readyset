@@ -126,6 +126,7 @@ pub enum FieldExpression {
     All,
     AllInTable(String),
     Col(Column),
+    Literal(Literal),
 }
 
 impl Display for FieldExpression {
@@ -134,6 +135,7 @@ impl Display for FieldExpression {
             FieldExpression::All => write!(f, "*"),
             FieldExpression::AllInTable(ref table) => write!(f, "{}.*", table),
             FieldExpression::Col(ref col) => write!(f, "{}", col.name.as_str()),
+            FieldExpression::Literal(ref lit) => write!(f, "{}", lit.to_string()),
         }
     }
 }
@@ -422,6 +424,12 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                      column: column_identifier,
                      || {
                          FieldExpression::Col(column)
+                     }
+                 )
+                 | chain!(
+                     literal: literal,
+                     || {
+                         FieldExpression::Literal(literal)
                      }
                  )
                ) ~
