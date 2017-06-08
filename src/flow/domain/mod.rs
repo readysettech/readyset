@@ -479,7 +479,7 @@ impl Domain {
             Packet::StartMigration { .. } |
             Packet::CompleteMigration { .. } |
             Packet::ReplayPiece { transaction_state: Some(_), .. } => {
-                self.transaction_state.handle(m, &self.nodes);
+                self.transaction_state.handle(m);
                 self.process_transactions();
             }
             Packet::ReplayPiece { .. } |
@@ -1603,7 +1603,10 @@ impl Domain {
                     // If no packet was received and we were waiting until it was time for a flush,
                     // then do the flush now.
                     if packet.is_none() && duration_until_flush.is_some() {
-                        for m in group_commit_queues.flush() {
+                        while let Some(m) =
+                            group_commit_queues.flush_if_necessary(&self.nodes,
+                                                                   &self.transaction_state
+                                                                       .get_checktable()) {
                             self.handle(m);
                         }
                         continue;
@@ -1641,9 +1644,13 @@ impl Domain {
                             ack.send(back_tx.clone()).unwrap();
                         }
                         Ok(m) => {
-                            if group_commit_queues.destination_is_base(&m, &self.nodes) {
-                                for m in group_commit_queues.append(m) {
-                                    self.handle(m);
+                            if group_commit_queues.should_append(&m, &self.nodes) {
+                                if let Some(m) =
+                                    group_commit_queues.append(m,
+                                                               &self.nodes,
+                                                               &self.transaction_state
+                                                                   .get_checktable()) {
+                                    self.handle(m)
                                 }
                             } else {
                                 self.handle(m);

@@ -11,8 +11,6 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
-use std::vec::Drain;
-
 
 use flow::domain;
 use flow::prelude::*;
@@ -123,7 +121,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Returns whether the given packet should be persisted.
-    pub fn destination_is_base(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
+    pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         match Self::packet_destination(p) {
             Some(n) => {
                 let node = &nodes[&n].borrow();
@@ -134,7 +132,10 @@ impl GroupCommitQueueSet {
     }
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
-    pub fn flush(&mut self) -> Drain<Box<Packet>> {
+    pub fn flush_if_necessary(&mut self,
+                              nodes: &DomainNodes,
+                              checktable: &Arc<Mutex<checktable::CheckTable>>)
+                              -> Option<Box<Packet>> {
         assert_eq!(self.durable_packets.len(), 0);
 
         let mut needs_flush = None;
@@ -149,13 +150,18 @@ impl GroupCommitQueueSet {
             self.flush_internal(&node);
         }
 
-        self.durable_packets.drain(..)
+        Self::merge_packets(&mut self.durable_packets,
+                            &mut self.commit_decisions,
+                            nodes,
+                            checktable)
     }
 
-    /// Flush any pending packets for node to disk (if applicable), moving the packets to self.durable_packets.
+    /// Flush any pending packets for node to disk (if applicable), moving the packets to
+    /// self.durable_packets.
     fn flush_internal(&mut self, node: &LocalNodeIndex) {
         match self.durability_mode {
-            DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
+            DurabilityMode::DeleteOnExit |
+            DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
                     let file = self.create_file(node);
                     self.files.insert(node.clone(), file);
@@ -166,10 +172,10 @@ impl GroupCommitQueueSet {
                     let data_to_flush: Vec<_> = self.pending_packets[&node]
                         .iter()
                         .map(|p| match **p {
-                            Packet::Transaction { ref data, .. } |
-                            Packet::Message { ref data, .. } => data,
-                            _ => unreachable!(),
-                        })
+                                 Packet::Transaction { ref data, .. } |
+                                 Packet::Message { ref data, .. } => data,
+                                 _ => unreachable!(),
+                             })
                         .collect();
                     serde_json::to_writer(&mut file, &data_to_flush).unwrap();
                 }
@@ -186,7 +192,11 @@ impl GroupCommitQueueSet {
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append(&mut self, p: Box<Packet>) -> Drain<Box<Packet>> {
+    pub fn append<'a>(&mut self,
+                      p: Box<Packet>,
+                      nodes: &DomainNodes,
+                      checktable: &Arc<Mutex<checktable::CheckTable>>)
+                      -> Option<Box<Packet>> {
         assert_eq!(self.durable_packets.len(), 0);
 
         let node = Self::packet_destination(&p).unwrap();
@@ -202,7 +212,10 @@ impl GroupCommitQueueSet {
             self.wait_start.insert(node, time::Instant::now());
         }
 
-        self.durable_packets.drain(..)
+        Self::merge_packets(&mut self.durable_packets,
+                            &mut self.commit_decisions,
+                            nodes,
+                            checktable)
     }
 
     /// Returns how long until a flush should occur.
@@ -267,8 +280,10 @@ impl GroupCommitQueueSet {
         })
     }
 
-    fn merge_transactional_packets(&mut self,
-                                   packets: &mut Vec<Box<Packet>>,
+    /// Merge the contents of packets into a single packet, emptying packets in the process. Panics
+    /// if every packet in packets is not a `Packet::Transaction`, or if packets is empty.
+    fn merge_transactional_packets(packets: &mut Vec<Box<Packet>>,
+                                   commit_decisions: &mut Vec<bool>,
                                    nodes: &DomainNodes,
                                    checktable: &Arc<Mutex<checktable::CheckTable>>)
                                    -> Option<Box<Packet>> {
@@ -284,7 +299,7 @@ impl GroupCommitQueueSet {
 
         let (ts, prevs) = {
             let mut checktable = checktable.lock().unwrap();
-            match checktable.apply_batch(base, packets, &mut self.commit_decisions) {
+            match checktable.apply_batch(base, packets, commit_decisions) {
                 checktable::TransactionResult::Aborted => return None,
                 checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
             }
@@ -292,7 +307,7 @@ impl GroupCommitQueueSet {
 
         let committed_packets = packets
             .drain(..)
-            .zip(self.commit_decisions.iter())
+            .zip(commit_decisions.iter())
             .map(|(mut packet, committed)| {
                 if let box Packet::Transaction {
                            state: TransactionState::Pending(_, ref mut sender), ..
@@ -317,8 +332,9 @@ impl GroupCommitQueueSet {
         merged
     }
 
-    fn merge_packets(&mut self,
-                     packets: &mut Vec<Box<Packet>>,
+    /// Merge the contents of packets into a single packet, emptying packets in the process.
+    fn merge_packets(packets: &mut Vec<Box<Packet>>,
+                     commit_decisions: &mut Vec<bool>,
                      nodes: &DomainNodes,
                      checktable: &Arc<Mutex<checktable::CheckTable>>)
                      -> Option<Box<Packet>> {
@@ -329,7 +345,7 @@ impl GroupCommitQueueSet {
         match packets[0] {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..)),
             box Packet::Transaction { .. } => {
-                self.merge_transactional_packets(packets, nodes, checktable)
+                Self::merge_transactional_packets(packets, commit_decisions, nodes, checktable)
             }
             _ => unreachable!(),
         }

@@ -217,6 +217,7 @@ impl CheckTable {
                           .collect()))
     }
 
+    #[allow(unused)]
     pub fn apply(&mut self, token: &Token, base: NodeIndex, rs: &Records) -> TransactionResult {
         if self.validate_token(token) {
             let (ts, prevs) = self.apply_unconditional(base, rs);
