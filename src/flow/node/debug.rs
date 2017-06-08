@@ -21,13 +21,13 @@ impl fmt::Debug for Node {
 
 impl Node {
     pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
-        let border = if let Sharding::ByColumn(_) = self.sharded_by {
-            ",dotted"
-        } else {
-            ""
+        let border = match self.sharded_by {
+            Sharding::ByColumn(_) |
+            Sharding::Random => "filled,dashed",
+            _ => "filled",
         };
         write!(f,
-               " [style=\"filled{}\", fillcolor={}, label=\"",
+               " [style=\"{}\", fillcolor={}, label=\"",
                border,
                self.domain
                    .map(|d| -> usize { d.into() })
