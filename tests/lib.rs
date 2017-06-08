@@ -1101,131 +1101,124 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    // we're trying to force a very particular race, namely that a put arrives for a new join
-    // *before* its state has been fully initialized. it may take a couple of iterations to hit
-    // that, so we run the test a couple of times.
-    for _ in 0..3 {
-        use distributary::{Blender, Base, Join, JoinType, Aggregation, DataType};
-        let mut g = Blender::new();
-        let article;
-        let vote;
-        let vc;
-        let end;
-        let (article, vote) = {
-            // migrate
-            let mut mig = g.start_migration();
-
-            // add article base node
-            article = mig.add_ingredient("article", &["id", "title"], Base::default());
-
-            // add vote base table
-            vote = mig.add_ingredient("vote", &["user", "id"], Base::default().with_key(vec![1]));
-
-            // add vote count
-            vc = mig.add_ingredient("votecount",
-                                    &["id", "votes"],
-                                    Aggregation::COUNT.over(vote, 0, &[1]));
-
-            // add final join using first field from article and first from vc
-            use distributary::JoinSource::*;
-            let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
-            end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
-
-            mig.maintain(end, 0);
-
-            // start processing
-            mig.commit();
-
-            (article, vote)
-        };
-        let mut muta = g.get_mutator(article);
-        let mut mutv = g.get_mutator(vote);
-
-        let n = 1000i64;
-        let title: DataType = "foo".into();
-        let raten: DataType = 5.into();
-
-        for i in 0..n {
-            muta.put(vec![i.into(), title.clone()]).unwrap();
-        }
-        for i in 0..n {
-            mutv.put(vec![1.into(), i.into()]).unwrap();
-        }
-
-        let last = g.get_getter(end).unwrap();
-        thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
-        for i in 0..n {
-            let rows = last(&i.into(), true).unwrap();
-            assert!(!rows.is_empty(), "every article should be voted for");
-            assert_eq!(rows.len(), 1, "every article should have only one entry");
-            let row = rows.into_iter().next().unwrap();
-            assert_eq!(row[0],
-                       i.into(),
-                       "each article result should have the right id");
-            assert_eq!(row[1], title, "all articles should have title 'foo'");
-            assert_eq!(row[2], 1.into(), "all articles should have one vote");
-        }
-
+    use distributary::{Blender, Base, Join, JoinType, Aggregation, DataType};
+    let mut g = Blender::new();
+    let article;
+    let vote;
+    let vc;
+    let end;
+    let (article, vote) = {
         // migrate
-        let (rating, last) = {
-            let mut mig = g.start_migration();
+        let mut mig = g.start_migration();
 
-            // add new "ratings" base table
-            let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
+        // add article base node
+        article = mig.add_ingredient("article", &["id", "title"], Base::default());
 
-            // add sum of ratings
-            let rs = mig.add_ingredient("rsum",
-                                        &["id", "total"],
-                                        Aggregation::SUM.over(rating, 2, &[1]));
+        // add vote base table
+        vote = mig.add_ingredient("vote", &["user", "id"], Base::default().with_key(vec![1]));
 
-            // join vote count and rsum (and in theory, sum them)
-            use distributary::JoinSource::*;
-            let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
-            let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
+        // add vote count
+        vc = mig.add_ingredient("votecount",
+                                &["id", "votes"],
+                                Aggregation::COUNT.over(vote, 0, &[1]));
 
-            // finally, produce end result
-            let j = Join::new(article,
-                              total,
-                              JoinType::Inner,
-                              vec![B(0, 0), L(1), R(1), R(2)]);
-            let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
-            mig.maintain(newend, 0);
+        // add final join using first field from article and first from vc
+        use distributary::JoinSource::*;
+        let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+        end = mig.add_ingredient("awvc", &["id", "title", "votes"], j);
 
-            // start processing
-            mig.commit();
+        mig.maintain(end, 0);
 
-            (rating, newend)
-        };
+        // start processing
+        mig.commit();
 
-        let last = g.get_getter(last).unwrap();
-        let mut mutr = g.get_mutator(rating);
-        for i in 0..n {
-            if old_puts_after {
-                mutv.put(vec![1.into(), i.into()]).unwrap();
-            }
-            mutr.put(vec![1.into(), i.into(), raten.clone()]).unwrap();
-        }
+        (article, vote)
+    };
+    let mut muta = g.get_mutator(article);
+    let mut mutv = g.get_mutator(vote);
 
-        thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
-        for i in 0..n {
-            let rows = last(&i.into(), true).unwrap();
-            assert!(!rows.is_empty(), "every article should be voted for");
-            assert_eq!(rows.len(), 1, "every article should have only one entry");
-            let row = rows.into_iter().next().unwrap();
-            assert_eq!(row[0],
-                       i.into(),
-                       "each article result should have the right id");
-            assert_eq!(row[1], title, "all articles should have title 'foo'");
-            assert_eq!(row[2], raten, "all articles should have one 5-star rating");
-            if old_puts_after {
-                assert_eq!(row[3], 2.into(), "all articles should have two votes");
-            } else {
-                assert_eq!(row[3], 1.into(), "all articles should have one vote");
-            }
-        }
+    let n = 1000i64;
+    let title: DataType = "foo".into();
+    let raten: DataType = 5.into();
+
+    for i in 0..n {
+        muta.put(vec![i.into(), title.clone()]).unwrap();
+    }
+    for i in 0..n {
+        mutv.put(vec![1.into(), i.into()]).unwrap();
     }
 
-    assert!(true);
+    let last = g.get_getter(end).unwrap();
+    thread::sleep(time::Duration::from_millis(3 * SETTLE_TIME_MS));
+    for i in 0..n {
+        let rows = last(&i.into(), true).unwrap();
+        assert!(!rows.is_empty(), "every article should be voted for");
+        assert_eq!(rows.len(), 1, "every article should have only one entry");
+        let row = rows.into_iter().next().unwrap();
+        assert_eq!(row[0],
+                   i.into(),
+                   "each article result should have the right id");
+        assert_eq!(row[1], title, "all articles should have title 'foo'");
+        assert_eq!(row[2], 1.into(), "all articles should have one vote");
+    }
+
+    // migrate
+    let (rating, last) = {
+        let mut mig = g.start_migration();
+
+        // add new "ratings" base table
+        let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
+
+        // add sum of ratings
+        let rs = mig.add_ingredient("rsum",
+                                    &["id", "total"],
+                                    Aggregation::SUM.over(rating, 2, &[1]));
+
+        // join vote count and rsum (and in theory, sum them)
+        use distributary::JoinSource::*;
+        let j = Join::new(rs, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+        let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
+
+        // finally, produce end result
+        let j = Join::new(article,
+                          total,
+                          JoinType::Inner,
+                          vec![B(0, 0), L(1), R(1), R(2)]);
+        let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
+        mig.maintain(newend, 0);
+
+        // start processing
+        mig.commit();
+
+        (rating, newend)
+    };
+
+    let last = g.get_getter(last).unwrap();
+    let mut mutr = g.get_mutator(rating);
+    for i in 0..n {
+        if old_puts_after {
+            mutv.put(vec![1.into(), i.into()]).unwrap();
+        }
+        mutr.put(vec![1.into(), i.into(), raten.clone()]).unwrap();
+    }
+
+    thread::sleep(time::Duration::from_millis(3 * SETTLE_TIME_MS));
+    for i in 0..n {
+        let rows = last(&i.into(), true).unwrap();
+        assert!(!rows.is_empty(), "every article should be voted for");
+        assert_eq!(rows.len(), 1, "every article should have only one entry");
+        let row = rows.into_iter().next().unwrap();
+        assert_eq!(row[0],
+                   i.into(),
+                   "each article result should have the right id");
+        assert_eq!(row[1], title, "all articles should have title 'foo'");
+        assert_eq!(row[2], raten, "all articles should have one 5-star rating");
+        if old_puts_after {
+            assert_eq!(row[3], 2.into(), "all articles should have two votes");
+        } else {
+            assert_eq!(row[3], 1.into(), "all articles should have one vote");
+        }
+    }
 }
 
 #[test]
