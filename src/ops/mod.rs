@@ -143,6 +143,7 @@ impl Ingredient for NodeOperator {
                     data: Records,
                     tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
+                    nshards: usize,
                     domain: &DomainNodes,
                     states: &StateMap)
                     -> RawProcessingResult {
@@ -152,6 +153,7 @@ impl Ingredient for NodeOperator {
                                 data,
                                 tracer,
                                 is_replay_of,
+                                nshards,
                                 domain,
                                 states)
     }

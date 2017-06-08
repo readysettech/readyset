@@ -30,6 +30,7 @@ pub struct Node {
     taken: bool,
 
     sharded_by: Sharding,
+    is_shard_merge: bool,
 }
 
 // constructors
@@ -53,6 +54,7 @@ impl Node {
             taken: false,
 
             sharded_by: Sharding::None,
+            is_shard_merge: false,
         }
     }
 
@@ -272,6 +274,10 @@ impl Node {
         addr.as_global();
         self.index = Some(addr);
     }
+
+    pub fn mark_as_shard_merger(&mut self, is: bool) {
+        self.is_shard_merge = is;
+    }
 }
 
 // is this or that?
@@ -330,6 +336,10 @@ impl Node {
             NodeType::Sharder(..) => true,
             _ => false,
         }
+    }
+
+    pub fn is_shard_merger(&self) -> bool {
+        self.is_shard_merge
     }
 
     /// A node is considered to be an output node if changes to its state are visible outside of

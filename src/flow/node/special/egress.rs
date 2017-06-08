@@ -1,7 +1,6 @@
 use std::sync::mpsc;
 use std::collections::HashMap;
 use flow::prelude::*;
-use petgraph::graph::NodeIndex;
 
 #[derive(Clone)]
 pub struct Egress {
@@ -30,7 +29,7 @@ impl Egress {
         self.tags.insert(tag, dst);
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex) {
+    pub fn process(&mut self, m: &mut Option<Box<Packet>>, shard: usize) {
         let &mut Self {
             ref mut txs,
             ref tags,
@@ -67,7 +66,10 @@ impl Egress {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            m.link_mut().src = index.into();
+            // src is usually ignored and overwritten by ingress
+            // *except* if the ingress is marked as a shard merger
+            // in which case it wants to know about the shard
+            m.link_mut().src = shard.into();
             m.link_mut().dst = dst;
 
             if tx.send(m).is_err() {

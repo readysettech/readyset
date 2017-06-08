@@ -777,10 +777,9 @@ pub fn reconstruct(log: &Logger,
                             .unwrap()
                             .send(box Packet::RequestUnboundedTx(tx))
                             .unwrap();
-                        let root_unbounded_tx = rx.recv().unwrap();
-                        // FIXME: we might actually get *multiple* txs here
-                        assert!(rx.recv().is_err());
-                        *trigger = TriggerEndpoint::End(root_unbounded_tx);
+                        let mut v: Vec<_> = rx.into_iter().collect();
+                        v.sort_by_key(|x| x.0);
+                        *trigger = TriggerEndpoint::End(v.into_iter().map(|x| x.1).collect());
                     }
                 } else {
                     unreachable!();
@@ -843,7 +842,6 @@ pub fn reconstruct(log: &Logger,
                 .send(box Packet::StartReplay {
                           tag: tag,
                           from: *graph[segments[0].1[0].0].local_addr(),
-                          ack: wait_tx.clone(),
                       })
                 .unwrap();
 

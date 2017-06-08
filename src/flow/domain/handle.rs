@@ -111,6 +111,7 @@ impl DomainHandle {
             let domain = domain::Domain::new(logger,
                                              self.idx,
                                              i,
+                                             n,
                                              nodes,
                                              persistence_params.clone(),
                                              checktable.clone(),
@@ -179,7 +180,7 @@ impl DomainHandle {
                     new_streamer: new_streamer.clone(),
                 }
             }
-            Packet::RequestUnboundedTx(..) => unimplemented!(),
+            Packet::RequestUnboundedTx(ref tx) => box Packet::RequestUnboundedTx(tx.clone()),
             Packet::PrepareState {
                 ref node,
                 ref state,
@@ -218,7 +219,12 @@ impl DomainHandle {
                     key: key.clone(),
                 }
             }
-            Packet::StartReplay { .. } => unimplemented!(),
+            Packet::StartReplay { ref tag, ref from } => {
+                box Packet::StartReplay {
+                    tag: tag.clone(),
+                    from: from.clone(),
+                }
+            }
             Packet::Ready {
                 ref node,
                 ref index,

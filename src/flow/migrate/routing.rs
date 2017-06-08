@@ -111,6 +111,12 @@ pub fn add(log: &Logger,
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
 
+                if graph[node].is_shard_merger() {
+                    // the ingress is really what merges the shards
+                    graph[node].mark_as_shard_merger(false);
+                    i.mark_as_shard_merger(true);
+                }
+
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
                 graph.add_edge(parent, ingress, false);
@@ -207,6 +213,7 @@ pub fn add(log: &Logger,
                 // NOTE: technically, this doesn't need to mirror its parent, but meh
                 let mut egress = graph[sender].mirror(node::special::Egress::default());
                 egress.add_to(graph[sender].domain());
+                egress.shard_by(graph[sender].sharded_by());
                 let egress = graph.add_node(egress);
                 graph.add_edge(sender, egress, false);
 
@@ -257,13 +264,16 @@ pub fn connect(log: &Logger,
                            "ingress" => node.index()
                     );
 
-                // we need to be a bit careful here in the particular case where we have a sharded
-                // egress that sends to another domain sharded by the same key. specifically, in
-                // that case we shouldn't have each shard of domain A send to all the shards of B.
-                // instead A[0] should send to B[0], A[1] to B[1], etc.
                 let mut txs = domains[&n.domain()].get_txs();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
-                if sender_node.sharded_by() != Sharding::None && txs.len() != 1 {
+                if txs.len() != 1 && sender_node.sharded_by() != Sharding::None {
+                    // we need to be a bit careful here in the particular case where we have a
+                    // sharded egress that sends to another domain sharded by the same key.
+                    // specifically, in that case we shouldn't have each shard of domain A send to
+                    // all the shards of B. instead A[0] should send to B[0], A[1] to B[1], etc.
+                    // note that we don't have to check the sharding of both src and dst here,
+                    // because an egress implies that no shuffle was necessary, which again means
+                    // that the sharding must be the same.
                     for (i, tx) in txs.into_iter().enumerate() {
                         domain
                             .send_to_shard(i,
@@ -275,6 +285,11 @@ pub fn connect(log: &Logger,
                             .unwrap();
                     }
                 } else {
+                    // consider the case where len != 1. that must mean that the
+                    // sender_node.sharded_by() == Sharding::None. so, we have an unsharded egress
+                    // sending to a sharded child. but that shouldn't be allowed -- such a node
+                    // *must* be a Sharder.
+                    assert_eq!(txs.len(), 1);
                     domain
                         .send(box Packet::UpdateEgress {
                                   node: sender_node.local_addr().as_local().clone(),

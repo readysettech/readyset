@@ -103,6 +103,10 @@ impl Sharder {
                     unreachable!()
                 };
 
+                if let box Packet::ReplayPiece { ref mut nshards, .. } = m {
+                    *nshards = 1;
+                }
+
                 let tx = &mut self.txs[shard];
                 m.link_mut().src = index.into();
                 m.link_mut().dst = tx.0;
@@ -133,6 +137,10 @@ impl Sharder {
                     .entry(shard)
                     .or_insert_with(|| box m.clone_data());
             }
+        }
+
+        if let Packet::ReplayPiece { ref mut nshards, .. } = *m {
+            *nshards = self.sharded.len();
         }
 
         for (i, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {

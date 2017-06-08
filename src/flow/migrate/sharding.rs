@@ -427,18 +427,15 @@ fn reshard(log: &Logger,
            src: NodeIndex,
            dst: NodeIndex,
            to: Sharding) {
-    if graph[src].sharded_by() == Sharding::None {
-        // src isn't sharded, so conforms to all shardings
-        return;
-    }
+    assert!(!graph[src].is_source());
 
     let node = match to {
         Sharding::None => {
-            // an identity node that is *not* marked as sharded will end up acting like a union!
-            // FIXME: this *must* be a union so that we correctly buffer partial replays
-            let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
+            // NOTE: this *must* be a union so that we correctly buffer partial replays
+            let n: NodeOperator = ops::union::Union::new_deshard(src.into()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(Sharding::None);
+            n.mark_as_shard_merger(true);
             n
         }
         Sharding::ByColumn(c) => {
