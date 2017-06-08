@@ -291,8 +291,9 @@ impl DomainHandle {
             }
             let key_col = key[0];
             let shard = {
-                let key = match p.data()[0]{
-                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
+                let key = match p.data()[0] {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col],
                     Record::DeleteRequest(ref k) => &k[0],
                 };
                 if !p.data().iter().all(|r| match *r {
