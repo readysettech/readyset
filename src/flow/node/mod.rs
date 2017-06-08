@@ -97,6 +97,10 @@ impl Node {
         DanglingDomainNode(n)
     }
 
+    pub fn remove(&mut self) {
+        self.inner = NodeType::Dropped;
+    }
+
     /// Set this node's sharding property.
     pub fn shard_by(&mut self, s: Sharding) {
         self.sharded_by = s;
@@ -121,6 +125,16 @@ impl Node {
         match self.inner {
             NodeType::Sharder(ref mut s) => f(s),
             _ => unreachable!(),
+        }
+    }
+
+    pub fn with_sharder<'a, F, R>(&'a self, f: F) -> Option<R>
+        where F: FnOnce(&'a special::Sharder) -> R,
+              R: 'a
+    {
+        match self.inner {
+            NodeType::Sharder(ref s) => Some(f(s)),
+            _ => None,
         }
     }
 
@@ -262,6 +276,7 @@ impl Node {
 
     pub fn add_to(&mut self, domain: domain::Index) {
         assert_eq!(self.domain, None);
+        assert!(!self.is_dropped());
         self.domain = Some(domain);
     }
 
@@ -284,6 +299,14 @@ impl Node {
 impl Node {
     pub fn is_source(&self) -> bool {
         if let NodeType::Source { .. } = self.inner {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_dropped(&self) -> bool {
+        if let NodeType::Dropped = self.inner {
             true
         } else {
             false

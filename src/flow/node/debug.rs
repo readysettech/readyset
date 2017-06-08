@@ -6,6 +6,7 @@ use flow::core::processing::Ingredient;
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.inner {
+            NodeType::Dropped => write!(f, "dropped node"),
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
@@ -28,6 +29,7 @@ impl Node {
 
         match self.inner {
             NodeType::Source => write!(f, "(source)"),
+            NodeType::Dropped => write!(f, "(✗)"),
             NodeType::Ingress => {
                 write!(f,
                        "{{ {} / {} | (ingress) }}",

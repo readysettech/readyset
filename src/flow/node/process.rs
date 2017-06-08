@@ -133,7 +133,7 @@ impl Node {
 
                 misses
             }
-            NodeType::Source => unreachable!(),
+            NodeType::Source | NodeType::Dropped => unreachable!(),
         }
     }
 }

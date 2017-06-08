@@ -333,6 +333,9 @@ pub fn initialize(log: &Logger,
         if node == blender.source {
             continue;
         }
+        if blender.ingredients[node].is_dropped() {
+            continue;
+        }
         if !new.contains(&node) {
             continue;
         }

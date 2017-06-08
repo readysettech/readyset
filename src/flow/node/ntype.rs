@@ -12,6 +12,7 @@ pub enum NodeType {
     Reader(special::Reader),
     Hook(Option<hook::Hook>),
     Source,
+    Dropped,
 }
 
 impl NodeType {
@@ -24,6 +25,7 @@ impl NodeType {
             NodeType::Internal(ref mut i) => NodeType::Internal(i.take()),
             NodeType::Hook(ref mut h) => NodeType::Hook(h.take()),
             NodeType::Source => unreachable!(),
+            NodeType::Dropped => unreachable!(),
         }
     }
 }

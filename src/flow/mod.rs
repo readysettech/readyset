@@ -778,12 +778,14 @@ impl<'a> Migration<'a> {
 
         // Find all nodes for domains that have changed
         let changed_domains: HashSet<domain::Index> = new.iter()
+            .filter(|&&ni| !mainline.ingredients[ni].is_dropped())
             .map(|&ni| mainline.ingredients[ni].domain())
             .collect();
         let mut domain_nodes = mainline
             .ingredients
             .node_indices()
             .filter(|&ni| ni != mainline.source)
+            .filter(|&ni| !mainline.ingredients[ni].is_dropped())
             .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));

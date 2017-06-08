@@ -29,6 +29,9 @@ pub fn assign(log: &Logger,
         if node == source {
             continue;
         }
+        if graph[node].is_dropped() {
+            continue;
+        }
         if !new.contains(&node) {
             continue;
         }

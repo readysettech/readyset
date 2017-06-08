@@ -47,6 +47,10 @@ impl Sharder {
         }
     }
 
+    pub fn sharded_by(&self) -> usize {
+        self.shard_by
+    }
+
     #[inline]
     fn to_shard(&self, r: &Record) -> usize {
         self.shard(&r[self.shard_by])
