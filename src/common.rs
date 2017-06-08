@@ -401,7 +401,6 @@ named!(pub field_list<&[u8], Vec<Column> >,
 );
 
 /// Parse list of column/field definitions.
-/// XXX(malte): add support for named table notation
 named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
        many0!(
            chain!(
