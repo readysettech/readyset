@@ -337,7 +337,7 @@ named!(pub sql_identifier<&[u8], &[u8]>,
                 || { ident }
           )
         | delimited!(tag!("`"), take_while1!(is_sql_identifier), tag!("`"))
-        | delimited!(tag!("'"), take_while1!(is_sql_identifier), tag!("'"))
+        | delimited!(tag!("["), take_while1!(is_sql_identifier), tag!("]"))
     )
 );
 
