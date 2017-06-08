@@ -40,8 +40,8 @@ pub struct Parameters {
 impl Default for Parameters {
     fn default() -> Self {
         Self {
-            queue_capacity: 1,
-            flush_timeout: time::Duration::from_millis(0),
+            queue_capacity: 512,
+            flush_timeout: time::Duration::from_millis(1),
             mode: DurabilityMode::MemoryOnly,
         }
     }
