@@ -18,6 +18,16 @@ use flow::domain;
 use flow::prelude::*;
 use checktable;
 
+/// Indicates to what degree updates should be persisted.
+#[derive(Clone)]
+pub enum DurabilityMode {
+    /// Don't do any durability
+    MemoryOnly,
+    /// Delete any log files on exit. Useful mainly for tests.
+    DeleteOnExit,
+    /// Persist updates to disk, and don't delete them later.
+    Permanent,
+}
 
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone)]
@@ -27,7 +37,17 @@ pub struct Parameters {
     /// Amount of time to wait before flushing despite not reaching `queue_capacity`.
     pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
-    pub delete_on_drop: bool,
+    pub mode: DurabilityMode,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            queue_capacity: 1,
+            flush_timeout: time::Duration::from_millis(0),
+            mode: DurabilityMode::MemoryOnly,
+        }
+    }
 }
 
 pub struct GroupCommitQueueSet {
@@ -53,7 +73,7 @@ pub struct GroupCommitQueueSet {
     domain_index: domain::Index,
     timeout: time::Duration,
     capacity: usize,
-    delete_on_drop: bool,
+    durability_mode: DurabilityMode,
 }
 
 impl GroupCommitQueueSet {
@@ -71,7 +91,7 @@ impl GroupCommitQueueSet {
             domain_index,
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
-            delete_on_drop: params.delete_on_drop,
+            durability_mode: params.mode.clone(),
         }
     }
 
@@ -103,7 +123,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Returns whether the given packet should be persisted.
-    pub fn should_persist(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
+    pub fn destination_is_base(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         match Self::packet_destination(p) {
             Some(n) => {
                 let node = &nodes[&n].borrow();
@@ -132,28 +152,33 @@ impl GroupCommitQueueSet {
         self.durable_packets.drain(..)
     }
 
-    /// Flush any pending packets for node to disk, leaving the packets in self.durable_packets.
+    /// Flush any pending packets for node to disk (if applicable), moving the packets to self.durable_packets.
     fn flush_internal(&mut self, node: &LocalNodeIndex) {
-        if !self.files.contains_key(node) {
-            let file = self.create_file(node);
-            self.files.insert(node.clone(), file);
-        }
+        match self.durability_mode {
+            DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
+                if !self.files.contains_key(node) {
+                    let file = self.create_file(node);
+                    self.files.insert(node.clone(), file);
+                }
 
-        let mut file = &mut self.files[node].1;
-        {
-            let data_to_flush: Vec<_> = self.pending_packets[&node]
-                .iter()
-                .map(|p| match **p {
-                         Packet::Transaction { ref data, .. } |
-                         Packet::Message { ref data, .. } => data,
-                         _ => unreachable!(),
-                     })
-                .collect();
-            serde_json::to_writer(&mut file, &data_to_flush).unwrap();
-        }
+                let mut file = &mut self.files[node].1;
+                {
+                    let data_to_flush: Vec<_> = self.pending_packets[&node]
+                        .iter()
+                        .map(|p| match **p {
+                            Packet::Transaction { ref data, .. } |
+                            Packet::Message { ref data, .. } => data,
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                    serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                }
 
-        file.flush().unwrap();
-        file.get_mut().sync_data().unwrap();
+                file.flush().unwrap();
+                file.get_mut().sync_data().unwrap();
+            }
+            DurabilityMode::MemoryOnly => {}
+        }
 
         self.wait_start.remove(node);
         mem::swap(&mut self.pending_packets[&node], &mut self.durable_packets);
@@ -313,7 +338,7 @@ impl GroupCommitQueueSet {
 
 impl Drop for GroupCommitQueueSet {
     fn drop(&mut self) {
-        if self.delete_on_drop {
+        if let DurabilityMode::DeleteOnExit = self.durability_mode {
             for &(ref filename, _) in self.files.values() {
                 fs::remove_file(filename).unwrap();
             }

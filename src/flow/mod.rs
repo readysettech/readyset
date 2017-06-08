@@ -62,8 +62,8 @@ pub struct Blender {
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
 
-    /// Parameters for persistence code. None means run in memory only mode.
-    persistence: Option<persistence::Parameters>,
+    /// Parameters for persistence code.
+    persistence: persistence::Parameters,
 
     txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
     in_txs: HashMap<domain::Index, mpsc::SyncSender<Box<payload::Packet>>>,
@@ -87,7 +87,7 @@ impl Default for Blender {
             partial: Default::default(),
             partial_enabled: true,
 
-            persistence: None,
+            persistence: persistence::Parameters::default(),
 
             txs: HashMap::default(),
             in_txs: HashMap::default(),
@@ -116,11 +116,11 @@ impl Blender {
     /// Must be called before any domains have been created.
     pub fn enable_persistence(&mut self, queue_capacity: usize, flush_timeout: time::Duration) {
         assert_eq!(self.ndomains, 0);
-        self.persistence = Some(persistence::Parameters {
-                                    queue_capacity,
-                                    flush_timeout,
-                                    delete_on_drop: false,
-                                });
+        self.persistence = persistence::Parameters {
+            queue_capacity,
+            flush_timeout,
+            mode: persistence::DurabilityMode::Permanent,
+        };
     }
 
     /// Same as `enable_persistence`, except that the log file(s) should be deleted on exit.
@@ -128,11 +128,11 @@ impl Blender {
                                         queue_capacity: usize,
                                         flush_timeout: time::Duration) {
         assert_eq!(self.ndomains, 0);
-        self.persistence = Some(persistence::Parameters {
-                                    queue_capacity,
-                                    flush_timeout,
-                                    delete_on_drop: true,
-                                });
+        self.persistence = persistence::Parameters {
+            queue_capacity,
+            flush_timeout,
+            mode: persistence::DurabilityMode::DeleteOnExit,
+        };
     }
 
     /// Set the `Logger` to use for internal log messages.
