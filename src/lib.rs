@@ -179,7 +179,7 @@
 //! # mig.commit();
 //! # article
 //! # };
-//! let muta = g.get_mutator(article);
+//! let mut muta = g.get_mutator(article);
 //! muta.put(vec![1.into(), "Hello world".into()]);
 //! ```
 //!
@@ -242,7 +242,7 @@
 //! # mig.commit();
 //! # vote
 //! # };
-//! let mutv = g.get_mutator(vote);
+//! let mut mutv = g.get_mutator(vote);
 //! mutv.put(vec![1000.into(), 1.into()]);
 //! ```
 //!
