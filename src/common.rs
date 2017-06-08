@@ -421,15 +421,15 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                      }
                  )
                  | chain!(
-                     column: column_identifier,
-                     || {
-                         FieldExpression::Col(column)
-                     }
-                 )
-                 | chain!(
                      literal: literal,
                      || {
                          FieldExpression::Literal(literal)
+                     }
+                 )
+                 | chain!(
+                     column: column_identifier,
+                     || {
+                         FieldExpression::Col(column)
                      }
                  )
                ) ~
