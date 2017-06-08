@@ -189,7 +189,12 @@ impl DomainHandle {
                     state: state.clone(),
                 }
             }
-            Packet::StateSizeProbe { .. } => unimplemented!(),
+            Packet::StateSizeProbe { ref node, ref ack } => {
+                box Packet::StateSizeProbe {
+                    node: node.clone(),
+                    ack: ack.clone(),
+                }
+            }
             Packet::SetupReplayPath {
                 ref tag,
                 ref source,
@@ -198,8 +203,6 @@ impl DomainHandle {
                 ref trigger,
                 ref ack,
             } => {
-                // FIXME: is multi-ack correct?
-                // FIXME: is multi-done correct?
                 box Packet::SetupReplayPath {
                     tag: tag.clone(),
                     source: source.clone(),
@@ -221,7 +224,6 @@ impl DomainHandle {
                 ref index,
                 ref ack,
             } => {
-                // FIXME: multi-ack?
                 box Packet::Ready {
                     node: node.clone(),
                     index: index.clone(),

@@ -623,7 +623,7 @@ impl Domain {
                         ack,
                     } => {
                         // let coordinator know that we've registered the tagged path
-                        ack.send(()).unwrap();
+                        drop(ack);
 
                         if done_tx.is_some() {
                             info!(self.log,
@@ -1506,9 +1506,10 @@ impl Domain {
 
             if let Some(done_tx) = self.replay_paths
                    .get_mut(&tag)
-                   .and_then(|p| p.done_tx.as_mut()) {
+                   .and_then(|p| p.done_tx.take()) {
+                // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                done_tx.send(()).unwrap();
+                drop(done_tx);
             } else {
                 unreachable!()
             }

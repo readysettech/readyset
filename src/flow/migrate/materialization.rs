@@ -769,7 +769,7 @@ pub fn reconstruct(log: &Logger,
                         // first domain needs to be told about partial replay trigger
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
-                        // otherwise, should know what how to trigger partial replay
+                        // otherwise, should know how to trigger partial replay
                         let (tx, rx) = mpsc::channel();
                         blender
                             .domains
@@ -828,9 +828,9 @@ pub fn reconstruct(log: &Logger,
         }
 
         // wait for them all to have seen that message
-        for _ in &segments {
-            wait_rx.recv().unwrap();
-        }
+        drop(wait_tx);
+        let x = wait_rx.recv();
+        assert!(x.is_err());
         trace!(log, "all domains ready for replay");
 
         if !partial_ok {
@@ -852,7 +852,8 @@ pub fn reconstruct(log: &Logger,
                    "waiting for done message from target";
                    "domain" => segments.last().unwrap().0.index()
             );
-            done_rx.recv().unwrap();
+            let x = done_rx.recv();
+            assert!(x.is_err());
         }
     }
     domains_on_path
@@ -999,9 +1000,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
                               ack: tx,
                           })
                     .unwrap();
-                let mut size = rx.recv().expect("stateful parent should have state");
-                // FIXME: can get more than one result with sharding
-                assert!(rx.recv().is_err());
+                let mut size: usize = rx.into_iter().sum();
 
                 // compute the total cost
                 // replay cost
