@@ -661,6 +661,9 @@ pub fn reconstruct(log: &Logger,
     // TODO FIXME:
     // we need to detect materialized nodes downstream of partially materialized nodes.
 
+    // FIXME: what if we have two paths with the same source because of a fork-join? we'd need to
+    // buffer somewhere to avoid splitting pieces...
+
     let mut domains_on_path = HashMap::new();
 
     // set up channels for replay along each path
