@@ -511,10 +511,7 @@ fn reshard(log: &Logger,
         Sharding::ByColumn(c) => {
             use flow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
-
-            // the sharder itself isn't sharded
-            n.shard_by(Sharding::None);
-
+            n.shard_by(graph[src].sharded_by());
             n
         }
         Sharding::Random => unreachable!(),

@@ -120,6 +120,9 @@ pub fn add(log: &Logger,
                     i.mark_as_shard_merger(true);
                 }
 
+                // the ingress is sharded the same way as its target
+                i.shard_by(graph[node].sharded_by());
+
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
                 graph.add_edge(parent, ingress, false);
