@@ -7,7 +7,6 @@ use serde_json;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::mem;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
@@ -56,17 +55,12 @@ pub struct GroupCommitQueueSet {
     /// empty. A flush should occur on or before wait_start + timeout.
     wait_start: Map<time::Instant>,
 
-    /// Packets that have already been persisted, and should now be handled by the domain. This Vec
-    /// is drained immediately after it is filled, so it should be empty any time method is called
-    /// on GroupCommitqueueSet.
-    durable_packets: Vec<Box<Packet>>,
+    /// Name of, and handle to the files that packets should be persisted to.
+    files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
 
     /// Passed to the checktable to learn which packets committed. Stored here to avoid an
     /// allocation on the critical path.
     commit_decisions: Vec<bool>,
-
-    /// Name of, and handle to the files that packets should be persisted to.
-    files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
 
     domain_index: domain::Index,
     timeout: time::Duration,
@@ -81,7 +75,6 @@ impl GroupCommitQueueSet {
 
         Self {
             pending_packets: Map::default(),
-            durable_packets: Vec::with_capacity(params.queue_capacity),
             commit_decisions: Vec::with_capacity(params.queue_capacity),
             wait_start: Map::default(),
             files: Map::default(),
@@ -136,8 +129,6 @@ impl GroupCommitQueueSet {
                               nodes: &DomainNodes,
                               checktable: &Arc<Mutex<checktable::CheckTable>>)
                               -> Option<Box<Packet>> {
-        assert_eq!(self.durable_packets.len(), 0);
-
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.timeout {
@@ -146,19 +137,15 @@ impl GroupCommitQueueSet {
             }
         }
 
-        if let Some(node) = needs_flush {
-            self.flush_internal(&node);
-        }
-
-        Self::merge_packets(&mut self.durable_packets,
-                            &mut self.commit_decisions,
-                            nodes,
-                            checktable)
+        needs_flush.and_then(|node| self.flush_internal(&node, nodes, checktable))
     }
 
-    /// Flush any pending packets for node to disk (if applicable), moving the packets to
-    /// self.durable_packets.
-    fn flush_internal(&mut self, node: &LocalNodeIndex) {
+    /// Flush any pending packets for node to disk (if applicable), and return a merged packet.
+    fn flush_internal(&mut self,
+                      node: &LocalNodeIndex,
+                      nodes: &DomainNodes,
+                      checktable: &Arc<Mutex<checktable::CheckTable>>)
+                      -> Option<Box<Packet>> {
         match self.durability_mode {
             DurabilityMode::DeleteOnExit |
             DurabilityMode::Permanent => {
@@ -187,7 +174,10 @@ impl GroupCommitQueueSet {
         }
 
         self.wait_start.remove(node);
-        mem::swap(&mut self.pending_packets[&node], &mut self.durable_packets);
+        Self::merge_packets(&mut self.pending_packets[node],
+                            &mut self.commit_decisions,
+                            nodes,
+                            checktable)
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
@@ -197,8 +187,6 @@ impl GroupCommitQueueSet {
                       nodes: &DomainNodes,
                       checktable: &Arc<Mutex<checktable::CheckTable>>)
                       -> Option<Box<Packet>> {
-        assert_eq!(self.durable_packets.len(), 0);
-
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
@@ -207,15 +195,11 @@ impl GroupCommitQueueSet {
 
         self.pending_packets[&node].push(p);
         if self.pending_packets[&node].len() >= self.capacity {
-            self.flush_internal(&node);
-        } else if !self.wait_start.contains_key(&node) {
+            return self.flush_internal(&node, nodes, checktable);
+        } if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
         }
-
-        Self::merge_packets(&mut self.durable_packets,
-                            &mut self.commit_decisions,
-                            nodes,
-                            checktable)
+        None
     }
 
     /// Returns how long until a flush should occur.
