@@ -292,6 +292,23 @@ mod tests {
                    });
     }
 
+    #[test]
+    fn select_literals() {
+        use common::Literal;
+
+        let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
+
+        let res = selection(qstring.as_bytes());
+        assert_eq!(res.unwrap().1,
+                   SelectStatement {
+                       tables: vec![Table::from("users")],
+                       fields: vec![FieldExpression::Literal(Literal::Null),
+                                    FieldExpression::Literal(1.into()),
+                                    FieldExpression::Literal("foo".into()),
+                                    FieldExpression::Literal(Literal::CurrentTime)],
+                       ..Default::default()
+                   });
+    }
 
     #[test]
     fn select_all() {
