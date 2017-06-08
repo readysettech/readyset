@@ -27,33 +27,15 @@ impl Node {
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                    .unwrap_or("white".into()))?;
 
+        let index = self.index.unwrap_or(idx.into());
+        let addr = self.index.unwrap_or(0.into());
         match self.inner {
             NodeType::Source => write!(f, "(source)"),
             NodeType::Dropped => write!(f, "(✗)"),
-            NodeType::Ingress => {
-                write!(f,
-                       "{{ {} / {} | (ingress) }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap())
-            }
-            NodeType::Egress { .. } => {
-                write!(f,
-                       "{{ {} / {} | (egress) }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap())
-            }
-            NodeType::Sharder { .. } => {
-                write!(f,
-                       "{{ {} / {} | (sharder) }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap())
-            }
-            NodeType::Hook(..) => {
-                write!(f,
-                       "{{ {} / {} | (hook) }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap())
-            }
+            NodeType::Ingress => write!(f, "{{ {} / {} | (ingress) }}", index, addr),
+            NodeType::Egress { .. } => write!(f, "{{ {} / {} | (egress) }}", index, addr),
+            NodeType::Sharder { .. } => write!(f, "{{ {} / {} | (sharder) }}", index, addr),
+            NodeType::Hook(..) => write!(f, "{{ {} / {} | (hook) }}", index, addr),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
@@ -70,8 +52,8 @@ impl Node {
                 };
                 write!(f,
                        "{{ {} / {} | (reader / key: {}) | {} }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap(),
+                       index,
+                       addr,
                        key,
                        size)
             }
@@ -81,8 +63,8 @@ impl Node {
                 // Output node name and description. First row.
                 write!(f,
                        "{{ {} / {} / {} | {} }}",
-                       self.index.unwrap(),
-                       self.addr.unwrap(),
+                       index,
+                       addr,
                        Self::escape(self.name()),
                        Self::escape(&i.description()))?;
 
