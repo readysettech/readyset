@@ -319,6 +319,8 @@
 #![feature(box_syntax)]
 #![deny(missing_docs)]
 
+const SHARDS: usize = 2;
+
 #[macro_use]
 extern crate slog;
 extern crate slog_term;

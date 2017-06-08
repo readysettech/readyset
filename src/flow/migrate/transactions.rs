@@ -25,7 +25,12 @@ fn count_base_ingress(graph: &Graph,
             let mut num_paths = ingress_nodes
                 .iter()
                 .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
-                .count();
+                .map(|&ingress| if graph[ingress].is_shard_merger() {
+                         ::SHARDS
+                     } else {
+                         1
+                     })
+                .sum();
 
             // Domains containing a base node will get a single copy of each packet sent to it.
             if graph[base].domain() == *domain {

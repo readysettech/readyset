@@ -55,11 +55,13 @@ impl DomainHandle {
                 Sharding::None => {}
                 _ => {
                     // NOTE: warning to future self
-                    // the code currently relies on the fact that two domains that are sharded by
+                    // the code currently relies on the fact that the domains that are sharded by
                     // the same key *also* have the same number of shards. if this no longer holds,
                     // we actually need to do a shuffle, otherwise writes will end up on the wrong
                     // shard. keep that in mind.
-                    add();
+                    for _ in 1..::SHARDS {
+                        add();
+                    }
                 }
             }
         }

@@ -131,11 +131,19 @@ impl Sharder {
             p.map_data(|rs| rs.push(record));
         }
 
+        let mut force_all = false;
         if let Packet::ReplayPiece {
                    context: payload::ReplayPieceContext::Regular { last: true }, ..
                } = *m {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
+            force_all = true;
+        }
+        if let Packet::Transaction { .. } = *m {
+            // transactions (currently) need to reach all shards so they know they can progress
+            force_all = true;
+        }
+        if force_all {
             for shard in 0..self.txs.len() {
                 self.sharded
                     .entry(shard)

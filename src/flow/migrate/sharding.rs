@@ -98,6 +98,11 @@ pub fn shard(log: &Logger,
             continue;
         }
 
+        if graph[node].get_base().is_some() && graph[node].is_transactional() {
+            error!(log, "not sharding transactional base node"; "node" => ?node);
+            continue;
+        }
+
         // if a node does a lookup into itself by a given key, it must be sharded by that key (or
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
@@ -340,6 +345,11 @@ pub fn shard(log: &Logger,
 
             // if the parent is a base, the only option we have is to shard the base.
             if graph[p].get_base().is_some() {
+                // sharded transactional bases are hard
+                if graph[p].is_transactional() {
+                    continue;
+                }
+
                 // if the base has other children, sharding it may have other effects
                 if graph
                        .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
