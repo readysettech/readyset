@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const SETTLE_TIME_MS: u64 = 750;
 
 #[test]
-fn it_works() {
+fn it_works_basic() {
     // set up graph
     let mut g = distributary::Blender::new();
     g.enable_temporary_persistence(128, time::Duration::from_millis(1));
@@ -478,11 +478,11 @@ fn transactional_vote() {
 
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap().0;
+    assert_eq!(res.len(), 1);
     assert!(res.iter()
                 .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
             "no entry for [1,2,1|2] in {:?}",
             res);
-    assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2).unwrap().0;
