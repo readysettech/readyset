@@ -196,7 +196,7 @@ impl GroupCommitQueueSet {
         self.pending_packets[&node].push(p);
         if self.pending_packets[&node].len() >= self.capacity {
             return self.flush_internal(&node, nodes, checktable);
-        } if !self.wait_start.contains_key(&node) {
+        } else if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
         }
         None
@@ -230,16 +230,16 @@ impl GroupCommitQueueSet {
         let merged_data = packets.fold(Records::default(), |mut acc, p| {
             match (p,) {
                 (box Packet::Message {
-                    ref link,
-                    ref mut data,
-                    ref mut tracer,
-                },) |
+                     ref link,
+                     ref mut data,
+                     ref mut tracer,
+                 },) |
                 (box Packet::Transaction {
-                    ref link,
-                    ref mut data,
-                    ref mut tracer,
-                    ..
-                },) => {
+                     ref link,
+                     ref mut data,
+                     ref mut tracer,
+                     ..
+                 },) => {
                     assert_eq!(merged_link, *link);
                     acc.append(data);
 
@@ -261,18 +261,18 @@ impl GroupCommitQueueSet {
         match transaction_state {
             Some(merged_state) => {
                 Some(Box::new(Packet::Transaction {
-                             link: merged_link,
-                             data: merged_data,
-                             tracer: merged_tracer,
-                             state: merged_state,
-                         }))
+                                  link: merged_link,
+                                  data: merged_data,
+                                  tracer: merged_tracer,
+                                  state: merged_state,
+                              }))
             }
             None => {
                 Some(Box::new(Packet::Message {
-                             link: merged_link,
-                             data: merged_data,
-                             tracer: merged_tracer,
-                         }))
+                                  link: merged_link,
+                                  data: merged_data,
+                                  tracer: merged_tracer,
+                              }))
             }
         }
     }
@@ -297,7 +297,18 @@ impl GroupCommitQueueSet {
         let (ts, prevs) = {
             let mut checktable = checktable.lock().unwrap();
             match checktable.apply_batch(base, packets, commit_decisions) {
-                checktable::TransactionResult::Aborted => return None,
+                checktable::TransactionResult::Aborted => {
+                    for packet in packets.drain(..) {
+                        if let (box Packet::Transaction {
+                                   state: TransactionState::Pending(_, ref mut sender), ..
+                               },) = (packet,) {
+                            sender.send(Err(())).unwrap();
+                        } else {
+                            unreachable!();
+                        }
+                    }
+                    return None;
+                }
                 checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
             }
         };

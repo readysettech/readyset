@@ -155,7 +155,8 @@ impl Mutator {
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
-                Err(..) => thread::yield_now(),
+                Err(mpsc::TryRecvError::Empty) => thread::yield_now(),
+                Err(mpsc::TryRecvError::Disconnected) => unreachable!(),
             }
         }
     }
