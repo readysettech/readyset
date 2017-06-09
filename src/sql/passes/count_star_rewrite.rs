@@ -151,8 +151,7 @@ mod tests {
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
         // SELECT COUNT(users.name) FROM users GROUP BY id;
-        let q = parse_query("SELECT COUNT(*) FROM users GROUP BY id;")
-            .unwrap();
+        let q = parse_query("SELECT COUNT(*) FROM users GROUP BY id;").unwrap();
         let mut schema = HashMap::new();
         schema.insert("users".into(),
                       vec!["id".into(), "name".into(), "age".into()]);

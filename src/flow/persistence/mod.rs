@@ -305,8 +305,8 @@ impl GroupCommitQueueSet {
                 checktable::TransactionResult::Aborted => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                                   state: TransactionState::Pending(_, ref mut sender), ..
-                               },) = (packet,) {
+                                    state: TransactionState::Pending(_, ref mut sender), ..
+                                },) = (packet,) {
                             sender.send(Err(())).unwrap();
                         } else {
                             unreachable!();

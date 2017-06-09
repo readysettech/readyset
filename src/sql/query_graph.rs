@@ -160,8 +160,9 @@ fn classify_conditionals(ce: &ConditionExpression,
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
-                                    if let Ordering::Less =
-                                        fr.table.as_ref().cmp(&fl.table.as_ref()) {
+                                    if let Ordering::Less = fr.table
+                                           .as_ref()
+                                           .cmp(&fl.table.as_ref()) {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
                                     }

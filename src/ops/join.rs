@@ -399,8 +399,7 @@ mod tests {
         j.seed(l, l_b2.clone());
         let rs = j.one_row(l, l_b2.clone(), false);
         assert_eq!(rs,
-                   vec![((vec![2.into(), "b".into(), "z".into()], true))]
-                       .into());
+                   vec![((vec![2.into(), "b".into(), "z".into()], true))].into());
 
         // forward from left with two matching records on right
         j.seed(l, l_a1.clone());

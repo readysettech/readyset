@@ -406,8 +406,7 @@ mod tests {
     fn it_computes_delta() {
         let r0 = Recipe::blank(None);
         let q0 = sql_parser::parse_query("SELECT a FROM b;").unwrap();
-        let q1 = sql_parser::parse_query("SELECT a, c FROM b WHERE x = 42;")
-            .unwrap();
+        let q1 = sql_parser::parse_query("SELECT a, c FROM b WHERE x = 42;").unwrap();
 
         let q0_id = hash_query(&q0);
         let q1_id = hash_query(&q1);

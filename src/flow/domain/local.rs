@@ -88,10 +88,9 @@ impl<T> Map<T> {
 
     pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (NodeAddress, &'a mut T)> + 'a> {
         Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
-                                                                   t.as_mut().map(|v| {
-                (unsafe { NodeAddress::make_local(i as u32) }, v)
-            })
-                                                               }))
+            t.as_mut()
+                .map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
+        }))
     }
 
     pub fn values<'a>(&'a self) -> Box<Iterator<Item = &'a T> + 'a> {

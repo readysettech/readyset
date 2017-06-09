@@ -871,10 +871,11 @@ impl MirNodeType {
                         // if we are instructed to adapt an earlier base node, we cannot reuse
                         // anything directly; we'll have to keep a new MIR node here.
                         if our_adapted_over.is_some() {
-                            // TODO(malte): this is a bit more conservative than it needs to be, since
-                            // base node adaptation actually *changes* the underlying base node, so we
-                            // will actually reuse. However, returning false here terminates the
-                            // reuse search unnecessarily. We should handle this special case.
+                            // TODO(malte): this is a bit more conservative than it needs to be,
+                            // since base node adaptation actually *changes* the underlying base
+                            // node, so we will actually reuse. However, returning false here
+                            // terminates the reuse search unnecessarily. We should handle this
+                            // special case.
                             return false;
                         }
                         // note that as long as we are not adapting a previous base node,
@@ -1259,8 +1260,7 @@ fn make_base_node(name: &str,
                          .unwrap()
                  })
             .collect();
-        ops::base::Base::new(default_values)
-            .with_key(pkey_column_ids)
+        ops::base::Base::new(default_values).with_key(pkey_column_ids)
     } else {
         ops::base::Base::new(default_values)
     };

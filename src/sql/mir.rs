@@ -333,7 +333,8 @@ impl SqlToMirConverter {
                             let pos = columns
                                 .iter()
                                 .position(|cc| cc == *removed)
-                                .expect(&format!("couldn't find column \"{:#?}\", which we're removing",
+                                .expect(&format!("couldn't find column \"{:#?}\", \
+                                                 which we're removing",
                                                  removed));
                             columns.remove(pos);
                         }
@@ -917,10 +918,8 @@ impl SqlToMirConverter {
                                     QueryGraphEdge::GroupBy(ref gbc) => {
                                         let table =
                                             gbc.into_iter().next().unwrap().table.as_ref().unwrap();
-                                        assert!(gbc.into_iter().all(|c| {
-                                                                        c.table.as_ref().unwrap() ==
-                                                                        table
-                                                                    }));
+                                        assert!(gbc.into_iter()
+                                                    .all(|c| c.table.as_ref().unwrap() == table));
                                         gb_cols.extend(gbc);
                                     }
                                     _ => unreachable!(),
@@ -941,8 +940,9 @@ impl SqlToMirConverter {
                                             Some(pn) => pn,
                                         };
                                         let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                             qg.signature().hash,
-                                                             new_node_count),
+                                                                                  qg.signature()
+                                                                                      .hash,
+                                                                                  new_node_count),
                                                                          parent,
                                                                          &qgn.predicates);
                                         assert!(fns.len() > 0);
@@ -1009,8 +1009,9 @@ impl SqlToMirConverter {
                                             Some(pn) => pn,
                                         };
                                         let fns = self.make_filter_nodes(&format!("q_{:x}_n{}",
-                                                                             qg.signature().hash,
-                                                                             new_node_count),
+                                                                                  qg.signature()
+                                                                                      .hash,
+                                                                                  new_node_count),
                                                                          parent,
                                                                          &qgn.predicates);
                                         assert!(fns.len() > 0);

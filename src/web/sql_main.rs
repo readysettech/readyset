@@ -53,11 +53,12 @@ fn main() {
         println!("done awvc");
 
         // add user karma
-        let _karma = inc.add_query("SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
+        let _karma =
+            inc.add_query("SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
                             awvc.user;",
-                                   Some("karma".into()),
-                                   &mut mig)
-            .unwrap();
+                          Some("karma".into()),
+                          &mut mig)
+                .unwrap();
     }
 
     println!("{}", g);
