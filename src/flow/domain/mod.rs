@@ -87,7 +87,7 @@ struct Waiting {
 
 pub struct Domain {
     index: Index,
-    _shard: Option<usize>,
+    shard: Option<usize>,
     nshards: usize,
 
     nodes: DomainNodes,
@@ -133,7 +133,7 @@ impl Domain {
 
         Domain {
             index,
-            _shard: shard,
+            shard: shard,
             nshards: nshards,
             transaction_state: transactions::DomainState::new(index, checktable, ts),
             persistence_parameters,
@@ -358,7 +358,7 @@ impl Domain {
                        &mut self.waiting,
                        &mut self.state,
                        &self.nodes,
-                       self._shard,
+                       self.shard,
                        &mut self.replay_paths,
                        &mut self.process_times,
                        &mut self.process_ptimes,
@@ -429,12 +429,9 @@ impl Domain {
             self.process_times.start(*addr.as_local());
             self.process_ptimes.start(*addr.as_local());
             let mut m = Some(m);
-            self.nodes[addr.as_local()].borrow_mut().process(&mut m,
-                                                             None,
-                                                             &mut self.state,
-                                                             &self.nodes,
-                                                             self._shard,
-                                                             true);
+            self.nodes[addr.as_local()]
+                .borrow_mut()
+                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().nchildren(), 0);
@@ -1020,7 +1017,7 @@ impl Domain {
                               None,
                               &mut self.state,
                               &self.nodes,
-                              self._shard,
+                              self.shard,
                               false);
                 }
                 break;
@@ -1057,7 +1054,7 @@ impl Domain {
                                       None,
                                       &mut self.state,
                                       &self.nodes,
-                                      self._shard,
+                                      self.shard,
                                       false);
                             debug!(self.log, "bulk egress forward completed");
                             drop(n);
@@ -1248,7 +1245,7 @@ impl Domain {
                                                    keyed_by,
                                                    &mut self.state,
                                                    &self.nodes,
-                                                   self._shard,
+                                                   self.shard,
                                                    false);
 
                         if target {
@@ -1317,7 +1314,7 @@ impl Domain {
                                                   None,
                                                   &mut self.state,
                                                   &self.nodes,
-                                                  self._shard,
+                                                  self.shard,
                                                   false);
                                     }
                                 }
@@ -1537,7 +1534,7 @@ impl Domain {
                                    &mut self.waiting,
                                    &mut self.state,
                                    &self.nodes,
-                                   self._shard,
+                                   self.shard,
                                    &mut self.replay_paths,
                                    &mut self.process_times,
                                    &mut self.process_ptimes,
@@ -1652,7 +1649,7 @@ impl Domain {
 
                 let mut group_commit_queues =
                     persistence::GroupCommitQueueSet::new(self.index,
-                                                          self._shard.unwrap_or(0),
+                                                          self.shard.unwrap_or(0),
                                                           &self.persistence_parameters);
 
                 self.total_time.start();
@@ -1719,7 +1716,7 @@ impl Domain {
                         Err(_) => break,
                         Ok(box Packet::Quit) => break,
                         Ok(box Packet::RequestUnboundedTx(ack)) => {
-                            ack.send((self._shard.unwrap_or(0), back_tx.clone()))
+                            ack.send((self.shard.unwrap_or(0), back_tx.clone()))
                                 .unwrap();
                         }
                         Ok(m) => {
