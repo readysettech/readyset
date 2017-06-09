@@ -217,33 +217,58 @@ impl CheckTable {
                           .collect()))
     }
 
-    pub fn attempt_claim_timestamp(&mut self,
-                                   token: &Token,
-                                   base: NodeIndex,
-                                   rs: &Records)
-                                   -> TransactionResult {
+    #[allow(unused)]
+    pub fn apply(&mut self, token: &Token, base: NodeIndex, rs: &Records) -> TransactionResult {
         if self.validate_token(token) {
-            let (ts, prevs) = self.claim_timestamp(base, rs);
+            let (ts, prevs) = self.apply_unconditional(base, rs);
             TransactionResult::Committed(ts, prevs)
         } else {
             TransactionResult::Aborted
         }
     }
 
-    pub fn claim_timestamp(&mut self,
-                           base: NodeIndex,
-                           rs: &Records)
-                           -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
-        // Take timestamp
-        let ts = self.next_timestamp;
-        self.next_timestamp += 1;
+    pub fn apply_batch(&mut self,
+                       base: NodeIndex,
+                       packets: &mut Vec<Box<Packet>>,
+                       decisions: &mut Vec<bool>)
+                       -> TransactionResult {
+        decisions.clear();
 
-        // Compute the previous timestamp that each domain will see before getting this one
-        let prev_times = self.compute_previous_timestamps(Some(base));
+        let mut result = TransactionResult::Aborted;
+        for packet in packets.iter() {
+            let (commit, rs) = if let box Packet::Transaction {
+                       ref data,
+                       ref state,
+                       ..
+                   } = *packet {
+                match *state {
+                    TransactionState::Pending(ref token, _) => (self.validate_token(token), data),
+                    TransactionState::WillCommit => (true, data),
+                    TransactionState::Committed(..) => unreachable!(),
+                }
+            } else {
+                unreachable!();
+            };
 
-        // Update checktables
-        self.last_base = Some(base);
-        self.toplevel.insert(base, ts);
+            decisions.push(commit);
+            if !commit {
+                continue;
+            }
+
+            match result {
+                TransactionResult::Committed(ts, _) => {
+                    self.update_granular_checktables(base.clone(), ts, rs);
+                }
+                TransactionResult::Aborted => {
+                    let (ts, prevs) = self.apply_unconditional(base, rs);
+                    result = TransactionResult::Committed(ts, prevs);
+                }
+            };
+        }
+        result
+    }
+
+    fn update_granular_checktables(&mut self, base: NodeIndex, ts: i64, rs: &Records) {
         let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
         for record in rs.iter() {
             for (i, value) in record.iter().enumerate() {
@@ -260,6 +285,23 @@ impl CheckTable {
                 }
             }
         }
+    }
+
+    pub fn apply_unconditional(&mut self,
+                               base: NodeIndex,
+                               rs: &Records)
+                               -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+        // Take timestamp
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+
+        // Compute the previous timestamp that each domain will see before getting this one
+        let prev_times = self.compute_previous_timestamps(Some(base));
+
+        // Update checktables
+        self.last_base = Some(base);
+        self.toplevel.insert(base, ts);
+        self.update_granular_checktables(base, ts, rs);
         (ts, prev_times)
     }
 

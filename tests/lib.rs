@@ -732,9 +732,11 @@ fn migrate_drop_columns() {
     // new mutator allows putting two values, and injects default for a.b
     let muta3 = g.get_mutator(a);
     muta3.put(vec![id.clone(), "cy".into()]).unwrap();
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // using an old putter now should add default for c
     muta1.put(vec![id.clone(), "bz".into()]).unwrap();
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // using putter that knows of neither b nor c should result in defaults for both
     muta2.put(vec![id.clone()]).unwrap();

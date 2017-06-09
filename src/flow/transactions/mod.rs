@@ -105,66 +105,6 @@ impl DomainState {
         &self.egress_for_base[&base][..]
     }
 
-    fn assign_ts(&mut self, packet: &mut Box<Packet>, nodes: &DomainNodes) -> bool {
-        // all this is for #16223
-        let mut unsafe_state_ref_mut = None;
-        if let Packet::Transaction { ref mut state, .. } = **packet {
-            match *state {
-                TransactionState::Committed(..) => {}
-                _ => {
-                    unsafe_state_ref_mut = Some(state as *mut _);
-                }
-            }
-        }
-
-        match **packet {
-            Packet::Transaction { state: TransactionState::Committed(..), .. } => true,
-            Packet::Transaction { ref link, ref data, .. } => {
-                let state: &mut TransactionState = unsafe { &mut *unsafe_state_ref_mut.unwrap() };
-                let empty = TransactionState::Committed(0, 0.into(), None);
-                let pending = ::std::mem::replace(state, empty);
-                let base_node = nodes[link.dst.as_local()]
-                    .borrow()
-                    .global_addr()
-                    .as_global()
-                    .clone();
-                match pending {
-                    TransactionState::Pending(token, send) => {
-                        let result = self.checktable
-                            .lock()
-                            .unwrap()
-                            .attempt_claim_timestamp(&token, base_node, data);
-                        match result {
-                            checktable::TransactionResult::Committed(ts, prevs) => {
-                                let _ = send.send(Ok(ts));
-                                ::std::mem::replace(state,
-                                                    TransactionState::Committed(ts,
-                                                                                base_node,
-                                                                                prevs));
-                                true
-                            }
-                            checktable::TransactionResult::Aborted => {
-                                let _ = send.send(Err(()));
-                                false
-                            }
-                        }
-                    }
-                    TransactionState::WillCommit => {
-                        let (ts, prevs) = self.checktable
-                            .lock()
-                            .unwrap()
-                            .claim_timestamp(base_node, data);
-                        ::std::mem::replace(state,
-                                            TransactionState::Committed(ts, base_node, prevs));
-                        true
-                    }
-                    TransactionState::Committed(..) => unreachable!(),
-                }
-            }
-            _ => true,
-        }
-    }
-
     fn buffer_transaction(&mut self, m: Box<Packet>) {
         let (ts, base, prev_ts) = match *m {
             Packet::Transaction {
@@ -271,10 +211,8 @@ impl DomainState {
         }
     }
 
-    pub fn handle(&mut self, mut m: Box<Packet>, nodes: &DomainNodes) {
-        if self.assign_ts(&mut m, nodes) {
-            self.buffer_transaction(m);
-        }
+    pub fn handle(&mut self, m: Box<Packet>) {
+        self.buffer_transaction(m);
     }
 
     fn update_next_transaction(&mut self) {
@@ -404,5 +342,9 @@ impl DomainState {
                                  transaction: BufferedTransaction::SeedReplay(tag, key, rts),
                              });
         }
+    }
+
+    pub fn get_checktable(&self) -> &Arc<Mutex<checktable::CheckTable>> {
+        &self.checktable
     }
 }

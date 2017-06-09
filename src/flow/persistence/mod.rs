@@ -7,13 +7,24 @@ use serde_json;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::mem;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time;
-use std::vec::Drain;
 
 use flow::domain;
 use flow::prelude::*;
+use checktable;
+
+/// Indicates to what degree updates should be persisted.
+#[derive(Clone)]
+pub enum DurabilityMode {
+    /// Don't do any durability
+    MemoryOnly,
+    /// Delete any log files on exit. Useful mainly for tests.
+    DeleteOnExit,
+    /// Persist updates to disk, and don't delete them later.
+    Permanent,
+}
 
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone)]
@@ -23,7 +34,17 @@ pub struct Parameters {
     /// Amount of time to wait before flushing despite not reaching `queue_capacity`.
     pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
-    pub delete_on_drop: bool,
+    pub mode: DurabilityMode,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            queue_capacity: 512,
+            flush_timeout: time::Duration::from_millis(1),
+            mode: DurabilityMode::MemoryOnly,
+        }
+    }
 }
 
 pub struct GroupCommitQueueSet {
@@ -34,18 +55,17 @@ pub struct GroupCommitQueueSet {
     /// empty. A flush should occur on or before wait_start + timeout.
     wait_start: Map<time::Instant>,
 
-    /// Packets that have already been persisted, and should now be handled by the domain. This Vec
-    /// is drained immediately after it is filled, so it should be empty any time method is called
-    /// on GroupCommitqueueSet.
-    durable_packets: Vec<Box<Packet>>,
-
     /// Name of, and handle to the files that packets should be persisted to.
     files: Map<(PathBuf, BufWriter<File, WhenFull>)>,
+
+    /// Passed to the checktable to learn which packets committed. Stored here to avoid an
+    /// allocation on the critical path.
+    commit_decisions: Vec<bool>,
 
     domain_index: domain::Index,
     timeout: time::Duration,
     capacity: usize,
-    delete_on_drop: bool,
+    durability_mode: DurabilityMode,
 }
 
 impl GroupCommitQueueSet {
@@ -55,14 +75,14 @@ impl GroupCommitQueueSet {
 
         Self {
             pending_packets: Map::default(),
-            durable_packets: Vec::with_capacity(params.queue_capacity),
+            commit_decisions: Vec::with_capacity(params.queue_capacity),
             wait_start: Map::default(),
             files: Map::default(),
 
             domain_index,
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
-            delete_on_drop: params.delete_on_drop,
+            durability_mode: params.mode.clone(),
         }
     }
 
@@ -94,7 +114,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Returns whether the given packet should be persisted.
-    pub fn should_persist(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
+    pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
         match Self::packet_destination(p) {
             Some(n) => {
                 let node = &nodes[&n].borrow();
@@ -105,9 +125,10 @@ impl GroupCommitQueueSet {
     }
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
-    pub fn flush(&mut self) -> Drain<Box<Packet>> {
-        assert_eq!(self.durable_packets.len(), 0);
-
+    pub fn flush_if_necessary(&mut self,
+                              nodes: &DomainNodes,
+                              checktable: &Arc<Mutex<checktable::CheckTable>>)
+                              -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.timeout {
@@ -116,45 +137,56 @@ impl GroupCommitQueueSet {
             }
         }
 
-        if let Some(node) = needs_flush {
-            self.flush_internal(&node);
-        }
-
-        self.durable_packets.drain(..)
+        needs_flush.and_then(|node| self.flush_internal(&node, nodes, checktable))
     }
 
-    /// Flush any pending packets for node to disk, leaving the packets in self.durable_packets.
-    fn flush_internal(&mut self, node: &LocalNodeIndex) {
-        if !self.files.contains_key(node) {
-            let file = self.create_file(node);
-            self.files.insert(node.clone(), file);
-        }
+    /// Flush any pending packets for node to disk (if applicable), and return a merged packet.
+    fn flush_internal(&mut self,
+                      node: &LocalNodeIndex,
+                      nodes: &DomainNodes,
+                      checktable: &Arc<Mutex<checktable::CheckTable>>)
+                      -> Option<Box<Packet>> {
+        match self.durability_mode {
+            DurabilityMode::DeleteOnExit |
+            DurabilityMode::Permanent => {
+                if !self.files.contains_key(node) {
+                    let file = self.create_file(node);
+                    self.files.insert(node.clone(), file);
+                }
 
-        let mut file = &mut self.files[node].1;
-        {
-            let data_to_flush: Vec<_> = self.pending_packets[&node]
-                .iter()
-                .map(|p| match **p {
-                         Packet::Transaction { ref data, .. } |
-                         Packet::Message { ref data, .. } => data,
-                         _ => unreachable!(),
-                     })
-                .collect();
-            serde_json::to_writer(&mut file, &data_to_flush).unwrap();
-        }
+                let mut file = &mut self.files[node].1;
+                {
+                    let data_to_flush: Vec<_> = self.pending_packets[&node]
+                        .iter()
+                        .map(|p| match **p {
+                                 Packet::Transaction { ref data, .. } |
+                                 Packet::Message { ref data, .. } => data,
+                                 _ => unreachable!(),
+                             })
+                        .collect();
+                    serde_json::to_writer(&mut file, &data_to_flush).unwrap();
+                }
 
-        file.flush().unwrap();
-        file.get_mut().sync_data().unwrap();
+                file.flush().unwrap();
+                file.get_mut().sync_data().unwrap();
+            }
+            DurabilityMode::MemoryOnly => {}
+        }
 
         self.wait_start.remove(node);
-        mem::swap(&mut self.pending_packets[&node], &mut self.durable_packets);
+        Self::merge_packets(&mut self.pending_packets[node],
+                            &mut self.commit_decisions,
+                            nodes,
+                            checktable)
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append(&mut self, p: Box<Packet>) -> Drain<Box<Packet>> {
-        assert_eq!(self.durable_packets.len(), 0);
-
+    pub fn append<'a>(&mut self,
+                      p: Box<Packet>,
+                      nodes: &DomainNodes,
+                      checktable: &Arc<Mutex<checktable::CheckTable>>)
+                      -> Option<Box<Packet>> {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
@@ -163,12 +195,11 @@ impl GroupCommitQueueSet {
 
         self.pending_packets[&node].push(p);
         if self.pending_packets[&node].len() >= self.capacity {
-            self.flush_internal(&node);
-        } else if !self.wait_start.contains_key(&node) {
+            return self.flush_internal(&node, nodes, checktable);
+        } if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
         }
-
-        self.durable_packets.drain(..)
+        None
     }
 
     /// Returns how long until a flush should occur.
@@ -182,11 +213,140 @@ impl GroupCommitQueueSet {
                  })
             .min()
     }
+
+    fn merge_committed_packets<I>(packets: I,
+                                  transaction_state: Option<TransactionState>)
+                                  -> Option<Box<Packet>>
+        where I: Iterator<Item = Box<Packet>>
+    {
+        let mut packets = packets.peekable();
+        let merged_link = match **packets.peek().as_mut().unwrap() {
+            box Packet::Message { ref link, .. } |
+            box Packet::Transaction { ref link, .. } => link.clone(),
+            _ => unreachable!(),
+        };
+        let mut merged_tracer = None;
+
+        let merged_data = packets.fold(Records::default(), |mut acc, p| {
+            match (p,) {
+                (box Packet::Message {
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                },) |
+                (box Packet::Transaction {
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                    ..
+                },) => {
+                    assert_eq!(merged_link, *link);
+                    acc.append(data);
+
+                    if merged_tracer.is_some() && tracer.is_some() {
+                        tracer
+                            .as_mut()
+                            .unwrap()
+                            .send((time::Instant::now(), PacketEvent::Merged))
+                            .unwrap();
+                    } else if tracer.is_some() {
+                        merged_tracer = tracer.take();
+                    }
+                }
+                _ => unreachable!(),
+            }
+            acc
+        });
+
+        match transaction_state {
+            Some(merged_state) => {
+                Some(Box::new(Packet::Transaction {
+                             link: merged_link,
+                             data: merged_data,
+                             tracer: merged_tracer,
+                             state: merged_state,
+                         }))
+            }
+            None => {
+                Some(Box::new(Packet::Message {
+                             link: merged_link,
+                             data: merged_data,
+                             tracer: merged_tracer,
+                         }))
+            }
+        }
+    }
+
+    /// Merge the contents of packets into a single packet, emptying packets in the process. Panics
+    /// if every packet in packets is not a `Packet::Transaction`, or if packets is empty.
+    fn merge_transactional_packets(packets: &mut Vec<Box<Packet>>,
+                                   commit_decisions: &mut Vec<bool>,
+                                   nodes: &DomainNodes,
+                                   checktable: &Arc<Mutex<checktable::CheckTable>>)
+                                   -> Option<Box<Packet>> {
+        let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
+            nodes[&link.dst.as_local()]
+                .borrow()
+                .global_addr()
+                .as_global()
+                .clone()
+        } else {
+            unreachable!()
+        };
+
+        let (ts, prevs) = {
+            let mut checktable = checktable.lock().unwrap();
+            match checktable.apply_batch(base, packets, commit_decisions) {
+                checktable::TransactionResult::Aborted => return None,
+                checktable::TransactionResult::Committed(ts, prevs) => (ts, prevs),
+            }
+        };
+
+        let committed_packets = packets
+            .drain(..)
+            .zip(commit_decisions.iter())
+            .map(|(mut packet, committed)| {
+                if let box Packet::Transaction {
+                           state: TransactionState::Pending(_, ref mut sender), ..
+                       } = packet {
+                    if *committed {
+                        sender.send(Ok(ts)).unwrap();
+                    } else {
+                        sender.send(Err(())).unwrap();
+                    }
+                }
+                (packet, committed)
+            })
+            .filter(|&(_, committed)| *committed)
+            .map(|(packet, _)| packet);
+
+        Self::merge_committed_packets(committed_packets,
+                                      Some(TransactionState::Committed(ts, base, prevs)))
+    }
+
+    /// Merge the contents of packets into a single packet, emptying packets in the process.
+    fn merge_packets(packets: &mut Vec<Box<Packet>>,
+                     commit_decisions: &mut Vec<bool>,
+                     nodes: &DomainNodes,
+                     checktable: &Arc<Mutex<checktable::CheckTable>>)
+                     -> Option<Box<Packet>> {
+        if packets.is_empty() {
+            return None;
+        }
+
+        match packets[0] {
+            box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
+            box Packet::Transaction { .. } => {
+                Self::merge_transactional_packets(packets, commit_decisions, nodes, checktable)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Drop for GroupCommitQueueSet {
     fn drop(&mut self) {
-        if self.delete_on_drop {
+        if let DurabilityMode::DeleteOnExit = self.durability_mode {
             for &(ref filename, _) in self.files.values() {
                 fs::remove_file(filename).unwrap();
             }
