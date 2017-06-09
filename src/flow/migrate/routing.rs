@@ -9,13 +9,9 @@
 use flow::prelude::*;
 use flow::domain;
 use flow::node;
-
 use petgraph;
 use petgraph::graph::NodeIndex;
-
 use std::collections::{HashSet, HashMap};
-use std::sync::mpsc;
-
 use slog::Logger;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
@@ -35,6 +31,9 @@ pub fn add(log: &Logger,
     let mut topo = petgraph::visit::Topo::new(&*graph);
     while let Some(node) = topo.next(&*graph) {
         if node == source {
+            continue;
+        }
+        if graph[node].is_dropped() {
             continue;
         }
         if !new.contains(&node) {
@@ -89,8 +88,8 @@ pub fn add(log: &Logger,
                     graph.neighbors_directed(parent, petgraph::EdgeDirection::Outgoing) {
                     if graph[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
-                        for i in graph.neighbors_directed(pchild,
-                                                          petgraph::EdgeDirection::Outgoing) {
+                        for i in
+                            graph.neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing) {
                             assert!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
@@ -114,6 +113,15 @@ pub fn add(log: &Logger,
 
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
+
+                if graph[node].is_shard_merger() {
+                    // the ingress is really what merges the shards
+                    graph[node].mark_as_shard_merger(false);
+                    i.mark_as_shard_merger(true);
+                }
+
+                // the ingress is sharded the same way as its target
+                i.shard_by(graph[node].sharded_by());
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
@@ -211,6 +219,7 @@ pub fn add(log: &Logger,
                 // NOTE: technically, this doesn't need to mirror its parent, but meh
                 let mut egress = graph[sender].mirror(node::special::Egress::default());
                 egress.add_to(graph[sender].domain());
+                egress.shard_by(graph[sender].sharded_by());
                 let egress = graph.add_node(egress);
                 graph.add_edge(sender, egress, false);
 
@@ -240,7 +249,7 @@ pub fn add(log: &Logger,
 
 pub fn connect(log: &Logger,
                graph: &mut Graph,
-               main_txs: &HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
+               domains: &mut HashMap<domain::Index, domain::DomainHandle>,
                new: &HashSet<NodeIndex>) {
 
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
@@ -260,25 +269,55 @@ pub fn connect(log: &Logger,
                            "egress" => sender.index(),
                            "ingress" => node.index()
                     );
-                main_txs[&sender_node.domain()]
-                    .send(box Packet::UpdateEgress {
-                              node: sender_node.local_addr().as_local().clone(),
-                              new_tx: Some((node.into(),
-                                            *n.local_addr(),
-                                            main_txs[&n.domain()].clone())),
-                              new_tag: None,
-                          })
-                    .unwrap();
+
+                let mut txs = domains[&n.domain()].get_txs();
+                let domain = domains.get_mut(&sender_node.domain()).unwrap();
+                if txs.len() != 1 && sender_node.sharded_by() != Sharding::None {
+                    // we need to be a bit careful here in the particular case where we have a
+                    // sharded egress that sends to another domain sharded by the same key.
+                    // specifically, in that case we shouldn't have each shard of domain A send to
+                    // all the shards of B. instead A[0] should send to B[0], A[1] to B[1], etc.
+                    // note that we don't have to check the sharding of both src and dst here,
+                    // because an egress implies that no shuffle was necessary, which again means
+                    // that the sharding must be the same.
+                    for (i, tx) in txs.into_iter().enumerate() {
+                        domain
+                            .send_to_shard(i,
+                                           box Packet::UpdateEgress {
+                                               node: sender_node.local_addr().as_local().clone(),
+                                               new_tx: Some((node.into(), *n.local_addr(), tx)),
+                                               new_tag: None,
+                                           })
+                            .unwrap();
+                    }
+                } else {
+                    // consider the case where len != 1. that must mean that the
+                    // sender_node.sharded_by() == Sharding::None. so, we have an unsharded egress
+                    // sending to a sharded child. but that shouldn't be allowed -- such a node
+                    // *must* be a Sharder.
+                    assert_eq!(txs.len(), 1);
+                    domain
+                        .send(box Packet::UpdateEgress {
+                                  node: sender_node.local_addr().as_local().clone(),
+                                  new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
+                                  new_tag: None,
+                              })
+                        .unwrap();
+                }
             } else if sender_node.is_sharder() {
                 trace!(log,
                            "connecting";
                            "sharder" => sender.index(),
                            "ingress" => node.index()
                     );
-                main_txs[&sender_node.domain()]
+
+                let txs = domains[&n.domain()].get_txs();
+                domains
+                    .get_mut(&sender_node.domain())
+                    .unwrap()
                     .send(box Packet::UpdateSharder {
                               node: sender_node.local_addr().as_local().clone(),
-                              new_tx: (*n.local_addr(), main_txs[&n.domain()].clone()),
+                              new_txs: (*n.local_addr(), txs),
                           })
                     .unwrap();
             } else if sender_node.is_source() {

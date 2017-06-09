@@ -13,7 +13,7 @@ pub mod identity;
 pub mod filter;
 pub mod topk;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
     Base(base::Base),
     Sum(grouped::GroupedOperator<grouped::aggregate::Aggregator>),
@@ -143,6 +143,7 @@ impl Ingredient for NodeOperator {
                     data: Records,
                     tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
+                    nshards: usize,
                     domain: &DomainNodes,
                     states: &StateMap)
                     -> RawProcessingResult {
@@ -152,6 +153,7 @@ impl Ingredient for NodeOperator {
                                 data,
                                 tracer,
                                 is_replay_of,
+                                nshards,
                                 domain,
                                 states)
     }

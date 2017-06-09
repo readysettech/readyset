@@ -8,6 +8,7 @@
 
 use flow::prelude::*;
 use flow::domain;
+use flow;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
@@ -18,16 +19,15 @@ use petgraph::graph::NodeIndex;
 use slog::Logger;
 
 pub fn inform(log: &Logger,
-              graph: &mut Graph,
-              source: NodeIndex,
-              txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
+              blender: &mut flow::Blender,
               nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
               ts: i64,
               prevs: Box<HashMap<domain::Index, i64>>) {
 
+    let source = blender.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));
-        let ctx = txs.get_mut(&domain).unwrap();
+        let ctx = blender.domains.get_mut(&domain).unwrap();
 
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
@@ -37,7 +37,7 @@ pub fn inform(log: &Logger,
                              prev_ts: prevs[&domain],
                              ack: ready_tx,
                          });
-        let _ = ready_rx.recv();
+        let _ = ready_rx.recv().is_err();
         trace!(log, "domain ready for migration");
 
         let old_nodes: HashSet<_> = nodes
@@ -56,8 +56,9 @@ pub fn inform(log: &Logger,
                 continue;
             }
 
-            let node = graph.node_weight_mut(ni).unwrap().take();
-            let node = node.finalize(graph);
+            let node = blender.ingredients.node_weight_mut(ni).unwrap().take();
+            let node = node.finalize(&mut blender.ingredients);
+            let graph = &blender.ingredients;
             // new parents already have the right child list
             let old_parents = graph
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)

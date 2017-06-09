@@ -29,13 +29,16 @@ impl fmt::Debug for Link {
         write!(f, "{:?} -> {:?}", self.src, self.dst)
     }
 }
+
+#[derive(Clone)]
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(mpsc::Sender<Box<Packet>>),
+    End(Vec<mpsc::Sender<Box<Packet>>>),
     Local(Vec<usize>),
 }
 
+#[derive(Clone)]
 pub enum InitialState {
     PartialLocal(usize),
     IndexedLocal(Vec<Vec<usize>>),
@@ -44,7 +47,7 @@ pub enum InitialState {
         cols: usize,
         key: usize,
         tag: Tag,
-        trigger_tx: mpsc::SyncSender<Box<Packet>>,
+        trigger_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -120,6 +123,7 @@ pub enum Packet {
         link: Link,
         tag: Tag,
         data: Records,
+        nshards: usize,
         context: ReplayPieceContext,
         transaction_state: Option<ReplayTransactionState>,
     },
@@ -164,7 +168,7 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_tx: (NodeAddress, mpsc::SyncSender<Box<Packet>>),
+        new_txs: (NodeAddress, Vec<mpsc::SyncSender<Box<Packet>>>),
     },
 
     /// Add a streamer to an existing reader node.
@@ -178,7 +182,7 @@ pub enum Packet {
     /// We need these channels to send replay requests, as using the bounded channels could easily
     /// result in a deadlock. Since the unbounded channel is only used for requests as a result of
     /// processing, it is essentially self-clocking.
-    RequestUnboundedTx(mpsc::Sender<mpsc::Sender<Box<Packet>>>),
+    RequestUnboundedTx(mpsc::Sender<(usize, mpsc::Sender<Box<Packet>>)>),
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
@@ -208,11 +212,7 @@ pub enum Packet {
     RequestPartialReplay { tag: Tag, key: Vec<DataType> },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
-    StartReplay {
-        tag: Tag,
-        from: NodeAddress,
-        ack: mpsc::SyncSender<()>,
-    },
+    StartReplay { tag: Tag, from: NodeAddress },
 
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.
@@ -371,6 +371,7 @@ impl Packet {
                 ref link,
                 ref tag,
                 ref data,
+                ref nshards,
                 context: ref context @ ReplayPieceContext::Regular { .. },
                 ref transaction_state,
             } => {
@@ -378,6 +379,7 @@ impl Packet {
                     link: link.clone(),
                     tag: tag.clone(),
                     data: data.clone(),
+                    nshards: *nshards,
                     context: context.clone(),
                     transaction_state: transaction_state.clone(),
                 }

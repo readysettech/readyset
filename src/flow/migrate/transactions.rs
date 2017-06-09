@@ -1,14 +1,10 @@
 use flow::domain;
 use flow::prelude::*;
 use flow::payload::{IngressFromBase, EgressForBase};
-
 use petgraph;
 use petgraph::graph::NodeIndex;
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::sync::mpsc;
-
 use slog::Logger;
 
 fn count_base_ingress(graph: &Graph,
@@ -29,7 +25,12 @@ fn count_base_ingress(graph: &Graph,
             let mut num_paths = ingress_nodes
                 .iter()
                 .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
-                .count();
+                .map(|&ingress| if graph[ingress].is_shard_merger() {
+                         ::SHARDS
+                     } else {
+                         1
+                     })
+                .sum();
 
             // Domains containing a base node will get a single copy of each packet sent to it.
             if graph[base].domain() == *domain {
@@ -80,7 +81,7 @@ pub fn analyze_graph(graph: &Graph,
 
 pub fn finalize(deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
                 log: &Logger,
-                txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
+                txs: &mut HashMap<domain::Index, domain::DomainHandle>,
                 at: i64) {
     for (domain, (ingress_from_base, egress_for_base)) in deps {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());

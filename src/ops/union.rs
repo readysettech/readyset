@@ -3,12 +3,19 @@ use std::sync;
 
 use flow::prelude::*;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+enum Emit {
+    AllFrom(NodeAddress),
+    Project {
+        emit: HashMap<NodeAddress, Vec<usize>>,
+        cols: HashMap<NodeAddress, usize>,
+    },
+}
+
 /// A union of a set of views.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
-    emit: HashMap<NodeAddress, Vec<usize>>,
-    cols: HashMap<NodeAddress, usize>,
-
+    emit: Emit,
     replay_key: Option<Map<usize>>,
     replay_pieces: HashMap<DataType, Map<Records>>,
 }
@@ -17,8 +24,6 @@ impl Clone for Union {
     fn clone(&self) -> Self {
         Union {
             emit: self.emit.clone(),
-            cols: self.cols.clone(),
-
             // nothing can have been received yet
             replay_key: None,
             replay_pieces: HashMap::new(),
@@ -32,6 +37,7 @@ impl Union {
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
     pub fn new(emit: HashMap<NodeAddress, Vec<usize>>) -> Union {
+        assert!(!emit.is_empty());
         for emit in emit.values() {
             let mut last = &emit[0];
             for i in emit {
@@ -42,9 +48,19 @@ impl Union {
             }
         }
         Union {
-            emit: emit,
-            cols: HashMap::new(),
+            emit: Emit::Project {
+                emit,
+                cols: HashMap::new(),
+            },
+            replay_key: None,
+            replay_pieces: HashMap::new(),
+        }
+    }
 
+    /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
+    pub fn new_deshard(parent: NodeAddress) -> Union {
+        Union {
+            emit: Emit::AllFrom(parent),
             replay_key: None,
             replay_pieces: HashMap::new(),
         }
@@ -57,7 +73,10 @@ impl Ingredient for Union {
     }
 
     fn ancestors(&self) -> Vec<NodeAddress> {
-        self.emit.keys().cloned().collect()
+        match self.emit {
+            Emit::AllFrom(p) => vec![p],
+            Emit::Project { ref emit, .. } => emit.keys().cloned().collect(),
+        }
     }
 
     fn should_materialize(&self) -> bool {
@@ -69,22 +88,35 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols.extend(self.emit
-                             .keys()
-                             .map(|&n| (n, g[*n.as_global()].fields().len())));
+        if let Emit::Project {
+                   ref mut cols,
+                   ref emit,
+               } = self.emit {
+            cols.extend(emit.keys().map(|&n| (n, g[*n.as_global()].fields().len())));
+        }
     }
 
     fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        for (from, to) in remap {
-            if from == to {
-                continue;
-            }
+        match self.emit {
+            Emit::Project {
+                ref mut emit,
+                ref mut cols,
+            } => {
+                for (from, to) in remap {
+                    if from == to {
+                        continue;
+                    }
 
-            if let Some(e) = self.emit.remove(from) {
-                assert!(self.emit.insert(*to, e).is_none());
+                    if let Some(e) = emit.remove(from) {
+                        assert!(emit.insert(*to, e).is_none());
+                    }
+                    if let Some(e) = cols.remove(from) {
+                        assert!(cols.insert(*to, e).is_none());
+                    }
+                }
             }
-            if let Some(e) = self.cols.remove(from) {
-                assert!(self.cols.insert(*to, e).is_none());
+            Emit::AllFrom(ref mut p) => {
+                *p = remap[p];
             }
         }
     }
@@ -96,25 +128,36 @@ impl Ingredient for Union {
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
-        let rs = rs.into_iter()
-            .map(move |rec| {
-                let (r, pos) = rec.extract();
-
-                // yield selected columns for this source
-                // TODO: if emitting all in same order then avoid clone
-                let res = self.emit[&from].iter().map(|&col| r[col].clone()).collect();
-
-                // return new row with appropriate sign
-                if pos {
-                    Record::Positive(sync::Arc::new(res))
-                } else {
-                    Record::Negative(sync::Arc::new(res))
+        match self.emit {
+            Emit::AllFrom(_) => {
+                ProcessingResult {
+                    results: rs,
+                    misses: Vec::new(),
                 }
-            })
-            .collect();
-        ProcessingResult {
-            results: rs,
-            misses: Vec::new(),
+            }
+            Emit::Project { ref emit, .. } => {
+
+                let rs = rs.into_iter()
+                    .map(move |rec| {
+                        let (r, pos) = rec.extract();
+
+                        // yield selected columns for this source
+                        // TODO: if emitting all in same order then avoid clone
+                        let res = emit[&from].iter().map(|&col| r[col].clone()).collect();
+
+                        // return new row with appropriate sign
+                        if pos {
+                            Record::Positive(sync::Arc::new(res))
+                        } else {
+                            Record::Negative(sync::Arc::new(res))
+                        }
+                    })
+                    .collect();
+                ProcessingResult {
+                    results: rs,
+                    misses: Vec::new(),
+                }
+            }
         }
     }
 
@@ -123,9 +166,14 @@ impl Ingredient for Union {
                     rs: Records,
                     tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
+                    nshards: usize,
                     n: &DomainNodes,
                     s: &StateMap)
                     -> RawProcessingResult {
+        // NOTE: in the special case of us being a shard merge node (i.e., when
+        // self.emit.is_empty()), `from` will *actually* hold the shard index of
+        // the sharded egress that sent us this record. this should make everything
+        // below just work out.
         match is_replay_of {
             None => {
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
@@ -164,10 +212,18 @@ impl Ingredient for Union {
                 if self.replay_key.is_none() {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
-                    self.replay_key = Some(self.emit
-                                               .iter()
-                                               .map(|(src, emit)| (*src.as_local(), emit[key_col]))
-                                               .collect());
+                    match self.emit {
+                        Emit::AllFrom(_) => {
+                            self.replay_key =
+                                Some(Some((*from.as_local(), key_col)).into_iter().collect());
+                        }
+                        Emit::Project { ref emit, .. } => {
+                            self.replay_key =
+                                Some(emit.iter()
+                                         .map(|(src, emit)| (*src.as_local(), emit[key_col]))
+                                         .collect());
+                        }
+                    }
                 }
 
                 let finished = {
@@ -179,7 +235,10 @@ impl Ingredient for Union {
                     assert!(!pieces.contains_key(from.as_local()));
                     pieces.insert(*from.as_local(), rs);
                     // does this release the replay?
-                    pieces.len() == self.emit.len()
+                    match self.emit {
+                        Emit::AllFrom(_) => pieces.len() == nshards,
+                        Emit::Project { ref emit, .. } => pieces.len() == emit.len(),
+                    }
                 };
 
                 if finished {
@@ -207,32 +266,43 @@ impl Ingredient for Union {
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(self.emit
-                 .iter()
-                 .map(|(src, emit)| (*src, emit[col]))
-                 .collect())
+        match self.emit {
+            Emit::AllFrom(p) => Some(vec![(p, col)]),
+            Emit::Project { ref emit, .. } => {
+                Some(emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
+            }
+        }
     }
 
     fn description(&self) -> String {
         // Ensure we get a consistent output by sorting.
-        let mut emit = self.emit.iter().collect::<Vec<_>>();
-        emit.sort();
-        emit.iter()
-            .map(|&(src, emit)| {
-                     let cols = emit.iter()
-                         .map(|e| e.to_string())
-                         .collect::<Vec<_>>()
-                         .join(", ");
-                     format!("{}:[{}]", src, cols)
-                 })
-            .collect::<Vec<_>>()
-            .join(" ⋃ ")
+        match self.emit {
+            Emit::AllFrom(_) => "⊍".to_string(),
+            Emit::Project { ref emit, .. } => {
+                let mut emit = emit.iter().collect::<Vec<_>>();
+                emit.sort();
+                emit.iter()
+                    .map(|&(src, emit)| {
+                             let cols = emit.iter()
+                                 .map(|e| e.to_string())
+                                 .collect::<Vec<_>>()
+                                 .join(", ");
+                             format!("{}:[{}]", src, cols)
+                         })
+                    .collect::<Vec<_>>()
+                    .join(" ⋃ ")
+            }
+        }
     }
     fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        self.emit
-            .iter()
-            .map(|(src, emit)| (*src, Some(emit[col])))
-            .collect()
+        match self.emit {
+            Emit::AllFrom(p) => vec![(p, Some(col))],
+            Emit::Project { ref emit, .. } => {
+                emit.iter()
+                    .map(|(src, emit)| (*src, Some(emit[col])))
+                    .collect()
+            }
+        }
     }
 }
 

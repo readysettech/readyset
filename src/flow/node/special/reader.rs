@@ -36,6 +36,12 @@ pub struct Reader {
     for_node: NodeAddress,
 }
 
+impl Clone for Reader {
+    fn clone(&self) -> Self {
+        unreachable!("readers should never be cloned (because they are never sharded)");
+    }
+}
+
 impl Reader {
     pub fn new(for_node: NodeAddress) -> Self {
         Reader {

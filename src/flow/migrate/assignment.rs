@@ -29,6 +29,9 @@ pub fn assign(log: &Logger,
         if node == source {
             continue;
         }
+        if graph[node].is_dropped() {
+            continue;
+        }
         if !new.contains(&node) {
             continue;
         }
@@ -45,24 +48,25 @@ pub fn assign(log: &Logger,
             let n = &graph[node];
             let ps: Vec<_> = graph
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                .map(|ni| &graph[ni])
+                .map(|ni| (ni, &graph[ni]))
                 .collect();
 
-            if ps.iter().any(|p| p.is_sharder()) {
+            if ps.iter().any(|&(_, ref p)| p.is_sharder()) {
                 // child of a sharder
                 // TODO: this is stupid -- assign to some domain that already exists under the
                 // sharder if possible.
                 next_domain()
             } else if n.is_sharder() {
                 // sharder belongs to parent domain
-                ps[0].domain().index()
+                ps[0].1.domain().index()
             } else if n.sharded_by() == Sharding::None &&
-                      ps.iter().any(|p| p.sharded_by() != Sharding::None) {
+                      ps.iter()
+                          .any(|&(_, ref p)| p.sharded_by() != Sharding::None) {
                 // shard merger
                 next_domain()
             } else if n.is_reader() {
                 // reader
-                ps[0].domain().index()
+                ps[0].1.domain().index()
             } else if n.is_internal() {
                 match **n {
                     NodeOperator::Base(..) => {
@@ -77,12 +81,18 @@ pub fn assign(log: &Logger,
                     }
                     _ => {
                         // "all other nodes", but only internal
-                        ps[0].domain().index()
+                        // prefer new
+                        if let Some(&(_, ref p)) =
+                            ps.iter().find(|&&(ref pni, _)| new.contains(pni)) {
+                            p.domain().index()
+                        } else {
+                            ps[0].1.domain().index()
+                        }
                     }
                 }
             } else {
                 // actually all other nodes
-                ps[0].domain().index()
+                ps[0].1.domain().index()
             }
         };
         debug!(log, "node added to domain";

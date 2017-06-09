@@ -18,6 +18,15 @@ impl<T> Default for Map<T> {
     }
 }
 
+impl<T: Clone> Clone for Map<T> {
+    fn clone(&self) -> Self {
+        Map {
+            n: self.n,
+            things: self.things.clone(),
+        }
+    }
+}
+
 impl<T> Map<T> {
     pub fn new() -> Self {
         Self::default()
@@ -72,10 +81,9 @@ impl<T> Map<T> {
 
     pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (NodeAddress, &'a T)> + 'a> {
         Box::new(self.things.iter().enumerate().filter_map(|(i, t)| {
-                                                               t.as_ref().map(|v| {
-                (unsafe { NodeAddress::make_local(i as u32) }, v)
-            })
-                                                           }))
+            t.as_ref()
+                .map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
+        }))
     }
 
     pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (NodeAddress, &'a mut T)> + 'a> {
@@ -150,10 +158,8 @@ impl<T: 'static> IntoIterator for Map<T> {
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
         Box::new(self.things.into_iter().enumerate().filter_map(|(i, v)| {
-                                                                    v.map(|v| {
-                (unsafe { NodeAddress::make_local(i as u32) }, v)
-            })
-                                                                }))
+            v.map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
+        }))
     }
 }
 
@@ -539,7 +545,7 @@ impl<T: Hash + Eq + Clone> State<T> {
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let state = &self.state[self.state_for(columns)
-            .expect("lookup on non-indexed column set")];
+                                    .expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {

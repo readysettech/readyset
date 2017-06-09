@@ -63,6 +63,7 @@ pub struct GroupCommitQueueSet {
     commit_decisions: Vec<bool>,
 
     domain_index: domain::Index,
+    domain_shard: usize,
     timeout: time::Duration,
     capacity: usize,
     durability_mode: DurabilityMode,
@@ -70,7 +71,7 @@ pub struct GroupCommitQueueSet {
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(domain_index: domain::Index, params: &Parameters) -> Self {
+    pub fn new(domain_index: domain::Index, domain_shard: usize, params: &Parameters) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {
@@ -80,6 +81,7 @@ impl GroupCommitQueueSet {
             files: Map::default(),
 
             domain_index,
+            domain_shard,
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
             durability_mode: params.mode.clone(),
@@ -87,7 +89,10 @@ impl GroupCommitQueueSet {
     }
 
     fn create_file(&self, node: &LocalNodeIndex) -> (PathBuf, BufWriter<File, WhenFull>) {
-        let filename = format!("soup-log-{}-{}.json", self.domain_index.index(), node.id());
+        let filename = format!("soup-log-{}_{}-{}.json",
+                               self.domain_index.index(),
+                               self.domain_shard,
+                               node.id());
 
         // TODO(jmftrindade): Current semantics is to overwrite an existing log.
         // Once we have recovery code, we obviously do not want to overwrite this

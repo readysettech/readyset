@@ -114,10 +114,12 @@ pub trait Ingredient
                     data: prelude::Records,
                     tracer: &mut prelude::Tracer,
                     is_replay_of: Option<(usize, prelude::DataType)>,
+                    nshards: usize,
                     domain: &prelude::DomainNodes,
                     states: &prelude::StateMap)
                     -> RawProcessingResult {
         let _ = is_replay_of;
+        let _ = nshards;
         RawProcessingResult::Regular(self.on_input(from, data, tracer, domain, states))
     }
 

@@ -10,6 +10,16 @@ pub struct Sharder {
     shard_by: usize,
 }
 
+impl Clone for Sharder {
+    fn clone(&self) -> Self {
+        Sharder {
+            txs: self.txs.clone(),
+            sharded: Default::default(),
+            shard_by: self.shard_by,
+        }
+    }
+}
+
 impl Sharder {
     pub fn new(by: usize) -> Self {
         Self {
@@ -29,8 +39,16 @@ impl Sharder {
         }
     }
 
-    pub fn add_shard(&mut self, dst: NodeAddress, tx: mpsc::SyncSender<Box<Packet>>) {
-        self.txs.push((dst, tx));
+    pub fn add_sharded_child(&mut self, dst: NodeAddress, txs: Vec<mpsc::SyncSender<Box<Packet>>>) {
+        assert_eq!(self.txs.len(), 0);
+        // TODO: add support for "shared" sharder?
+        for tx in txs {
+            self.txs.push((dst, tx));
+        }
+    }
+
+    pub fn sharded_by(&self) -> usize {
+        self.shard_by
     }
 
     #[inline]
@@ -47,7 +65,7 @@ impl Sharder {
         }
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex) {
+    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex, is_sharded: bool) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
 
@@ -89,6 +107,10 @@ impl Sharder {
                     unreachable!()
                 };
 
+                if let box Packet::ReplayPiece { ref mut nshards, .. } = m {
+                    *nshards = 1;
+                }
+
                 let tx = &mut self.txs[shard];
                 m.link_mut().src = index.into();
                 m.link_mut().dst = tx.0;
@@ -109,16 +131,37 @@ impl Sharder {
             p.map_data(|rs| rs.push(record));
         }
 
+        let mut force_all = false;
         if let Packet::ReplayPiece {
                    context: payload::ReplayPieceContext::Regular { last: true }, ..
                } = *m {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
+            force_all = true;
+        }
+        if let Packet::Transaction { .. } = *m {
+            // transactions (currently) need to reach all shards so they know they can progress
+            force_all = true;
+        }
+        if force_all {
             for shard in 0..self.txs.len() {
                 self.sharded
                     .entry(shard)
                     .or_insert_with(|| box m.clone_data());
             }
+        }
+
+        if is_sharded {
+            // FIXME: we don't know how many shards in the destination domain our sibling Sharders
+            // sent to, so we don't know what to put here. we *could* put self.txs.len() and send
+            // empty messages to all other shards, which is probably pretty sensible, but that only
+            // solves half the problem. the destination shard domains will then recieve *multiple*
+            // replay pieces for each incoming replay piece, and needs to combine them somehow.
+            // it's unclear how we do that.
+            unimplemented!();
+        }
+        if let Packet::ReplayPiece { ref mut nshards, .. } = *m {
+            *nshards = self.sharded.len();
         }
 
         for (i, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {

@@ -63,15 +63,10 @@ pub fn shard(log: &Logger,
             // non-internal nodes are always pass-through
             HashMap::new()
         };
-        if need_sharding.is_empty() {
-            // no shuffle necessary -- can re-use any existing sharding
-            let s = if input_shardings.len() == 1 ||
-                       input_shardings.iter().all(|(_, &s)| s == Sharding::None) {
-                input_shardings.into_iter().map(|(_, s)| s).next().unwrap()
-            } else {
-                // FIXME: if every shard unions with a Sharding::None, we'll get repeated rows :(
-                Sharding::Random
-            };
+        if need_sharding.is_empty() &&
+           (input_shardings.len() == 1 ||
+            input_shardings.iter().all(|(_, &s)| s == Sharding::None)) {
+            let s = input_shardings.into_iter().map(|(_, s)| s).next().unwrap();
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);
@@ -86,13 +81,20 @@ pub fn shard(log: &Logger,
             }
         }
         if complex {
-            // not supported yet -- force no sharding
-            // TODO: if we're sharding by a two-part key and need sharding by the *first* part
-            // of that key, we can probably re-use the existing sharding?
-            error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
-            for (&ni, _) in &input_shardings {
-                reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+            if graph[node].get_base().is_none() {
+                // not supported yet -- force no sharding
+                // TODO: if we're sharding by a two-part key and need sharding by the *first* part
+                // of that key, we can probably re-use the existing sharding?
+                error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
+                for (&ni, _) in &input_shardings {
+                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+                }
             }
+            continue;
+        }
+
+        if graph[node].get_base().is_some() && graph[node].is_transactional() {
+            error!(log, "not sharding transactional base node"; "node" => ?node);
             continue;
         }
 
@@ -214,9 +216,12 @@ pub fn shard(log: &Logger,
         // key. we then make sure all our inputs are sharded by that key too.
         debug!(log, "testing for sharding opportunities"; "node" => ?node);
         'outer: for col in 0..graph[node].fields().len() {
-            let srcs: Vec<_> = graph[node]
-                .parent_columns(col)
-                .into_iter()
+            let srcs = if graph[node].get_base().is_some() {
+                vec![(node.into(), None)]
+            } else {
+                graph[node].parent_columns(col)
+            };
+            let srcs: Vec<_> = srcs.into_iter()
                 .filter_map(|(ni, src)| src.map(|src| (ni, src)))
                 .collect();
 
@@ -229,35 +234,51 @@ pub fn shard(log: &Logger,
                 continue;
             }
 
-            // `col` resolved to all ancestors!
-            // does it match the key we're doing lookups based on?
-            for &(ni, src) in &srcs {
-                match need_sharding.get(&ni) {
-                    Some(col) if col.len() != 1 => {
-                        // we're looking up by a compound key -- that's hard to shard
-                        trace!(log, "column traces to node looked up in by compound key";
+
+            if need_sharding.is_empty() {
+                // a node that doesn't need any sharding, yet has multiple parents. must be a
+                // union. if this single output column (which resolves to a column in all our
+                // inputs) matches what each ancestor is individually sharded by, then we know that
+                // the output of the union is also sharded by that key. this is sufficiently common
+                // that we want to make sure we don't accidentally shuffle in those cases.
+                for &(ni, src) in &srcs {
+                    if input_shardings[ni.as_global()] != Sharding::ByColumn(src) {
+                        // TODO: technically we could revert to Sharding::Random here, which is a
+                        // little better than forcing a de-shard, but meh.
+                        continue 'outer;
+                    }
+                }
+            } else {
+                // `col` resolved to all ancestors!
+                // does it match the key we're doing lookups based on?
+                for &(ni, src) in &srcs {
+                    match need_sharding.get(&ni) {
+                        Some(col) if col.len() != 1 => {
+                            // we're looking up by a compound key -- that's hard to shard
+                            trace!(log, "column traces to node looked up in by compound key";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src);
-                        break 'outer;
-                    }
-                    Some(col) if col[0] != src => {
-                        // we're looking up by a different key. it's kind of weird that this
-                        // output column still resolved to a column in all our inputs...
-                        trace!(log, "column traces to node that is not looked up by";
+                            break 'outer;
+                        }
+                        Some(col) if col[0] != src => {
+                            // we're looking up by a different key. it's kind of weird that this
+                            // output column still resolved to a column in all our inputs...
+                            trace!(log, "column traces to node that is not looked up by";
                                    "node" => ?node,
                                    "ancestor" => ?ni,
                                    "column" => src,
                                    "lookup" => col[0]);
-                        continue 'outer;
-                    }
-                    Some(_) => {
-                        // looking up by the same column -- that's fine
-                    }
-                    None => {
-                        // we're never looking up in this view. must mean that a given
-                        // column resolved to *two* columns in the *same* view?
-                        unreachable!()
+                            continue 'outer;
+                        }
+                        Some(_) => {
+                            // looking up by the same column -- that's fine
+                        }
+                        None => {
+                            // we're never looking up in this view. must mean that a given
+                            // column resolved to *two* columns in the *same* view?
+                            unreachable!()
+                        }
                     }
                 }
             }
@@ -306,120 +327,174 @@ pub fn shard(log: &Logger,
         .filter(|&&n| graph[n].is_sharder())
         .cloned()
         .collect();
-    let mut stable = false;
-    while !stable {
-        stable = true;
-        for n in new_sharders.split_off(0) {
-            let ps: Vec<_> = graph
-                .neighbors_directed(n, petgraph::EdgeDirection::Incoming)
-                .collect();
-            let by = graph[graph
-                               .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
-                               .next()
-                               .unwrap()]
-                .sharded_by();
-            // *technically* we could also push sharding up even if some parents are already
-            // sharded, but let's leave that for another day.
-            //
-            // TODO: p could have changed in previous iterations, so we should re-check here
-            // whether p.sharded_by() == n.sharded_by() now.
-            if ps.iter()
-                   .all(|&p| new.contains(&p) && graph[p].sharded_by() == Sharding::None) {
-                'parents: for p in ps {
-                    if p == source {
-                        continue;
-                    }
+    let mut gone = HashSet::new();
+    while !new_sharders.is_empty() {
+        'sharders: for n in new_sharders.split_off(0) {
+            if gone.contains(&n) {
+                continue;
+            }
 
-                    let col = match by {
-                        Sharding::ByColumn(c) => c,
-                        Sharding::Random => continue,
-                        Sharding::None => continue,
-                    };
+            // we know that a sharder only has one parent.
+            let p = {
+                let mut ps = graph.neighbors_directed(n, petgraph::EdgeDirection::Incoming);
+                let p = ps.next().unwrap();
+                assert_eq!(ps.count(), 0);
+                p
+            };
 
-                    let src_cols = graph[p].parent_columns(col);
-                    if src_cols.len() != 1 {
-                        continue;
-                    }
-                    let (grandp, src_col) = src_cols[0];
-                    if src_col.is_none() {
-                        continue;
-                    }
-                    let src_col = src_col.unwrap();
-                    let grandp = *grandp.as_global();
+            // a sharder should never be placed right under the source node
+            assert!(!graph[p].is_source());
 
-                    let mut cs = 0;
-                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
-                        // if p has other children, it is only safe to push up the Sharder if
-                        // those other children are also sharded by the same key.
-                        if !graph[c].is_sharder() {
-                            continue 'parents;
-                        }
-                        let sibling_sharder_child = graph
-                            .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
-                            .next()
-                            .unwrap();
-                        if graph[sibling_sharder_child].sharded_by() != by {
-                            continue 'parents;
-                        }
-                        cs += 1;
-                    }
+            // and that its children must be sharded somehow (otherwise what is the sharder doing?)
+            let col = graph[n].with_sharder(|s| s.sharded_by()).unwrap();
+            let by = Sharding::ByColumn(col);
 
-                    // it's safe to push up the Sharder.
-                    // to do so, we need to undo all the changes we made to `swaps` when
-                    // introducing the Sharders below this parent in the first place
-                    let mut remove = Vec::with_capacity(cs);
-                    let mut children = Vec::new();
-                    for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
-                        for grandchild in
-                            graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
-                            // undo the swap that inserting the Sharder generated
-                            swaps.remove(&(p, grandchild));
-                            children.push(grandchild);
-                        }
-                        if c != n {
-                            remove.push(c);
-                        }
-                    }
-                    // we then need to wire in the Sharder above the parent instead
-                    let new = graph[p].mirror(node::special::Sharder::new(src_col));
-                    *graph.node_weight_mut(n).unwrap() = new;
-                    let e = graph.find_edge(p, n).unwrap();
-                    graph.remove_edge(e);
-                    let e = graph.find_edge(grandp, p).unwrap();
+            // we can only push sharding above newly created nodes that are not already sharded.
+            if !new.contains(&p) || graph[p].sharded_by() != Sharding::None {
+                continue;
+            }
+
+            // if the parent is a base, the only option we have is to shard the base.
+            if graph[p].get_base().is_some() {
+                // sharded transactional bases are hard
+                if graph[p].is_transactional() {
+                    continue;
+                }
+
+                // if the base has other children, sharding it may have other effects
+                if graph
+                       .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
+                       .count() != 1 {
+                    // TODO: technically we could still do this if the other children were
+                    // sharded by the same column.
+                    continue;
+                }
+
+                // shard the base
+                graph[p].shard_by(by);
+                // remove the sharder at n by rewiring its outgoing edges directly to the base.
+                let mut cs = graph
+                    .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
+                    .detach();
+                while let Some((_, c)) = cs.next(&graph) {
+                    // undo the swap that inserting the sharder in the first place generated
+                    swaps.remove(&(c, p)).unwrap();
+                    // unwire the child from the sharder and wire to the base directly
+                    let e = graph.find_edge(n, c).unwrap();
                     let w = graph.remove_edge(e).unwrap();
-                    graph.add_edge(grandp, n, w);
-                    for &child in &children {
-                        if let Some(e) = graph.find_edge(n, child) {
-                            graph.remove_edge(e);
-                        }
-                        // TODO: materialized edges?
-                        graph.add_edge(n, child, false);
-                    }
-                    // and finally, we need to remove any Sharders that were added for other
-                    // children. unfortunately, we can't remove nodes from the graph, because
-                    // petgraph doesn't guarantee that NodeIndexes are stable when nodes are
-                    // removed from the graph.
-                    for r in remove {
-                        let e = graph.find_edge(p, r).unwrap();
-                        graph.remove_edge(e);
-                        // ugh:
-                        for &child in &children {
-                            if let Some(e) = graph.find_edge(r, child) {
-                                graph.remove_edge(e);
-                            }
-                        }
-                        // r is now entirely disconnected from the graph
-                    }
+                    graph.add_edge(p, c, w);
+                }
+                // also unwire the sharder from the base
+                let e = graph.find_edge(p, n).unwrap();
+                graph.remove_edge(e).unwrap();
+                // NOTE: we can't remove nodes from the graph, because petgraph doesn't
+                // guarantee that NodeIndexes are stable when nodes are removed from the
+                // graph.
+                graph[n].remove();
+                gone.insert(n);
+                continue;
+            }
+
+            let src_cols = graph[p].parent_columns(col);
+            if src_cols.len() != 1 {
+                // TODO: technically we could push the sharder to all parents here
+                continue;
+            }
+            let (grandp, src_col) = src_cols[0];
+            if src_col.is_none() {
+                // we can't shard a node by a column it generates
+                continue;
+            }
+            let src_col = src_col.unwrap();
+            let grandp = *grandp.as_global();
+
+            // we now know that we have the following
+            //
+            //    grandp[src_col] -> p[col] -> n[col] ---> nchildren[][]
+            //                       :
+            //                       +----> pchildren[col][]
+            //
+            // we want to move the sharder to "before" p.
+            // this requires us to:
+            //
+            //  - rewire all nchildren to refer to p instead of n
+            //  - rewire p so that it refers to n instead of grandp
+            //  - remove any pchildren that also shard p by the same key
+            //  - mark p as sharded
+            //
+            // there are some cases we need to look out for though. in particular, if any of n's
+            // siblings (i.e., pchildren) do *not* have a sharder, we can't lift n!
+
+            let mut remove = Vec::new();
+            for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
+                if !graph[c].is_sharder() {
+                    // lifting n would shard a node that isn't expecting to be sharded
+                    // TODO: we *could* insert a de-shard here
+                    continue 'sharders;
+                }
+                // what does c shard by?
+                let csharding = graph[graph
+                                          .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
+                                          .next()
+                                          .unwrap()]
+                    .sharded_by();
+
+                if csharding == by {
+                    // sharding by the same key, which is now unnecessary.
+                    remove.push(c);
+                } else {
+                    // sharding by a different key, which is okay
+                    //
+                    // TODO:
+                    // we have two sharders for different keys below p
+                    // which should we shard p by?
                 }
             }
+
+            // it is now safe to hoist the sharder
+
+            // first, remove any sharders that are now unnecessary. unfortunately, we can't fully
+            // remove nodes from the graph, because petgraph doesn't guarantee that NodeIndexes are
+            // stable when nodes are removed from the graph.
+            for c in remove {
+                // disconnect the sharder from p
+                let e = graph.find_edge(p, c).unwrap();
+                graph.remove_edge(e);
+                // connect its children to p directly
+                let mut grandc = graph
+                    .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
+                    .detach();
+                while let Some((_, gc)) = grandc.next(&graph) {
+                    let e = graph.find_edge(c, gc).unwrap();
+                    let w = graph.remove_edge(e).unwrap();
+                    // undo the swap as well
+                    swaps.remove(&(gc, p)).unwrap();
+                    // add back the original edge
+                    graph.add_edge(p, gc, w);
+                }
+                // c is now entirely disconnected from the graph
+                // if petgraph indices were stable, we could now remove c (if != n) from the graph
+                if c != n {
+                    graph[c].remove();
+                    gone.insert(c);
+                }
+            }
+
+            // then wire us (n) above the parent instead
+            let new = graph[grandp].mirror(node::special::Sharder::new(src_col));
+            *graph.node_weight_mut(n).unwrap() = new;
+            let e = graph.find_edge(grandp, p).unwrap();
+            let w = graph.remove_edge(e).unwrap();
+            graph.add_edge(grandp, n, w);
+            swaps.insert((p, grandp), n);
+
+            // mark p as now being sharded
+            graph[p].shard_by(by);
+
+            // and then recurse up to checking us again
+            new_sharders.push(n);
         }
     }
-
-    // TODO
-    // how do we actually split a sharded node?
-    // ideally we want to keep the graph representation unchanged, and instead just *instantiate*
-    // multiple copies of the given node. but that probably has very deep-reaching consequences in
-    // the code...
 
     swaps
 }
@@ -433,26 +508,21 @@ fn reshard(log: &Logger,
            src: NodeIndex,
            dst: NodeIndex,
            to: Sharding) {
-    if graph[src].sharded_by() == Sharding::None {
-        // src isn't sharded, so conforms to all shardings
-        return;
-    }
+    assert!(!graph[src].is_source());
 
     let node = match to {
         Sharding::None => {
-            // an identity node that is *not* marked as sharded will end up acting like a union!
-            let n: NodeOperator = ops::identity::Identity::new(src.into()).into();
+            // NOTE: this *must* be a union so that we correctly buffer partial replays
+            let n: NodeOperator = ops::union::Union::new_deshard(src.into()).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(Sharding::None);
+            n.mark_as_shard_merger(true);
             n
         }
         Sharding::ByColumn(c) => {
             use flow::node;
             let mut n = graph[src].mirror(node::special::Sharder::new(c));
-
-            // the sharder itself isn't sharded
-            n.shard_by(Sharding::None);
-
+            n.shard_by(graph[src].sharded_by());
             n
         }
         Sharding::Random => unreachable!(),

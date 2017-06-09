@@ -73,7 +73,7 @@ pub struct Server {
 }
 
 /// Handle RPCs from a single `TcpStream`
-pub fn main(stream: TcpStream, s: Server) {
+pub fn main(stream: TcpStream, mut s: Server) {
     let mut stream = BufStream::new(stream);
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {

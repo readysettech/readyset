@@ -5,6 +5,7 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
+use flow;
 use flow::keys;
 use flow::domain;
 use flow::prelude::*;
@@ -261,15 +262,15 @@ pub fn index(log: &Logger,
                         // key. Each element of this vec is (parent_node, parent_col). We need to
                         // collect these inner tuples and install corresponding indexing
                         // requirements on the nodes/columns in them.
-                        let cols_to_index_per_node = real_cols.into_iter().fold(HashMap::new(),
-                                                                                |mut acc, nc| {
-                            if let Some(p_cols) = nc {
-                                for (pn, pc) in p_cols {
-                                    acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                        let cols_to_index_per_node =
+                            real_cols.into_iter().fold(HashMap::new(), |mut acc, nc| {
+                                if let Some(p_cols) = nc {
+                                    for (pn, pc) in p_cols {
+                                        acc.entry(pn).or_insert_with(Vec::new).push(pc);
+                                    }
                                 }
-                            }
-                            acc
-                        });
+                                acc
+                            });
                         // cols_to_index_per_node is now a map of node -> Vec<usize>, and we add an
                         // index on each individual column in the Vec.
                         // Note that this, and the semantics of node.resolve(), imply that each
@@ -321,19 +322,18 @@ pub fn index(log: &Logger,
 }
 
 pub fn initialize(log: &Logger,
-                  graph: &mut Graph,
-                  source: NodeIndex,
+                  blender: &mut flow::Blender,
                   new: &HashSet<NodeIndex>,
-                  partial: &mut HashSet<NodeIndex>,
-                  partial_ok: bool,
                   mut materialize: HashMap<domain::Index,
-                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                  txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>)
+                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>)
                   -> HashMap<Tag, Vec<domain::Index>> {
     let mut topo_list = Vec::with_capacity(new.len());
-    let mut topo = petgraph::visit::Topo::new(&*graph);
-    while let Some(node) = topo.next(&*graph) {
-        if node == source {
+    let mut topo = petgraph::visit::Topo::new(&blender.ingredients);
+    while let Some(node) = topo.next(&blender.ingredients) {
+        if node == blender.source {
+            continue;
+        }
+        if blender.ingredients[node].is_dropped() {
             continue;
         }
         if !new.contains(&node) {
@@ -346,8 +346,8 @@ pub fn initialize(log: &Logger,
     let mut domains_on_path = HashMap::new();
     let mut empty = HashSet::new();
     for node in topo_list {
-        let addr = *graph[node].local_addr();
-        let d = graph[node].domain();
+        let addr = *blender.ingredients[node].local_addr();
+        let d = blender.ingredients[node].domain();
 
         let index_on = materialize
             .get_mut(&d)
@@ -361,19 +361,20 @@ pub fn initialize(log: &Logger,
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
-        graph[node].with_reader(|r| if r.is_materialized() {
-                                    has_state = true;
-                                });
+        blender.ingredients[node].with_reader(|r| if r.is_materialized() {
+                                                  has_state = true;
+                                              });
 
         // ready communicates to the domain in charge of a particular node that it should start
         // delivering updates to a given new node. note that we wait for the domain to acknowledge
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |txs: &mut HashMap<_, mpsc::SyncSender<_>>, index_on: Vec<Vec<usize>>| {
+        let ready = |txs: &mut HashMap<_, domain::DomainHandle>, index_on: Vec<Vec<usize>>| {
             let (ack_tx, ack_rx) = mpsc::sync_channel(0);
             trace!(log, "readying node"; "node" => node.index());
-            txs[&d]
+            txs.get_mut(&d)
+                .unwrap()
                 .send(box Packet::Ready {
                           node: *addr.as_local(),
                           index: index_on,
@@ -387,59 +388,57 @@ pub fn initialize(log: &Logger,
             trace!(log, "node ready"; "node" => node.index());
         };
 
-        if graph
+        if blender
+               .ingredients
                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-               .filter(|&ni| ni != source)
+               .filter(|&ni| ni != blender.source)
                .all(|n| empty.contains(&n)) {
             // all parents are empty, so we can materialize it immediately
             info!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
 
             // we need to make sure the domain constructs reader backlog handles!
-            graph[node].with_reader(|r| if let Some(key) = r.key() {
-                                        use flow::payload::InitialState;
+            let prep = blender.ingredients[node].with_reader(|r| {
+                r.key().map(|key| {
+                    use flow::payload::InitialState;
 
-                                        txs[&d]
-                                            .send(box Packet::PrepareState {
-                                                      node: *addr.as_local(),
-                                                      state: InitialState::Global {
-                                                          cols: graph[node].fields().len(),
-                                                          key: key,
-                                                          gid: node,
-                                                      },
-                                                  })
-                                            .unwrap();
-                                    });
+                    box Packet::PrepareState {
+                        node: *addr.as_local(),
+                        state: InitialState::Global {
+                            cols: blender.ingredients[node].fields().len(),
+                            key: key,
+                            gid: node,
+                        },
+                    }
+                })
+            });
+            if let Some(Some(prep)) = prep {
+                blender.domains.get_mut(&d).unwrap().send(prep).unwrap();
+            }
 
-            ready(txs, index_on);
+            ready(&mut blender.domains, index_on);
         } else {
             // if this node doesn't need to be materialized, then we're done. note that this check
             // needs to happen *after* the empty parents check so that we keep tracking whether or
             // not nodes are empty.
             if !has_state {
                 debug!(log, "no need to replay non-materialized view"; "node" => node.index());
-                ready(txs, index_on);
+                ready(&mut blender.domains, index_on);
                 continue;
             }
 
             // we have a parent that has data, so we need to replay and reconstruct
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
-            info!(log, "beginning reconstruction of {:?}", graph[node]);
-            let new_paths = reconstruct(&log,
-                                        graph,
-                                        &empty,
-                                        partial,
-                                        partial_ok,
-                                        &materialize,
-                                        txs,
-                                        node,
-                                        index_on);
+            info!(log,
+                  "beginning reconstruction of {:?}",
+                  blender.ingredients[node]);
+            let new_paths = reconstruct(&log, blender, &empty, &materialize, node, index_on);
             domains_on_path.extend(new_paths.into_iter());
 
             // NOTE: the state has already been marked ready by the replay completing,
             // but we want to wait for the domain to finish replay, which a Ready does.
-            ready(txs, vec![]);
+            ready(&mut blender.domains, vec![]);
             info!(log, "reconstruction completed"; "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
         }
     }
@@ -447,13 +446,10 @@ pub fn initialize(log: &Logger,
 }
 
 pub fn reconstruct(log: &Logger,
-                   graph: &mut Graph,
+                   blender: &mut flow::Blender,
                    empty: &HashSet<NodeIndex>,
-                   partial: &mut HashSet<NodeIndex>,
-                   mut partial_ok: bool,
                    materialized: &HashMap<domain::Index,
                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                   txs: &mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>,
                    node: NodeIndex,
                    mut index_on: Vec<Vec<usize>>)
                    -> HashMap<Tag, Vec<domain::Index>> {
@@ -461,7 +457,7 @@ pub fn reconstruct(log: &Logger,
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
         // figure out what key that Reader is using
-        graph[node]
+        blender.ingredients[node]
             .with_reader(|r| {
                              assert!(r.is_materialized());
                              if let Some(rh) = r.key() {
@@ -489,11 +485,16 @@ pub fn reconstruct(log: &Logger,
     //
     // so, first things first, let's find all our paths up the tree
     let paths = {
-        let mut on_join = cost_fn(log, graph, empty, partial, materialized, txs);
+        let mut on_join = cost_fn(log,
+                                  &blender.ingredients,
+                                  &blender.partial,
+                                  &mut blender.domains,
+                                  empty,
+                                  materialized);
         // TODO: what if we're constructing multiple indices?
         // TODO: what if we have a compound index?
         let trace_col = index_on[0][0];
-        keys::provenance_of(graph, node, trace_col, &mut *on_join)
+        keys::provenance_of(&blender.ingredients, node, trace_col, &mut *on_join)
     };
 
     // cut paths so they only reach to the the closest materialized node
@@ -511,7 +512,7 @@ pub fn reconstruct(log: &Logger,
 
                     // keep taking until we get our first materialized node
                     // (`found` helps us emulate `take_while_inclusive`)
-                    let n = &graph[node];
+                    let n = &blender.ingredients[node];
                     if found {
                         // we've already found a materialized node
                         return false;
@@ -548,6 +549,7 @@ pub fn reconstruct(log: &Logger,
     //
     // and perhaps most importantly, does column `index_on[0][0]` of `node` trace back to some
     // `key` in the materialized state we're replaying?
+    let mut partial_ok = blender.partial_enabled;
     if partial_ok {
         partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
                      paths.iter().all(|path| {
@@ -557,7 +559,7 @@ pub fn reconstruct(log: &Logger,
                 return false;
             }
 
-            let n = &graph[node];
+            let n = &blender.ingredients[node];
             let col = col.unwrap();
             // node must also have an *index* on col
             materialized
@@ -574,16 +576,17 @@ pub fn reconstruct(log: &Logger,
     // yet know about those paths, that's a bit inconvenient. we might be able to mvoe
     // this entire block below the main loop somehow (?), but for now:
     if partial_ok {
-        if graph[node].is_reader() {
+        if blender.ingredients[node].is_reader() {
             partial_ok = paths.len() == 1;
         }
     }
 
     if partial_ok {
         warn!(log, "using partial materialization");
-        partial.insert(node);
+        blender.partial.insert(node);
     }
 
+    let graph = &blender.ingredients;
     let domain = graph[node].domain();
     let addr = *graph[node].local_addr();
     let cols = graph[node].fields().len();
@@ -616,7 +619,7 @@ pub fn reconstruct(log: &Logger,
                     cols,
                     key: r.key().unwrap(),
                     tag: first_tag.unwrap(),
-                    trigger_tx: txs[&last_domain.unwrap()].clone(),
+                    trigger_txs: blender.domains[&last_domain.unwrap()].get_txs(),
                 }
             } else {
                 InitialState::Global {
@@ -634,7 +637,10 @@ pub fn reconstruct(log: &Logger,
                             InitialState::IndexedLocal(index_on)
                         });
 
-    txs[&domain]
+    blender
+        .domains
+        .get_mut(&domain)
+        .unwrap()
         .send(box Packet::PrepareState {
                   node: *addr.as_local(),
                   state: s,
@@ -654,6 +660,9 @@ pub fn reconstruct(log: &Logger,
 
     // TODO FIXME:
     // we need to detect materialized nodes downstream of partially materialized nodes.
+
+    // FIXME: what if we have two paths with the same source because of a fork-join? we'd need to
+    // buffer somewhere to avoid splitting pieces...
 
     let mut domains_on_path = HashMap::new();
 
@@ -766,13 +775,17 @@ pub fn reconstruct(log: &Logger,
                         // first domain needs to be told about partial replay trigger
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
-                        // otherwise, should know what how to trigger partial replay
+                        // otherwise, should know how to trigger partial replay
                         let (tx, rx) = mpsc::channel();
-                        txs[&segments[0].0]
+                        blender
+                            .domains
+                            .get_mut(&segments[0].0)
+                            .unwrap()
                             .send(box Packet::RequestUnboundedTx(tx))
                             .unwrap();
-                        let root_unbounded_tx = rx.recv().unwrap();
-                        *trigger = TriggerEndpoint::End(root_unbounded_tx);
+                        let mut v: Vec<_> = rx.into_iter().collect();
+                        v.sort_by_key(|x| x.0);
+                        *trigger = TriggerEndpoint::End(v.into_iter().map(|x| x.1).collect());
                     }
                 } else {
                     unreachable!();
@@ -795,7 +808,10 @@ pub fn reconstruct(log: &Logger,
                 // replay path so that it knows what path to forward replay packets on.
                 let n = &graph[nodes.last().unwrap().0];
                 if n.is_egress() {
-                    txs[domain]
+                    blender
+                        .domains
+                        .get_mut(domain)
+                        .unwrap()
                         .send(box Packet::UpdateEgress {
                                   node: n.local_addr().as_local().clone(),
                                   new_tx: None,
@@ -808,23 +824,30 @@ pub fn reconstruct(log: &Logger,
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());
-            txs[domain].send(setup).unwrap();
+            blender
+                .domains
+                .get_mut(domain)
+                .unwrap()
+                .send(setup)
+                .unwrap();
         }
 
         // wait for them all to have seen that message
-        for _ in &segments {
-            wait_rx.recv().unwrap();
-        }
+        drop(wait_tx);
+        let x = wait_rx.recv();
+        assert!(x.is_err());
         trace!(log, "all domains ready for replay");
 
         if !partial_ok {
             // tell the first domain to start playing
             trace!(log, "telling root domain to start replay"; "domain" => segments[0].0.index());
-            txs[&segments[0].0]
+            blender
+                .domains
+                .get_mut(&segments[0].0)
+                .unwrap()
                 .send(box Packet::StartReplay {
                           tag: tag,
                           from: *graph[segments[0].1[0].0].local_addr(),
-                          ack: wait_tx.clone(),
                       })
                 .unwrap();
 
@@ -833,7 +856,8 @@ pub fn reconstruct(log: &Logger,
                    "waiting for done message from target";
                    "domain" => segments.last().unwrap().0.index()
             );
-            done_rx.recv().unwrap();
+            let x = done_rx.recv();
+            assert!(x.is_err());
         }
     }
     domains_on_path
@@ -841,10 +865,10 @@ pub fn reconstruct(log: &Logger,
 
 fn cost_fn<'a, T>(log: &'a Logger,
                   graph: &'a Graph,
-                  empty: &'a HashSet<NodeIndex>,
                   partial: &'a HashSet<NodeIndex>,
-                  materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
-                  txs: &'a mut HashMap<domain::Index, mpsc::SyncSender<Box<Packet>>>)
+                  txs: &'a mut HashMap<domain::Index, domain::DomainHandle>,
+                  empty: &'a HashSet<NodeIndex>,
+                  materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>)
                   -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
 
     Box::new(move |node, parents| {
@@ -973,13 +997,14 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 // find the size of the state we would end up replaying
                 let (tx, rx) = mpsc::sync_channel(1);
                 let stateful = &graph[stateful];
-                txs[&stateful.domain()]
+                txs.get_mut(&stateful.domain())
+                    .unwrap()
                     .send(box Packet::StateSizeProbe {
                               node: *stateful.local_addr().as_local(),
                               ack: tx,
                           })
                     .unwrap();
-                let mut size = rx.recv().expect("stateful parent should have state");
+                let mut size: usize = rx.into_iter().sum();
 
                 // compute the total cost
                 // replay cost

@@ -8,6 +8,7 @@ impl Node {
                    keyed_by: Option<usize>,
                    state: &mut StateMap,
                    nodes: &DomainNodes,
+                   on_shard: Option<usize>,
                    swap: bool)
                    -> Vec<Miss> {
         m.as_mut().unwrap().trace(PacketEvent::Process);
@@ -38,11 +39,11 @@ impl Node {
             }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, *self.index.unwrap().as_global());
+                e.process(m, on_shard.unwrap_or(0));
                 vec![]
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, *self.index.unwrap().as_global());
+                s.process(m, *self.index.unwrap().as_global(), on_shard.is_some());
                 vec![]
             }
             NodeType::Internal(ref mut i) => {
@@ -53,6 +54,11 @@ impl Node {
                 {
                     let m = m.as_mut().unwrap();
                     let from = m.link().src;
+
+                    let nshards = match **m {
+                        Packet::ReplayPiece { ref nshards, .. } => *nshards,
+                        _ => 1,
+                    };
 
                     let replay = if let Packet::ReplayPiece {
                                context: payload::ReplayPieceContext::Partial {
@@ -76,7 +82,13 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
+                        match i.on_input_raw(from,
+                                             old_data,
+                                             &mut tracer,
+                                             replay,
+                                             nshards,
+                                             nodes,
+                                             state) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
@@ -121,7 +133,7 @@ impl Node {
 
                 misses
             }
-            NodeType::Source => unreachable!(),
+            NodeType::Source | NodeType::Dropped => unreachable!(),
         }
     }
 }

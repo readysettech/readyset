@@ -1,3 +1,4 @@
+use flow;
 use flow::prelude::*;
 use checktable;
 
@@ -19,9 +20,10 @@ pub enum MutatorError {
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
     pub(crate) src: NodeAddress,
-    pub(crate) tx: mpsc::SyncSender<Box<Packet>>,
+    pub(crate) tx: flow::domain::DomainHandle,
     pub(crate) addr: NodeAddress,
-    pub(crate) primary_key: Vec<usize>,
+    pub(crate) key_is_primary: bool,
+    pub(crate) key: Vec<usize>,
     pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
@@ -35,7 +37,8 @@ impl Clone for Mutator {
             src: self.src.clone(),
             tx: self.tx.clone(),
             addr: self.addr.clone(),
-            primary_key: self.primary_key.clone(),
+            key: self.key.clone(),
+            key_is_primary: self.key_is_primary.clone(),
             tx_reply_channel: mpsc::channel(),
             transactional: self.transactional,
             dropped: self.dropped.clone(),
@@ -120,7 +123,7 @@ impl Mutator {
         }
     }
 
-    fn send(&self, mut rs: Records) {
+    fn send(&mut self, mut rs: Records) {
         self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
             box Packet::Transaction {
@@ -137,10 +140,10 @@ impl Mutator {
             }
         };
 
-        self.tx.send(m).unwrap();
+        self.tx.base_send(m, &self.key[..]).unwrap();
     }
 
-    fn tx_send(&self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
+    fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
         self.inject_dropped_cols(&mut rs);
@@ -151,7 +154,7 @@ impl Mutator {
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),
         };
-        self.tx.send(m).unwrap();
+        self.tx.base_send(m, &self.key[..]).unwrap();
         loop {
             match self.tx_reply_channel.1.try_recv() {
                 Ok(r) => return r,
@@ -162,7 +165,7 @@ impl Mutator {
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.
-    pub fn put<V>(&self, u: V) -> Result<(), MutatorError>
+    pub fn put<V>(&mut self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
         let data = vec![u.into()];
@@ -174,7 +177,7 @@ impl Mutator {
     }
 
     /// Perform a transactional write to the base node this Mutator was generated for.
-    pub fn transactional_put<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_put<V>(&mut self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
         let data = vec![u.into()];
@@ -186,14 +189,17 @@ impl Mutator {
     }
 
     /// Perform a non-transactional delete from the base node this Mutator was generated for.
-    pub fn delete<I>(&self, key: I) -> Result<(), MutatorError>
+    pub fn delete<I>(&mut self, key: I) -> Result<(), MutatorError>
         where I: Into<Vec<DataType>>
     {
         Ok(self.send(vec![Record::DeleteRequest(key.into())].into()))
     }
 
     /// Perform a transactional delete from the base node this Mutator was generated for.
-    pub fn transactional_delete<I>(&self, key: I, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_delete<I>(&mut self,
+                                   key: I,
+                                   t: checktable::Token)
+                                   -> Result<i64, MutatorError>
         where I: Into<Vec<DataType>>
     {
         self.tx_send(vec![Record::DeleteRequest(key.into())].into(), t)
@@ -202,10 +208,10 @@ impl Mutator {
 
     /// Perform a non-transactional update (delete followed by put) to the base node this Mutator
     /// was generated for.
-    pub fn update<V>(&self, u: V) -> Result<(), MutatorError>
+    pub fn update<V>(&mut self, u: V) -> Result<(), MutatorError>
         where V: Into<Vec<DataType>>
     {
-        assert!(!self.primary_key.is_empty(),
+        assert!(!self.key.is_empty() && self.key_is_primary,
                 "update operations can only be applied to base nodes with key columns");
 
         let u = u.into();
@@ -213,21 +219,19 @@ impl Mutator {
             return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
         }
 
-        Ok(self.send(vec![Record::DeleteRequest(self.primary_key
-                                                    .iter()
-                                                    .map(|&col| &u[col])
-                                                    .cloned()
-                                                    .collect()),
-                          u.into()]
-                         .into()))
+        let pkey = self.key.iter().map(|&col| &u[col]).cloned().collect();
+        Ok(self.send(vec![Record::DeleteRequest(pkey), u.into()].into()))
     }
 
     /// Perform a transactional update (delete followed by put) to the base node this Mutator was
     /// generated for.
-    pub fn transactional_update<V>(&self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
+    pub fn transactional_update<V>(&mut self,
+                                   u: V,
+                                   t: checktable::Token)
+                                   -> Result<i64, MutatorError>
         where V: Into<Vec<DataType>>
     {
-        assert!(!self.primary_key.is_empty(),
+        assert!(!self.key.is_empty() && self.key_is_primary,
                 "update operations can only be applied to base nodes with key columns");
 
         let u: Vec<_> = u.into();
@@ -235,11 +239,7 @@ impl Mutator {
             return Err(MutatorError::WrongColumnCount(self.expected_columns, u.len()));
         }
 
-        let m = vec![Record::DeleteRequest(self.primary_key
-                                               .iter()
-                                               .map(|&col| &u[col])
-                                               .cloned()
-                                               .collect()),
+        let m = vec![Record::DeleteRequest(self.key.iter().map(|&col| &u[col]).cloned().collect()),
                      u.into()]
             .into();
         self.tx_send(m, t).map_err(|()|MutatorError::TransactionFailed)
