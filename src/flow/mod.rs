@@ -22,11 +22,11 @@ pub mod keys;
 pub mod migrate;
 pub mod node;
 pub mod payload;
+pub mod persistence;
 pub mod prelude;
 pub mod statistics;
 
 mod mutator;
-mod persistence;
 mod transactions;
 
 use self::prelude::Ingredient;
@@ -104,30 +104,24 @@ impl Blender {
         self.partial_enabled = false;
     }
 
-    /// All writes to base nodes should be written to disk. `queue_capacity` indicates the number of
-    /// packets that should be buffered until flushing, and `flush_timeout` indicates the length of
-    /// time to wait before flushing anyway.
+    /// Controls the persistence mode, and parameters related to persistence.
+    ///
+    /// Three modes are available:
+    ///
+    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
+    ///     deleted once the `Blender` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
+    ///     Useful for baseline numbers.
+    ///
+    /// `queue_capacity` indicates the number of packets that should be buffered until
+    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
+    /// anyway.
     ///
     /// Must be called before any domains have been created.
-    pub fn enable_persistence(&mut self, queue_capacity: usize, flush_timeout: time::Duration) {
+    pub fn with_persistence_options(&mut self, params: persistence::Parameters) {
         assert_eq!(self.ndomains, 0);
-        self.persistence = persistence::Parameters {
-            queue_capacity,
-            flush_timeout,
-            mode: persistence::DurabilityMode::Permanent,
-        };
-    }
-
-    /// Same as `enable_persistence`, except that the log file(s) should be deleted on exit.
-    pub fn enable_temporary_persistence(&mut self,
-                                        queue_capacity: usize,
-                                        flush_timeout: time::Duration) {
-        assert_eq!(self.ndomains, 0);
-        self.persistence = persistence::Parameters {
-            queue_capacity,
-            flush_timeout,
-            mode: persistence::DurabilityMode::DeleteOnExit,
-        };
+        self.persistence = params;
     }
 
     /// Set the `Logger` to use for internal log messages.

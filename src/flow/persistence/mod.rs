@@ -47,6 +47,29 @@ impl Default for Parameters {
     }
 }
 
+impl Parameters {
+    /// Parameters to control the persistence mode, and parameters related to persistence.
+    ///
+    /// Three modes are available:
+    ///
+    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes are written to disk, but the log is
+    ///     deleted once the `Blender` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
+    ///     Useful for baseline numbers.
+    ///
+    /// `queue_capacity` indicates the number of packets that should be buffered until
+    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
+    /// anyway.
+    pub fn new(mode: DurabilityMode, queue_capacity: usize, flush_timeout: time::Duration) -> Self {
+        Self {
+            queue_capacity,
+            flush_timeout,
+            mode,
+        }
+    }
+}
+
 pub struct GroupCommitQueueSet {
     /// Packets that are queued to be persisted.
     pending_packets: Map<Vec<Box<Packet>>>,
