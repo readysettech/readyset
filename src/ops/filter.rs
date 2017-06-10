@@ -7,7 +7,7 @@ use flow::prelude::*;
 /// Filters incoming records according to some filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
-    src: NodeAddress,
+    src: IndexPair,
     filter: sync::Arc<Vec<Option<(Operator, DataType)>>>,
 }
 
@@ -15,9 +15,9 @@ impl Filter {
     /// Construct a new filter operator. The `filter` vector must have as many elements as the
     /// `src` node has columns. Each column that is set to `None` matches any value, while columns
     /// in the filter that have values set will check for equality on that column.
-    pub fn new(src: NodeAddress, filter: &[Option<(Operator, DataType)>]) -> Filter {
+    pub fn new(src: NodeIndex, filter: &[Option<(Operator, DataType)>]) -> Filter {
         Filter {
-            src: src,
+            src: src.into(),
             filter: sync::Arc::new(Vec::from(filter)),
         }
     }
@@ -28,8 +28,8 @@ impl Ingredient for Filter {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -41,18 +41,18 @@ impl Ingredient for Filter {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[*self.src.as_global()];
+        let srcn = &g[self.src.as_global()];
         // N.B.: <= because the adjacent node might be a base with a suffix of removed columns.
         // It's okay to just ignore those.
         assert!(self.filter.len() <= srcn.fields().len());
     }
 
-    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        self.src = remap[&self.src];
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.src.remap(remap);
     }
 
     fn on_input(&mut self,
-                _: NodeAddress,
+                _: LocalNodeIndex,
                 mut rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
@@ -86,12 +86,12 @@ impl Ingredient for Filter {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![(self.src, col)])
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Some(vec![(self.src.as_global(), col)])
     }
 
     fn description(&self) -> String {
@@ -129,7 +129,7 @@ impl Ingredient for Filter {
          key: &KeyType<DataType>,
          states: &'a StateMap)
          -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
-        states.get(self.src.as_local()).and_then(|state| {
+        states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
             match state.lookup(columns, key) {
                 LookupResult::Some(rs) => {
@@ -159,8 +159,8 @@ impl Ingredient for Filter {
         })
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        vec![(self.src, Some(column))]
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+        vec![(self.src.as_global(), Some(column))]
     }
 
     fn is_selective(&self) -> bool {
@@ -181,7 +181,7 @@ mod tests {
         let s = g.add_base("source", &["x", "y"]);
         g.set_op("filter",
                  &["x", "y"],
-                 Filter::new(s,
+                 Filter::new(s.as_global(),
                              filters.unwrap_or(&[None, Some((Operator::Equal, "a".into()))])),
                  materialized);
         g
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let g = setup(false, None);
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
@@ -251,8 +251,10 @@ mod tests {
     #[test]
     fn it_resolves() {
         let g = setup(false, None);
-        assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
+        assert_eq!(g.node().resolve(0),
+                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
+        assert_eq!(g.node().resolve(1),
+                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
     }
 
     #[test]

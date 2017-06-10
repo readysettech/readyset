@@ -19,7 +19,7 @@ impl Extremum {
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
     pub fn over(self,
-                src: NodeAddress,
+                src: NodeIndex,
                 over: usize,
                 group_by: &[usize])
                 -> GroupedOperator<ExtremumOperator> {
@@ -169,7 +169,10 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        g.set_op("agg", &["x", "ys"], Extremum::MAX.over(s, 1, &[0]), mat);
+        g.set_op("agg",
+                 &["x", "ys"],
+                 Extremum::MAX.over(s.as_global(), 1, &[0]),
+                 mat);
         g
     }
 
@@ -250,7 +253,7 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
@@ -265,7 +268,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
+        assert_eq!(c.node().resolve(0),
+                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
         assert_eq!(c.node().resolve(1), None);
     }
 }

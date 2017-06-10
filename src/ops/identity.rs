@@ -6,13 +6,13 @@ use flow::prelude::*;
 /// it is the simplest possible operation. Primary intended as a reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
-    src: NodeAddress,
+    src: IndexPair,
 }
 
 impl Identity {
     /// Construct a new identity operator.
-    pub fn new(src: NodeAddress) -> Identity {
-        Identity { src: src }
+    pub fn new(src: NodeIndex) -> Identity {
+        Identity { src: src.into() }
     }
 }
 
@@ -21,8 +21,8 @@ impl Ingredient for Identity {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -35,18 +35,12 @@ impl Ingredient for Identity {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, me: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        // an identity is sometimes injected into the graph (to de-shard), which causes its src
-        // address to be remapped to its address in  all of its (new) children. unfortunately, this
-        // means that *we* will also be told to remap our parent to ourselves, which is
-        // non-sensical and should be ignored.
-        if remap[&self.src] != me {
-            self.src = remap[&self.src];
-        }
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.src.remap(remap);
     }
 
     fn on_input(&mut self,
-                _: NodeAddress,
+                _: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
@@ -58,21 +52,20 @@ impl Ingredient for Identity {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        // TODO
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![(self.src, col)])
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Some(vec![(self.src.as_global(), col)])
     }
 
     fn description(&self) -> String {
         "≡".into()
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        vec![(self.src, Some(column))]
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+        vec![(self.src.as_global(), Some(column))]
     }
 }
 
@@ -85,7 +78,10 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("identity", &["x", "y", "z"], Identity::new(s), materialized);
+        g.set_op("identity",
+                 &["x", "y", "z"],
+                 Identity::new(s.as_global()),
+                 materialized);
         g
     }
 
@@ -100,7 +96,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let g = setup(false);
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
     }
@@ -108,8 +104,11 @@ mod tests {
     #[test]
     fn it_resolves() {
         let g = setup(false);
-        assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
-        assert_eq!(g.node().resolve(2), Some(vec![(g.narrow_base_id(), 2)]));
+        assert_eq!(g.node().resolve(0),
+                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
+        assert_eq!(g.node().resolve(1),
+                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
+        assert_eq!(g.node().resolve(2),
+                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
     }
 }

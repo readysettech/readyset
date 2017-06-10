@@ -19,9 +19,8 @@ pub enum MutatorError {
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    pub(crate) src: NodeAddress,
     pub(crate) tx: flow::domain::DomainHandle,
-    pub(crate) addr: NodeAddress,
+    pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
     pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
@@ -34,7 +33,6 @@ pub struct Mutator {
 impl Clone for Mutator {
     fn clone(&self) -> Self {
         Self {
-            src: self.src.clone(),
             tx: self.tx.clone(),
             addr: self.addr.clone(),
             key: self.key.clone(),
@@ -127,14 +125,14 @@ impl Mutator {
         self.inject_dropped_cols(&mut rs);
         let m = if self.transactional {
             box Packet::Transaction {
-                link: Link::new(self.src, self.addr),
+                link: Link::new(self.addr, self.addr),
                 data: rs,
                 state: TransactionState::WillCommit,
                 tracer: self.tracer.clone(),
             }
         } else {
             box Packet::Message {
-                link: Link::new(self.src, self.addr),
+                link: Link::new(self.addr, self.addr),
                 data: rs,
                 tracer: self.tracer.clone(),
             }
@@ -149,7 +147,7 @@ impl Mutator {
         self.inject_dropped_cols(&mut rs);
         let send = self.tx_reply_channel.0.clone();
         let m = box Packet::Transaction {
-            link: Link::new(self.src, self.addr),
+            link: Link::new(self.addr, self.addr),
             data: rs,
             state: TransactionState::Pending(t, send),
             tracer: self.tracer.clone(),

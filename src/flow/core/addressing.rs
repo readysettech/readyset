@@ -1,4 +1,5 @@
 use std::fmt;
+use std::collections::HashMap;
 use petgraph::graph::NodeIndex;
 
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
@@ -10,151 +11,102 @@ pub struct LocalNodeIndex {
 }
 
 impl LocalNodeIndex {
+    pub unsafe fn make(id: u32) -> LocalNodeIndex {
+        LocalNodeIndex { id }
+    }
+
     pub fn id(&self) -> usize {
         self.id as usize
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
-pub enum NodeAddress_ {
-    Global(NodeIndex),
-    Local(LocalNodeIndex), // XXX: maybe include domain here?
+impl fmt::Display for LocalNodeIndex {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "l{}", self.id)
+    }
 }
 
-/// Variant of NodeAddress_ used for serialization
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug)]
+pub struct IndexPair {
+    global: NodeIndex,
+    local: Option<LocalNodeIndex>,
+}
+
+impl fmt::Display for IndexPair {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.global.index())
+    }
+}
+
+use std::ops::Deref;
+impl Deref for IndexPair {
+    type Target = LocalNodeIndex;
+    fn deref(&self) -> &Self::Target {
+        self.local
+            .as_ref()
+            .expect("tried to access local node index, which has not yet been assigned")
+    }
+}
+
+impl From<NodeIndex> for IndexPair {
+    fn from(ni: NodeIndex) -> Self {
+        IndexPair {
+            global: ni,
+            local: None,
+        }
+    }
+}
+
+impl IndexPair {
+    pub fn set_local(&mut self, li: LocalNodeIndex) {
+        assert_eq!(self.local, None);
+        self.local = Some(li);
+    }
+
+    pub fn has_local(&self) -> bool {
+        self.local.is_some()
+    }
+
+    pub fn as_global(&self) -> NodeIndex {
+        self.global
+    }
+
+    pub fn remap(&mut self, mapping: &HashMap<NodeIndex, IndexPair>) {
+        *self = *mapping
+            .get(&self.global)
+            .expect("asked to remap index that is unknown in mapping");
+    }
+}
+
 #[derive(Serialize, Deserialize)]
-enum NodeAddressDef {
-    Global(u32),
-    Local(u32),
+struct IndexPairDef {
+    global: usize,
+    local: Option<LocalNodeIndex>,
 }
 
-impl Serialize for NodeAddress_ {
+impl Serialize for IndexPair {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
     {
-        let def = match *self {
-            NodeAddress_::Global(i) => NodeAddressDef::Global(i.index() as u32),
-            NodeAddress_::Local(i) => NodeAddressDef::Local(i.id() as u32),
+        let def = IndexPairDef {
+            global: self.global.index(),
+            local: self.local,
         };
 
         def.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for NodeAddress_ {
+impl<'de> Deserialize<'de> for IndexPair {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de>
     {
-        NodeAddressDef::deserialize(deserializer).map(|def| match def {
-                                                          NodeAddressDef::Local(idx) => {
-                                                              NodeAddress_::Local(LocalNodeIndex {
-                                                                                      id: idx,
-                                                                                  })
-                                                          }
-                                                          NodeAddressDef::Global(idx) => {
-                         NodeAddress_::Global(NodeIndex::new(idx as usize))
-                     }
-                                                      })
-    }
-}
-
-/// `NodeAddress` is a unique identifier that can be used to refer to nodes in the graph across
-/// migrations.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Serialize, Deserialize)]
-pub struct NodeAddress {
-    addr: NodeAddress_, // wrap the enum so people can't create these accidentally
-}
-
-impl fmt::Debug for NodeAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => write!(f, "NodeAddress::Global({})", ni.index()),
-            NodeAddress_::Local(ref li) => write!(f, "NodeAddress::Local({})", li.id()),
-        }
-    }
-}
-
-impl NodeAddress {
-    // https://github.com/rust-lang-nursery/rustfmt/issues/1394
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    pub(crate) unsafe fn make_local(id: u32) -> NodeAddress {
-        NodeAddress { addr: NodeAddress_::Local(LocalNodeIndex { id: id }) }
-    }
-
-
-    pub(crate) fn is_global(&self) -> bool {
-        match self.addr {
-            NodeAddress_::Global(_) => true,
-            _ => false,
-        }
-    }
-
-    pub(crate) fn is_local(&self) -> bool {
-        match self.addr {
-            NodeAddress_::Local(_) => true,
-            _ => false,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn mock_local(id: usize) -> NodeAddress {
-        unsafe { Self::make_local(id as u32) }
-    }
-
-    #[cfg(test)]
-    pub fn mock_global(id: NodeIndex) -> NodeAddress {
-        NodeAddress { addr: NodeAddress_::Global(id) }
-    }
-}
-
-impl Into<usize> for NodeAddress {
-    fn into(self) -> usize {
-        match self.addr {
-            NodeAddress_::Global(ni) => ni.index(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl From<NodeIndex> for NodeAddress {
-    fn from(o: NodeIndex) -> Self {
-        NodeAddress { addr: NodeAddress_::Global(o) }
-    }
-}
-
-impl From<usize> for NodeAddress {
-    fn from(o: usize) -> Self {
-        NodeAddress::from(NodeIndex::new(o))
-    }
-}
-
-impl From<LocalNodeIndex> for NodeAddress {
-    fn from(o: LocalNodeIndex) -> Self {
-        NodeAddress { addr: NodeAddress_::Local(o) }
-    }
-}
-
-impl fmt::Display for NodeAddress {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => write!(f, "g{}", ni.index()),
-            NodeAddress_::Local(ref ni) => write!(f, "l{}", ni.id),
-        }
-    }
-}
-
-impl NodeAddress {
-    pub(crate) fn as_global(&self) -> &NodeIndex {
-        match self.addr {
-            NodeAddress_::Global(ref ni) => ni,
-            NodeAddress_::Local(_) => unreachable!("tried to use local address as global"),
-        }
-    }
-
-    pub(crate) fn as_local(&self) -> &LocalNodeIndex {
-        match self.addr {
-            NodeAddress_::Local(ref i) => i,
-            NodeAddress_::Global(_) => unreachable!("tried to use global address as local"),
-        }
+        IndexPairDef::deserialize(deserializer).map(|def| {
+            // what if I put a really long comment rustfmt? then what?
+            IndexPair {
+                global: NodeIndex::new(def.global),
+                local: def.local,
+            }
+        })
     }
 }

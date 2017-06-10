@@ -66,7 +66,7 @@ pub fn inform(log: &Logger,
                 .filter(|ni| old_nodes.contains(ni))
                 .map(|ni| &graph[ni])
                 .filter(|n| n.domain() == domain)
-                .map(|n| *n.local_addr().as_local())
+                .map(|n| *n.local_addr())
                 .collect();
 
             trace!(log, "request addition of node"; "node" => ni.index());

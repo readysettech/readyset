@@ -8,8 +8,8 @@ use flow::prelude::*;
 /// latest for that group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Latest {
-    us: Option<NodeAddress>,
-    src: NodeAddress,
+    us: Option<IndexPair>,
+    src: IndexPair,
     // MUST be in reverse sorted order!
     key: Vec<usize>,
     key_m: HashMap<usize, usize>,
@@ -21,7 +21,7 @@ impl Latest {
     /// `src` should be the ancestor the operation is performed over, and `keys` should be a list
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
-    pub fn new(src: NodeAddress, mut keys: Vec<usize>) -> Latest {
+    pub fn new(src: NodeIndex, mut keys: Vec<usize>) -> Latest {
         assert_eq!(keys.len(),
                    1,
                    "only latest over a single column is supported");
@@ -34,7 +34,7 @@ impl Latest {
         keys.reverse();
         Latest {
             us: None,
-            src: src,
+            src: src.into(),
             key: keys,
             key_m: key_m,
         }
@@ -46,8 +46,8 @@ impl Ingredient for Latest {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -60,23 +60,24 @@ impl Ingredient for Latest {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        self.us = Some(us);
-        self.src = remap[&self.src]
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.src.remap(remap);
+        self.us = Some(remap[&us]);
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        debug_assert_eq!(from, self.src);
+        debug_assert_eq!(from, *self.src);
 
         // find the current value for each group
+        let us = self.us.unwrap();
         let db = state
-            .get(self.us.as_ref().unwrap().as_local())
+            .get(&us)
             .expect("latest must have its own state materialized");
 
         let mut misses = Vec::new();
@@ -100,7 +101,7 @@ impl Ingredient for Latest {
                     // be a read, because reads cause replay, which fill holes with an empty set
                     // before processing!
                     misses.push(Miss{
-                        node: *self.us.unwrap().as_local(),
+                        node: *us,
                         key: vec![r[self.key[0]].clone()],
                     });
                     None
@@ -127,13 +128,13 @@ impl Ingredient for Latest {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index all key columns
         Some((this, self.key.clone())).into_iter().collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![(self.src, col)])
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Some(vec![(self.src.as_global(), col)])
     }
 
     fn description(&self) -> String {
@@ -145,8 +146,8 @@ impl Ingredient for Latest {
         format!("⧖ γ[{}]", key_cols)
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        vec![(self.src, Some(column))]
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
+        vec![(self.src.as_global(), Some(column))]
     }
 }
 
@@ -159,7 +160,10 @@ mod tests {
     fn setup(key: usize, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
-        g.set_op("latest", &["x", "y"], Latest::new(s, vec![key]), mat);
+        g.set_op("latest",
+                 &["x", "y"],
+                 Latest::new(s.as_global(), vec![key]),
+                 mat);
         g
     }
 
@@ -262,7 +266,7 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let c = setup(1, false);
         let idx = c.node().suggest_indexes(me);
 
@@ -278,8 +282,11 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(1, false);
-        assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
-        assert_eq!(c.node().resolve(1), Some(vec![(c.narrow_base_id(), 1)]));
-        assert_eq!(c.node().resolve(2), Some(vec![(c.narrow_base_id(), 2)]));
+        assert_eq!(c.node().resolve(0),
+                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
+        assert_eq!(c.node().resolve(1),
+                   Some(vec![(c.narrow_base_id().as_global(), 1)]));
+        assert_eq!(c.node().resolve(2),
+                   Some(vec![(c.narrow_base_id().as_global(), 2)]));
     }
 }

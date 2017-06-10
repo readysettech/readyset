@@ -58,11 +58,11 @@ pub trait GroupedOperation: fmt::Debug + Clone {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupedOperator<T: GroupedOperation> {
-    src: NodeAddress,
+    src: IndexPair,
     inner: T,
 
     // some cache state
-    us: Option<NodeAddress>,
+    us: Option<IndexPair>,
     cols: usize,
 
     // precomputed datastructures
@@ -72,9 +72,9 @@ pub struct GroupedOperator<T: GroupedOperation> {
 }
 
 impl<T: GroupedOperation> GroupedOperator<T> {
-    pub fn new(src: NodeAddress, op: T) -> GroupedOperator<T> {
+    pub fn new(src: NodeIndex, op: T) -> GroupedOperator<T> {
         GroupedOperator {
-            src: src,
+            src: src.into(),
             inner: op,
 
             us: None,
@@ -93,8 +93,8 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -106,7 +106,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[*self.src.as_global()];
+        let srcn = &g[self.src.as_global()];
 
         // give our inner operation a chance to initialize
         self.inner.setup(srcn);
@@ -135,22 +135,22 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
         self.colfix.extend(colfix.into_iter());
     }
 
-    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         // who's our parent really?
-        self.src = remap[&self.src];
+        self.src.remap(remap);
 
         // who are we?
-        self.us = Some(us);
+        self.us = Some(remap[&us]);
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        debug_assert_eq!(from, self.src);
+        debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
             return ProcessingResult {
@@ -177,12 +177,13 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
             consolidate.entry(group).or_insert_with(Vec::new).push(val);
         }
 
+        let us = self.us.unwrap();
         let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * consolidate.len());
         for (group, diffs) in consolidate {
             // find the current value for this group
             let db = state
-                .get(self.us.as_ref().unwrap().as_local())
+                .get(&*us)
                 .expect("grouped operators must have their own state materialized");
 
             let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
@@ -192,7 +193,7 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
                 }
                 LookupResult::Missing => {
                     misses.push(Miss {
-                                    node: *self.us.unwrap().as_local(),
+                                    node: *us,
                                     key: group.iter().map(|&dt| dt.clone()).collect(),
                                 });
                     continue;
@@ -239,27 +240,27 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index by our primary key
         Some((this, self.out_key.clone())).into_iter().collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         if col == self.cols - 1 {
             return None;
         }
-        Some(vec![(self.src, self.colfix[col])])
+        Some(vec![(self.src.as_global(), self.colfix[col])])
     }
 
     fn description(&self) -> String {
         self.inner.description()
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
         if column == self.cols - 1 {
-            return vec![(self.src, None)];
+            return vec![(self.src.as_global(), None)];
         }
-        vec![(self.src, Some(self.colfix[column]))]
+        vec![(self.src.as_global(), Some(self.colfix[column]))]
     }
 
     fn is_selective(&self) -> bool {

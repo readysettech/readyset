@@ -5,7 +5,8 @@ use std::fmt::{Error, Formatter, Debug, Display};
 use std::rc::Rc;
 
 use flow::Migration;
-use flow::core::{NodeAddress, DataType};
+use flow::core::DataType;
+use flow::prelude::NodeIndex;
 use ops;
 use ops::grouped::aggregate::Aggregation as AggregationKind;
 use ops::grouped::extremum::Extremum as ExtremumKind;
@@ -20,12 +21,12 @@ mod optimize;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
-    New(NodeAddress),
-    Existing(NodeAddress),
+    New(NodeIndex),
+    Existing(NodeIndex),
 }
 
 impl FlowNode {
-    pub fn address(&self) -> NodeAddress {
+    pub fn address(&self) -> NodeIndex {
         match *self {
             FlowNode::New(na) |
             FlowNode::Existing(na) => na,
@@ -421,7 +422,7 @@ impl MirNode {
         }
     }
 
-    fn flow_node_addr(&self) -> Result<NodeAddress, String> {
+    fn flow_node_addr(&self) -> Result<NodeIndex, String> {
         match self.flow_node {
             Some(FlowNode::New(na)) |
             Some(FlowNode::Existing(na)) => Ok(na),

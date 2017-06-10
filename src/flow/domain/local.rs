@@ -79,17 +79,17 @@ impl<T> Map<T> {
         ret
     }
 
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (NodeAddress, &'a T)> + 'a> {
+    pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (LocalNodeIndex, &'a T)> + 'a> {
         Box::new(self.things.iter().enumerate().filter_map(|(i, t)| {
             t.as_ref()
-                .map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
+                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (NodeAddress, &'a mut T)> + 'a> {
+    pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (LocalNodeIndex, &'a mut T)> + 'a> {
         Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
             t.as_mut()
-                .map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
+                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
@@ -153,12 +153,13 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
 }
 
 impl<T: 'static> IntoIterator for Map<T> {
-    type Item = (NodeAddress, T);
+    type Item = (LocalNodeIndex, T);
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
-        Box::new(self.things.into_iter().enumerate().filter_map(|(i, v)| {
-            v.map(|v| (unsafe { NodeAddress::make_local(i as u32) }, v))
-        }))
+        Box::new(self.things
+                     .into_iter()
+                     .enumerate()
+                     .filter_map(|(i, v)| v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))))
     }
 }
 

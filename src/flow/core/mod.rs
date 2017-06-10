@@ -5,4 +5,4 @@ pub mod processing;
 pub use self::processing::{Ingredient, ProcessingResult, Miss, RawProcessingResult};
 
 pub mod addressing;
-pub use self::addressing::{LocalNodeIndex, NodeAddress};
+pub use self::addressing::{LocalNodeIndex, IndexPair};

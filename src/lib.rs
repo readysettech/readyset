@@ -371,7 +371,8 @@ mod sql;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, Mutator, MutatorError};
-pub use flow::core::{NodeAddress, DataType, Datas};
+pub use flow::core::{DataType, Datas};
+pub use petgraph::graph::NodeIndex;
 pub use flow::node::StreamUpdate;
 pub use flow::domain::Index;
 pub use flow::payload::PacketEvent;

@@ -28,8 +28,8 @@ pub enum JoinSource {
 /// Join provides a left outer join between two views.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Join {
-    left: NodeAddress,
-    right: NodeAddress,
+    left: IndexPair,
+    right: IndexPair,
 
     // Key column in the left and right parents respectively
     on: (usize, usize),
@@ -53,11 +53,7 @@ impl Join {
     /// the join columns: (left_parent_column, right_parent_column) and `emit` dictates for each
     /// output colunm, which source and column should be used (true means left parent, and false
     /// means right parent).
-    pub fn new(left: NodeAddress,
-               right: NodeAddress,
-               kind: JoinType,
-               emit: Vec<JoinSource>)
-               -> Self {
+    pub fn new(left: NodeIndex, right: NodeIndex, kind: JoinType, emit: Vec<JoinSource>) -> Self {
         let mut join_columns = Vec::new();
         let emit = emit.into_iter()
             .map(|join_source| match join_source {
@@ -74,8 +70,8 @@ impl Join {
         let on = *join_columns.iter().next().unwrap();
 
         Self {
-            left: left,
-            right: right,
+            left: left.into(),
+            right: right.into(),
             on: on,
             emit: emit,
             right_counts: HashMap::new(),
@@ -111,8 +107,8 @@ impl Ingredient for Join {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.left, self.right]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.left.as_global(), self.right.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -123,10 +119,14 @@ impl Ingredient for Join {
         true
     }
 
-    fn must_replay_among(&self) -> Option<HashSet<NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         match self.kind {
-            JoinType::Left => Some(Some(self.left).into_iter().collect()),
-            JoinType::Inner => Some(vec![self.left, self.right].into_iter().collect()),
+            JoinType::Left => Some(Some(self.left.as_global()).into_iter().collect()),
+            JoinType::Inner => {
+                Some(vec![self.left.as_global(), self.right.as_global()]
+                         .into_iter()
+                         .collect())
+            }
         }
     }
 
@@ -136,18 +136,13 @@ impl Ingredient for Join {
 
     fn on_connected(&mut self, _g: &Graph) {}
 
-    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        if let Some(left) = remap.get(&self.left) {
-            self.left = left.clone();
-        }
-
-        if let Some(right) = remap.get(&self.right) {
-            self.right = right.clone();
-        }
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.left.remap(remap);
+        self.right.remap(remap);
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 nodes: &DomainNodes,
@@ -155,7 +150,7 @@ impl Ingredient for Join {
                 -> ProcessingResult {
         let mut misses = Vec::new();
 
-        if from == self.right && self.kind == JoinType::Left {
+        if from == *self.right && self.kind == JoinType::Left {
             // If records are being received from the right, then populate self.right_counts
             // with the number of records that existed for each key *before* this batch of
             // records was processed.
@@ -169,7 +164,7 @@ impl Ingredient for Join {
                     continue;
                 }
 
-                let rc = self.lookup(self.right,
+                let rc = self.lookup(*self.right,
                                      &[self.on.0],
                                      &KeyType::Single(&key),
                                      nodes,
@@ -187,10 +182,10 @@ impl Ingredient for Join {
                 .retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
-        let (other, from_key, other_key) = if from == self.left {
-            (self.right, self.on.0, self.on.1)
+        let (other, from_key, other_key) = if from == *self.left {
+            (*self.right, self.on.0, self.on.1)
         } else {
-            (self.left, self.on.1, self.on.0)
+            (*self.left, self.on.1, self.on.0)
         };
 
         // okay, so here's what's going on:
@@ -213,7 +208,7 @@ impl Ingredient for Join {
                 .unwrap();
             if other_rows.is_none() {
                 misses.push(Miss {
-                                node: *other.as_local(),
+                                node: other,
                                 key: vec![row[from_key].clone()],
                             });
                 continue;
@@ -222,7 +217,7 @@ impl Ingredient for Join {
 
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
-                if from == self.right {
+                if from == *self.right {
                     let rc = if let Some(&mut (ref mut rc, _)) =
                         self.right_counts.get_mut(&row[self.on.0]) {
                         if positive {
@@ -251,7 +246,7 @@ impl Ingredient for Join {
                 }
             }
 
-            if from == self.right {
+            if from == *self.right {
                 ret.extend(other_rows.map(|r| (self.generate_row(r, &row), positive).into()));
             } else {
                 ret.extend(other_rows.map(|r| (self.generate_row(&row, r), positive).into()));
@@ -264,18 +259,19 @@ impl Ingredient for Join {
         }
     }
 
-    fn suggest_indexes(&self, _this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        vec![(self.left, vec![self.on.0]), (self.right, vec![self.on.1])]
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+        vec![(self.left.as_global(), vec![self.on.0]),
+             (self.right.as_global(), vec![self.on.1])]
             .into_iter()
             .collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         let e = self.emit[col];
         if e.0 {
-            Some(vec![(self.left, e.1)])
+            Some(vec![(self.left.as_global(), e.1)])
         } else {
-            Some(vec![(self.right, e.1)])
+            Some(vec![(self.right.as_global(), e.1)])
         }
     }
 
@@ -284,7 +280,7 @@ impl Ingredient for Join {
             .iter()
             .map(|&(from_left, col)| {
                      let src = if from_left { self.left } else { self.right };
-                     format!("{}:{}", src, col)
+                     format!("{}:{}", src.as_global().index(), col)
                  })
             .collect::<Vec<_>>()
             .join(", ");
@@ -296,20 +292,21 @@ impl Ingredient for Join {
 
         format!("[{}] {}:{} {} {}:{}",
                 emit,
-                self.left,
+                self.left.as_global().index(),
                 self.on.0,
                 op,
-                self.right,
+                self.right.as_global().index(),
                 self.on.1)
     }
 
-    fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         let pcol = self.emit[col];
         if (pcol.0 && pcol.1 == self.on.0) || (pcol.0 && pcol.1 == self.on.1) {
             // Join column comes from both parents
-            vec![(self.left, Some(self.on.0)), (self.right, Some(self.on.1))]
+            vec![(self.left.as_global(), Some(self.on.0)),
+                 (self.right.as_global(), Some(self.on.1))]
         } else {
-            vec![(if pcol.0 { self.left } else { self.right }, Some(pcol.1))]
+            vec![(if pcol.0 { &self.left } else { &self.right }.as_global(), Some(pcol.1))]
         }
     }
 }
@@ -320,16 +317,18 @@ mod tests {
 
     use ops;
 
-    fn setup() -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
+    fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1"]);
 
         use JoinSource::*;
-        let j = Join::new(l, r, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+        let j = Join::new(l.as_global(),
+                          r.as_global(),
+                          JoinType::Left,
+                          vec![B(0, 0), L(1), R(1)]);
 
         g.set_op("join", &["j0", "j1", "j2"], j, false);
-        let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
 
@@ -426,10 +425,10 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
-        let me = NodeAddress::mock_global(2.into());
+        let me = 2.into();
         let (g, l, r) = setup();
-        let hm: HashMap<_, _> = vec![(l, vec![0]), /* join column for left */
-                                     (r, vec![0]) /* join column for right */]
+        let hm: HashMap<_, _> = vec![(l.as_global(), vec![0]), /* join column for left */
+                                     (r.as_global(), vec![0]) /* join column for right */]
             .into_iter()
             .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);
@@ -438,8 +437,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (g, l, r) = setup();
-        assert_eq!(g.node().resolve(0), Some(vec![(l, 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(l, 1)]));
-        assert_eq!(g.node().resolve(2), Some(vec![(r, 1)]));
+        assert_eq!(g.node().resolve(0), Some(vec![(l.as_global(), 0)]));
+        assert_eq!(g.node().resolve(1), Some(vec![(l.as_global(), 1)]));
+        assert_eq!(g.node().resolve(2), Some(vec![(r.as_global(), 1)]));
     }
 }

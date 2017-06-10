@@ -101,7 +101,7 @@ impl DomainState {
         }
     }
 
-    pub fn egress_for(&self, base: NodeIndex) -> &[NodeAddress] {
+    pub fn egress_for(&self, base: NodeIndex) -> &[LocalNodeIndex] {
         &self.egress_for_base[&base][..]
     }
 

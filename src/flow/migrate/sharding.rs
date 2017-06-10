@@ -179,16 +179,10 @@ pub fn shard(log: &Logger,
 
                         for (ni, col) in want_sharding_input {
                             let need_sharding = Sharding::ByColumn(col);
-                            if input_shardings[ni.as_global()] != need_sharding {
+                            if input_shardings[&ni] != need_sharding {
                                 // input is sharded by different key -- need shuffle
-                                reshard(log,
-                                        new,
-                                        &mut swaps,
-                                        graph,
-                                        *ni.as_global(),
-                                        node,
-                                        need_sharding);
-                                input_shardings.insert(*ni.as_global(), need_sharding);
+                                reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
+                                input_shardings.insert(ni, need_sharding);
                             }
                         }
 
@@ -242,7 +236,7 @@ pub fn shard(log: &Logger,
                 // the output of the union is also sharded by that key. this is sufficiently common
                 // that we want to make sure we don't accidentally shuffle in those cases.
                 for &(ni, src) in &srcs {
-                    if input_shardings[ni.as_global()] != Sharding::ByColumn(src) {
+                    if input_shardings[&ni] != Sharding::ByColumn(src) {
                         // TODO: technically we could revert to Sharding::Random here, which is a
                         // little better than forcing a de-shard, but meh.
                         continue 'outer;
@@ -293,15 +287,9 @@ pub fn shard(log: &Logger,
             // we have to ensure that each input is also sharded by that key
             for &(ni, src) in &srcs {
                 let need_sharding = Sharding::ByColumn(src);
-                if input_shardings[ni.as_global()] != need_sharding {
-                    reshard(log,
-                            new,
-                            &mut swaps,
-                            graph,
-                            *ni.as_global(),
-                            node,
-                            need_sharding);
-                    input_shardings.insert(*ni.as_global(), need_sharding);
+                if input_shardings[&ni] != need_sharding {
+                    reshard(log, new, &mut swaps, graph, ni, node, need_sharding);
+                    input_shardings.insert(ni, need_sharding);
                 }
             }
             graph.node_weight_mut(node).unwrap().shard_by(s);
@@ -312,11 +300,11 @@ pub fn shard(log: &Logger,
         // force everything to be unsharded...
         let sharding = Sharding::None;
         warn!(log, "forcing de-sharding"; "node" => ?node);
-        for ni in need_sharding.keys() {
-            if input_shardings[ni.as_global()] != sharding {
+        for &ni in need_sharding.keys() {
+            if input_shardings[&ni] != sharding {
                 // ancestor must be forced to right sharding
-                reshard(log, new, &mut swaps, graph, *ni.as_global(), node, sharding);
-                input_shardings.insert(*ni.as_global(), sharding);
+                reshard(log, new, &mut swaps, graph, ni, node, sharding);
+                input_shardings.insert(ni, sharding);
             }
         }
     }
@@ -406,7 +394,6 @@ pub fn shard(log: &Logger,
                 continue;
             }
             let src_col = src_col.unwrap();
-            let grandp = *grandp.as_global();
 
             // we now know that we have the following
             //

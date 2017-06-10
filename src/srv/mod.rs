@@ -42,14 +42,14 @@ pub fn make_server(soup: &flow::Blender) -> Server {
     let ins = soup.inputs()
         .into_iter()
         .map(|(ni, n)| {
-                 (ni.as_global().index(),
+                 (ni.index(),
                   (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_mutator(ni)))
              })
         .collect();
     let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n)| {
-                 (ni.as_global().index(),
+                 (ni.index(),
                   (n.name().to_owned(),
                    n.fields().iter().cloned().collect(),
                    soup.get_getter(ni).unwrap()))

@@ -5,10 +5,14 @@ use flow::prelude::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
-    AllFrom(NodeAddress),
+    AllFrom(IndexPair),
     Project {
-        emit: HashMap<NodeAddress, Vec<usize>>,
-        cols: HashMap<NodeAddress, usize>,
+        emit: HashMap<IndexPair, Vec<usize>>,
+
+        // generated
+        emit_l: Map<Vec<usize>>,
+        cols: HashMap<IndexPair, usize>,
+        cols_l: Map<usize>,
     },
 }
 
@@ -36,7 +40,7 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
-    pub fn new(emit: HashMap<NodeAddress, Vec<usize>>) -> Union {
+    pub fn new(emit: HashMap<NodeIndex, Vec<usize>>) -> Union {
         assert!(!emit.is_empty());
         for emit in emit.values() {
             let mut last = &emit[0];
@@ -47,10 +51,13 @@ impl Union {
                 last = i;
             }
         }
+        let emit = emit.into_iter().map(|(k, v)| (k.into(), v)).collect();
         Union {
             emit: Emit::Project {
                 emit,
+                emit_l: Map::new(),
                 cols: HashMap::new(),
+                cols_l: Map::new(),
             },
             replay_key: None,
             replay_pieces: HashMap::new(),
@@ -58,9 +65,9 @@ impl Union {
     }
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
-    pub fn new_deshard(parent: NodeAddress) -> Union {
+    pub fn new_deshard(parent: NodeIndex) -> Union {
         Union {
-            emit: Emit::AllFrom(parent),
+            emit: Emit::AllFrom(parent.into()),
             replay_key: None,
             replay_pieces: HashMap::new(),
         }
@@ -72,10 +79,10 @@ impl Ingredient for Union {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         match self.emit {
-            Emit::AllFrom(p) => vec![p],
-            Emit::Project { ref emit, .. } => emit.keys().cloned().collect(),
+            Emit::AllFrom(p) => vec![p.as_global()],
+            Emit::Project { ref emit, .. } => emit.keys().map(|k| k.as_global()).collect(),
         }
     }
 
@@ -91,38 +98,46 @@ impl Ingredient for Union {
         if let Emit::Project {
                    ref mut cols,
                    ref emit,
+                   ..
                } = self.emit {
-            cols.extend(emit.keys().map(|&n| (n, g[*n.as_global()].fields().len())));
+            cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
         }
     }
 
-    fn on_commit(&mut self, _: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+    fn on_commit(&mut self, _: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         match self.emit {
             Emit::Project {
                 ref mut emit,
                 ref mut cols,
+                ref mut emit_l,
+                ref mut cols_l,
             } => {
-                for (from, to) in remap {
-                    if from == to {
-                        continue;
-                    }
-
-                    if let Some(e) = emit.remove(from) {
-                        assert!(emit.insert(*to, e).is_none());
-                    }
-                    if let Some(e) = cols.remove(from) {
-                        assert!(cols.insert(*to, e).is_none());
-                    }
-                }
+                use std::mem;
+                let mapped_emit = emit.drain()
+                    .map(|(mut k, v)| {
+                             k.remap(remap);
+                             emit_l.insert(*k, v.clone());
+                             (k, v)
+                         })
+                    .collect();
+                let mapped_cols = cols.drain()
+                    .map(|(mut k, v)| {
+                             k.remap(remap);
+                             cols_l.insert(*k, v.clone());
+                             (k, v)
+                         })
+                    .collect();
+                mem::replace(emit, mapped_emit);
+                mem::replace(cols, mapped_cols);
             }
             Emit::AllFrom(ref mut p) => {
-                *p = remap[p];
+                p.remap(remap);
             }
         }
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
@@ -135,7 +150,7 @@ impl Ingredient for Union {
                     misses: Vec::new(),
                 }
             }
-            Emit::Project { ref emit, .. } => {
+            Emit::Project { ref emit_l, .. } => {
 
                 let rs = rs.into_iter()
                     .map(move |rec| {
@@ -143,7 +158,7 @@ impl Ingredient for Union {
 
                         // yield selected columns for this source
                         // TODO: if emitting all in same order then avoid clone
-                        let res = emit[&from].iter().map(|&col| r[col].clone()).collect();
+                        let res = emit_l[&from].iter().map(|&col| r[col].clone()).collect();
 
                         // return new row with appropriate sign
                         if pos {
@@ -162,7 +177,7 @@ impl Ingredient for Union {
     }
 
     fn on_input_raw(&mut self,
-                    from: NodeAddress,
+                    from: LocalNodeIndex,
                     rs: Records,
                     tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
@@ -188,9 +203,9 @@ impl Ingredient for Union {
                 // in the downstream node. in fact, we *must* forward them, becuase there may be
                 // *other* nodes downstream that do *not* have holes for the key in question.
                 for r in &rs {
-                    let k = self.replay_key.as_ref().unwrap()[from.as_local()];
+                    let k = self.replay_key.as_ref().unwrap()[&from];
                     if let Some(ref mut pieces) = self.replay_pieces.get_mut(&r[k]) {
-                        if let Some(ref mut rs) = pieces.get_mut(from.as_local()) {
+                        if let Some(ref mut rs) = pieces.get_mut(&from) {
                             // we've received a replay piece from this ancestor already for this
                             // key, and are waiting for replay pieces from other ancestors. we need
                             // to incorporate this record into the replay piece so that it doesn't
@@ -214,14 +229,13 @@ impl Ingredient for Union {
                     // which might translate to different columns in our inputs
                     match self.emit {
                         Emit::AllFrom(_) => {
-                            self.replay_key =
-                                Some(Some((*from.as_local(), key_col)).into_iter().collect());
+                            self.replay_key = Some(Some((from, key_col)).into_iter().collect());
                         }
-                        Emit::Project { ref emit, .. } => {
-                            self.replay_key =
-                                Some(emit.iter()
-                                         .map(|(src, emit)| (*src.as_local(), emit[key_col]))
-                                         .collect());
+                        Emit::Project { ref emit_l, .. } => {
+                            self.replay_key = Some(emit_l
+                                                       .iter()
+                                                       .map(|(src, emit)| (src, emit[key_col]))
+                                                       .collect());
                         }
                     }
                 }
@@ -232,8 +246,8 @@ impl Ingredient for Union {
                         .entry(key_val.clone())
                         .or_insert_with(Map::new);
                     // there better be only one replay from each ancestor
-                    assert!(!pieces.contains_key(from.as_local()));
-                    pieces.insert(*from.as_local(), rs);
+                    assert!(!pieces.contains_key(&from));
+                    pieces.insert(from, rs);
                     // does this release the replay?
                     match self.emit {
                         Emit::AllFrom(_) => pieces.len() == nshards,
@@ -260,16 +274,18 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         // index nothing (?)
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         match self.emit {
-            Emit::AllFrom(p) => Some(vec![(p, col)]),
+            Emit::AllFrom(p) => Some(vec![(p.as_global(), col)]),
             Emit::Project { ref emit, .. } => {
-                Some(emit.iter().map(|(src, emit)| (*src, emit[col])).collect())
+                Some(emit.iter()
+                         .map(|(src, emit)| (src.as_global(), emit[col]))
+                         .collect())
             }
         }
     }
@@ -287,19 +303,19 @@ impl Ingredient for Union {
                                  .map(|e| e.to_string())
                                  .collect::<Vec<_>>()
                                  .join(", ");
-                             format!("{}:[{}]", src, cols)
+                             format!("{}:[{}]", src.as_global().index(), cols)
                          })
                     .collect::<Vec<_>>()
                     .join(" ⋃ ")
             }
         }
     }
-    fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         match self.emit {
-            Emit::AllFrom(p) => vec![(p, Some(col))],
+            Emit::AllFrom(p) => vec![(p.as_global(), Some(col))],
             Emit::Project { ref emit, .. } => {
                 emit.iter()
-                    .map(|(src, emit)| (*src, Some(emit[col])))
+                    .map(|(src, emit)| (src.as_global(), Some(emit[col])))
                     .collect()
             }
         }
@@ -312,17 +328,15 @@ mod tests {
 
     use ops;
 
-    fn setup() -> (ops::test::MockGraph, NodeAddress, NodeAddress) {
+    fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1", "r2"]);
 
         let mut emits = HashMap::new();
-        emits.insert(l, vec![0, 1]);
-        emits.insert(r, vec![0, 2]);
+        emits.insert(l.as_global(), vec![0, 1]);
+        emits.insert(r.as_global(), vec![0, 2]);
         g.set_op("union", &["u0", "u1"], Union::new(emits), false);
-
-        let (l, r) = (g.to_local(l), g.to_local(r));
         (g, l, r)
     }
 
@@ -351,7 +365,7 @@ mod tests {
     fn it_suggests_indices() {
         use std::collections::HashMap;
         let (u, _, _) = setup();
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         assert_eq!(u.node().suggest_indexes(me), HashMap::new());
     }
 
@@ -359,10 +373,22 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup();
         let r0 = u.node().resolve(0);
-        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 0));
-        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 0));
+        assert!(r0.as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|&(n, c)| n == l.as_global() && c == 0));
+        assert!(r0.as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|&(n, c)| n == r.as_global() && c == 0));
         let r1 = u.node().resolve(1);
-        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == l && c == 1));
-        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| n == r && c == 2));
+        assert!(r1.as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|&(n, c)| n == l.as_global() && c == 1));
+        assert!(r1.as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|&(n, c)| n == r.as_global() && c == 2));
     }
 }

@@ -1,6 +1,7 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use {SqlIncorporator, Migration, NodeAddress};
+use {SqlIncorporator, Migration};
+use flow::prelude::NodeIndex;
 
 use slog;
 use std::collections::HashMap;
@@ -12,8 +13,8 @@ type QueryID = u64;
 /// Represents the result of a recipe activation.
 #[derive(Clone, Debug)]
 pub struct ActivationResult {
-    /// Map of query names to `NodeAddress` handles for reads/writes.
-    pub new_nodes: HashMap<String, NodeAddress>,
+    /// Map of query names to `NodeIndex` handles for reads/writes.
+    pub new_nodes: HashMap<String, NodeIndex>,
     /// Number of expressions the recipe added compared to the prior recipe.
     pub expressions_added: usize,
     /// Number of expressions the recipe removed compared to the prior recipe.
@@ -92,8 +93,8 @@ impl Recipe {
         self.log = log;
     }
 
-    /// Obtains the `NodeAddress` for the node corresponding to a named query or a write type.
-    pub fn node_addr_for(&self, name: &str) -> Result<NodeAddress, String> {
+    /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
+    pub fn node_addr_for(&self, name: &str) -> Result<NodeIndex, String> {
         match self.inc {
             Some(ref inc) => {
                 // `name` might be an alias for another identical query, so resolve via QID here
@@ -222,7 +223,7 @@ impl Recipe {
             .set_transactional(transactional_base_nodes);
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
-        // incorporator in `inc`. `NodeAddress`es for new nodes are collected in `new_nodes` to be
+        // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
         // returned to the caller (who may use them to obtain mutators and getters)
         for qid in added {
             let (n, q) = self.expressions[&qid].clone();

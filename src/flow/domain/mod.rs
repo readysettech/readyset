@@ -60,8 +60,8 @@ enum DomainMode {
 }
 
 struct ReplayPath {
-    source: Option<NodeAddress>,
-    path: Vec<(NodeAddress, Option<usize>)>,
+    source: Option<LocalNodeIndex>,
+    path: Vec<(LocalNodeIndex, Option<usize>)>,
     done_tx: Option<mpsc::SyncSender<()>>,
     trigger: TriggerEndpoint,
 }
@@ -124,10 +124,7 @@ impl Domain {
                ts: i64)
                -> Self {
         // initially, all nodes are not ready
-        let not_ready = nodes
-            .values()
-            .map(|n| *n.borrow().local_addr().as_local())
-            .collect();
+        let not_ready = nodes.values().map(|n| *n.borrow().local_addr()).collect();
 
         let shard = if nshards == 1 { None } else { Some(shard) };
 
@@ -182,7 +179,7 @@ impl Domain {
             if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
                 continue;
             }
-            if self.replay_paths[&tag].path.last().unwrap().0.as_local() != &miss {
+            if self.replay_paths[&tag].path.last().unwrap().0 != miss {
                 continue;
             }
 
@@ -242,7 +239,7 @@ impl Domain {
                 process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
                 process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
                 enable_output: bool)
-                -> HashMap<NodeAddress, Vec<Record>> {
+                -> HashMap<LocalNodeIndex, Vec<Record>> {
 
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
@@ -253,20 +250,20 @@ impl Domain {
                 ref to,
                 ref mut buffered,
                 ..
-            } if to == me.as_local() => {
+            } if to == &me => {
                 buffered.push_back(m);
                 return output_messages;
             }
             DomainMode::Replaying { .. } => (),
         }
 
-        if !not_ready.is_empty() && not_ready.contains(me.as_local()) {
+        if !not_ready.is_empty() && not_ready.contains(&me) {
             return output_messages;
         }
 
-        let mut n = nodes[me.as_local()].borrow_mut();
-        process_times.start(*me.as_local());
-        process_ptimes.start(*me.as_local());
+        let mut n = nodes[&me].borrow_mut();
+        process_times.start(me);
+        process_ptimes.start(me);
         let mut m = Some(m);
         n.process(&mut m, None, states, nodes, shard, true);
         process_ptimes.stop();
@@ -296,7 +293,7 @@ impl Domain {
             ref m => unreachable!("dispatch process got {:?}", m),
         }
 
-        let n = nodes[me.as_local()].borrow();
+        let n = nodes[&me].borrow();
         for i in 0..n.nchildren() {
             // avoid cloning if we can
             let mut m = if i == n.nchildren() - 1 {
@@ -305,7 +302,7 @@ impl Domain {
                 m.as_ref().map(|m| box m.clone_data()).unwrap()
             };
 
-            if enable_output || !nodes[n.child(i).as_local()].borrow().is_output() {
+            if enable_output || !nodes[n.child(i)].borrow().is_output() {
                 if n.is_shard_merger() {
                     // we need to preserve the egress src (which includes shard identifier)
                 } else {
@@ -351,7 +348,7 @@ impl Domain {
     fn dispatch_(&mut self,
                  m: Box<Packet>,
                  enable_output: bool)
-                 -> HashMap<NodeAddress, Vec<Record>> {
+                 -> HashMap<LocalNodeIndex, Vec<Record>> {
         Self::dispatch(m,
                        &self.not_ready,
                        &mut self.mode,
@@ -397,7 +394,7 @@ impl Domain {
         };
 
         for n in self.transaction_state.egress_for(base) {
-            let n = &self.nodes[n.as_local()];
+            let n = &self.nodes[n];
             let data = match egress_messages.entry(*n.borrow().local_addr()) {
                 Entry::Occupied(entry) => entry.remove().into(),
                 _ => Records::default(),
@@ -422,14 +419,14 @@ impl Domain {
                 }
             };
 
-            if !self.not_ready.is_empty() && self.not_ready.contains(addr.as_local()) {
+            if !self.not_ready.is_empty() && self.not_ready.contains(&addr) {
                 continue;
             }
 
-            self.process_times.start(*addr.as_local());
-            self.process_ptimes.start(*addr.as_local());
+            self.process_times.start(addr);
+            self.process_ptimes.start(addr);
             let mut m = Some(m);
-            self.nodes[addr.as_local()]
+            self.nodes[&addr]
                 .borrow_mut()
                 .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
             self.process_ptimes.stop();
@@ -466,8 +463,8 @@ impl Domain {
                 ..
             } => {
                 // a miss in a reader! make sure we don't re-do work
-                let addr = path.last().unwrap().0.as_local();
-                let n = self.nodes[addr].borrow();
+                let addr = path.last().unwrap().0;
+                let n = self.nodes[&addr].borrow();
                 let mut already_replayed = false;
                 n.with_reader(|r| {
                                   if let Some(wh) = r.writer() {
@@ -482,7 +479,7 @@ impl Domain {
                 }
 
                 let mut had = false;
-                if let Some(ref mut prev) = self.reader_triggered.get_mut(addr) {
+                if let Some(ref mut prev) = self.reader_triggered.get_mut(&addr) {
                     if prev.contains(&key[0]) {
                         // we've already requested a replay of this key
                         return true;
@@ -492,7 +489,7 @@ impl Domain {
                 }
 
                 if !had {
-                    self.reader_triggered.insert(*addr, HashSet::new());
+                    self.reader_triggered.insert(addr, HashSet::new());
                 }
                 false
             }
@@ -522,7 +519,7 @@ impl Domain {
                 match consumed {// workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
-                        let addr = *node.local_addr().as_local();
+                        let addr = *node.local_addr();
                         self.not_ready.insert(addr);
 
                         for p in parents {
@@ -721,7 +718,7 @@ impl Domain {
                         // process incoming updates to the domain without disturbing the state that
                         // is being replayed.
                         let state: State = self.state
-                            .get(from.as_local())
+                            .get(&from)
                             .expect("migration replay path started with non-materialized node")
                             .clone();
 
@@ -796,8 +793,8 @@ impl Domain {
                             .values()
                             .filter_map(|nd| {
                                 let ref n = *nd.borrow();
-                                let local_index: LocalNodeIndex = *n.local_addr().as_local();
-                                let node_index: NodeIndex = *n.global_addr().as_global();
+                                let local_index: LocalNodeIndex = *n.local_addr();
+                                let node_index: NodeIndex = n.global_addr();
 
                                 let time = self.process_times.num_nanoseconds(local_index);
                                 let ptime = self.process_ptimes.num_nanoseconds(local_index);
@@ -839,7 +836,7 @@ impl Domain {
                        trigger: TriggerEndpoint::Start(..),
                        ..
                    } = self.replay_paths[&tag] {
-                if self.nodes[source.as_local()].borrow().is_transactional() {
+                if self.nodes[&source].borrow().is_transactional() {
                     self.transaction_state.schedule_replay(tag, key.into());
                     self.process_transactions();
                     return;
@@ -861,7 +858,7 @@ impl Domain {
                 ..
             } => {
                 let rs = self.state
-                    .get(source.as_local())
+                    .get(&source)
                     .expect("migration replay path started with non-materialized node")
                     .lookup(&cols[..], &KeyType::Single(&key[0]));
 
@@ -903,12 +900,11 @@ impl Domain {
         if is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(*source.as_local(), Vec::from(key), tag);
+            self.on_replay_miss(source, Vec::from(key), tag);
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
-                   "key" => format!("{:?}", key)
-                   );
+                   "key" => ?key);
         } else {
             trace!(self.log,
                    "satisfied replay request";
@@ -948,7 +944,7 @@ impl Domain {
                     // applied them after all the state has been replayed, we would double-apply
                     // those changes, which is bad.
                     self.mode = DomainMode::Replaying {
-                        to: *path.last().unwrap().0.as_local(),
+                        to: path.last().unwrap().0,
                         buffered: VecDeque::new(),
                         passes: 0,
                     };
@@ -967,14 +963,14 @@ impl Domain {
                 // unfortunately, if this is a reader node, we can't just copy in the state
                 // since State and Reader use different internal data structures
                 // TODO: can we do better?
-                let n = self.nodes[path[0].0.as_local()].borrow();
+                let n = self.nodes[&path[0].0].borrow();
                 if n.is_reader() {
                     can_handle_directly = false;
                 }
             }
 
             if can_handle_directly {
-                let n = self.nodes[path[0].0.as_local()].borrow();
+                let n = self.nodes[&path[0].0].borrow();
                 if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
                     // also need to include defaults for new columns
                     can_handle_directly = false;
@@ -987,13 +983,13 @@ impl Domain {
             // nodes above, and this check only applies to non-reader nodes.
             if can_handle_directly && done_tx.is_some() {
                 if let box Packet::FullReplay { ref state, .. } = m {
-                    let local_pkey = self.state[path[0].0.as_local()].keys();
+                    let local_pkey = self.state[&path[0].0].keys();
                     if local_pkey != state.keys() {
                         debug!(self.log,
                            "cannot use state directly, so falling back to regular replay";
-                           "node" => path[0].0.as_local().id(),
-                           "src keys" => format!("{:?}", state.keys()),
-                           "dst keys" => format!("{:?}", local_pkey));
+                           "node" => %path[0].0,
+                           "src keys" => ?state.keys(),
+                           "dst keys" => ?local_pkey);
                         can_handle_directly = false;
                     }
                 }
@@ -1007,7 +1003,7 @@ impl Domain {
             if let box Packet::ReplayPiece {
                        context: ReplayPieceContext::Partial { ignore: true, .. }, ..
                    } = m {
-                let mut n = self.nodes[&path.last().unwrap().0.as_local()].borrow_mut();
+                let mut n = self.nodes[&path.last().unwrap().0].borrow_mut();
                 if n.is_egress() && n.is_transactional() {
                     // We need to propagate this replay even though it contains no data, so that
                     // downstream domains don't wait for its timestamp.  There is no need to set
@@ -1032,16 +1028,16 @@ impl Domain {
                         // just given the entire state. no need to process or anything, just move
                         // in the state and we're done.
                         let node = path[0].0;
-                        debug!(self.log, "absorbing state clone"; "node" => node.as_local().id());
-                        assert_eq!(self.state[node.as_local()].keys(), state.keys());
-                        self.state.insert(*node.as_local(), state);
+                        debug!(self.log, "absorbing state clone"; "node" => %node);
+                        assert_eq!(self.state[&node].keys(), state.keys());
+                        self.state.insert(node, state);
                         debug!(self.log, "direct state clone absorbed");
-                        finished = Some((tag, *node.as_local(), None));
+                        finished = Some((tag, node, None));
                     } else if can_handle_directly {
                         // if we're not terminal, and the domain only has a single node, that node
                         // *has* to be an egress node (since we're relaying to another domain).
                         let node = path[0].0;
-                        let mut n = self.nodes[node.as_local()].borrow_mut();
+                        let mut n = self.nodes[&node].borrow_mut();
                         if n.is_egress() {
                             // forward the state to the next domain without doing anything with it.
                             let mut p = Some(box Packet::FullReplay {
@@ -1118,10 +1114,7 @@ impl Domain {
                                 use itertools::Itertools;
 
                                 let start = time::Instant::now();
-                                debug!(log,
-                                   "starting state chunker";
-                                   "node" => link.dst.as_local().id()
-                            );
+                                debug!(log, "starting state chunker"; "node" => %link.dst);
 
                                 let iter = state.into_iter().flat_map(|rs| rs).chunks(BATCH_SIZE);
                                 let mut iter = iter.into_iter().enumerate().peekable();
@@ -1151,9 +1144,9 @@ impl Domain {
 
                                 debug!(log,
                                    "state chunker finished";
-                                   "node" => link.dst.as_local().id(),
+                                   "node" => %link.dst,
                                    "μs" => dur_to_ns!(start.elapsed()) / 1000
-                            );
+                                );
                             })
                             .unwrap();
                     }
@@ -1194,7 +1187,7 @@ impl Domain {
                         };
 
                     for (i, &(ref ni, keyed_by)) in path.iter().enumerate() {
-                        let mut n = self.nodes[ni.as_local()].borrow_mut();
+                        let mut n = self.nodes[&ni].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         if !n.is_transactional() {
@@ -1217,7 +1210,7 @@ impl Domain {
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
                         let target = partial_key.is_some() &&
-                                     (is_reader || self.waiting.contains_key(ni.as_local()));
+                                     (is_reader || self.waiting.contains_key(&ni));
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1228,7 +1221,7 @@ impl Domain {
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
-                            if let Some(state) = self.state.get_mut(ni.as_local()) {
+                            if let Some(state) = self.state.get_mut(&ni) {
                                 state.mark_filled(partial_key.clone());
                             } else {
                                 n.with_reader_mut(|r| {
@@ -1264,7 +1257,7 @@ impl Domain {
 
                             let partial_key = partial_key.unwrap();
                             if !hole_filled {
-                                if let Some(state) = self.state.get_mut(ni.as_local()) {
+                                if let Some(state) = self.state.get_mut(&ni) {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
                                     n.with_reader_mut(|r| {
@@ -1275,8 +1268,7 @@ impl Domain {
                                 // we filled a hole! swap the reader.
                                 n.with_reader_mut(|r| { r.writer_mut().map(|wh| wh.swap()); });
                                 // and also unmark the replay request
-                                if let Some(ref mut prev) =
-                                    self.reader_triggered.get_mut(ni.as_local()) {
+                                if let Some(ref mut prev) = self.reader_triggered.get_mut(&ni) {
                                     prev.remove(&partial_key[0]);
                                 }
                             }
@@ -1290,7 +1282,7 @@ impl Domain {
                             if partial_key.is_some() && is_transactional {
                                 let last_ni = path.last().unwrap().0;
                                 if last_ni != *ni {
-                                    let mut n = self.nodes[&last_ni.as_local()].borrow_mut();
+                                    let mut n = self.nodes[&last_ni].borrow_mut();
                                     if n.is_egress() && n.is_transactional() {
                                         // The partial replay was captured, but we still need to
                                         // propagate an (ignored) ReplayPiece so that downstream
@@ -1360,7 +1352,7 @@ impl Domain {
                         }
                     }
 
-                    let dst = *path.last().unwrap().0.as_local();
+                    let dst = path.last().unwrap().0;
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
                             debug!(self.log,

@@ -6,7 +6,7 @@ mod query_utils;
 mod reuse;
 
 use flow::Migration;
-use flow::core::NodeAddress;
+use flow::prelude::NodeIndex;
 use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
@@ -26,9 +26,9 @@ use std::vec::Vec;
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryFlowParts {
     pub name: String,
-    pub new_nodes: Vec<NodeAddress>,
-    pub reused_nodes: Vec<NodeAddress>,
-    pub query_leaf: NodeAddress,
+    pub new_nodes: Vec<NodeIndex>,
+    pub reused_nodes: Vec<NodeIndex>,
+    pub query_leaf: NodeIndex,
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ enum QueryGraphReuse {
 pub struct SqlIncorporator {
     log: slog::Logger,
     mir_converter: SqlToMirConverter,
-    leaf_addresses: HashMap<String, NodeAddress>,
+    leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
     schema_version: usize,
@@ -104,7 +104,7 @@ impl SqlIncorporator {
     /// otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
-    /// of `NodeAddress`es representing the nodes added to support the query.
+    /// of `NodeIndex`es representing the nodes added to support the query.
     pub fn add_query(&mut self,
                      query: &str,
                      name: Option<String>,
@@ -119,7 +119,7 @@ impl SqlIncorporator {
     /// queries, and a deterministic, unique name is generated and returned otherwise.
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
-    /// of `NodeAddress`es representing the nodes added to support the query.
+    /// of `NodeIndex`es representing the nodes added to support the query.
     pub fn add_parsed_query(&mut self,
                             query: SqlQuery,
                             name: Option<String>,
@@ -132,12 +132,12 @@ impl SqlIncorporator {
     }
 
     #[cfg(test)]
-    fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeAddress> {
+    fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
-    pub fn get_query_address(&self, name: &str) -> Option<NodeAddress> {
+    pub fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
         self.mir_converter.get_leaf(name)
     }
 
@@ -542,7 +542,7 @@ mod tests {
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
         let na = inc.get_flow_node_address(name, 0)
             .expect(&format!("No node named \"{}\" at v0", name));
-        mig.graph().node_weight(na.as_global().clone()).unwrap()
+        mig.graph().node_weight(na).unwrap()
     }
 
     /// Helper to compute a query ID hash via the same method as in `QueryGraph::signature()`.

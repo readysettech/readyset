@@ -93,22 +93,22 @@ impl Ingredient for NodeOperator {
     fn take(&mut self) -> NodeOperator {
         impl_ingredient_fn_mut!(self,take,)
     }
-    fn ancestors(&self) -> Vec<NodeAddress> {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         impl_ingredient_fn_ref!(self,ancestors,)
     }
     fn should_materialize(&self) -> bool {
         impl_ingredient_fn_ref!(self,should_materialize,)
     }
-    fn must_replay_among(&self) -> Option<HashSet<NodeAddress>> {
+    fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self,must_replay_among,)
     }
     fn will_query(&self, materialized: bool) -> bool {
         impl_ingredient_fn_ref!(self, will_query, materialized)
     }
-    fn suggest_indexes(&self, you: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
-    fn resolve(&self, i: usize) -> Option<Vec<(NodeAddress, usize)>> {
+    fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
         impl_ingredient_fn_ref!(self, resolve, i)
     }
     fn get_base(&self) -> Option<&base::Base> {
@@ -126,11 +126,11 @@ impl Ingredient for NodeOperator {
     fn on_connected(&mut self, graph: &Graph) {
         impl_ingredient_fn_mut!(self, on_connected, graph)
     }
-    fn on_commit(&mut self, you: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+    fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         impl_ingredient_fn_mut!(self, on_commit, you, remap)
     }
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 data: Records,
                 tracer: &mut Tracer,
                 domain: &DomainNodes,
@@ -139,7 +139,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(self, on_input, from, data, tracer, domain, states)
     }
     fn on_input_raw(&mut self,
-                    from: NodeAddress,
+                    from: LocalNodeIndex,
                     data: Records,
                     tracer: &mut Tracer,
                     is_replay_of: Option<(usize, DataType)>,
@@ -168,7 +168,7 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_ref!(self, query_through, columns, key, states)
     }
     fn lookup<'a>(&self,
-                  parent: NodeAddress,
+                  parent: LocalNodeIndex,
                   columns: &[usize],
                   key: &KeyType<DataType>,
                   domain: &DomainNodes,
@@ -176,7 +176,7 @@ impl Ingredient for NodeOperator {
                   -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
     }
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
         impl_ingredient_fn_ref!(self, parent_columns, column)
     }
     fn is_selective(&self) -> bool {
@@ -197,10 +197,10 @@ pub mod test {
     pub struct MockGraph {
         graph: Graph,
         source: NodeIndex,
-        nut: Option<(NodeIndex, NodeAddress)>, // node under test
+        nut: Option<IndexPair>, // node under test
         states: StateMap,
         nodes: DomainNodes,
-        remap: HashMap<NodeAddress, NodeAddress>,
+        remap: HashMap<NodeIndex, IndexPair>,
     }
 
     impl MockGraph {
@@ -220,7 +220,7 @@ pub mod test {
             }
         }
 
-        pub fn add_base(&mut self, name: &str, fields: &[&str]) -> NodeAddress {
+        pub fn add_base(&mut self, name: &str, fields: &[&str]) -> IndexPair {
             self.add_base_defaults(name, fields, vec![])
         }
 
@@ -228,29 +228,29 @@ pub mod test {
                                  name: &str,
                                  fields: &[&str],
                                  defaults: Vec<DataType>)
-                                 -> NodeAddress {
+                                 -> IndexPair {
             use ops::base::Base;
             let mut i = Base::new(defaults);
             i.on_connected(&self.graph);
             let i: NodeOperator = i.into();
-            let ni = self.graph.add_node(Node::new(name, fields, i, false));
-            self.graph.add_edge(self.source, ni, false);
+            let global = self.graph.add_node(Node::new(name, fields, i, false));
+            self.graph.add_edge(self.source, global, false);
             let mut remap = HashMap::new();
-            let global = NodeAddress::mock_global(ni);
-            let local = NodeAddress::mock_local(self.remap.len());
+            let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
+            let mut ip: IndexPair = global.into();
+            ip.set_local(local);
             self.graph
-                .node_weight_mut(ni)
+                .node_weight_mut(global)
                 .unwrap()
-                .set_global_addr(global);
+                .set_finalized_addr(ip);
+            remap.insert(global, ip);
             self.graph
-                .node_weight_mut(ni)
+                .node_weight_mut(global)
                 .unwrap()
-                .set_local_addr(local);
-            remap.insert(global, local);
-            self.graph.node_weight_mut(ni).unwrap().on_commit(&remap);
-            self.states.insert(*local.as_local(), State::default());
-            self.remap.insert(global, local);
-            global
+                .on_commit(&remap);
+            self.states.insert(local, State::default());
+            self.remap.insert(global, ip);
+            ip
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], mut i: I, materialized: bool)
@@ -264,33 +264,30 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let ni = self.graph.add_node(node::Node::new(name, fields, i, false));
-            let global = NodeAddress::mock_global(ni);
-            let local = NodeAddress::mock_local(self.remap.len());
+            let global = self.graph.add_node(node::Node::new(name, fields, i, false));
+            let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
-                self.states.insert(*local.as_local(), State::default());
+                self.states.insert(local, State::default());
             }
             for parent in parents {
-                self.graph.add_edge(*parent.as_global(), ni, false);
+                self.graph.add_edge(parent, global, false);
             }
-            self.remap.insert(global, local);
+            let mut ip: IndexPair = global.into();
+            ip.set_local(local);
+            self.remap.insert(global, ip);
             self.graph
-                .node_weight_mut(ni)
+                .node_weight_mut(global)
                 .unwrap()
-                .set_global_addr(global);
+                .set_finalized_addr(ip);
             self.graph
-                .node_weight_mut(ni)
-                .unwrap()
-                .set_local_addr(local);
-            self.graph
-                .node_weight_mut(ni)
+                .node_weight_mut(global)
                 .unwrap()
                 .on_commit(&self.remap);
 
             // we need to set the indices for all the base tables so they *actually* store things.
-            let idx = self.graph[ni].suggest_indexes(local);
+            let idx = self.graph[global].suggest_indexes(global);
             for (tbl, col) in idx {
-                if let Some(ref mut s) = self.states.get_mut(tbl.as_local()) {
+                if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
                     s.add_key(&col[..], false);
                 }
             }
@@ -298,14 +295,13 @@ pub mod test {
             let unused: Vec<_> = self.remap
                 .values()
                 .filter_map(|ni| {
-                                self.states
-                                    .get(ni.as_local())
-                                    .map(move |s| (ni, !s.is_useful()))
+                                let ni = *self.graph[ni.as_global()].local_addr();
+                                self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
                             })
                 .filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
-                self.states.remove(ni.as_local());
+                self.states.remove(&ni);
             }
 
             // we're now committing to testing this op
@@ -317,7 +313,7 @@ pub mod test {
                 node.add_to(0.into());
             }
             // store the id
-            self.nut = Some((ni, local));
+            self.nut = Some(ip);
             // and also set up the node list
             let mut nodes = vec![];
             let mut topo = petgraph::visit::Topo::new(&self.graph);
@@ -334,12 +330,12 @@ pub mod test {
                 .into_iter()
                 .map(|(_, n)| {
                          use std::cell;
-                         (*n.local_addr().as_local(), cell::RefCell::new(n))
+                         (*n.local_addr(), cell::RefCell::new(n))
                      })
                 .collect();
         }
 
-        pub fn seed(&mut self, base: NodeAddress, data: Vec<DataType>) {
+        pub fn seed(&mut self, base: IndexPair, data: Vec<DataType>) {
             assert!(self.nut.is_some(), "seed must happen after set_op");
 
             // base here is some identifier that was returned by Self::add_base.
@@ -348,16 +344,11 @@ pub mod test {
             // since we set up the graph, we actually know that the NodeIndex is simply one greater
             // than the local index (since bases are added first, and assigned local + global
             // indices in order, but global ids are prefixed by the id of the source node).
-            let local = if NodeAddress::is_global(&base) {
-                self.to_local(base)
-            } else {
-                base
-            };
 
             // no need to call on_input since base tables just forward anyway
 
             // if the base node has state, keep it
-            if let Some(ref mut state) = self.states.get_mut(local.as_local()) {
+            if let Some(ref mut state) = self.states.get_mut(&*base) {
                 match data.into() {
                     Record::Positive(r) => state.insert(r),
                     Record::Negative(_) => unreachable!(),
@@ -366,42 +357,40 @@ pub mod test {
             } else {
                 assert!(false,
                         "unnecessary seed value for {} (never used by any node)",
-                        base);
+                        base.as_global().index());
             }
         }
 
-        pub fn unseed(&mut self, base: NodeAddress) {
+        pub fn unseed(&mut self, base: IndexPair) {
             assert!(self.nut.is_some(), "unseed must happen after set_op");
-
-            let local = self.to_local(base);
-            self.states.get_mut(local.as_local()).unwrap().clear();
+            self.states.get_mut(&*base).unwrap().clear();
         }
 
-        pub fn one<U: Into<Records>>(&mut self, src: NodeAddress, u: U, remember: bool) -> Records {
+        pub fn one<U: Into<Records>>(&mut self, src: IndexPair, u: U, remember: bool) -> Records {
             assert!(self.nut.is_some());
-            assert!(!remember || self.states.contains_key(self.nut.unwrap().1.as_local()));
+            assert!(!remember || self.states.contains_key(&*self.nut.unwrap()));
 
             let mut u = {
-                let id = self.nut.unwrap().1;
-                let mut n = self.nodes[id.as_local()].borrow_mut();
-                let m = n.on_input(src, u.into(), &mut None, &self.nodes, &self.states);
+                let id = self.nut.unwrap();
+                let mut n = self.nodes[&*id].borrow_mut();
+                let m = n.on_input(*src, u.into(), &mut None, &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
 
-            if !remember || !self.states.contains_key(self.nut.unwrap().1.as_local()) {
+            if !remember || !self.states.contains_key(&*self.nut.unwrap()) {
                 return u;
             }
 
             let misses = node::materialize(&mut u,
-                                           *self.nut.unwrap().1.as_local(),
-                                           self.states.get_mut(self.nut.unwrap().1.as_local()));
+                                           *self.nut.unwrap(),
+                                           self.states.get_mut(&*self.nut.unwrap()));
             assert_eq!(misses, vec![]);
             u
         }
 
         pub fn one_row<R: Into<Record>>(&mut self,
-                                        src: NodeAddress,
+                                        src: IndexPair,
                                         d: R,
                                         remember: bool)
                                         -> Records {
@@ -418,20 +407,16 @@ pub mod test {
         }
 
         pub fn node(&self) -> cell::Ref<node::Node> {
-            self.nodes[self.nut.unwrap().1.as_local()].borrow()
+            self.nodes[&*self.nut.unwrap()].borrow()
         }
 
-        pub fn narrow_base_id(&self) -> NodeAddress {
+        pub fn narrow_base_id(&self) -> IndexPair {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
             *self.remap
                 .values()
-                .skip_while(|&&n| n == self.nut.unwrap().1)
+                .skip_while(|&n| n.as_global() == self.nut.unwrap().as_global())
                 .next()
                 .unwrap()
-        }
-
-        pub fn to_local(&self, global: NodeAddress) -> NodeAddress {
-            NodeAddress::mock_local(global.as_global().index() - 1)
         }
     }
 }

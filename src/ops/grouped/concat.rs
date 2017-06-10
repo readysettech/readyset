@@ -60,7 +60,7 @@ impl GroupConcat {
     /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
     /// the individual record strings from a group string. It should therefore not appear in the
     /// record data.
-    pub fn new(src: NodeAddress,
+    pub fn new(src: NodeIndex,
                components: Vec<TextComponent>,
                separator: String)
                -> GroupedOperator<GroupConcat> {
@@ -229,7 +229,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let c = GroupConcat::new(s,
+        let c = GroupConcat::new(s.as_global(),
                                  vec![TextComponent::Literal(".".to_owned()),
                                       TextComponent::Column(1),
                                       TextComponent::Literal(";".to_owned())],
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
@@ -410,7 +410,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
+        assert_eq!(c.node().resolve(0),
+                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
         assert_eq!(c.node().resolve(1), None);
     }
 }

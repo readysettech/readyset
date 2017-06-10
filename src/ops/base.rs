@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use vec_map::VecMap;
+use flow::prelude::*;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
 ///
@@ -9,7 +10,7 @@ use vec_map::VecMap;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Base {
     primary_key: Option<Vec<usize>>,
-    us: Option<NodeAddress>,
+    us: Option<IndexPair>,
 
     defaults: Vec<DataType>,
     dropped: Vec<usize>,
@@ -96,14 +97,12 @@ impl Default for Base {
     }
 }
 
-use flow::prelude::*;
-
 impl Ingredient for Base {
     fn take(&mut self) -> NodeOperator {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
+    fn ancestors(&self) -> Vec<NodeIndex> {
         vec![]
     }
 
@@ -117,12 +116,12 @@ impl Ingredient for Base {
 
     fn on_connected(&mut self, _: &Graph) {}
 
-    fn on_commit(&mut self, us: NodeAddress, _: &HashMap<NodeAddress, NodeAddress>) {
-        self.us = Some(us);
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.us = Some(remap[&us]);
     }
 
     fn on_input(&mut self,
-                _: NodeAddress,
+                _: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
@@ -138,10 +137,7 @@ impl Ingredient for Base {
                         .as_ref()
                         .expect("base must have a primary key to support deletions");
                     let db =
-                    state.get(self.us
-                                  .as_ref()
-                                  .unwrap()
-                                  .as_local())
+                    state.get(&*self.us.unwrap())
                         .expect("base must have its own state materialized to support deletions");
 
                     match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
@@ -193,7 +189,7 @@ impl Ingredient for Base {
         }
     }
 
-    fn suggest_indexes(&self, n: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         if self.primary_key.is_some() {
             Some((n, self.primary_key.as_ref().unwrap().clone()))
                 .into_iter()
@@ -203,7 +199,7 @@ impl Ingredient for Base {
         }
     }
 
-    fn resolve(&self, _: usize) -> Option<Vec<(NodeAddress, usize)>> {
+    fn resolve(&self, _: usize) -> Option<Vec<(NodeIndex, usize)>> {
         None
     }
 
@@ -219,7 +215,7 @@ impl Ingredient for Base {
         "B".into()
     }
 
-    fn parent_columns(&self, _: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, _: usize) -> Vec<(NodeIndex, Option<usize>)> {
         unreachable!();
     }
 }

@@ -19,13 +19,12 @@ mod debug;
 #[derive(Clone)]
 pub struct Node {
     name: String,
-    index: Option<NodeAddress>,
+    index: Option<IndexPair>,
     domain: Option<domain::Index>,
-    addr: Option<NodeAddress>,
     transactional: bool,
 
     fields: Vec<String>,
-    children: Vec<NodeAddress>,
+    children: Vec<LocalNodeIndex>,
     inner: NodeType,
     taken: bool,
 
@@ -45,7 +44,6 @@ impl Node {
             name: name.to_string(),
             index: None,
             domain: None,
-            addr: None,
             transactional: transactional,
 
             fields: fields.into_iter().map(|s| s.to_string()).collect(),
@@ -69,7 +67,7 @@ pub struct DanglingDomainNode(Node);
 impl DanglingDomainNode {
     pub fn finalize(self, graph: &Graph) -> Node {
         let mut n = self.0;
-        let ni = *n.global_addr().as_global();
+        let ni = n.global_addr();
         let dm = n.domain();
         n.children = graph
             .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
@@ -89,7 +87,6 @@ impl Node {
 
         let inner = self.inner.take();
         let mut n = self.mirror(inner);
-        n.addr = self.addr;
         n.index = self.index;
         n.domain = self.domain;
         self.taken = true;
@@ -106,13 +103,11 @@ impl Node {
         self.sharded_by = s;
     }
 
-    pub fn on_commit(&mut self, remap: &HashMap<NodeAddress, NodeAddress>) {
+    pub fn on_commit(&mut self, remap: &HashMap<NodeIndex, IndexPair>) {
         // this is *only* overwritten for these asserts.
-        assert!(self.addr.is_some());
         assert!(!self.taken);
-        assert!(self.is_internal());
         if let NodeType::Internal(ref mut i) = self.inner {
-            i.on_commit(self.addr.unwrap(), remap)
+            i.on_commit(self.index.unwrap().as_global(), remap)
         }
     }
 }
@@ -198,11 +193,11 @@ impl DerefMut for Node {
 
 // children
 impl Node {
-    pub fn children(&self) -> &[NodeAddress] {
+    pub fn children(&self) -> &[LocalNodeIndex] {
         &self.children[..]
     }
 
-    pub fn child(&self, i: usize) -> &NodeAddress {
+    pub fn child(&self, i: usize) -> &LocalNodeIndex {
         &self.children[i]
     }
 
@@ -221,8 +216,7 @@ impl Node {
         self.sharded_by
     }
 
-    pub fn add_child(&mut self, child: NodeAddress) {
-        assert!(child.is_local());
+    pub fn add_child(&mut self, child: LocalNodeIndex) {
         self.children.push(child);
     }
 
@@ -252,26 +246,31 @@ impl Node {
         }
     }
 
-    pub fn local_addr(&self) -> &NodeAddress {
-        match self.addr {
-            Some(ref addr) => addr,
-            None => {
-                unreachable!("asked for unset addr for {:?}", self);
-            }
+    pub fn local_addr(&self) -> &LocalNodeIndex {
+        match self.index {
+            Some(ref idx) if idx.has_local() => &*idx,
+            Some(_) | None => unreachable!("asked for unset addr for {:?}", self),
         }
     }
 
-    pub fn global_addr(&self) -> &NodeAddress {
+    pub fn global_addr(&self) -> NodeIndex {
         match self.index {
-            Some(ref index) => index,
+            Some(ref index) => index.as_global(),
             None => {
                 unreachable!("asked for unset index for {:?}", self);
             }
         }
     }
 
+    pub fn get_index(&self) -> &IndexPair {
+        self.index.as_ref().unwrap()
+    }
+
     pub fn is_localized(&self) -> bool {
-        self.addr.is_some() && self.domain.is_some()
+        self.index
+            .as_ref()
+            .map(|idx| idx.has_local())
+            .unwrap_or(false) && self.domain.is_some()
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
@@ -280,13 +279,7 @@ impl Node {
         self.domain = Some(domain);
     }
 
-    pub fn set_local_addr(&mut self, addr: NodeAddress) {
-        addr.as_local();
-        self.addr = Some(addr);
-    }
-
-    pub fn set_global_addr(&mut self, addr: NodeAddress) {
-        addr.as_global();
+    pub fn set_finalized_addr(&mut self, addr: IndexPair) {
         self.index = Some(addr);
     }
 

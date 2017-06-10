@@ -2,10 +2,9 @@ use std::sync::mpsc;
 use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
-use petgraph::graph::NodeIndex;
 
 pub struct Sharder {
-    txs: Vec<(NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
+    txs: Vec<(LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
@@ -39,7 +38,9 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: NodeAddress, txs: Vec<mpsc::SyncSender<Box<Packet>>>) {
+    pub fn add_sharded_child(&mut self,
+                             dst: LocalNodeIndex,
+                             txs: Vec<mpsc::SyncSender<Box<Packet>>>) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
@@ -65,7 +66,10 @@ impl Sharder {
         }
     }
 
-    pub fn process(&mut self, m: &mut Option<Box<Packet>>, index: NodeIndex, is_sharded: bool) {
+    pub fn process(&mut self,
+                   m: &mut Option<Box<Packet>>,
+                   index: LocalNodeIndex,
+                   is_sharded: bool) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
 
@@ -77,7 +81,7 @@ impl Sharder {
                 if let Packet::FullReplay { tag, state, .. } = m {
                     for (_, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
                         let m = box Packet::FullReplay {
-                            link: Link::new(index.into(), dst),
+                            link: Link::new(index, dst),
                             tag: tag,
                             state: state.clone(),
                         };
@@ -112,7 +116,7 @@ impl Sharder {
                 }
 
                 let tx = &mut self.txs[shard];
-                m.link_mut().src = index.into();
+                m.link_mut().src = index;
                 m.link_mut().dst = tx.0;
                 if tx.1.send(m).is_err() {
                     // we must be shutting down...

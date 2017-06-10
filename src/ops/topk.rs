@@ -37,10 +37,10 @@ impl From<Vec<(usize, OrderType)>> for Order {
 /// unordered.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TopK {
-    src: NodeAddress,
+    src: IndexPair,
 
     // some cache state
-    us: Option<NodeAddress>,
+    us: Option<IndexPair>,
     cols: usize,
 
     // precomputed datastructures
@@ -58,7 +58,7 @@ impl TopK {
     /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
     /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
     /// of results per group.
-    pub fn new(src: NodeAddress,
+    pub fn new(src: NodeIndex,
                order: Vec<(usize, OrderType)>,
                group_by: Vec<usize>,
                k: usize)
@@ -67,7 +67,7 @@ impl TopK {
         group_by.sort();
 
         TopK {
-            src: src,
+            src: src.into(),
 
             us: None,
             cols: 0,
@@ -117,7 +117,7 @@ impl TopK {
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
         let src_db = state
-            .get(self.src.as_local())
+            .get(&*self.src)
             .expect("topk must have its parent's state materialized");
         if output_rows.len() < self.k {
             let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
@@ -206,8 +206,8 @@ impl Ingredient for TopK {
         }.into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -219,26 +219,26 @@ impl Ingredient for TopK {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[*self.src.as_global()];
+        let srcn = &g[self.src.as_global()];
         self.cols = srcn.fields().len();
     }
 
-    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         // who's our parent really?
-        self.src = remap[&self.src];
+        self.src.remap(remap);
 
         // who are we?
-        self.us = Some(us);
+        self.us = Some(remap[&us]);
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
                 state: &StateMap)
                 -> ProcessingResult {
-        debug_assert_eq!(from, self.src);
+        debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
             return ProcessingResult {
@@ -269,21 +269,21 @@ impl Ingredient for TopK {
         }
 
         // find the current value for each group
+        let us = self.us.unwrap();
         let db = state
-            .get(self.us.as_ref().unwrap().as_local())
+            .get(&*us)
             .expect("topk must have its own state materialized");
 
         let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * self.k);
         {
-            let us = *self.us.unwrap().as_local();
             let group_by = &self.group_by[..];
             let current = consolidate.into_iter().filter_map(|(group, diffs)| {
                 match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
                         misses.push(Miss {
-                                        node: us,
+                                        node: *us,
                                         key: group.clone(),
                                     });
                         None
@@ -320,23 +320,23 @@ impl Ingredient for TopK {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         vec![(this, self.group_by.clone()),
-             (self.src, self.group_by.clone())]
+             (self.src.as_global(), self.group_by.clone())]
             .into_iter()
             .collect()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![(self.src, col)])
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Some(vec![(self.src.as_global(), col)])
     }
 
     fn description(&self) -> String {
         format!("TopK")
     }
 
-    fn parent_columns(&self, col: usize) -> Vec<(NodeAddress, Option<usize>)> {
-        vec![(self.src, Some(col))]
+    fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
+        vec![(self.src.as_global(), Some(col))]
     }
 }
 
@@ -346,7 +346,7 @@ mod tests {
 
     use ops;
 
-    fn setup(reversed: bool) -> (ops::test::MockGraph, NodeAddress) {
+    fn setup(reversed: bool) -> (ops::test::MockGraph, IndexPair) {
         let cmp_rows = if !reversed {
             vec![(2, OrderType::OrderAscending)]
         } else {
@@ -357,7 +357,7 @@ mod tests {
         let s = g.add_base("source", &["x", "y", "z"]);
         g.set_op("topk",
                  &["x", "y", "z"],
-                 TopK::new(s, cmp_rows, vec![1], 3),
+                 TopK::new(s.as_global(), cmp_rows, vec![1], 3),
                  true);
         (g, s)
     }
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         let (g, _) = setup(false);
-        let me = NodeAddress::mock_global(1.into());
+        let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
         assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
@@ -479,16 +479,22 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (g, _) = setup(false);
-        assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
-        assert_eq!(g.node().resolve(2), Some(vec![(g.narrow_base_id(), 2)]));
+        assert_eq!(g.node().resolve(0),
+                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
+        assert_eq!(g.node().resolve(1),
+                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
+        assert_eq!(g.node().resolve(2),
+                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
     }
 
     #[test]
     fn it_parent_columns() {
         let (g, _) = setup(false);
-        assert_eq!(g.node().resolve(0), Some(vec![(g.narrow_base_id(), 0)]));
-        assert_eq!(g.node().resolve(1), Some(vec![(g.narrow_base_id(), 1)]));
-        assert_eq!(g.node().resolve(2), Some(vec![(g.narrow_base_id(), 2)]));
+        assert_eq!(g.node().resolve(0),
+                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
+        assert_eq!(g.node().resolve(1),
+                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
+        assert_eq!(g.node().resolve(2),
+                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
     }
 }

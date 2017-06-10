@@ -40,7 +40,7 @@ impl Tag {
     }
 }
 
-pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<LocalNodeIndex> {
+pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet<NodeIndex> {
     let nodes: Vec<_> = nodes
         .iter()
         .map(|&(ni, new)| (ni, &graph[ni], new))
@@ -67,7 +67,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                        .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
                        .any(|e| *e.weight()) {
                     trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
-                    Some(*n.local_addr().as_local())
+                    Some(n.global_addr())
                 } else {
                     trace!(log, "not materializing"; "node" => format!("{}", ni.index()));
                     None
@@ -82,12 +82,12 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     {
         let mark_parent_inquisitive_or_materialize =
             |ni: NodeIndex,
-             materialize: &mut HashSet<LocalNodeIndex>,
+             materialize: &mut HashSet<NodeIndex>,
              inquisitive_children: &mut HashSet<NodeIndex>|
              -> Option<NodeIndex> {
                 let n = &graph[ni];
                 if n.is_internal() {
-                    if !materialize.contains(n.local_addr().as_local()) {
+                    if !materialize.contains(&n.global_addr()) {
                         if n.can_query_through() {
                             trace!(log, "parent can be queried through, mark it as querying";
                                    "node" => format!("{}", ni.index()));
@@ -98,7 +98,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                             // we can't query through this internal node, so materialize it
                             trace!(log, "parent can't be queried through, so materialize it";
                                    "node" => format!("{}", ni.index()));
-                            materialize.insert(*n.local_addr().as_local());
+                            materialize.insert(n.global_addr());
                         }
                     }
                 }
@@ -106,7 +106,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
             };
         for &(ni, n, _) in nodes.iter() {
             if n.is_internal() {
-                if n.will_query(materialize.contains(n.local_addr().as_local())) {
+                if n.will_query(materialize.contains(&n.global_addr())) {
                     trace!(log, "found querying child"; "node" => format!("{}", ni.index()));
                     inquisitive_children.insert(ni);
                     // track child back to an ingress, marking any unmaterialized nodes on the path
@@ -139,7 +139,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 trace!(log,
                        "querying children force materialization of node {}",
                        ni.index());
-                materialize.insert(*n.local_addr().as_local());
+                materialize.insert(n.global_addr());
             }
         }
     }
@@ -152,7 +152,7 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                 continue;
             }
 
-            if !materialize.contains(n.local_addr().as_local()) {
+            if !materialize.contains(&n.global_addr()) {
                 // we're not materialized, so no materialization shifting necessary
                 continue;
             }
@@ -161,13 +161,13 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                    .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
                    .any(|e| *e.weight()) {
                 // our output is materialized! what a waste. instead, materialize our input.
-                materialize.remove(n.local_addr().as_local());
+                materialize.remove(&n.global_addr());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
 
                 // TODO: unclear if we need *all* our parents to be materialized. it's
                 // certainly the case for filter, which is our only use-case for now...
                 for p in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                    materialize.insert(*graph[p].local_addr().as_local());
+                    materialize.insert(p);
                 }
             }
         }
@@ -179,15 +179,10 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
 pub fn index(log: &Logger,
              graph: &Graph,
              nodes: &[(NodeIndex, bool)],
-             materialize: HashSet<LocalNodeIndex>)
+             materialize: HashSet<NodeIndex>)
              -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
 
-    let map: HashMap<_, _> = nodes
-        .iter()
-        .map(|&(ni, _)| (*graph[ni].local_addr().as_local(), ni))
-        .collect();
     let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
-
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
 
@@ -198,7 +193,7 @@ pub fn index(log: &Logger,
     // that we need to push indices through non-materialized views so that they end up on the
     // columns of the views that will actually query into a table of some sort.
     {
-        let nodes: HashMap<_, _> = nodes.iter().map(|&(n, _)| (n.local_addr(), n)).collect();
+        let nodes: HashMap<_, _> = nodes.iter().map(|&(n, _)| (n.global_addr(), n)).collect();
         let mut indices = nodes.iter()
                 .filter(|&(_, node)| node.is_internal()) // only internal nodes can suggest indices
                 .filter(|&(_, node)| {
@@ -215,7 +210,7 @@ pub fn index(log: &Logger,
                     //  will_query(false) as an indicator of whether indices are necessary.
                     node.will_query(false)
                 })
-                .flat_map(|(ni, node)| node.suggest_indexes(**ni).into_iter())
+                .flat_map(|(ni, node)| node.suggest_indexes(*ni).into_iter())
                 .filter(|&(ref node, _)| nodes.contains_key(node))
                 .fold(HashMap::new(), |mut hm, (v, idx)| {
                     hm.entry(v).or_insert_with(HashSet::new).insert(idx);
@@ -227,12 +222,12 @@ pub fn index(log: &Logger,
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
             for (v, idxs) in leftover_indices.drain() {
-                if let Some(mut state) = state.get_mut(v.as_local()) {
+                if let Some(mut state) = state.get_mut(&v) {
                     // this node is materialized! add the indices!
                     info!(log,
                           "adding indices";
-                          "node" => map[v.as_local()].index(),
-                          "cols" => format!("{:?}", idxs)
+                          "node" => v.index(),
+                          "cols" => ?idxs,
                       );
                     *state = Some(idxs.into_iter().collect());
                 } else if let Some(node) = nodes.get(&v) {
@@ -242,7 +237,7 @@ pub fn index(log: &Logger,
                         // we can't push further up!
                         crit!(log, "suggested index is at domain edge, but ingress isn't \
                                       materialized";
-                                      "node" => ?node.global_addr(),
+                                      "node" => v.index(),
                                       "idxs" => ?idxs.into_iter().collect::<Vec<_>>());
                         unreachable!();
                     }
@@ -282,9 +277,9 @@ pub fn index(log: &Logger,
                                 trace!(log,
                                        "pushing up index {:?} on {} into columns {:?} of {}",
                                        idx,
-                                       v,
+                                       v.index(),
                                        col,
-                                       n);
+                                       n.index());
                                 tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
                             }
                         }
@@ -300,21 +295,21 @@ pub fn index(log: &Logger,
     state
         .into_iter()
         .filter_map(|(n, col)| {
+            let ref node = graph[n];
             if let Some(col) = col {
-                Some((n, col))
+                Some((*node.local_addr(), col))
             } else {
                 // this materialization doesn't have any primary key,
                 // so we assume it's not in use.
 
-                let ref node = graph[map[&n]];
                 if node.is_internal() && node.get_base().is_some() {
                     // but it's a base nodes!
                     // we must *always* materialize base nodes
                     // so, just make up some column to index on
-                    return Some((n, vec![vec![0]]));
+                    return Some((*node.local_addr(), vec![vec![0]]));
                 }
 
-                info!(log, "removing unnecessary materialization"; "node" => map[&n].index());
+                info!(log, "removing unnecessary materialization"; "node" => n.index());
                 None
             }
         })
@@ -351,7 +346,7 @@ pub fn initialize(log: &Logger,
 
         let index_on = materialize
             .get_mut(&d)
-            .and_then(|ss| ss.get(addr.as_local()))
+            .and_then(|ss| ss.get(&addr))
             .cloned()
             .map(|idxs| {
                      // we've been told to materialize a node using 0 indices
@@ -376,7 +371,7 @@ pub fn initialize(log: &Logger,
             txs.get_mut(&d)
                 .unwrap()
                 .send(box Packet::Ready {
-                          node: *addr.as_local(),
+                          node: addr,
                           index: index_on,
                           ack: ack_tx,
                       })
@@ -403,7 +398,7 @@ pub fn initialize(log: &Logger,
                     use flow::payload::InitialState;
 
                     box Packet::PrepareState {
-                        node: *addr.as_local(),
+                        node: addr,
                         state: InitialState::Global {
                             cols: blender.ingredients[node].fields().len(),
                             key: key,
@@ -520,7 +515,7 @@ pub fn reconstruct(log: &Logger,
 
                     let is_materialized = materialized
                         .get(&n.domain())
-                        .map(|dm| dm.contains_key(n.local_addr().as_local()))
+                        .map(|dm| dm.contains_key(n.local_addr()))
                         .unwrap_or(false);
                     if is_materialized {
                         // we want to take this node, but not any later ones
@@ -564,7 +559,7 @@ pub fn reconstruct(log: &Logger,
             // node must also have an *index* on col
             materialized
                 .get(&n.domain())
-                .and_then(|d| d.get(n.local_addr().as_local()))
+                .and_then(|d| d.get(n.local_addr()))
                 .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
                 .unwrap_or(false)
         });
@@ -642,7 +637,7 @@ pub fn reconstruct(log: &Logger,
         .get_mut(&domain)
         .unwrap()
         .send(box Packet::PrepareState {
-                  node: *addr.as_local(),
+                  node: addr,
                   state: s,
               })
         .unwrap();
@@ -710,7 +705,7 @@ pub fn reconstruct(log: &Logger,
 
         debug!(log, "domain replay path is {:?}", segments; "tag" => tag.id());
 
-        let locals = |i: usize| -> Vec<(NodeAddress, Option<usize>)> {
+        let locals = |i: usize| -> Vec<(LocalNodeIndex, Option<usize>)> {
             let mut skip = 0;
             if i == 0 {
                 // we're not replaying through the starter node
@@ -813,7 +808,7 @@ pub fn reconstruct(log: &Logger,
                         .get_mut(domain)
                         .unwrap()
                         .send(box Packet::UpdateEgress {
-                                  node: n.local_addr().as_local().clone(),
+                                  node: *n.local_addr(),
                                   new_tx: None,
                                   new_tag: Some((tag, segments[i + 1].1[0].0.into())),
                               })
@@ -878,7 +873,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
             let n = &graph[ni];
             materialized
                 .get(&n.domain())
-                .map(|dm| dm.contains_key(n.local_addr().as_local()))
+                .map(|dm| dm.contains_key(n.local_addr()))
                 .unwrap_or(false)
         };
 
@@ -899,7 +894,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
             .expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
-        parents.retain(|&parent| options.contains(graph[parent].local_addr()));
+        parents.retain(|&parent| options.contains(&parent));
         assert!(!parents.is_empty());
 
         // if there is only one left, we don't have a choice
@@ -1000,7 +995,7 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 txs.get_mut(&stateful.domain())
                     .unwrap()
                     .send(box Packet::StateSizeProbe {
-                              node: *stateful.local_addr().as_local(),
+                              node: *stateful.local_addr(),
                               ack: tx,
                           })
                     .unwrap();

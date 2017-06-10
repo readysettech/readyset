@@ -113,7 +113,7 @@ impl GroupCommitQueueSet {
     fn packet_destination(p: &Box<Packet>) -> Option<LocalNodeIndex> {
         match **p {
             Packet::Message { ref link, .. } |
-            Packet::Transaction { ref link, .. } => Some(link.dst.as_local().clone()),
+            Packet::Transaction { ref link, .. } => Some(link.dst),
             _ => None,
         }
     }
@@ -137,7 +137,7 @@ impl GroupCommitQueueSet {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.timeout {
-                needs_flush = Some(node.as_local().clone());
+                needs_flush = Some(node);
                 break;
             }
         }
@@ -290,11 +290,7 @@ impl GroupCommitQueueSet {
                                    checktable: &Arc<Mutex<checktable::CheckTable>>)
                                    -> Option<Box<Packet>> {
         let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
-            nodes[&link.dst.as_local()]
-                .borrow()
-                .global_addr()
-                .as_global()
-                .clone()
+            nodes[&link.dst].borrow().global_addr()
         } else {
             unreachable!()
         };

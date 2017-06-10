@@ -34,15 +34,23 @@ impl Node {
                    .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                    .unwrap_or("white".into()))?;
 
-        let index = self.index.unwrap_or(idx.into());
-        let addr = self.index.unwrap_or(0.into());
+        let addr = match self.index {
+            Some(ref idx) => {
+                if idx.has_local() {
+                    format!("{} / {}", idx.as_global().index(), **idx)
+                } else {
+                    format!("{} / -", idx.as_global().index())
+                }
+            }
+            None => format!("{} / -", idx.index()),
+        };
         match self.inner {
             NodeType::Source => write!(f, "(source)"),
             NodeType::Dropped => write!(f, "✗"),
-            NodeType::Ingress => write!(f, "{{ {} / {} | (ingress) }}", index, addr),
-            NodeType::Egress { .. } => write!(f, "{{ {} / {} | (egress) }}", index, addr),
-            NodeType::Sharder { .. } => write!(f, "{{ {} / {} | (sharder) }}", index, addr),
-            NodeType::Hook(..) => write!(f, "{{ {} / {} | (hook) }}", index, addr),
+            NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", addr),
+            NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", addr),
+            NodeType::Sharder { .. } => write!(f, "{{ {} | (sharder) }}", addr),
+            NodeType::Hook(..) => write!(f, "{{ {} | (hook) }}", addr),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),
@@ -57,20 +65,14 @@ impl Node {
                     None => String::from("empty"),
                     Some(s) => format!("{} distinct keys", s),
                 };
-                write!(f,
-                       "{{ {} / {} | (reader / key: {}) | {} }}",
-                       index,
-                       addr,
-                       key,
-                       size)
+                write!(f, "{{ {} | (reader / key: {}) | {} }}", addr, key, size)
             }
             NodeType::Internal(ref i) => {
                 write!(f, "{{")?;
 
                 // Output node name and description. First row.
                 write!(f,
-                       "{{ {} / {} / {} | {} }}",
-                       index,
+                       "{{ {} / {} | {} }}",
                        addr,
                        Self::escape(self.name()),
                        Self::escape(&i.description()))?;

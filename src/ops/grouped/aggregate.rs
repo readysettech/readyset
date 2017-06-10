@@ -19,7 +19,7 @@ impl Aggregation {
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
     pub fn over(self,
-                src: NodeAddress,
+                src: NodeIndex,
                 over: usize,
                 group_by: &[usize])
                 -> GroupedOperator<Aggregator> {
@@ -116,7 +116,7 @@ mod tests {
         let s = g.add_base("source", &["x", "y"]);
         g.set_op("identity",
                  &["x", "ys"],
-                 Aggregation::COUNT.over(s, 1, &[0]),
+                 Aggregation::COUNT.over(s.as_global(), 1, &[0]),
                  mat);
         g
     }
@@ -126,14 +126,14 @@ mod tests {
         let s = g.add_base("source", &["x", "y", "z"]);
         g.set_op("identity",
                  &["x", "z", "ys"],
-                 Aggregation::COUNT.over(s, 1, &[0, 2]),
+                 Aggregation::COUNT.over(s.as_global(), 1, &[0, 2]),
                  mat);
         g
     }
 
     #[test]
     fn it_describes() {
-        let s = NodeAddress::mock_global(0.into());
+        let s = 0.into();
 
         let c = Aggregation::COUNT.over(s, 1, &[0, 2]);
         assert_eq!(c.description(), "|*| γ[0, 2]");
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let c = setup(false);
         let idx = c.node().suggest_indexes(me);
 
@@ -366,7 +366,8 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0), Some(vec![(c.narrow_base_id(), 0)]));
+        assert_eq!(c.node().resolve(0),
+                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
         assert_eq!(c.node().resolve(1), None);
     }
 }

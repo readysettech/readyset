@@ -6,20 +6,20 @@ use flow::prelude::*;
 /// Permutes or omits columns from its source node, or adds additional literal value columns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
-    us: Option<NodeAddress>,
+    us: Option<IndexPair>,
     emit: Option<Vec<usize>>,
     additional: Option<Vec<DataType>>,
-    src: NodeAddress,
+    src: IndexPair,
     cols: usize,
 }
 
 impl Project {
     /// Construct a new permuter operator.
-    pub fn new(src: NodeAddress, emit: &[usize], additional: Option<Vec<DataType>>) -> Project {
+    pub fn new(src: NodeIndex, emit: &[usize], additional: Option<Vec<DataType>>) -> Project {
         Project {
             emit: Some(emit.into()),
             additional: additional,
-            src: src,
+            src: src.into(),
             cols: 0,
             us: None,
         }
@@ -40,8 +40,8 @@ impl Ingredient for Project {
         Clone::clone(self).into()
     }
 
-    fn ancestors(&self) -> Vec<NodeAddress> {
-        vec![self.src]
+    fn ancestors(&self) -> Vec<NodeIndex> {
+        vec![self.src.as_global()]
     }
 
     fn should_materialize(&self) -> bool {
@@ -53,12 +53,12 @@ impl Ingredient for Project {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols = g[*self.src.as_global()].fields().len();
+        self.cols = g[self.src.as_global()].fields().len();
     }
 
-    fn on_commit(&mut self, us: NodeAddress, remap: &HashMap<NodeAddress, NodeAddress>) {
-        self.us = Some(us);
-        self.src = remap[&self.src];
+    fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
+        self.src.remap(remap);
+        self.us = Some(remap[&us]);
 
         // Eliminate emit specifications which require no permutation of
         // the inputs, so we don't needlessly perform extra work on each
@@ -75,13 +75,13 @@ impl Ingredient for Project {
     }
 
     fn on_input(&mut self,
-                from: NodeAddress,
+                from: LocalNodeIndex,
                 mut rs: Records,
                 _: &mut Tracer,
                 _: &DomainNodes,
                 _: &StateMap)
                 -> ProcessingResult {
-        debug_assert_eq!(from, self.src);
+        debug_assert_eq!(from, *self.src);
 
         if self.emit.is_some() {
             for r in &mut *rs {
@@ -111,13 +111,12 @@ impl Ingredient for Project {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeAddress) -> HashMap<NodeAddress, Vec<usize>> {
-        // TODO
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         HashMap::new()
     }
 
-    fn resolve(&self, col: usize) -> Option<Vec<(NodeAddress, usize)>> {
-        Some(vec![(self.src, self.resolve_col(col))])
+    fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
+        Some(vec![(self.src.as_global(), self.resolve_col(col))])
     }
 
     fn description(&self) -> String {
@@ -144,13 +143,13 @@ impl Ingredient for Project {
         format!("π[{}]", emit_cols)
     }
 
-    fn parent_columns(&self, column: usize) -> Vec<(NodeAddress, Option<usize>)> {
+    fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
         let result = if self.emit.is_some() && column >= self.emit.as_ref().unwrap().len() {
             None
         } else {
             Some(self.resolve_col(column))
         };
-        vec![(self.src, result)]
+        vec![(self.src.as_global(), result)]
     }
 }
 
@@ -172,7 +171,7 @@ mod tests {
         };
         g.set_op("permute",
                  &["x", "y", "z"],
-                 Project::new(s, &permutation[..], additional),
+                 Project::new(s.as_global(), &permutation[..], additional),
                  materialized);
         g
     }
@@ -230,7 +229,7 @@ mod tests {
 
     #[test]
     fn it_suggests_indices() {
-        let me = NodeAddress::mock_global(1.into());
+        let me = 1.into();
         let p = setup(false, false, true);
         let idx = p.node().suggest_indexes(me);
         assert_eq!(idx.len(), 0);
@@ -239,16 +238,21 @@ mod tests {
     #[test]
     fn it_resolves() {
         let p = setup(false, false, true);
-        assert_eq!(p.node().resolve(0), Some(vec![(p.narrow_base_id(), 2)]));
-        assert_eq!(p.node().resolve(1), Some(vec![(p.narrow_base_id(), 0)]));
+        assert_eq!(p.node().resolve(0),
+                   Some(vec![(p.narrow_base_id().as_global(), 2)]));
+        assert_eq!(p.node().resolve(1),
+                   Some(vec![(p.narrow_base_id().as_global(), 0)]));
     }
 
     #[test]
     fn it_resolves_all() {
         let p = setup(false, true, true);
-        assert_eq!(p.node().resolve(0), Some(vec![(p.narrow_base_id(), 0)]));
-        assert_eq!(p.node().resolve(1), Some(vec![(p.narrow_base_id(), 1)]));
-        assert_eq!(p.node().resolve(2), Some(vec![(p.narrow_base_id(), 2)]));
+        assert_eq!(p.node().resolve(0),
+                   Some(vec![(p.narrow_base_id().as_global(), 0)]));
+        assert_eq!(p.node().resolve(1),
+                   Some(vec![(p.narrow_base_id().as_global(), 1)]));
+        assert_eq!(p.node().resolve(2),
+                   Some(vec![(p.narrow_base_id().as_global(), 2)]));
     }
 
     #[test]

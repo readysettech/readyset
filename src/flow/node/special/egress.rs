@@ -4,8 +4,8 @@ use flow::prelude::*;
 
 #[derive(Clone)]
 pub struct Egress {
-    txs: Vec<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
-    tags: HashMap<Tag, NodeAddress>,
+    txs: Vec<(NodeIndex, LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+    tags: HashMap<Tag, NodeIndex>,
 }
 
 impl Default for Egress {
@@ -19,13 +19,13 @@ impl Default for Egress {
 
 impl Egress {
     pub fn add_tx(&mut self,
-                  dst_g: NodeAddress,
-                  dst_l: NodeAddress,
+                  dst_g: NodeIndex,
+                  dst_l: LocalNodeIndex,
                   tx: mpsc::SyncSender<Box<Packet>>) {
         self.txs.push((dst_g, dst_l, tx));
     }
 
-    pub fn add_tag(&mut self, tag: Tag, dst: NodeAddress) {
+    pub fn add_tag(&mut self, tag: Tag, dst: NodeIndex) {
         self.tags.insert(tag, dst);
     }
 
@@ -69,7 +69,7 @@ impl Egress {
             // src is usually ignored and overwritten by ingress
             // *except* if the ingress is marked as a shard merger
             // in which case it wants to know about the shard
-            m.link_mut().src = shard.into();
+            m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
             m.link_mut().dst = dst;
 
             if tx.send(m).is_err() {

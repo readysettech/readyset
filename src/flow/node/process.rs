@@ -18,11 +18,7 @@ impl Node {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let mut misses = Vec::new();
-                m.map_data(|rs| {
-                               misses = materialize(rs,
-                                                    *addr.as_local(),
-                                                    state.get_mut(addr.as_local()));
-                           });
+                m.map_data(|rs| { misses = materialize(rs, addr, state.get_mut(&addr)); });
                 misses
             }
             NodeType::Reader(ref mut r) => {
@@ -43,7 +39,7 @@ impl Node {
                 vec![]
             }
             NodeType::Sharder(ref mut s) => {
-                s.process(m, *self.index.unwrap().as_global(), on_shard.is_some());
+                s.process(m, addr, on_shard.is_some());
                 vec![]
             }
             NodeType::Internal(ref mut i) => {
@@ -125,9 +121,7 @@ impl Node {
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
                     m.map_data(|rs| {
-                                   misses.extend(materialize(rs,
-                                                             *addr.as_local(),
-                                                             state.get_mut(addr.as_local())));
+                                   misses.extend(materialize(rs, addr, state.get_mut(&addr)));
                                });
                 }
 

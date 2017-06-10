@@ -284,7 +284,7 @@ pub fn connect(log: &Logger,
                         domain
                             .send_to_shard(i,
                                            box Packet::UpdateEgress {
-                                               node: sender_node.local_addr().as_local().clone(),
+                                               node: *sender_node.local_addr(),
                                                new_tx: Some((node.into(), *n.local_addr(), tx)),
                                                new_tag: None,
                                            })
@@ -298,7 +298,7 @@ pub fn connect(log: &Logger,
                     assert_eq!(txs.len(), 1);
                     domain
                         .send(box Packet::UpdateEgress {
-                                  node: sender_node.local_addr().as_local().clone(),
+                                  node: *sender_node.local_addr(),
                                   new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
                                   new_tag: None,
                               })
@@ -316,7 +316,7 @@ pub fn connect(log: &Logger,
                     .get_mut(&sender_node.domain())
                     .unwrap()
                     .send(box Packet::UpdateSharder {
-                              node: sender_node.local_addr().as_local().clone(),
+                              node: *sender_node.local_addr(),
                               new_txs: (*n.local_addr(), txs),
                           })
                     .unwrap();

@@ -1,4 +1,5 @@
-use flow::core::{NodeAddress, DataType};
+use flow::core::DataType;
+use flow::prelude::NodeIndex;
 use mir::{GroupedNodeType, MirNode, MirNodeType};
 // TODO(malte): remove if possible
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
@@ -162,7 +163,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeAddress> {
+    pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,
             Some(ref node) => {
@@ -174,7 +175,7 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn get_leaf(&self, name: &str) -> Option<NodeAddress> {
+    pub fn get_leaf(&self, name: &str) -> Option<NodeIndex> {
         match self.current.get(name) {
             None => None,
             Some(v) => self.get_flow_node_address(name, *v),

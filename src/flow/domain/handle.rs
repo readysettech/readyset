@@ -86,7 +86,7 @@ impl DomainHandle {
                      let node = graph.node_weight_mut(ni).unwrap().take();
                      node.finalize(graph)
                  })
-            .map(|nd| (*nd.local_addr().as_local(), cell::RefCell::new(nd)))
+            .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
     }
 

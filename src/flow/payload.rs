@@ -14,12 +14,12 @@ use std::time;
 
 #[derive(Clone, PartialEq)]
 pub struct Link {
-    pub src: NodeAddress,
-    pub dst: NodeAddress,
+    pub src: LocalNodeIndex,
+    pub dst: LocalNodeIndex,
 }
 
 impl Link {
-    pub fn new(src: NodeAddress, dst: NodeAddress) -> Self {
+    pub fn new(src: LocalNodeIndex, dst: LocalNodeIndex) -> Self {
         Link { src: src, dst: dst }
     }
 }
@@ -95,7 +95,7 @@ pub enum PacketEvent {
 
 pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
-pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<NodeAddress>>;
+pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
 pub enum Packet {
     // Data messages
@@ -159,8 +159,8 @@ pub enum Packet {
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeAddress, NodeAddress, mpsc::SyncSender<Box<Packet>>)>,
-        new_tag: Option<(Tag, NodeAddress)>,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+        new_tag: Option<(Tag, NodeIndex)>,
     },
 
     /// Add a shard to a Sharder node.
@@ -168,7 +168,7 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_txs: (NodeAddress, Vec<mpsc::SyncSender<Box<Packet>>>),
+        new_txs: (LocalNodeIndex, Vec<mpsc::SyncSender<Box<Packet>>>),
     },
 
     /// Add a streamer to an existing reader node.
@@ -201,8 +201,8 @@ pub enum Packet {
     /// Inform domain about a new replay path.
     SetupReplayPath {
         tag: Tag,
-        source: Option<NodeAddress>,
-        path: Vec<(NodeAddress, Option<usize>)>,
+        source: Option<LocalNodeIndex>,
+        path: Vec<(LocalNodeIndex, Option<usize>)>,
         done_tx: Option<mpsc::SyncSender<()>>,
         trigger: TriggerEndpoint,
         ack: mpsc::SyncSender<()>,
@@ -212,7 +212,7 @@ pub enum Packet {
     RequestPartialReplay { tag: Tag, key: Vec<DataType> },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path.
-    StartReplay { tag: Tag, from: NodeAddress },
+    StartReplay { tag: Tag, from: LocalNodeIndex },
 
     /// Sent to instruct a domain that a particular node should be considered ready to process
     /// updates.

@@ -171,7 +171,7 @@ impl Blender {
     ///
     /// This function will only tell you which nodes are input nodes in the graph. To obtain a
     /// function for inserting writes, use `Blender::get_putter`.
-    pub fn inputs(&self) -> Vec<(core::NodeAddress, &node::Node)> {
+    pub fn inputs(&self) -> Vec<(prelude::NodeIndex, &node::Node)> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
@@ -190,28 +190,28 @@ impl Blender {
     ///
     /// This function will only tell you which nodes are output nodes in the graph. To obtain a
     /// function for performing reads, call `.get_reader()` on the returned reader.
-    pub fn outputs(&self) -> Vec<(core::NodeAddress, &node::Node)> {
+    pub fn outputs(&self) -> Vec<(prelude::NodeIndex, &node::Node)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 self.ingredients[n].with_reader(|r| {
                     // we want to give the the node that is being materialized
                     // not the reader node itself
-                    let src = r.is_for().clone();
-                    (src, &self.ingredients[*src.as_global()])
+                    let src = r.is_for();
+                    (src, &self.ingredients[src])
                 })
             })
             .collect()
     }
 
-    fn find_getter_for(&self, node: &core::NodeAddress) -> Option<NodeIndex> {
+    fn find_getter_for(&self, node: prelude::NodeIndex) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
         // presumably only
-        let mut bfs = Bfs::new(&self.ingredients, *node.as_global());
+        let mut bfs = Bfs::new(&self.ingredients, node);
         let mut reader = None;
         while let Some(child) = bfs.next(&self.ingredients) {
             if self.ingredients[child]
@@ -228,11 +228,11 @@ impl Blender {
     /// Obtain a new function for querying a given (already maintained) reader node.
     pub fn get_getter
         (&self,
-         node: core::NodeAddress)
+         node: prelude::NodeIndex)
          -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
         // look up the read handle, clone it, and construct the read closure
-        self.find_getter_for(&node).and_then(|r| {
+        self.find_getter_for(node).and_then(|r| {
             let vr = VIEW_READERS.lock().unwrap();
             let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
             rh.map(|rh| {
@@ -256,18 +256,18 @@ impl Blender {
 
     /// Obtain a new function for querying a given (already maintained) transactional reader node.
     pub fn get_transactional_getter(&self,
-                                    node: core::NodeAddress)
+                                    node: prelude::NodeIndex)
                                     -> Result<Box<Fn(&prelude::DataType)
                                                      -> Result<(core::Datas, checktable::Token),
                                                                 ()> + Send>,
                                               ()> {
 
-        if !self.ingredients[*node.as_global()].is_transactional() {
+        if !self.ingredients[node].is_transactional() {
             return Err(());
         }
 
         // look up the read handle, clone it, and construct the read closure
-        self.find_getter_for(&node)
+        self.find_getter_for(node)
             .and_then(|r| {
                 let inner = self.ingredients[r].with_reader(|r| r).unwrap();
                 let vr = VIEW_READERS.lock().unwrap();
@@ -299,20 +299,19 @@ impl Blender {
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
-    pub fn get_mutator(&self, base: core::NodeAddress) -> Mutator {
-        let node = &self.ingredients[*base.as_global()];
+    pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
+        let node = &self.ingredients[base];
         let tx = self.domains[&node.domain()].clone();
 
-        trace!(self.log, "creating mutator"; "for" => base.as_global().index());
+        trace!(self.log, "creating mutator"; "for" => base.index());
 
-        let mut key = self.ingredients[*base.as_global()]
+        let mut key = self.ingredients[base]
             .suggest_indexes(base)
             .remove(&base)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let prelude::Sharding::ByColumn(col) =
-                self.ingredients[*base.as_global()].sharded_by() {
+            if let prelude::Sharding::ByColumn(col) = self.ingredients[base].sharded_by() {
                 key = vec![col];
             }
         } else {
@@ -323,13 +322,12 @@ impl Blender {
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
         Mutator {
-            src: self.source.into(),
             tx: tx,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
             tx_reply_channel: mpsc::channel(),
-            transactional: self.ingredients[*base.as_global()].is_transactional(),
+            transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
             tracer: None,
             expected_columns: num_fields - base_operator.get_dropped().len(),
@@ -428,7 +426,7 @@ impl<'a> Migration<'a> {
                                          name: S1,
                                          fields: FS,
                                          mut i: I)
-                                         -> core::NodeAddress
+                                         -> prelude::NodeIndex
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>,
@@ -438,10 +436,9 @@ impl<'a> Migration<'a> {
         let parents = i.ancestors();
 
         let transactional = !parents.is_empty() &&
-                            parents.iter().all(|p| {
-                                                   self.mainline.ingredients[*p.as_global()]
-                                                       .is_transactional()
-                                               });
+                            parents
+                                .iter()
+                                .all(|&p| self.mainline.ingredients[p].is_transactional());
 
         // add to the graph
         let ni = self.mainline
@@ -462,9 +459,7 @@ impl<'a> Migration<'a> {
                 .add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
-                self.mainline
-                    .ingredients
-                    .add_edge(*parent.as_global(), ni, false);
+                self.mainline.ingredients.add_edge(parent, ni, false);
             }
         }
         // and tell the caller its id
@@ -476,7 +471,7 @@ impl<'a> Migration<'a> {
                                               name: S1,
                                               fields: FS,
                                               mut b: Base)
-                                              -> core::NodeAddress
+                                              -> prelude::NodeIndex
         where S1: ToString,
               S2: ToString,
               FS: IntoIterator<Item = S2>
@@ -509,15 +504,15 @@ impl<'a> Migration<'a> {
     /// Note that a default value must be provided such that old writes can be converted into this
     /// new type.
     pub fn add_column<S: ToString>(&mut self,
-                                   node: core::NodeAddress,
+                                   node: prelude::NodeIndex,
                                    field: S,
                                    default: prelude::DataType)
                                    -> usize {
         // not allowed to add columns to new nodes
-        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
+        assert!(!self.added.iter().any(|&ni| ni == node));
 
         let field = field.to_string();
-        let base = &mut self.mainline.ingredients[*node.as_global()];
+        let base = &mut self.mainline.ingredients[node];
         assert!(base.is_internal() && base.get_base().is_some());
 
         // we need to tell the base about its new column and its default, so that old writes that
@@ -533,18 +528,17 @@ impl<'a> Migration<'a> {
         }
 
         // also eventually propagate to domain clone
-        self.columns
-            .push((*node.as_global(), ColumnChange::Add(field, default)));
+        self.columns.push((node, ColumnChange::Add(field, default)));
 
         col_i1
     }
 
     /// Drop a column from a base node.
-    pub fn drop_column(&mut self, node: core::NodeAddress, column: usize) {
+    pub fn drop_column(&mut self, node: prelude::NodeIndex, column: usize) {
         // not allowed to drop columns from new nodes
-        assert!(!self.added.iter().any(|ni| ni == node.as_global()));
+        assert!(!self.added.iter().any(|&ni| ni == node));
 
-        let base = &mut self.mainline.ingredients[*node.as_global()];
+        let base = &mut self.mainline.ingredients[node];
         assert!(base.is_internal() && base.get_base().is_some());
 
         // we need to tell the base about the dropped column, so that old writes that contain that
@@ -553,8 +547,7 @@ impl<'a> Migration<'a> {
         base.inner_mut().get_base_mut().unwrap().drop_column(column);
 
         // also eventually propagate to domain clone
-        self.columns
-            .push((*node.as_global(), ColumnChange::Drop(column)));
+        self.columns.push((node, ColumnChange::Drop(column)));
     }
 
     #[cfg(test)]
@@ -570,16 +563,16 @@ impl<'a> Migration<'a> {
     /// every receiving domain, this can save us some space if a child that doesn't require
     /// materialization is in its own domain. If multiple nodes in the same domain require
     /// materialization of the same parent, that materialized state will be shared.
-    pub fn materialize(&mut self, src: core::NodeAddress, dst: core::NodeAddress) {
+    pub fn materialize(&mut self, src: prelude::NodeIndex, dst: prelude::NodeIndex) {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
         // converted to an egress/ingress pair?
         let e = self.mainline
             .ingredients
-            .find_edge(*src.as_global(), *dst.as_global())
+            .find_edge(src, dst)
             .expect("asked to materialize non-existing edge");
 
-        debug!(self.log, "told to materialize"; "node" => src.as_global().index());
+        debug!(self.log, "told to materialize"; "node" => src.index());
 
         let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
         if !*e {
@@ -587,24 +580,23 @@ impl<'a> Migration<'a> {
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
             // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
             // commit())
-            self.materialize
-                .insert((*src.as_global(), *dst.as_global()));
+            self.materialize.insert((src, dst));
         }
     }
 
-    fn ensure_reader_for(&mut self, n: core::NodeAddress) {
-        if !self.readers.contains_key(n.as_global()) {
+    fn ensure_reader_for(&mut self, n: prelude::NodeIndex) {
+        if !self.readers.contains_key(&n) {
             // make a reader
             let r = node::special::Reader::new(n);
-            let r = self.mainline.ingredients[*n.as_global()].mirror(r);
+            let r = self.mainline.ingredients[n].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
-            self.mainline.ingredients.add_edge(*n.as_global(), r, false);
-            self.readers.insert(*n.as_global(), r);
+            self.mainline.ingredients.add_edge(n, r, false);
+            self.readers.insert(n, r);
         }
     }
 
-    fn ensure_token_generator(&mut self, n: core::NodeAddress, key: usize) {
-        let ri = self.readers[n.as_global()];
+    fn ensure_token_generator(&mut self, n: prelude::NodeIndex, key: usize) {
+        let ri = self.readers[&n];
         if self.mainline.ingredients[ri]
                .with_reader(|r| r.token_generator().is_some())
                .expect("tried to add token generator to non-reader node") {
@@ -615,7 +607,7 @@ impl<'a> Migration<'a> {
         // this node's column to cause a conflict. Is None for a given base node if any write to
         // that base node might cause a conflict.
         let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, *n.as_global(), key, |_, _| None)
+            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _| None)
                 .into_iter()
                 .map(|path| {
                          // we want the base node corresponding to each path
@@ -652,13 +644,13 @@ impl<'a> Migration<'a> {
     ///
     /// To query into the maintained state, use `Blender::get_getter` or
     /// `Blender::get_transactional_getter`
-    pub fn maintain(&mut self, n: core::NodeAddress, key: usize) {
+    pub fn maintain(&mut self, n: prelude::NodeIndex, key: usize) {
         self.ensure_reader_for(n);
-        if self.mainline.ingredients[*n.as_global()].is_transactional() {
+        if self.mainline.ingredients[n].is_transactional() {
             self.ensure_token_generator(n, key);
         }
 
-        let ri = self.readers[n.as_global()];
+        let ri = self.readers[&n];
 
         self.mainline.ingredients[ri].with_reader_mut(|r| r.set_key(key));
     }
@@ -668,13 +660,13 @@ impl<'a> Migration<'a> {
     /// As new updates are processed by the given node, its outputs will be streamed to the
     /// returned channel. Node that this channel is *not* bounded, and thus a receiver that is
     /// slower than the system as a hole will accumulate a large buffer over time.
-    pub fn stream(&mut self, n: core::NodeAddress) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
+    pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (mut tx, rx) = mpsc::channel();
 
         // If the reader hasn't been incorporated into the graph yet, just add the streamer
         // directly.
-        let ri = self.readers[n.as_global()];
+        let ri = self.readers[&n];
         let mut res = None;
         self.mainline.ingredients[ri].with_reader_mut(|r| { res = Some(r.add_streamer(tx)); });
         tx = match res.unwrap() {
@@ -684,13 +676,13 @@ impl<'a> Migration<'a> {
 
 
         // Otherwise, send a message to the reader's domain to have it add the streamer.
-        let reader = &self.mainline.ingredients[self.readers[n.as_global()]];
+        let reader = &self.mainline.ingredients[self.readers[&n]];
         self.mainline
             .domains
             .get_mut(&reader.domain())
             .unwrap()
             .send(box payload::Packet::AddStreamer {
-                      node: reader.local_addr().as_local().clone(),
+                      node: *reader.local_addr(),
                       new_streamer: tx,
                   })
             .unwrap();
@@ -700,15 +692,15 @@ impl<'a> Migration<'a> {
 
     /// Set up the given node such that its output is stored in Memcached.
     pub fn memcached_hook(&mut self,
-                          n: core::NodeAddress,
+                          n: prelude::NodeIndex,
                           name: String,
                           servers: &[(&str, usize)],
                           key: usize)
-                          -> io::Result<core::NodeAddress> {
+                          -> io::Result<prelude::NodeIndex> {
         let h = try!(hook::Hook::new(name, servers, vec![key]));
-        let h = self.mainline.ingredients[*n.as_global()].mirror(h);
+        let h = self.mainline.ingredients[n].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
-        self.mainline.ingredients.add_edge(*n.as_global(), h, false);
+        self.mainline.ingredients.add_edge(n, h, false);
         Ok(h.into())
     }
 
@@ -805,6 +797,8 @@ impl<'a> Migration<'a> {
             });
 
         // Assign local addresses to all new nodes, and initialize them
+        let mut local_remap = HashMap::new();
+        let mut remap = HashMap::new();
         for (domain, nodes) in &mut domain_nodes {
             // Number of pre-existing nodes
             let mut nnodes = nodes.iter().filter(|&&(_, new)| !new).count();
@@ -817,6 +811,7 @@ impl<'a> Migration<'a> {
             let log = log.new(o!("domain" => domain.index()));
 
             // Give local addresses to every (new) node
+            local_remap.clear();
             for &(ni, new) in nodes.iter() {
                 if new {
                     debug!(log,
@@ -825,27 +820,26 @@ impl<'a> Migration<'a> {
                            "node" => ni.index(),
                            "local" => nnodes
                     );
-                    mainline.ingredients[ni]
-                        .set_local_addr(unsafe { prelude::NodeAddress::make_local(nnodes as u32) });
-                    mainline.ingredients[ni].set_global_addr(ni.into());
+
+                    let mut ip: prelude::IndexPair = ni.into();
+                    ip.set_local(unsafe { prelude::LocalNodeIndex::make(nnodes as u32) });
+                    mainline.ingredients[ni].set_finalized_addr(ip);
+                    local_remap.insert(ni, ip);
                     nnodes += 1;
+                } else {
+                    local_remap.insert(ni, *mainline.ingredients[ni].get_index());
                 }
             }
-
-            // Figure out all the remappings that have happened
-            // NOTE: this has to be *per node*, since a shared parent may be remapped differently
-            // to different children (due to sharding for example). we just allocate it once
-            // though.
-            let mut remap = HashMap::new();
 
             // Initialize each new node
             for &(ni, new) in nodes.iter() {
                 if new && mainline.ingredients[ni].is_internal() {
+                    // Figure out all the remappings that have happened
+                    // NOTE: this has to be *per node*, since a shared parent may be remapped
+                    // differently to different children (due to sharding for example). we just
+                    // allocate it once though.
                     remap.clear();
-                    // The global address of each node in this domain is now a local one
-                    for &(ni, _) in nodes.iter() {
-                        remap.insert(ni.into(), *mainline.ingredients[ni].local_addr());
-                    }
+                    remap.extend(local_remap.iter().map(|(&k, &v)| (k, v)));
 
                     // Parents in other domains have been swapped for ingress nodes.
                     // Those ingress nodes' indices are now local.
@@ -855,9 +849,7 @@ impl<'a> Migration<'a> {
                             continue;
                         }
 
-                        // NOTE: assumes equal assignment of local addresses across shard domains!
-                        let old =
-                            remap.insert(src.into(), *mainline.ingredients[instead].local_addr());
+                        let old = remap.insert(src, local_remap[&instead]);
                         assert_eq!(old, None);
                     }
 
@@ -953,7 +945,7 @@ impl<'a> Migration<'a> {
                 let m = match change {
                     ColumnChange::Add(field, default) => {
                         box payload::Packet::AddBaseColumn {
-                            node: *n.local_addr().as_local(),
+                            node: *n.local_addr(),
                             field: field,
                             default: default,
                             ack: tx,
@@ -961,7 +953,7 @@ impl<'a> Migration<'a> {
                     }
                     ColumnChange::Drop(column) => {
                         box payload::Packet::DropBaseColumn {
-                            node: *n.local_addr().as_local(),
+                            node: *n.local_addr(),
                             column: column,
                             ack: tx,
                         }
