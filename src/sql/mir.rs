@@ -1138,11 +1138,9 @@ impl SqlToMirConverter {
                 v
             });
 
+            let ident = format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
             let leaf_project_node =
-                self.make_project_node(&format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                       final_node,
-                                       projected_columns,
-                                       vec![]);
+                self.make_project_node(&ident, final_node, projected_columns, vec![]);
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a

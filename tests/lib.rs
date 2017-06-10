@@ -12,7 +12,11 @@ const SETTLE_TIME_MS: u64 = 750;
 fn it_works_basic() {
     // set up graph
     let mut g = distributary::Blender::new();
-    g.enable_temporary_persistence(128, time::Duration::from_millis(1));
+    let pparams =
+        distributary::PersistenceParameters::new(distributary::DurabilityMode::DeleteOnExit,
+                                                 128,
+                                                 time::Duration::from_millis(1));
+    g.with_persistence_options(pparams);
     let (a, b, c) = {
         let mut mig = g.start_migration();
         let a = mig.add_ingredient("a",
