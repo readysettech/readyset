@@ -613,8 +613,7 @@ impl Domain {
                                         tx.send(box Packet::RequestPartialReplay {
                                                     key: vec![key.clone()],
                                                     tag: tag,
-                                                })
-                                            .unwrap();
+                                                }).unwrap();
                                     });
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
 
@@ -655,8 +654,8 @@ impl Domain {
                                   path;
                                   "tag" => tag.id()
                             );
-                            // NOTE: we set self.replaying_to when we first receive a replay with
-                            // this tag
+                        // NOTE: we set self.replaying_to when we first receive a replay with
+                        // this tag
                         } else {
                             info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                         }
@@ -771,12 +770,13 @@ impl Domain {
                         {
                             let mut n = self.nodes[&node].borrow_mut();
                             if n.is_reader() {
-                                n.with_reader_mut(|r| if let Some(ref mut state) =
-                                    r.writer_mut() {
-                                    trace!(self.log, "swapping state"; "local" => node.id());
-                                    state.swap();
-                                    trace!(self.log, "state swapped"; "local" => node.id());
-                                });
+                                n.with_reader_mut(
+                                    |r| if let Some(ref mut state) = r.writer_mut() {
+                                        trace!(self.log, "swapping state"; "local" => node.id());
+                                        state.swap();
+                                        trace!(self.log, "state swapped"; "local" => node.id());
+                                    },
+                                );
                             }
                         }
 

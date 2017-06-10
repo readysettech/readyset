@@ -1,9 +1,9 @@
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 extern crate distributary;
 
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 fn main() {
     use distributary::*;
 
@@ -53,12 +53,12 @@ fn main() {
         println!("done awvc");
 
         // add user karma
-        let _karma =
-            inc.add_query("SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
+        let _karma = inc.add_query(
+            "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
                             awvc.user;",
-                          Some("karma".into()),
-                          &mut mig)
-                .unwrap();
+            Some("karma".into()),
+            &mut mig,
+        ).unwrap();
     }
 
     println!("{}", g);
@@ -67,7 +67,7 @@ fn main() {
     web::run(Arc::new(Mutex::new(g))).unwrap();
 }
 
-#[cfg(not(feature="web"))]
+#[cfg(not(feature = "web"))]
 fn main() {
     unreachable!("compile with --features=web to build the web frontend");
 }

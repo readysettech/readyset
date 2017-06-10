@@ -219,25 +219,25 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 columns: st.fields
                     .iter()
                     .filter_map(|field| match field {
-                                    &FieldExpression::All => unimplemented!(),
-                                    &FieldExpression::AllInTable(_) => unimplemented!(),
-                                    &FieldExpression::Col(ref c) => {
-                                        match c.table.as_ref() {
-                                            None => {
-                            match c.function {
-                                // XXX(malte): don't drop aggregation columns
-                                Some(_) => None,
+                        &FieldExpression::All => unimplemented!(),
+                        &FieldExpression::AllInTable(_) => unimplemented!(),
+                        &FieldExpression::Col(ref c) => {
+                            match c.table.as_ref() {
                                 None => {
-                                    panic!("No table name set for column {} on {}", c.name, rel)
-                                }
-                            }
-                        }
-                                            Some(t) => {
-                                                if *t == rel { Some(c.clone()) } else { None }
-                                            }
+                                    match c.function {
+                                        // XXX(malte): don't drop aggregation columns
+                                        Some(_) => None,
+                                        None => {
+                                            panic!("No table name set for column {} on {}",
+                                                   c.name,
+                                                   rel)
                                         }
                                     }
-                                })
+                                }
+                                Some(t) => if *t == rel { Some(c.clone()) } else { None },
+                            }
+                        }
+                    })
                     .collect(),
                 parameters: Vec::new(),
             }

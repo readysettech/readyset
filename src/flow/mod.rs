@@ -237,8 +237,8 @@ impl Blender {
             let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
             rh.map(|rh| {
                 Box::new(move |q: &prelude::DataType,
-                               block: bool|
-                               -> Result<prelude::Datas, ()> {
+                      block: bool|
+                      -> Result<prelude::Datas, ()> {
                     rh.find_and(
                         q,
                         |rs| {
@@ -247,8 +247,7 @@ impl Blender {
                                 .collect()
                         },
                         block,
-                    )
-                        .map(|r| r.0.unwrap_or_else(Vec::new))
+                    ).map(|r| r.0.unwrap_or_else(Vec::new))
                 }) as Box<_>
             })
         })

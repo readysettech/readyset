@@ -159,7 +159,9 @@ impl<T: 'static> IntoIterator for Map<T> {
         Box::new(self.things
                      .into_iter()
                      .enumerate()
-                     .filter_map(|(i, v)| v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))))
+                     .filter_map(|(i, v)| {
+                         v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
+                     }))
     }
 }
 

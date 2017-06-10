@@ -202,19 +202,21 @@ impl CheckTable {
             return None;
         }
 
-        Some(Box::new(self.domain_dependencies
-                          .iter()
-                          .map(|(d, v)| {
-            let earliest: i64 = v.iter()
-                .filter_map(|b| self.toplevel.get(b))
-                .chain(self.last_migration.iter())
-                .chain(self.last_replay.get(d).iter().map(|t| *t))
-                .max()
-                .cloned()
-                .unwrap_or(0);
-            (*d, earliest)
-        })
-                          .collect()))
+        Some(Box::new(
+            self.domain_dependencies
+                .iter()
+                .map(|(d, v)| {
+                    let earliest: i64 = v.iter()
+                        .filter_map(|b| self.toplevel.get(b))
+                        .chain(self.last_migration.iter())
+                        .chain(self.last_replay.get(d).iter().map(|t| *t))
+                        .max()
+                        .cloned()
+                        .unwrap_or(0);
+                    (*d, earliest)
+                })
+                .collect(),
+        ))
     }
 
     #[allow(unused)]

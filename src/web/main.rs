@@ -1,9 +1,9 @@
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 extern crate distributary;
 
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 fn main() {
     use distributary::*;
 
@@ -52,7 +52,7 @@ fn main() {
     loop {}
 }
 
-#[cfg(not(feature="web"))]
+#[cfg(not(feature = "web"))]
 fn main() {
     unreachable!("compile with --features=web to build the web frontend");
 }

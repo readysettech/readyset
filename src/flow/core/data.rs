@@ -4,7 +4,7 @@ use chrono::{self, NaiveDateTime};
 
 use nom_sql::Literal;
 
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 use serde_json::Value;
 
 use std::ops::{Deref, DerefMut};
@@ -37,7 +37,7 @@ pub enum DataType {
     Timestamp(NaiveDateTime),
 }
 
-#[cfg(feature="web")]
+#[cfg(feature = "web")]
 impl DataType {
     /// Lossy representation as JSON value.
     pub fn to_json(&self) -> Value {

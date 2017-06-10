@@ -73,8 +73,7 @@ pub fn inform(log: &Logger,
             ctx.send(box Packet::AddNode {
                          node: node,
                          parents: old_parents,
-                     })
-                .unwrap();
+                     }).unwrap();
         }
     }
 }
