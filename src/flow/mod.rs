@@ -60,6 +60,7 @@ pub struct Blender {
     checktable: Arc<Mutex<checktable::CheckTable>>,
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
+    sharding_enabled: bool,
 
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
@@ -83,6 +84,7 @@ impl Default for Blender {
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
             partial: Default::default(),
             partial_enabled: true,
+            sharding_enabled: true,
 
             persistence: persistence::Parameters::default(),
 
@@ -102,6 +104,11 @@ impl Blender {
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.partial_enabled = false;
+    }
+
+    /// Disable sharding for all subsequent migrations
+    pub fn disable_sharding(&mut self) {
+        self.sharding_enabled = false;
     }
 
     /// Controls the persistence mode, and parameters related to persistence.
@@ -716,8 +723,11 @@ impl<'a> Migration<'a> {
         }
 
         // Shard the graph as desired
-        let mut swapped0 =
-            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
+        let mut swapped0 = if mainline.sharding_enabled {
+            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new)
+        } else {
+            HashMap::default()
+        };
 
         // Assign domains
         migrate::assignment::assign(&log,
