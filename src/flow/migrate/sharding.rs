@@ -469,7 +469,8 @@ pub fn shard(log: &Logger,
             *graph.node_weight_mut(n).unwrap() = new;
             let e = graph.find_edge(grandp, p).unwrap();
             let w = graph.remove_edge(e).unwrap();
-            graph.add_edge(grandp, n, w);
+            graph.add_edge(grandp, n, false);
+            graph.add_edge(n, p, w);
             swaps.insert((p, grandp), n);
 
             // mark p as now being sharded
