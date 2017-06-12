@@ -523,8 +523,10 @@ fn reshard(log: &Logger,
 
     new.insert(node);
 
+    // TODO: if there is already sharder child of src with the right sharding target,
+    // just add us as a child of that node!
+
     // hook in node that does appropriate shuffle
-    // FIXME: what if we already added a sharder in previous migration?
     let old = graph.find_edge(src, dst).unwrap();
     let was_materialized = graph.remove_edge(old).unwrap();
     graph.add_edge(src, node, false);
