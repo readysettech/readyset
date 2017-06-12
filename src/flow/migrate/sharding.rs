@@ -359,6 +359,7 @@ pub fn shard(log: &Logger,
                 }
 
                 // shard the base
+                warn!(log, "eagerly sharding unsharded base"; "by" => col, "base" => ?p);
                 graph[p].shard_by(by);
                 // remove the sharder at n by rewiring its outgoing edges directly to the base.
                 let mut cs = graph
@@ -465,6 +466,7 @@ pub fn shard(log: &Logger,
             }
 
             // then wire us (n) above the parent instead
+            warn!(log, "hoisting sharder above new unsharded node"; "sharder" => ?n, "node" => ?p);
             let new = graph[grandp].mirror(node::special::Sharder::new(src_col));
             *graph.node_weight_mut(n).unwrap() = new;
             let e = graph.find_edge(grandp, p).unwrap();
