@@ -414,17 +414,14 @@ pub fn shard(log: &Logger,
 
             let mut remove = Vec::new();
             for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
-                if !graph[c].is_sharder() {
+                // what does c shard by?
+                let col = graph[c].with_sharder(|s| s.sharded_by());
+                if col.is_none() {
                     // lifting n would shard a node that isn't expecting to be sharded
                     // TODO: we *could* insert a de-shard here
                     continue 'sharders;
                 }
-                // what does c shard by?
-                let csharding = graph[graph
-                                          .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
-                                          .next()
-                                          .unwrap()]
-                    .sharded_by();
+                let csharding = Sharding::ByColumn(col.unwrap());
 
                 if csharding == by {
                     // sharding by the same key, which is now unnecessary.
