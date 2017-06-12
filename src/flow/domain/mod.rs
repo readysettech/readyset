@@ -211,11 +211,7 @@ impl Domain {
                     0
                 } else {
                     assert!(key.len() == 1);
-                    match key[0] {
-                        DataType::Int(n) => n as usize % triggers.len(),
-                        DataType::BigInt(n) => n as usize % triggers.len(),
-                        _ => unimplemented!(),
-                    }
+                    ::shard_by(&key[0], triggers.len())
                 };
                 if triggers[shard]
                        .send(box Packet::RequestPartialReplay { tag, key })
@@ -681,11 +677,7 @@ impl Domain {
                                 0
                             } else {
                                 assert!(key.len() == 1);
-                                match key[0] {
-                                    DataType::Int(n) => n as usize % triggers.len(),
-                                    DataType::BigInt(n) => n as usize % triggers.len(),
-                                    _ => unimplemented!(),
-                                }
+                                ::shard_by(&key[0], triggers.len())
                             };
                             if triggers[shard]
                                    .send(box Packet::RequestPartialReplay { tag, key })

@@ -314,12 +314,7 @@ impl DomainHandle {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }
-                // TODO: avoid duplicating sharding code from Sharder
-                match *key {
-                    DataType::Int(n) => n as usize % self.txs.len(),
-                    DataType::BigInt(n) => n as usize % self.txs.len(),
-                    _ => unimplemented!(),
-                }
+                ::shard_by(key, self.txs.len())
             };
             self.in_txs[shard].send(p)
         }

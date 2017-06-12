@@ -321,6 +321,27 @@
 
 const SHARDS: usize = 2;
 
+#[inline]
+fn shard_by(dt: &DataType, shards: usize) -> usize {
+    match *dt {
+        DataType::Int(n) => n as usize % shards,
+        DataType::BigInt(n) => n as usize % shards,
+        DataType::Text(..) |
+        DataType::TinyText(..) => {
+            use std::hash::Hasher;
+            use std::borrow::Cow;
+            let mut hasher = fnv::FnvHasher::default();
+            let s: Cow<str> = dt.into();
+            hasher.write(s.as_bytes());
+            hasher.finish() as usize % shards
+        }
+        ref x => {
+            println!("asked to shard on value {:?}", x);
+            unimplemented!();
+        }
+    }
+}
+
 #[macro_use]
 extern crate slog;
 extern crate slog_term;

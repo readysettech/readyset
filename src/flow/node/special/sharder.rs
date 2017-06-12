@@ -59,14 +59,7 @@ impl Sharder {
 
     #[inline]
     fn shard(&self, dt: &DataType) -> usize {
-        match *dt {
-            DataType::Int(n) => n as usize % self.txs.len(),
-            DataType::BigInt(n) => n as usize % self.txs.len(),
-            ref x => {
-                println!("asked to shard on value {:?}", x);
-                unimplemented!();
-            }
-        }
+        ::shard_by(dt, self.txs.len())
     }
 
     pub fn process(&mut self,
