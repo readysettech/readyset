@@ -62,7 +62,10 @@ impl Sharder {
         match *dt {
             DataType::Int(n) => n as usize % self.txs.len(),
             DataType::BigInt(n) => n as usize % self.txs.len(),
-            _ => unimplemented!(),
+            ref x => {
+                println!("asked to shard on value {:?}", x);
+                unimplemented!();
+            }
         }
     }
 
