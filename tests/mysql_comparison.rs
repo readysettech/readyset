@@ -291,6 +291,7 @@ fn mysql_comparison() {
         generate_target_results(&schemas);
     }
 
+    let mut fail = false;
     for (schema_name, schema) in schemas.iter() {
         let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
             schema_name,
@@ -303,8 +304,13 @@ fn mysql_comparison() {
             io::stdout().flush().ok().expect("Could not flush stdout");
             match check_query(&schema.tables, query_name, query, &target_data[query_name]) {
                 Ok(()) => println!("\x1B[32;1mPASS\x1B[m"),
-                Err(e) => println!("\x1B[31;1mFAIL\x1B[m:\n{}", e),
+                Err(e) => {
+                    fail = true;
+                    println!("\x1B[31;1mFAIL\x1B[m:\n{}", e)
+                },
             }
         }
     }
+
+    assert!(!fail);
 }
