@@ -18,11 +18,13 @@ use petgraph::graph::NodeIndex;
 
 use slog::Logger;
 
-pub fn inform(log: &Logger,
-              blender: &mut flow::Blender,
-              nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
-              ts: i64,
-              prevs: Box<HashMap<domain::Index, i64>>) {
+pub fn inform(
+    log: &Logger,
+    blender: &mut flow::Blender,
+    nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+    ts: i64,
+    prevs: Box<HashMap<domain::Index, i64>>,
+) {
 
     let source = blender.source;
     for (domain, nodes) in nodes {
@@ -33,10 +35,10 @@ pub fn inform(log: &Logger,
 
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(box Packet::StartMigration {
-                             at: ts,
-                             prev_ts: prevs[&domain],
-                             ack: ready_tx,
-                         });
+            at: ts,
+            prev_ts: prevs[&domain],
+            ack: ready_tx,
+        });
         let _ = ready_rx.recv().is_err();
         trace!(log, "domain ready for migration");
 
@@ -71,9 +73,9 @@ pub fn inform(log: &Logger,
 
             trace!(log, "request addition of node"; "node" => ni.index());
             ctx.send(box Packet::AddNode {
-                         node: node,
-                         parents: old_parents,
-                     }).unwrap();
+                node: node,
+                parents: old_parents,
+            }).unwrap();
         }
     }
 }

@@ -39,13 +39,14 @@ impl Ingredient for Identity {
         self.src.remap(remap);
     }
 
-    fn on_input(&mut self,
-                _: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                _: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        _: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        _: &StateMap,
+    ) -> ProcessingResult {
         ProcessingResult {
             results: rs,
             misses: Vec::new(),
@@ -78,10 +79,12 @@ mod tests {
     fn setup(materialized: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("identity",
-                 &["x", "y", "z"],
-                 Identity::new(s.as_global()),
-                 materialized);
+        g.set_op(
+            "identity",
+            &["x", "y", "z"],
+            Identity::new(s.as_global()),
+            materialized,
+        );
         g
     }
 
@@ -104,11 +107,17 @@ mod tests {
     #[test]
     fn it_resolves() {
         let g = setup(false);
-        assert_eq!(g.node().resolve(0),
-                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
-        assert_eq!(g.node().resolve(1),
-                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
-        assert_eq!(g.node().resolve(2),
-                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
+        assert_eq!(
+            g.node().resolve(0),
+            Some(vec![(g.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            g.node().resolve(1),
+            Some(vec![(g.narrow_base_id().as_global(), 1)])
+        );
+        assert_eq!(
+            g.node().resolve(2),
+            Some(vec![(g.narrow_base_id().as_global(), 2)])
+        );
     }
 }

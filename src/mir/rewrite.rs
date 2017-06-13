@@ -28,11 +28,10 @@ pub fn pull_required_base_columns(q: &mut MirQuery) {
             .referenced_columns()
             .into_iter()
             .filter(|c| {
-                        !mn.borrow()
-                            .ancestors()
-                            .iter()
-                            .any(|a| a.borrow().columns().contains(c))
-                    })
+                !mn.borrow().ancestors().iter().any(|a| {
+                    a.borrow().columns().contains(c)
+                })
+            })
             .collect();
 
         let mut found: Vec<&Column> = Vec::new();

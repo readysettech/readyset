@@ -45,9 +45,10 @@ pub struct Recipe {
 impl PartialEq for Recipe {
     /// Equality for recipes is defined in terms of all members apart from `inc`.
     fn eq(&self, other: &Recipe) -> bool {
-        self.expressions == other.expressions && self.expression_order == other.expression_order &&
-        self.aliases == other.aliases && self.version == other.version &&
-        self.prior == other.prior
+        self.expressions == other.expressions &&
+            self.expression_order == other.expression_order &&
+            self.aliases == other.aliases && self.version == other.version &&
+            self.prior == other.prior
     }
 }
 
@@ -108,9 +109,11 @@ impl Recipe {
                 };
                 match na {
                     None => {
-                        Err(format!("No query endpoint for \"{}\" exists at v{}.",
-                                    name,
-                                    self.version))
+                        Err(format!(
+                            "No query endpoint for \"{}\" exists at v{}.",
+                            name,
+                            self.version
+                        ))
                     }
                     Some(na) => Ok(na),
                 }
@@ -127,7 +130,9 @@ impl Recipe {
         let lines: Vec<String> = recipe_text
             .lines()
             .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
+            .filter(|l| {
+                !l.is_empty() && !l.starts_with('#') && !l.starts_with("--")
+            })
             .map(String::from)
             .collect();
         let cleaned_recipe_text = lines.join("\n");
@@ -188,10 +193,11 @@ impl Recipe {
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
-    pub fn activate(&mut self,
-                    mig: &mut Migration,
-                    transactional_base_nodes: bool)
-                    -> Result<ActivationResult, String> {
+    pub fn activate(
+        &mut self,
+        mig: &mut Migration,
+        transactional_base_nodes: bool,
+    ) -> Result<ActivationResult, String> {
         debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
@@ -217,10 +223,9 @@ impl Recipe {
             self.inc.as_mut().unwrap().upgrade_schema(self.version);
         }
 
-        self.inc
-            .as_mut()
-            .unwrap()
-            .set_transactional(transactional_base_nodes);
+        self.inc.as_mut().unwrap().set_transactional(
+            transactional_base_nodes,
+        );
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
@@ -317,12 +322,12 @@ impl Recipe {
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with("#"))
             .map(|l| {
-                     // remove inline comments, too
-                     match l.find("#") {
-                         None => l.trim(),
-                         Some(pos) => &l[0..pos - 1].trim(),
-                     }
-                 })
+                // remove inline comments, too
+                match l.find("#") {
+                    None => l.trim(),
+                    Some(pos) => &l[0..pos - 1].trim(),
+                }
+            })
             .collect();
         let mut query_strings = Vec::new();
         let mut q = String::new();
@@ -364,10 +369,12 @@ impl Recipe {
             return Err(format!("Failed to parse recipe!"));
         }
 
-        Ok(parsed_queries
-               .into_iter()
-               .map(|t| (t.0, t.2.unwrap()))
-               .collect::<Vec<_>>())
+        Ok(
+            parsed_queries
+                .into_iter()
+                .map(|t| (t.0, t.2.unwrap()))
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Returns the predecessor from which this `Recipe` was migrated to.

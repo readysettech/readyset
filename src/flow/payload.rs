@@ -252,8 +252,12 @@ pub enum Packet {
     },
 
     /// Request that a domain send usage statistics on the given sender.
-    GetStatistics(mpsc::SyncSender<(statistics::DomainStats,
-                                     HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>)>),
+    GetStatistics(
+        mpsc::SyncSender<
+            (statistics::DomainStats,
+             HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>),
+        >
+    ),
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
@@ -291,7 +295,8 @@ impl Packet {
     }
 
     pub fn map_data<F>(&mut self, map: F)
-        where F: FnOnce(&mut Records)
+    where
+        F: FnOnce(&mut Records),
     {
         match *self {
             Packet::Message { ref mut data, .. } |
@@ -432,22 +437,26 @@ impl fmt::Debug for Packet {
                 ref data,
                 ..
             } => {
-                write!(f,
-                       "Packet::ReplayPiece({:?}, {}, {} records)",
-                       link,
-                       tag.id(),
-                       data.len())
+                write!(
+                    f,
+                    "Packet::ReplayPiece({:?}, {}, {} records)",
+                    link,
+                    tag.id(),
+                    data.len()
+                )
             }
             Packet::FullReplay {
                 ref link,
                 ref tag,
                 ref state,
             } => {
-                write!(f,
-                       "Packet::FullReplay({:?}, {}, {} row state)",
-                       link,
-                       tag.id(),
-                       state.len())
+                write!(
+                    f,
+                    "Packet::FullReplay({:?}, {}, {} row state)",
+                    link,
+                    tag.id(),
+                    state.len()
+                )
             }
             _ => write!(f, "Packet::Control"),
         }

@@ -105,11 +105,12 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    pub fn add_query(&mut self,
-                     query: &str,
-                     name: Option<String>,
-                     mut mig: &mut Migration)
-                     -> Result<QueryFlowParts, String> {
+    pub fn add_query(
+        &mut self,
+        query: &str,
+        name: Option<String>,
+        mut mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         query.to_flow_parts(self, name, &mut mig)
     }
 
@@ -120,11 +121,12 @@ impl SqlIncorporator {
     ///
     /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
     /// of `NodeIndex`es representing the nodes added to support the query.
-    pub fn add_parsed_query(&mut self,
-                            query: SqlQuery,
-                            name: Option<String>,
-                            mut mig: &mut Migration)
-                            -> Result<QueryFlowParts, String> {
+    pub fn add_parsed_query(
+        &mut self,
+        query: SqlQuery,
+        name: Option<String>,
+        mut mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         match name {
             None => self.nodes_for_query(query, mig),
             Some(n) => self.nodes_for_named_query(query, n, mig),
@@ -141,10 +143,11 @@ impl SqlIncorporator {
         self.mir_converter.get_leaf(name)
     }
 
-    fn consider_query_graph(&mut self,
-                            query_name: &str,
-                            st: &SelectStatement)
-                            -> (QueryGraph, QueryGraphReuse) {
+    fn consider_query_graph(
+        &mut self,
+        query_name: &str,
+        st: &SelectStatement,
+    ) -> (QueryGraph, QueryGraphReuse) {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
@@ -169,23 +172,30 @@ impl SqlIncorporator {
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature() &&
-                   existing_qg.parameters() == qg.parameters() {
+                    existing_qg.parameters() == qg.parameters()
+                {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
-                    info!(self.log,
-                          "An exact match for query \"{}\" already exists, reusing it",
-                          query_name);
+                    info!(
+                        self.log,
+                        "An exact match for query \"{}\" already exists, reusing it",
+                        query_name
+                    );
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
                     // QGs are identical, except for parameters (or their order)
-                    info!(self.log,
-                          "Query '{}' has an exact match modulo parameters, \
+                    info!(
+                        self.log,
+                        "Query '{}' has an exact match modulo parameters, \
                           so making a new reader",
-                          query_name);
+                        query_name
+                    );
 
                     let params = qg.parameters().into_iter().cloned().collect();
-                    return (qg,
-                            QueryGraphReuse::ReaderOntoExisting(mir_query.leaf.clone(), params));
+                    return (
+                        qg,
+                        QueryGraphReuse::ReaderOntoExisting(mir_query.leaf.clone(), params),
+                    );
                 }
             }
         }
@@ -193,9 +203,10 @@ impl SqlIncorporator {
         let mut reuse_candidates = Vec::new();
         for &(ref existing_qg, _) in self.query_graphs.values() {
             // queries are different, but one might be a generalization of the other
-            if existing_qg
-                   .signature()
-                   .is_generalization_of(&qg.signature()) {
+            if existing_qg.signature().is_generalization_of(
+                &qg.signature(),
+            )
+            {
                 match reuse::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
@@ -206,13 +217,17 @@ impl SqlIncorporator {
             }
         }
         if reuse_candidates.len() > 0 {
-            info!(self.log,
-                  "Identified {} candidate QGs for reuse",
-                  reuse_candidates.len());
-            trace!(self.log,
-                   "This QG: {:#?}\nReuse candidates:\n{:#?}",
-                   qg,
-                   reuse_candidates);
+            info!(
+                self.log,
+                "Identified {} candidate QGs for reuse",
+                reuse_candidates.len()
+            );
+            trace!(
+                self.log,
+                "This QG: {:#?}\nReuse candidates:\n{:#?}",
+                qg,
+                reuse_candidates
+            );
 
             // TODO(malte): score reuse candidates
             let choice = reuse::choose_best_option(reuse_candidates);
@@ -220,9 +235,11 @@ impl SqlIncorporator {
             match choice.0 {
                 ReuseType::DirectExtension => {
                     let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
-                    info!(self.log,
-                          "Can reuse by directly extending existing query {}",
-                          mir_query.name);
+                    info!(
+                        self.log,
+                        "Can reuse by directly extending existing query {}",
+                        mir_query.name
+                    );
                     return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
                 }
                 ReuseType::BackjoinRequired(_) => {
@@ -236,18 +253,22 @@ impl SqlIncorporator {
         (qg, QueryGraphReuse::None)
     }
 
-    fn add_leaf_to_existing_query(&mut self,
-                                  query_name: &str,
-                                  params: &Vec<Column>,
-                                  leaf: MirNodeRef,
-                                  mut mig: &mut Migration)
-                                  -> QueryFlowParts {
+    fn add_leaf_to_existing_query(
+        &mut self,
+        query_name: &str,
+        params: &Vec<Column>,
+        leaf: MirNodeRef,
+        mut mig: &mut Migration,
+    ) -> QueryFlowParts {
         // We want to hang the new leaf off the last non-leaf node of the query, so backtrack one
         // step here.
         let final_node_of_query = leaf.borrow().ancestors().iter().next().unwrap().clone();
 
-        let mut mir = self.mir_converter
-            .add_leaf_below(final_node_of_query, query_name, params);
+        let mut mir = self.mir_converter.add_leaf_below(
+            final_node_of_query,
+            query_name,
+            params,
+        );
 
         trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
 
@@ -273,14 +294,18 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn add_base_via_mir(&mut self,
-                        query_name: &str,
-                        query: &SqlQuery,
-                        mut mig: &mut Migration)
-                        -> QueryFlowParts {
+    fn add_base_via_mir(
+        &mut self,
+        query_name: &str,
+        query: &SqlQuery,
+        mut mig: &mut Migration,
+    ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_base_to_mir(query_name, query, self.transactional);
+        let mut mir = self.mir_converter.named_base_to_mir(
+            query_name,
+            query,
+            self.transactional,
+        );
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -304,16 +329,20 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn add_query_via_mir(&mut self,
-                         query_name: &str,
-                         query: &SelectStatement,
-                         qg: QueryGraph,
-                         mut mig: &mut Migration)
-                         -> QueryFlowParts {
+    fn add_query_via_mir(
+        &mut self,
+        query_name: &str,
+        query: &SelectStatement,
+        qg: QueryGraph,
+        mut mig: &mut Migration,
+    ) -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg);
+        let mut mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+        );
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -343,19 +372,23 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn extend_existing_query(&mut self,
-                             query_name: &str,
-                             query: &SelectStatement,
-                             qg: QueryGraph,
-                             extend_mir: MirQuery,
-                             mut mig: &mut Migration)
-                             -> QueryFlowParts {
+    fn extend_existing_query(
+        &mut self,
+        query_name: &str,
+        query: &SelectStatement,
+        qg: QueryGraph,
+        extend_mir: MirQuery,
+        mut mig: &mut Migration,
+    ) -> QueryFlowParts {
         use super::mir::reuse::merge_mir_for_queries;
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg);
+        let new_query_mir = self.mir_converter.named_query_to_mir(
+            query_name,
+            query,
+            &qg,
+        );
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -371,22 +404,27 @@ impl SqlIncorporator {
 
         let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
 
-        info!(self.log,
-              "Reused {} nodes for {}",
-              num_reused_nodes,
-              query_name);
+        info!(
+            self.log,
+            "Reused {} nodes for {}",
+            num_reused_nodes,
+            query_name
+        );
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs
-            .insert(qg.signature().hash, (qg, post_reuse_opt_mir));
+        self.query_graphs.insert(
+            qg.signature().hash,
+            (qg, post_reuse_opt_mir),
+        );
 
         qfp
     }
 
-    fn nodes_for_query(&mut self,
-                       q: SqlQuery,
-                       mig: &mut Migration)
-                       -> Result<QueryFlowParts, String> {
+    fn nodes_for_query(
+        &mut self,
+        q: SqlQuery,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
@@ -395,11 +433,12 @@ impl SqlIncorporator {
         self.nodes_for_named_query(q, name, mig)
     }
 
-    fn nodes_for_named_query(&mut self,
-                             q: SqlQuery,
-                             query_name: String,
-                             mut mig: &mut Migration)
-                             -> Result<QueryFlowParts, String> {
+    fn nodes_for_named_query(
+        &mut self,
+        q: SqlQuery,
+        query_name: String,
+        mut mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         use self::query_utils::ReferredTables;
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
@@ -465,8 +504,10 @@ impl SqlIncorporator {
 
         // record info about query
         self.num_queries += 1;
-        self.leaf_addresses
-            .insert(String::from(query_name.as_str()), qfp.query_leaf);
+        self.leaf_addresses.insert(
+            String::from(query_name.as_str()),
+            qfp.query_leaf,
+        );
 
         Ok(qfp)
     }
@@ -475,10 +516,12 @@ impl SqlIncorporator {
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
     pub fn upgrade_schema(&mut self, new_version: usize) {
         assert!(new_version > self.schema_version);
-        info!(self.log,
-              "Schema version advanced from {} to {}",
-              self.schema_version,
-              new_version);
+        info!(
+            self.log,
+            "Schema version advanced from {} to {}",
+            self.schema_version,
+            new_version
+        );
         self.schema_version = new_version;
         self.mir_converter.upgrade_schema(new_version);
     }
@@ -489,29 +532,32 @@ pub trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
     /// string in the `Option<String>` in the third argument.
-    fn to_flow_parts(&self,
-                     &mut SqlIncorporator,
-                     Option<String>,
-                     &mut Migration)
-                     -> Result<QueryFlowParts, String>;
+    fn to_flow_parts(
+        &self,
+        &mut SqlIncorporator,
+        Option<String>,
+        &mut Migration,
+    ) -> Result<QueryFlowParts, String>;
 }
 
 impl<'a> ToFlowParts for &'a String {
-    fn to_flow_parts(&self,
-                     inc: &mut SqlIncorporator,
-                     name: Option<String>,
-                     mig: &mut Migration)
-                     -> Result<QueryFlowParts, String> {
+    fn to_flow_parts(
+        &self,
+        inc: &mut SqlIncorporator,
+        name: Option<String>,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         self.as_str().to_flow_parts(inc, name, mig)
     }
 }
 
 impl<'a> ToFlowParts for &'a str {
-    fn to_flow_parts(&self,
-                     inc: &mut SqlIncorporator,
-                     name: Option<String>,
-                     mig: &mut Migration)
-                     -> Result<QueryFlowParts, String> {
+    fn to_flow_parts(
+        &self,
+        inc: &mut SqlIncorporator,
+        name: Option<String>,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(self);
 
@@ -540,8 +586,10 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.get_flow_node_address(name, 0)
-            .expect(&format!("No node named \"{}\" at v0", name));
+        let na = inc.get_flow_node_address(name, 0).expect(&format!(
+            "No node named \"{}\" at v0",
+            name
+        ));
         mig.graph().node_weight(na).unwrap()
     }
 
@@ -573,26 +621,32 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Must have a base node for type inference to work, so make one manually
-        assert!("CREATE TABLE users (id int, name varchar(40));"
-                    .to_flow_parts(&mut inc, None, &mut mig)
-                    .is_ok());
+        assert!(
+            "CREATE TABLE users (id int, name varchar(40));"
+                .to_flow_parts(&mut inc, None, &mut mig)
+                .is_ok()
+        );
 
         // Should have two nodes: source and "users" base table
         let ncount = mig.graph().node_count();
         assert_eq!(ncount, 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
 
-        assert!("SELECT users.id from users;"
-                    .to_flow_parts(&mut inc, None, &mut mig)
-                    .is_ok());
+        assert!(
+            "SELECT users.id from users;"
+                .to_flow_parts(&mut inc, None, &mut mig)
+                .is_ok()
+        );
         // Should now have source, "users", a leaf projection node for the new selection, and
         // a reader node
         assert_eq!(mig.graph().node_count(), ncount + 2);
 
         // Invalid query should fail parsing and add no nodes
-        assert!("foo bar from whatever;"
-                    .to_flow_parts(&mut inc, None, &mut mig)
-                    .is_err());
+        assert!(
+            "foo bar from whatever;"
+                .to_flow_parts(&mut inc, None, &mut mig)
+                .is_err()
+        );
         // Should still only have source, "users" and the two nodes for the above selection
         assert_eq!(mig.graph().node_count(), ncount + 2);
     }
@@ -605,10 +659,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type for "users"
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -616,15 +673,20 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").description(), "B");
 
         // Establish a base write type for "articles"
-        assert!(inc.add_query("CREATE TABLE articles (id int, author int, title varchar(255));",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 3);
         assert_eq!(get_node(&inc, &mig, "articles").name(), "articles");
-        assert_eq!(get_node(&inc, &mig, "articles").fields(),
-                   &["id", "author", "title"]);
+        assert_eq!(
+            get_node(&inc, &mig, "articles").fields(),
+            &["id", "author", "title"]
+        );
         assert_eq!(get_node(&inc, &mig, "articles").description(), "B");
 
         // Try a simple equi-JOIN query
@@ -633,13 +695,17 @@ mod tests {
                  WHERE users.id = articles.author;";
         let q = inc.add_query(q, None, &mut mig);
         assert!(q.is_ok());
-        let qid = query_id_hash(&["articles", "users"],
-                                &[&Column::from("articles.author"), &Column::from("users.id")],
-                                &[&Column::from("articles.title"), &Column::from("users.name")]);
+        let qid = query_id_hash(
+            &["articles", "users"],
+            &[&Column::from("articles.author"), &Column::from("users.id")],
+            &[&Column::from("articles.title"), &Column::from("users.name")],
+        );
         // join node
         let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
-        assert_eq!(new_join_view.fields(),
-                   &["id", "author", "title", "id", "name"]);
+        assert_eq!(
+            new_join_view.fields(),
+            &["id", "author", "title", "id", "name"]
+        );
         // leaf node
         let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
         assert_eq!(new_leaf_view.fields(), &["title", "name"]);
@@ -654,10 +720,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -665,14 +734,18 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").description(), "B");
 
         // Try a simple query
-        let res = inc.add_query("SELECT users.name FROM users WHERE users.id = 42;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT users.name FROM users WHERE users.id = 42;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
 
-        let qid = query_id_hash(&["users"],
-                                &[&Column::from("users.id")],
-                                &[&Column::from("users.name")]);
+        let qid = query_id_hash(
+            &["users"],
+            &[&Column::from("users.id")],
+            &[&Column::from("users.name")],
+        );
         // filter node
         let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
@@ -691,8 +764,10 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write types
-        assert!(inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
+                .is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
@@ -700,24 +775,33 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
 
         // Try a simple COUNT function
-        let res = inc.add_query("SELECT COUNT(votes.userid) AS votes \
+        let res = inc.add_query(
+            "SELECT COUNT(votes.userid) AS votes \
                                 FROM votes GROUP BY votes.aid;",
-                                None,
-                                &mut mig);
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         println!("{:?}", res);
         // added the aggregation and the edge view, and a reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
-        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
-        let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[&Column::from("votes.aid")],
-                                &[&Column {
-                                      name: String::from("votes"),
-                                      alias: Some(String::from("votes")),
-                                      table: None,
-                                      function: Some(f),
-                                  }]);
+        let f = Box::new(FunctionExpression::Count(
+            Column::from("votes.userid"),
+            false,
+        ));
+        let qid = query_id_hash(
+            &["computed_columns", "votes"],
+            &[&Column::from("votes.aid")],
+            &[
+                &Column {
+                    name: String::from("votes"),
+                    alias: Some(String::from("votes")),
+                    table: None,
+                    function: Some(f),
+                },
+            ],
+        );
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["aid", "votes"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
@@ -735,21 +819,28 @@ mod tests {
         inc.disable_reuse();
         let mut mig = g.start_migration();
 
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
-        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;",
-                                None,
-                                &mut mig);
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
+        let res = inc.add_query(
+            "SELECT id, name FROM users WHERE users.id = 42;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         let leaf = res.unwrap().query_leaf;
 
         // Add the same query again; this should NOT reuse here.
         let ncount = mig.graph().node_count();
-        let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT name, id FROM users WHERE users.id = 42;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         // should have added nodes for this query, too
         let qfp = res.unwrap();
@@ -768,10 +859,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -779,17 +873,21 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").description(), "B");
 
         // Add a new query
-        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = 42;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT id, name FROM users WHERE users.id = 42;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         let leaf = res.unwrap().query_leaf;
 
         // Add the same query again
         let ncount = mig.graph().node_count();
-        let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT name, id FROM users WHERE users.id = 42;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         // should have added no more nodes
         let qfp = res.unwrap();
@@ -807,10 +905,13 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "users").name(), "users");
@@ -818,16 +919,20 @@ mod tests {
         assert_eq!(get_node(&inc, &mig, "users").description(), "B");
 
         // Add a new query
-        let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT id, name FROM users WHERE users.id = ?;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
 
         // Add the same query again, but with a parameter on a different column
         let ncount = mig.graph().node_count();
-        let res = inc.add_query("SELECT id, name FROM users WHERE users.name = ?;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT id, name FROM users WHERE users.name = ?;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         // should have added two more nodes: one identity node and one reader node
         let qfp = res.unwrap();
@@ -848,30 +953,41 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query("CREATE TABLE votes (aid int, userid int);", None, &mut mig)
+                .is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
         assert_eq!(get_node(&inc, &mig, "votes").fields(), &["aid", "userid"]);
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
         // Try a simple COUNT function without a GROUP BY clause
-        let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT COUNT(votes.userid) AS count FROM votes;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 6);
         // check project helper node
-        let f = Box::new(FunctionExpression::Count(Column::from("votes.userid"), false));
-        let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[],
-                                &[&Column {
-                                      name: String::from("count"),
-                                      alias: Some(String::from("count")),
-                                      table: None,
-                                      function: Some(f),
-                                  }]);
+        let f = Box::new(FunctionExpression::Count(
+            Column::from("votes.userid"),
+            false,
+        ));
+        let qid = query_id_hash(
+            &["computed_columns", "votes"],
+            &[],
+            &[
+                &Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                },
+            ],
+        );
         let proj_helper_view = get_node(&inc, &mig, &format!("q_{:x}_n0_prj_hlpr", qid));
         assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
         assert_eq!(proj_helper_view.description(), format!("π[1, lit: 0]"));
@@ -894,30 +1010,38 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish a base write type
-        assert!(inc.add_query("CREATE TABLE votes (userid int, aid int);", None, &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query("CREATE TABLE votes (userid int, aid int);", None, &mut mig)
+                .is_ok()
+        );
         // Should have source and "users" base table node
         assert_eq!(mig.graph().node_count(), 2);
         assert_eq!(get_node(&inc, &mig, "votes").name(), "votes");
         assert_eq!(get_node(&inc, &mig, "votes").fields(), &["userid", "aid"]);
         assert_eq!(get_node(&inc, &mig, "votes").description(), "B");
         // Try a simple COUNT function without a GROUP BY clause
-        let res = inc.add_query("SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
-                                None,
-                                &mut mig);
+        let res = inc.add_query(
+            "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
+            None,
+            &mut mig,
+        );
         assert!(res.is_ok());
         // added the aggregation, a project helper, the edge view, and reader
         assert_eq!(mig.graph().node_count(), 5);
         // check aggregation view
         let f = Box::new(FunctionExpression::Count(Column::from("votes.aid"), false));
-        let qid = query_id_hash(&["computed_columns", "votes"],
-                                &[&Column::from("votes.userid")],
-                                &[&Column {
-                                      name: String::from("count"),
-                                      alias: Some(String::from("count")),
-                                      table: None,
-                                      function: Some(f),
-                                  }]);
+        let qid = query_id_hash(
+            &["computed_columns", "votes"],
+            &[&Column::from("votes.userid")],
+            &[
+                &Column {
+                    name: String::from("count"),
+                    alias: Some(String::from("count")),
+                    table: None,
+                    function: Some(f),
+                },
+            ],
+        );
         let agg_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         assert_eq!(agg_view.fields(), &["userid", "count"]);
         assert_eq!(agg_view.description(), format!("|*| γ[0]"));
@@ -936,16 +1060,24 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish base write types for "users" and "articles" and "votes"
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
-        assert!(inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
-                    .is_ok());
-        assert!(inc.add_query("CREATE TABLE articles (aid int, title varchar(255), author int);",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
+        assert!(
+            inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
+                .is_ok()
+        );
+        assert!(
+            inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
 
         // Try an explicit multi-way-join
         let q = "SELECT users.name, articles.title, votes.uid \
@@ -954,14 +1086,20 @@ mod tests {
                  JOIN votes ON (votes.aid = articles.aid);";
         let q = inc.add_query(q, None, &mut mig);
         assert!(q.is_ok());
-        let _qid = query_id_hash(&["articles", "users", "votes"],
-                                 &[&Column::from("articles.aid"),
-                                   &Column::from("articles.author"),
-                                   &Column::from("users.id"),
-                                   &Column::from("votes.aid")],
-                                 &[&Column::from("articles.title"),
-                                   &Column::from("users.name"),
-                                   &Column::from("votes.uid")]);
+        let _qid = query_id_hash(
+            &["articles", "users", "votes"],
+            &[
+                &Column::from("articles.aid"),
+                &Column::from("articles.author"),
+                &Column::from("users.id"),
+                &Column::from("votes.aid"),
+            ],
+            &[
+                &Column::from("articles.title"),
+                &Column::from("users.name"),
+                &Column::from("votes.uid"),
+            ],
+        );
         // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
         // views
         // leaf view
@@ -977,16 +1115,24 @@ mod tests {
         let mut mig = g.start_migration();
 
         // Establish base write types for "users" and "articles" and "votes"
-        assert!(inc.add_query("CREATE TABLE users (id int, name varchar(40));",
-                              None,
-                              &mut mig)
-                    .is_ok());
-        assert!(inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
-                    .is_ok());
-        assert!(inc.add_query("CREATE TABLE articles (aid int, title varchar(255), author int);",
-                              None,
-                              &mut mig)
-                    .is_ok());
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
+        assert!(
+            inc.add_query("CREATE TABLE votes (aid int, uid int);", None, &mut mig)
+                .is_ok()
+        );
+        assert!(
+            inc.add_query(
+                "CREATE TABLE articles (aid int, title varchar(255), author int);",
+                None,
+                &mut mig,
+            ).is_ok()
+        );
 
         // Try an implicit multi-way-join
         let q = "SELECT users.name, articles.title, votes.uid \
@@ -997,14 +1143,20 @@ mod tests {
         assert!(q.is_ok());
         // XXX(malte): below over-projects into the final leaf, and is thus inconsistent
         // with the explicit JOIN case!
-        let qid = query_id_hash(&["articles", "users", "votes"],
-                                &[&Column::from("articles.aid"),
-                                  &Column::from("articles.author"),
-                                  &Column::from("users.id"),
-                                  &Column::from("votes.aid")],
-                                &[&Column::from("articles.title"),
-                                  &Column::from("users.name"),
-                                  &Column::from("votes.uid")]);
+        let qid = query_id_hash(
+            &["articles", "users", "votes"],
+            &[
+                &Column::from("articles.aid"),
+                &Column::from("articles.author"),
+                &Column::from("users.id"),
+                &Column::from("votes.aid"),
+            ],
+            &[
+                &Column::from("articles.title"),
+                &Column::from("users.name"),
+                &Column::from("votes.uid"),
+            ],
+        );
         // XXX(malte): non-deterministic join ordering below
         let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         // articles join votes
@@ -1038,10 +1190,10 @@ mod tests {
             let lines: Vec<String> = s.lines()
                 .filter(|l| !l.is_empty() && !l.starts_with("#"))
                 .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
-                         String::from(l) + "\n"
-                     } else {
-                         String::from(l)
-                     })
+                    String::from(l) + "\n"
+                } else {
+                    String::from(l)
+                })
                 .collect();
 
             // Add them one by one

@@ -18,19 +18,24 @@ impl Aggregation {
     /// The aggregation will aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn over(self,
-                src: NodeIndex,
-                over: usize,
-                group_by: &[usize])
-                -> GroupedOperator<Aggregator> {
-        assert!(!group_by.iter().any(|&i| i == over),
-                "cannot group by aggregation column");
-        GroupedOperator::new(src,
-                             Aggregator {
-                                 op: self,
-                                 over: over,
-                                 group: group_by.into(),
-                             })
+    pub fn over(
+        self,
+        src: NodeIndex,
+        over: usize,
+        group_by: &[usize],
+    ) -> GroupedOperator<Aggregator> {
+        assert!(
+            !group_by.iter().any(|&i| i == over),
+            "cannot group by aggregation column"
+        );
+        GroupedOperator::new(
+            src,
+            Aggregator {
+                op: self,
+                over: over,
+                group: group_by.into(),
+            },
+        )
     }
 }
 
@@ -58,8 +63,10 @@ impl GroupedOperation for Aggregator {
     type Diff = i64;
 
     fn setup(&mut self, parent: &Node) {
-        assert!(self.over < parent.fields().len(),
-                "cannot aggregate over non-existing column");
+        assert!(
+            self.over < parent.fields().len(),
+            "cannot aggregate over non-existing column"
+        );
     }
 
     fn group_by(&self) -> &[usize] {
@@ -114,20 +121,24 @@ mod tests {
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
-        g.set_op("identity",
-                 &["x", "ys"],
-                 Aggregation::COUNT.over(s.as_global(), 1, &[0]),
-                 mat);
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            Aggregation::COUNT.over(s.as_global(), 1, &[0]),
+            mat,
+        );
         g
     }
 
     fn setup_multicolumn(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("identity",
-                 &["x", "z", "ys"],
-                 Aggregation::COUNT.over(s.as_global(), 1, &[0, 2]),
-                 mat);
+        g.set_op(
+            "identity",
+            &["x", "z", "ys"],
+            Aggregation::COUNT.over(s.as_global(), 1, &[0, 2]),
+            mat,
+        );
         g
     }
 
@@ -220,46 +231,48 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let u = vec![(vec![1.into(), 1.into()], false),
-                     (vec![1.into(), 1.into()], true),
-                     (vec![1.into(), 2.into()], true),
-                     (vec![2.into(), 2.into()], false),
-                     (vec![2.into(), 2.into()], true),
-                     (vec![2.into(), 3.into()], true),
-                     (vec![2.into(), 1.into()], true),
-                     (vec![3.into(), 3.into()], true)];
+        let u = vec![
+            (vec![1.into(), 1.into()], false),
+            (vec![1.into(), 1.into()], true),
+            (vec![1.into(), 2.into()], true),
+            (vec![2.into(), 2.into()], false),
+            (vec![2.into(), 2.into()], true),
+            (vec![2.into(), 3.into()], true),
+            (vec![2.into(), 1.into()], true),
+            (vec![3.into(), 3.into()], true),
+        ];
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except 3 which is new
         // group 1 lost 1 and gained 2
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 1.into() && r[1] == 1.into()
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 1.into() && r[1] == 2.into()
+        } else {
+            false
+        }));
         // group 2 lost 1 and gained 3
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 2.into() && r[1] == 1.into()
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 3.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 2.into() && r[1] == 3.into()
+        } else {
+            false
+        }));
         // group 3 lost 0 and gained 1
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 3.into() && r[1] == 1.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 3.into() && r[1] == 1.into()
+        } else {
+            false
+        }));
     }
 
     #[test]
@@ -366,8 +379,10 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0),
-                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
+        assert_eq!(
+            c.node().resolve(0),
+            Some(vec![(c.narrow_base_id().as_global(), 0)])
+        );
         assert_eq!(c.node().resolve(1), None);
     }
 }

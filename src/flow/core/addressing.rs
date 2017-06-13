@@ -42,9 +42,9 @@ use std::ops::Deref;
 impl Deref for IndexPair {
     type Target = LocalNodeIndex;
     fn deref(&self) -> &Self::Target {
-        self.local
-            .as_ref()
-            .expect("tried to access local node index, which has not yet been assigned")
+        self.local.as_ref().expect(
+            "tried to access local node index, which has not yet been assigned",
+        )
     }
 }
 
@@ -72,9 +72,9 @@ impl IndexPair {
     }
 
     pub fn remap(&mut self, mapping: &HashMap<NodeIndex, IndexPair>) {
-        *self = *mapping
-            .get(&self.global)
-            .expect("asked to remap index that is unknown in mapping");
+        *self = *mapping.get(&self.global).expect(
+            "asked to remap index that is unknown in mapping",
+        );
     }
 }
 
@@ -86,7 +86,8 @@ struct IndexPairDef {
 
 impl Serialize for IndexPair {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: Serializer
+    where
+        S: Serializer,
     {
         let def = IndexPairDef {
             global: self.global.index(),
@@ -99,7 +100,8 @@ impl Serialize for IndexPair {
 
 impl<'de> Deserialize<'de> for IndexPair {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: Deserializer<'de>
+    where
+        D: Deserializer<'de>,
     {
         IndexPairDef::deserialize(deserializer).map(|def| {
             // what if I put a really long comment rustfmt? then what?

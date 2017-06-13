@@ -22,9 +22,11 @@ impl Latest {
     /// of fields used to group records by. The latest record *within each group* will be
     /// maintained.
     pub fn new(src: NodeIndex, mut keys: Vec<usize>) -> Latest {
-        assert_eq!(keys.len(),
-                   1,
-                   "only latest over a single column is supported");
+        assert_eq!(
+            keys.len(),
+            1,
+            "only latest over a single column is supported"
+        );
         keys.sort();
         let key_m = keys.clone()
             .into_iter()
@@ -65,20 +67,21 @@ impl Ingredient for Latest {
         self.us = Some(remap[&us]);
     }
 
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                state: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        state: &StateMap,
+    ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
 
         // find the current value for each group
         let us = self.us.unwrap();
-        let db = state
-            .get(&us)
-            .expect("latest must have its own state materialized");
+        let db = state.get(&us).expect(
+            "latest must have its own state materialized",
+        );
 
         let mut misses = Vec::new();
         let mut out = Vec::with_capacity(rs.len());
@@ -160,10 +163,12 @@ mod tests {
     fn setup(key: usize, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
-        g.set_op("latest",
-                 &["x", "y"],
-                 Latest::new(s.as_global(), vec![key]),
-                 mat);
+        g.set_op(
+            "latest",
+            &["x", "y"],
+            Latest::new(s.as_global(), vec![key]),
+            mat,
+        );
         g
     }
 
@@ -231,37 +236,39 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let u = vec![(vec![1.into(), 1.into()], false),
-                     (vec![1.into(), 2.into()], false),
-                     (vec![1.into(), 3.into()], true),
-                     (vec![2.into(), 2.into()], false),
-                     (vec![2.into(), 4.into()], true)];
+        let u = vec![
+            (vec![1.into(), 1.into()], false),
+            (vec![1.into(), 2.into()], false),
+            (vec![1.into(), 3.into()], true),
+            (vec![2.into(), 2.into()], false),
+            (vec![2.into(), 4.into()], true),
+        ];
 
         // negatives and positives should still result in only one new current for each group
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 4); // one - and one + for each group
         // group 1 lost 2 and gained 3
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 1.into() && r[1] == 2.into()
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 1.into() && r[1] == 3.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 1.into() && r[1] == 3.into()
+        } else {
+            false
+        }));
         // group 2 lost 2 and gained 4
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 2.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 2.into() && r[1] == 2.into()
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  r[0] == 2.into() && r[1] == 4.into()
-                              } else {
-                                  false
-                              }));
+            r[0] == 2.into() && r[1] == 4.into()
+        } else {
+            false
+        }));
     }
 
     #[test]
@@ -282,11 +289,17 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(1, false);
-        assert_eq!(c.node().resolve(0),
-                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
-        assert_eq!(c.node().resolve(1),
-                   Some(vec![(c.narrow_base_id().as_global(), 1)]));
-        assert_eq!(c.node().resolve(2),
-                   Some(vec![(c.narrow_base_id().as_global(), 2)]));
+        assert_eq!(
+            c.node().resolve(0),
+            Some(vec![(c.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            c.node().resolve(1),
+            Some(vec![(c.narrow_base_id().as_global(), 1)])
+        );
+        assert_eq!(
+            c.node().resolve(2),
+            Some(vec![(c.narrow_base_id().as_global(), 2)])
+        );
     }
 }

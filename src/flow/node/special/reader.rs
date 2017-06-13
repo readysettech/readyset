@@ -75,9 +75,10 @@ impl Reader {
         }
     }
 
-    pub fn add_streamer(&mut self,
-                        new_streamer: mpsc::Sender<Vec<StreamUpdate>>)
-                        -> Result<(), mpsc::Sender<Vec<StreamUpdate>>> {
+    pub fn add_streamer(
+        &mut self,
+        new_streamer: mpsc::Sender<Vec<StreamUpdate>>,
+    ) -> Result<(), mpsc::Sender<Vec<StreamUpdate>>> {
         if let Some(ref mut streamers) = self.streamers {
             streamers.push(new_streamer);
             Ok(())
@@ -195,11 +196,13 @@ impl Reader {
             if left == 0 {
                 tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
             } else {
-                tx.send(data.clone()
-                            .unwrap()
-                            .into_iter()
-                            .map(|r| r.into())
-                            .collect())
+                tx.send(
+                    data.clone()
+                        .unwrap()
+                        .into_iter()
+                        .map(|r| r.into())
+                        .collect(),
+                )
             }.is_ok()
         });
     }

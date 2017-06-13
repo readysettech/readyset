@@ -85,10 +85,11 @@ pub struct DomainState {
 }
 
 impl DomainState {
-    pub fn new(domain_index: domain::Index,
-               checktable: Arc<Mutex<checktable::CheckTable>>,
-               ts: i64)
-               -> Self {
+    pub fn new(
+        domain_index: domain::Index,
+        checktable: Arc<Mutex<checktable::CheckTable>>,
+        ts: i64,
+    ) -> Self {
 
         Self {
             domain_index: domain_index,
@@ -149,12 +150,14 @@ impl DomainState {
                 Bundle::Empty => {
                     let bundle = match m {
                         box Packet::Transaction { .. } => {
-                            let count = base.map(|b| self.ingress_from_base[b.index()])
-                                .unwrap_or(1);
+                            let count =
+                                base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                             if count == 0 {
-                                println!("{:?} got transaction from base {:?}, which it shouldn't",
-                                         self.domain_index,
-                                         base);
+                                println!(
+                                    "{:?} got transaction from base {:?}, which it shouldn't",
+                                    self.domain_index,
+                                    base
+                                );
                                 unreachable!();
                             }
                             Bundle::Messages(count, vec![m])
@@ -163,10 +166,11 @@ impl DomainState {
                         box Packet::CompleteMigration { .. } => {
                             let m = *m; // workaround for #16223
                             if let Packet::CompleteMigration {
-                                       ingress_from_base,
-                                       egress_for_base,
-                                       ..
-                                   } = m {
+                                    ingress_from_base,
+                                    egress_for_base,
+                                    ..
+                                } = m
+                            {
                                 Bundle::MigrationEnd(ingress_from_base, egress_for_base)
                             } else {
                                 unreachable!()
@@ -190,10 +194,11 @@ impl DomainState {
                 box Packet::CompleteMigration { .. } => {
                     let m = *m; // workaround for #16223
                     if let Packet::CompleteMigration {
-                               ingress_from_base,
-                               egress_for_base,
-                               ..
-                           } = m {
+                            ingress_from_base,
+                            egress_for_base,
+                            ..
+                        } = m
+                    {
                         BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base)
                     } else {
                         unreachable!()
@@ -216,10 +221,9 @@ impl DomainState {
     }
 
     fn update_next_transaction(&mut self) {
-        let has_next = self.buffer
-            .peek()
-            .map(|e| e.prev_ts == self.ts)
-            .unwrap_or(false);
+        let has_next = self.buffer.peek().map(|e| e.prev_ts == self.ts).unwrap_or(
+            false,
+        );
 
         if has_next {
             let entry = self.buffer.pop().unwrap();
@@ -237,15 +241,15 @@ impl DomainState {
                         }
                     }
 
-                    self.next_transaction = Bundle::Messages(self.ingress_from_base[base.index()],
-                                                             messages);
+                    self.next_transaction =
+                        Bundle::Messages(self.ingress_from_base[base.index()], messages);
                 }
                 BufferedTransaction::MigrationStart(sender) => {
                     self.next_transaction = Bundle::MigrationStart(sender)
                 }
                 BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base) => {
-                    self.next_transaction = Bundle::MigrationEnd(ingress_from_base,
-                                                                 egress_for_base);
+                    self.next_transaction =
+                        Bundle::MigrationEnd(ingress_from_base, egress_for_base);
                 }
                 BufferedTransaction::Replay(packet) => {
                     self.next_transaction = Bundle::Replay(packet);
@@ -330,17 +334,19 @@ impl DomainState {
             self.ts = ts - 1;
 
             if let Bundle::Empty = self.next_transaction {
-                mem::replace(&mut self.next_transaction,
-                             Bundle::SeedReplay(tag, key, rts));
+                mem::replace(
+                    &mut self.next_transaction,
+                    Bundle::SeedReplay(tag, key, rts),
+                );
             } else {
                 unreachable!();
             }
         } else {
             self.buffer.push(BufferEntry {
-                                 ts: ts,
-                                 prev_ts: prev_ts,
-                                 transaction: BufferedTransaction::SeedReplay(tag, key, rts),
-                             });
+                ts: ts,
+                prev_ts: prev_ts,
+                transaction: BufferedTransaction::SeedReplay(tag, key, rts),
+            });
         }
     }
 

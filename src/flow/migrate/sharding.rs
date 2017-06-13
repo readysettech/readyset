@@ -13,11 +13,12 @@ pub enum Sharding {
     ByColumn(usize),
 }
 
-pub fn shard(log: &Logger,
-             graph: &mut Graph,
-             source: NodeIndex,
-             new: &mut HashSet<NodeIndex>)
-             -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
+pub fn shard(
+    log: &Logger,
+    graph: &mut Graph,
+    source: NodeIndex,
+    new: &mut HashSet<NodeIndex>,
+) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
 
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
@@ -51,21 +52,24 @@ pub fn shard(log: &Logger,
             // TODO: we may want to allow sharded Readers eventually...
             info!(log, "forcing de-sharding prior to Reader"; "node" => ?node);
             assert_eq!(input_shardings.len(), 1);
-            reshard(log,
-                    new,
-                    &mut swaps,
-                    graph,
-                    input_shardings.keys().next().cloned().unwrap(),
-                    node,
-                    Sharding::None);
+            reshard(
+                log,
+                new,
+                &mut swaps,
+                graph,
+                input_shardings.keys().next().cloned().unwrap(),
+                node,
+                Sharding::None,
+            );
             continue;
         } else {
             // non-internal nodes are always pass-through
             HashMap::new()
         };
         if need_sharding.is_empty() &&
-           (input_shardings.len() == 1 ||
-            input_shardings.iter().all(|(_, &s)| s == Sharding::None)) {
+            (input_shardings.len() == 1 ||
+                 input_shardings.iter().all(|(_, &s)| s == Sharding::None))
+        {
             let s = input_shardings.into_iter().map(|(_, s)| s).next().unwrap();
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
@@ -110,10 +114,12 @@ pub fn shard(log: &Logger,
             } else {
                 // non-internal nodes just pass through columns
                 assert_eq!(input_shardings.len(), 1);
-                Some(graph
-                         .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                         .map(|ni| (ni.into(), want_sharding))
-                         .collect())
+                Some(
+                    graph
+                        .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                        .map(|ni| (ni.into(), want_sharding))
+                        .collect(),
+                )
             };
             match resolved {
                 None if !graph[node].is_internal() || graph[node].get_base().is_none() => {
@@ -131,10 +137,11 @@ pub fn shard(log: &Logger,
                 None => {
                     // base nodes -- what do we shard them by?
                     warn!(log, "sharding base node"; "node" => ?node, "column" => want_sharding);
-                    graph
-                        .node_weight_mut(node)
-                        .unwrap()
-                        .shard_by(Sharding::ByColumn(want_sharding));
+                    graph.node_weight_mut(node).unwrap().shard_by(
+                        Sharding::ByColumn(
+                            want_sharding,
+                        ),
+                    );
                     continue;
                 }
                 Some(want_sharding_input) => {
@@ -351,8 +358,9 @@ pub fn shard(log: &Logger,
 
                 // if the base has other children, sharding it may have other effects
                 if graph
-                       .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
-                       .count() != 1 {
+                    .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
+                    .count() != 1
+                {
                     // TODO: technically we could still do this if the other children were
                     // sharded by the same column.
                     continue;
@@ -488,13 +496,15 @@ pub fn shard(log: &Logger,
 
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by column `col`.
-fn reshard(log: &Logger,
-           new: &mut HashSet<NodeIndex>,
-           swaps: &mut HashMap<(NodeIndex, NodeIndex), NodeIndex>,
-           graph: &mut Graph,
-           src: NodeIndex,
-           dst: NodeIndex,
-           to: Sharding) {
+fn reshard(
+    log: &Logger,
+    new: &mut HashSet<NodeIndex>,
+    swaps: &mut HashMap<(NodeIndex, NodeIndex), NodeIndex>,
+    graph: &mut Graph,
+    src: NodeIndex,
+    dst: NodeIndex,
+    to: Sharding,
+) {
     assert!(!graph[src].is_source());
 
     let node = match to {
@@ -534,7 +544,9 @@ fn reshard(log: &Logger,
 
     // if `dst` refers to `src`, it now needs to refer to `node` instead
     let old = swaps.insert((dst, src), node);
-    assert_eq!(old,
-               None,
-               "re-sharding already sharded node introduces swap collision");
+    assert_eq!(
+        old,
+        None,
+        "re-sharding already sharded node introduces swap collision"
+    );
 }

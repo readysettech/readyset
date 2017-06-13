@@ -3,14 +3,15 @@ use flow::node::NodeType;
 use flow::payload;
 
 impl Node {
-    pub fn process(&mut self,
-                   m: &mut Option<Box<Packet>>,
-                   keyed_by: Option<usize>,
-                   state: &mut StateMap,
-                   nodes: &DomainNodes,
-                   on_shard: Option<usize>,
-                   swap: bool)
-                   -> Vec<Miss> {
+    pub fn process(
+        &mut self,
+        m: &mut Option<Box<Packet>>,
+        keyed_by: Option<usize>,
+        state: &mut StateMap,
+        nodes: &DomainNodes,
+        on_shard: Option<usize>,
+        swap: bool,
+    ) -> Vec<Miss> {
         m.as_mut().unwrap().trace(PacketEvent::Process);
 
         let addr = *self.local_addr();
@@ -18,7 +19,9 @@ impl Node {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let mut misses = Vec::new();
-                m.map_data(|rs| { misses = materialize(rs, addr, state.get_mut(&addr)); });
+                m.map_data(|rs| {
+                    misses = materialize(rs, addr, state.get_mut(&addr));
+                });
                 misses
             }
             NodeType::Reader(ref mut r) => {
@@ -57,12 +60,13 @@ impl Node {
                     };
 
                     let replay = if let Packet::ReplayPiece {
-                               context: payload::ReplayPieceContext::Partial {
-                                   ref for_key,
-                                   ignore,
-                               },
-                               ..
-                           } = **m {
+                            context: payload::ReplayPieceContext::Partial {
+                                ref for_key,
+                                ignore,
+                            },
+                            ..
+                        } = **m
+                    {
                         assert!(!ignore);
                         assert!(keyed_by.is_some());
                         assert_eq!(for_key.len(), 1);
@@ -78,13 +82,15 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(from,
-                                             old_data,
-                                             &mut tracer,
-                                             replay,
-                                             nshards,
-                                             nodes,
-                                             state) {
+                        match i.on_input_raw(
+                            from,
+                            old_data,
+                            &mut tracer,
+                            replay,
+                            nshards,
+                            nodes,
+                            state,
+                        ) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
@@ -121,8 +127,8 @@ impl Node {
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
                     m.map_data(|rs| {
-                                   misses.extend(materialize(rs, addr, state.get_mut(&addr)));
-                               });
+                        misses.extend(materialize(rs, addr, state.get_mut(&addr)));
+                    });
                 }
 
                 misses
@@ -148,9 +154,9 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
             if let Some(columns) = state.hits_hole(r) {
                 // we would need a replay of this update.
                 holes.push(Miss {
-                               node: node,
-                               key: columns.into_iter().map(|&c| r[c].clone()).collect(),
-                           });
+                    node: node,
+                    key: columns.into_iter().map(|&c| r[c].clone()).collect(),
+                });
 
                 // we don't want to propagate records that miss
                 return false;

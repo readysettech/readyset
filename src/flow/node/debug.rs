@@ -26,13 +26,15 @@ impl Node {
             Sharding::Random => "filled,dashed",
             _ => "filled",
         };
-        write!(f,
-               " [style=\"{}\", fillcolor={}, label=\"",
-               border,
-               self.domain
-                   .map(|d| -> usize { d.into() })
-                   .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
-                   .unwrap_or("white".into()))?;
+        write!(
+            f,
+            " [style=\"{}\", fillcolor={}, label=\"",
+            border,
+            self.domain
+                .map(|d| -> usize { d.into() })
+                .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
+                .unwrap_or("white".into())
+        )?;
 
         let addr = match self.index {
             Some(ref idx) => {
@@ -57,11 +59,9 @@ impl Node {
                     Some(k) => format!("{}", k),
                 };
                 use flow::VIEW_READERS;
-                let size = match VIEW_READERS
-                          .lock()
-                          .unwrap()
-                          .get(&idx)
-                          .map(|state| state.len()) {
+                let size = match VIEW_READERS.lock().unwrap().get(&idx).map(
+                    |state| state.len(),
+                ) {
                     None => String::from("empty"),
                     Some(s) => format!("{} distinct keys", s),
                 };
@@ -71,11 +71,13 @@ impl Node {
                 write!(f, "{{")?;
 
                 // Output node name and description. First row.
-                write!(f,
-                       "{{ {} / {} | {} }}",
-                       addr,
-                       Self::escape(self.name()),
-                       Self::escape(&i.description()))?;
+                write!(
+                    f,
+                    "{{ {} / {} | {} }}",
+                    addr,
+                    Self::escape(self.name()),
+                    Self::escape(&i.description())
+                )?;
 
                 // Output node outputs. Second row.
                 write!(f, " | {}", self.fields().join(", \\n"))?;

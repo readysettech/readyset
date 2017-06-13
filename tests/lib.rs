@@ -12,19 +12,24 @@ const SETTLE_TIME_MS: u64 = 750;
 fn it_works_basic() {
     // set up graph
     let mut g = distributary::Blender::new();
-    let pparams =
-        distributary::PersistenceParameters::new(distributary::DurabilityMode::DeleteOnExit,
-                                                 128,
-                                                 time::Duration::from_millis(1));
+    let pparams = distributary::PersistenceParameters::new(
+        distributary::DurabilityMode::DeleteOnExit,
+        128,
+        time::Duration::from_millis(1),
+    );
     g.with_persistence_options(pparams);
     let (a, b, c) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec![]).with_key(vec![0]));
-        let b = mig.add_ingredient("b",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec![]).with_key(vec![0]));
+        let a = mig.add_ingredient(
+            "a",
+            &["a", "b"],
+            distributary::Base::new(vec![]).with_key(vec![0]),
+        );
+        let b = mig.add_ingredient(
+            "b",
+            &["a", "b"],
+            distributary::Base::new(vec![]).with_key(vec![0]),
+        );
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -105,13 +110,17 @@ fn it_works_streaming() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 2.into()].into()])
+    );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 4.into()].into()])
+    );
 }
 
 #[test]
@@ -142,17 +151,25 @@ fn shared_interdomain_ancestor() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
-    assert_eq!(bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    assert_eq!(
+        bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 2.into()].into()])
+    );
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 2.into()].into()])
+    );
 
     // update value again
     muta.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    assert_eq!(
+        bq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 4.into()].into()])
+    );
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 4.into()].into()])
+    );
 }
 
 #[test]
@@ -220,12 +237,16 @@ fn it_works_deletion() {
     let mut g = distributary::Blender::new();
     let (a, b, cq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["x", "y"],
-                                   distributary::Base::new(vec![]).with_key(vec![1]));
-        let b = mig.add_ingredient("b",
-                                   &["_", "x", "y"],
-                                   distributary::Base::new(vec![]).with_key(vec![2]));
+        let a = mig.add_ingredient(
+            "a",
+            &["x", "y"],
+            distributary::Base::new(vec![]).with_key(vec![1]),
+        );
+        let b = mig.add_ingredient(
+            "b",
+            &["_", "x", "y"],
+            distributary::Base::new(vec![]).with_key(vec![2]),
+        );
 
         let mut emits = HashMap::new();
         emits.insert(a, vec![0, 1]);
@@ -242,20 +263,26 @@ fn it_works_deletion() {
 
     // send a value on a
     muta.put(vec![1.into(), 2.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![1.into(), 2.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![1.into(), 2.into()].into()])
+    );
 
     // update value again
     mutb.put(vec![0.into(), 1.into(), 4.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![1.into(), 4.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![1.into(), 4.into()].into()])
+    );
 
     // delete first value
     use std::sync::Arc;
     use distributary::StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))])
+    );
 }
 
 #[test]
@@ -283,9 +310,11 @@ fn votes() {
         let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 
         // add vote count
-        let vc = mig.add_ingredient("vc",
-                                    &["id", "votes"],
-                                    Aggregation::COUNT.over(vote, 0, &[1]));
+        let vc = mig.add_ingredient(
+            "vc",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
         mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
@@ -343,10 +372,13 @@ fn votes() {
 
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1, true).unwrap();
-    assert!(res.iter()
-                .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-            "no entry for [1,2,1|2] in {:?}",
-            res);
+    assert!(
+        res.iter().any(|r| {
+            r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()
+        }),
+        "no entry for [1,2,1|2] in {:?}",
+        res
+    );
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
@@ -381,9 +413,11 @@ fn transactional_vote() {
         let vote = mig.add_transactional_base("vote", &["user", "id"], Base::default());
 
         // add vote count
-        let vc = mig.add_ingredient("vc",
-                                    &["id", "votes"],
-                                    Aggregation::COUNT.over(vote, 0, &[1]));
+        let vc = mig.add_ingredient(
+            "vc",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
         mig.maintain(vc, 0);
 
         // add final join using first field from article and first from vc
@@ -399,7 +433,16 @@ fn transactional_vote() {
 
         // start processing
         mig.commit();
-        (article1, article2, vote, article, vc, end, end_title, end_votes)
+        (
+            article1,
+            article2,
+            vote,
+            article,
+            vc,
+            end,
+            end_title,
+            end_votes,
+        )
     };
 
     let articleq = g.get_transactional_getter(article).unwrap();
@@ -422,8 +465,10 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // make one article
-    assert!(mut1.transactional_put(vec![a1.clone(), 2.into()], token)
-                .is_ok());
+    assert!(
+        mut1.transactional_put(vec![a1.clone(), 2.into()], token)
+            .is_ok()
+    );
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -438,8 +483,10 @@ fn transactional_vote() {
     assert!(!validate(&endq_votes_token));
 
     // make another article
-    assert!(mut2.transactional_put(vec![a2.clone(), 4.into()], token)
-                .is_ok());
+    assert!(
+        mut2.transactional_put(vec![a2.clone(), 4.into()], token)
+            .is_ok()
+    );
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -464,8 +511,10 @@ fn transactional_vote() {
     let endq_votes_token = endq_votes(&0.into()).unwrap().1;
 
     // create a vote (user 1 votes for article 1)
-    assert!(mutv.transactional_put(vec![1.into(), a1.clone()], token)
-                .is_ok());
+    assert!(
+        mutv.transactional_put(vec![1.into(), a1.clone()], token)
+            .is_ok()
+    );
 
     // give it some time to propagate
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
@@ -483,10 +532,13 @@ fn transactional_vote() {
     // check that article 1 appears in the join view with a vote count of one
     let res = endq(&a1).unwrap().0;
     assert_eq!(res.len(), 1);
-    assert!(res.iter()
-                .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
-            "no entry for [1,2,1|2] in {:?}",
-            res);
+    assert!(
+        res.iter().any(|r| {
+            r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()
+        }),
+        "no entry for [1,2,1|2] in {:?}",
+        res
+    );
 
     // check that article 2 doesn't have any votes
     let res = endq(&a2).unwrap().0;
@@ -599,9 +651,11 @@ fn add_columns() {
     let mut g = distributary::Blender::new();
     let (a, aq) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_ingredient(
+            "a",
+            &["a", "b"],
+            distributary::Base::new(vec![1.into(), 2.into()]),
+        );
         let aq = mig.stream(a);
         mig.commit();
         (a, aq)
@@ -612,8 +666,10 @@ fn add_columns() {
     muta.put(vec![id.clone(), "y".into()]).unwrap();
 
     // check that a got it
-    assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "y".into()].into()]));
+    assert_eq!(
+        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "y".into()].into()])
+    );
 
     // add a third column to a
     {
@@ -626,16 +682,20 @@ fn add_columns() {
     muta.put(vec![id.clone(), "z".into()]).unwrap();
 
     // check that a got it, and added the new, third column's default
-    assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()]));
+    assert_eq!(
+        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "z".into(), 3.into()].into()])
+    );
 
     // get a new muta and send a new value on it
     let mut muta = g.get_mutator(a);
     muta.put(vec![id.clone(), "a".into(), 10.into()]).unwrap();
 
     // check that a got it, and included the third column
-    assert_eq!(aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "a".into(), 10.into()].into()]));
+    assert_eq!(
+        aq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "a".into(), 10.into()].into()])
+    );
 }
 
 #[test]
@@ -646,9 +706,11 @@ fn migrate_added_columns() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_ingredient(
+            "a",
+            &["a", "b"],
+            distributary::Base::new(vec![1.into(), 2.into()]),
+        );
         mig.commit();
         a
     };
@@ -662,9 +724,11 @@ fn migrate_added_columns() {
     let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient("x",
-                                   &["c", "b"],
-                                   distributary::Project::new(a, &[2, 0], None));
+        let b = mig.add_ingredient(
+            "x",
+            &["c", "b"],
+            distributary::Project::new(a, &[2, 0], None),
+        );
         mig.maintain(b, 1);
         mig.commit();
         b
@@ -685,10 +749,12 @@ fn migrate_added_columns() {
     // value, and the new post-migration write with the value it contained.
     let res = bq(&id, true).unwrap();
     assert_eq!(res.len(), 3);
-    assert_eq!(res.iter()
-                   .filter(|&r| r == &vec![3.into(), id.clone()])
-                   .count(),
-               2);
+    assert_eq!(
+        res.iter()
+            .filter(|&r| r == &vec![3.into(), id.clone()])
+            .count(),
+        2
+    );
     assert!(res.iter().any(|r| r == &vec![10.into(), id.clone()]));
 }
 
@@ -700,9 +766,11 @@ fn migrate_drop_columns() {
     let mut g = distributary::Blender::new();
     let (a, stream) = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec!["a".into(), "b".into()]));
+        let a = mig.add_ingredient(
+            "a",
+            &["a", "b"],
+            distributary::Base::new(vec!["a".into(), "b".into()]),
+        );
         let stream = mig.stream(a);
         mig.commit();
         (a, stream)
@@ -745,16 +813,26 @@ fn migrate_drop_columns() {
     // using putter that knows of neither b nor c should result in defaults for both
     muta2.put(vec![id.clone()]).unwrap();
 
-    assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "bx".into()].into()]));
-    assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "b".into()].into()]));
-    assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "b".into(), "cy".into()].into()]));
-    assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "bz".into(), "c".into()].into()]));
-    assert_eq!(stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), "b".into(), "c".into()].into()]));
+    assert_eq!(
+        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "bx".into()].into()])
+    );
+    assert_eq!(
+        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "b".into()].into()])
+    );
+    assert_eq!(
+        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "b".into(), "cy".into()].into()])
+    );
+    assert_eq!(
+        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "bz".into(), "c".into()].into()])
+    );
+    assert_eq!(
+        stream.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), "b".into(), "c".into()].into()])
+    );
     assert_eq!(stream.try_recv(), Err(mpsc::TryRecvError::Empty));
 }
 
@@ -764,9 +842,11 @@ fn key_on_added() {
     let mut g = distributary::Blender::new();
     let a = {
         let mut mig = g.start_migration();
-        let a = mig.add_ingredient("a",
-                                   &["a", "b"],
-                                   distributary::Base::new(vec![1.into(), 2.into()]));
+        let a = mig.add_ingredient(
+            "a",
+            &["a", "b"],
+            distributary::Base::new(vec![1.into(), 2.into()]),
+        );
         mig.commit();
         a
     };
@@ -775,9 +855,11 @@ fn key_on_added() {
     let b = {
         let mut mig = g.start_migration();
         mig.add_column(a, "c", 3.into());
-        let b = mig.add_ingredient("x",
-                                   &["c", "b"],
-                                   distributary::Project::new(a, &[2, 1], None));
+        let b = mig.add_ingredient(
+            "x",
+            &["c", "b"],
+            distributary::Project::new(a, &[2, 1], None),
+        );
         mig.maintain(b, 0);
         mig.commit();
         b
@@ -863,8 +945,10 @@ fn transactional_migration() {
     thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
 
     // check that c got them
-    assert_eq!(cq(&3.into()).unwrap().0,
-               vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]);
+    assert_eq!(
+        cq(&3.into()).unwrap().0,
+        vec![vec![3.into(), 5.into()], vec![3.into(), 6.into()]]
+    );
 }
 
 #[test]
@@ -895,13 +979,17 @@ fn crossing_migration() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 2.into()].into()])
+    );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 4.into()].into()])
+    );
 }
 
 #[test]
@@ -980,13 +1068,17 @@ fn domain_amend_migration() {
 
     // send a value on a
     muta.put(vec![id.clone(), 2.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 2.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 2.into()].into()])
+    );
 
     // update value again
     mutb.put(vec![id.clone(), 4.into()]).unwrap();
-    assert_eq!(cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![id.clone(), 4.into()].into()]));
+    assert_eq!(
+        cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![id.clone(), 4.into()].into()])
+    );
 }
 
 #[test]
@@ -1023,10 +1115,12 @@ fn state_replay_migration_stream() {
         let mut mig = g.start_migration();
         let b = mig.add_ingredient("b", &["x", "z"], distributary::Base::default());
         use distributary::JoinSource::*;
-        let j = distributary::Join::new(a,
-                                        b,
-                                        distributary::JoinType::Inner,
-                                        vec![B(0, 0), L(1), R(1)]);
+        let j = distributary::Join::new(
+            a,
+            b,
+            distributary::JoinType::Inner,
+            vec![B(0, 0), L(1), R(1)],
+        );
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
@@ -1048,15 +1142,19 @@ fn state_replay_migration_stream() {
     // they may arrive in any order
     let res = out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS))
         .unwrap();
-    assert!(res.iter()
-                .any(|r| r == &vec![1.into(), "a".into(), "n".into()].into()));
-    assert!(res.iter()
-                .any(|r| r == &vec![1.into(), "b".into(), "n".into()].into()));
+    assert!(res.iter().any(|r| {
+        r == &vec![1.into(), "a".into(), "n".into()].into()
+    }));
+    assert!(res.iter().any(|r| {
+        r == &vec![1.into(), "b".into(), "n".into()].into()
+    }));
 
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]).unwrap();
-    assert_eq!(out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-               Ok(vec![vec![2.into(), "c".into(), "o".into()].into()]));
+    assert_eq!(
+        out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
+        Ok(vec![vec![2.into(), "c".into(), "o".into()].into()])
+    );
 
     // there should now be no more records
     drop(g);
@@ -1092,11 +1190,15 @@ fn migration_depends_on_unchanged_domain() {
     // joins require their inputs to be materialized
     // we need a new base as well so we can actually make a join
     let tmp = mig.add_ingredient("tmp", &["a", "b"], distributary::Base::default());
-    let j = distributary::Join::new(left,
-                                    tmp,
-                                    distributary::JoinType::Inner,
-                                    vec![distributary::JoinSource::B(0, 0),
-                                         distributary::JoinSource::R(1)]);
+    let j = distributary::Join::new(
+        left,
+        tmp,
+        distributary::JoinType::Inner,
+        vec![
+            distributary::JoinSource::B(0, 0),
+            distributary::JoinSource::R(1),
+        ],
+    );
     mig.add_ingredient("join", &["a", "b"], j);
 
     // start processing
@@ -1122,9 +1224,11 @@ fn do_full_vote_migration(old_puts_after: bool) {
         vote = mig.add_ingredient("vote", &["user", "id"], Base::default().with_key(vec![1]));
 
         // add vote count
-        vc = mig.add_ingredient("votecount",
-                                &["id", "votes"],
-                                Aggregation::COUNT.over(vote, 0, &[1]));
+        vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
 
         // add final join using first field from article and first from vc
         use distributary::JoinSource::*;
@@ -1159,9 +1263,11 @@ fn do_full_vote_migration(old_puts_after: bool) {
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
-        assert_eq!(row[0],
-                   i.into(),
-                   "each article result should have the right id");
+        assert_eq!(
+            row[0],
+            i.into(),
+            "each article result should have the right id"
+        );
         assert_eq!(row[1], title, "all articles should have title 'foo'");
         assert_eq!(row[2], 1.into(), "all articles should have one vote");
     }
@@ -1174,9 +1280,11 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let rating = mig.add_ingredient("rating", &["user", "id", "stars"], Base::default());
 
         // add sum of ratings
-        let rs = mig.add_ingredient("rsum",
-                                    &["id", "total"],
-                                    Aggregation::SUM.over(rating, 2, &[1]));
+        let rs = mig.add_ingredient(
+            "rsum",
+            &["id", "total"],
+            Aggregation::SUM.over(rating, 2, &[1]),
+        );
 
         // join vote count and rsum (and in theory, sum them)
         use distributary::JoinSource::*;
@@ -1184,10 +1292,12 @@ fn do_full_vote_migration(old_puts_after: bool) {
         let total = mig.add_ingredient("total", &["id", "ratings", "votes"], j);
 
         // finally, produce end result
-        let j = Join::new(article,
-                          total,
-                          JoinType::Inner,
-                          vec![B(0, 0), L(1), R(1), R(2)]);
+        let j = Join::new(
+            article,
+            total,
+            JoinType::Inner,
+            vec![B(0, 0), L(1), R(1), R(2)],
+        );
         let newend = mig.add_ingredient("awr", &["id", "title", "ratings", "votes"], j);
         mig.maintain(newend, 0);
 
@@ -1212,9 +1322,11 @@ fn do_full_vote_migration(old_puts_after: bool) {
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
-        assert_eq!(row[0],
-                   i.into(),
-                   "each article result should have the right id");
+        assert_eq!(
+            row[0],
+            i.into(),
+            "each article result should have the right id"
+        );
         assert_eq!(row[1], title, "all articles should have title 'foo'");
         assert_eq!(row[2], raten, "all articles should have one 5-star rating");
         if old_puts_after {
@@ -1250,9 +1362,11 @@ fn live_writes() {
         vote = mig.add_ingredient("vote", &["user", "id"], distributary::Base::default());
 
         // add vote count
-        vc = mig.add_ingredient("votecount",
-                                &["id", "votes"],
-                                Aggregation::COUNT.over(vote, 0, &[1]));
+        vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
 
         mig.maintain(vc, 0);
 
@@ -1268,13 +1382,13 @@ fn live_writes() {
 
     // continuously write to vote
     let jh = thread::spawn(move || {
-                               let user: DataType = 0.into();
-                               for _ in 0..votes {
-                                   for i in 0..ids {
-                                       add.put(vec![user.clone(), i.into()]).unwrap();
-                                   }
-                               }
-                           });
+        let user: DataType = 0.into();
+        for _ in 0..votes {
+            for i in 0..ids {
+                add.put(vec![user.clone(), i.into()]).unwrap();
+            }
+        }
+    });
 
     // let a few writes through to make migration take a while
     thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
@@ -1282,9 +1396,11 @@ fn live_writes() {
     // now do a migration that's going to have to copy state
     let vc2 = {
         let mut mig = g.start_migration();
-        let vc2 = mig.add_ingredient("votecount2",
-                                     &["id", "votes"],
-                                     Aggregation::SUM.over(vc, 1, &[0]));
+        let vc2 = mig.add_ingredient(
+            "votecount2",
+            &["id", "votes"],
+            Aggregation::SUM.over(vc, 1, &[0]),
+        );
         mig.maintain(vc2, 0);
         mig.commit();
         vc2
@@ -1302,10 +1418,14 @@ fn live_writes() {
 
     // check that all writes happened the right number of times
     for i in 0..ids {
-        assert_eq!(vc_state(&i.into(), true),
-                   Ok(vec![vec![i.into(), votes.into()]]));
-        assert_eq!(vc2_state(&i.into(), true),
-                   Ok(vec![vec![i.into(), votes.into()]]));
+        assert_eq!(
+            vc_state(&i.into(), true),
+            Ok(vec![vec![i.into(), votes.into()]])
+        );
+        assert_eq!(
+            vc2_state(&i.into(), true),
+            Ok(vec![vec![i.into(), votes.into()]])
+        );
     }
 }
 
@@ -1338,10 +1458,12 @@ fn state_replay_migration_query() {
         // add join and a reader node
         let mut mig = g.start_migration();
         use distributary::JoinSource::*;
-        let j = distributary::Join::new(a,
-                                        b,
-                                        distributary::JoinType::Inner,
-                                        vec![B(0, 0), L(1), R(1)]);
+        let j = distributary::Join::new(
+            a,
+            b,
+            distributary::JoinType::Inner,
+            vec![B(0, 0), L(1), R(1)],
+        );
         let j = mig.add_ingredient("j", &["x", "y", "z"], j);
 
         // we want to observe what comes out of the join
@@ -1359,14 +1481,18 @@ fn state_replay_migration_query() {
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
     let res = out(&1.into(), true).unwrap();
-    assert!(res.iter()
-                .any(|r| r == &vec![1.into(), "a".into(), "n".into()]));
-    assert!(res.iter()
-                .any(|r| r == &vec![1.into(), "b".into(), "n".into()]));
+    assert!(res.iter().any(
+        |r| r == &vec![1.into(), "a".into(), "n".into()],
+    ));
+    assert!(res.iter().any(
+        |r| r == &vec![1.into(), "b".into(), "n".into()],
+    ));
 
     // there are (/should be) one record in a with x == 2
-    assert_eq!(out(&2.into(), true),
-               Ok(vec![vec![2.into(), "c".into(), "o".into()]]));
+    assert_eq!(
+        out(&2.into(), true),
+        Ok(vec![vec![2.into(), "c".into(), "o".into()]])
+    );
 
     // there are (/should be) no records with x == 3
     assert!(out(&3.into(), true).unwrap().is_empty());
@@ -1481,10 +1607,10 @@ fn tpc_w() {
         let lines: Vec<String> = s.lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .map(|l| if !(l.ends_with('\n') || l.ends_with(';')) {
-                     String::from(l) + "\n"
-                 } else {
-                     String::from(l)
-                 })
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            })
             .collect();
 
         // Add them one by one

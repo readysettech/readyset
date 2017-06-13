@@ -35,21 +35,22 @@ impl Hook {
     /// of tuples in this form
     ///
     /// `(address, weight)`.
-    pub fn new(name: String,
-               servers: &[(&str, usize)],
-               key_columns: Vec<usize>)
-               -> io::Result<Self> {
+    pub fn new(
+        name: String,
+        servers: &[(&str, usize)],
+        key_columns: Vec<usize>,
+    ) -> io::Result<Self> {
         let client = try!(memcached::Client::connect(&servers, ProtoType::Binary));
 
         let mut s = State::default();
         s.add_key(&key_columns[..], false);
 
         Ok(Self {
-               client: Memcache(client),
-               key_columns: key_columns,
-               name: Value::String(name),
-               state: s,
-           })
+            client: Memcache(client),
+            key_columns: key_columns,
+            name: Value::String(name),
+            state: s,
+        })
     }
 
     /// Push the relevant record updates to Memcached.
@@ -69,20 +70,20 @@ impl Hook {
         let mut modified_keys: Vec<_> = records
             .into_iter()
             .map(|rec| match rec {
-                     Record::Positive(a) |
-                     Record::Negative(a) => {
-                         a.iter()
-                             .enumerate()
-                             .filter_map(|(i, v)| if self.key_columns.iter().any(|col| col == &i) {
-                                             Some(v)
-                                         } else {
-                                             None
-                                         })
-                             .cloned()
-                             .collect::<Vec<_>>()
-                     }
-                     Record::DeleteRequest(..) => unreachable!(),
-                 })
+                Record::Positive(a) |
+                Record::Negative(a) => {
+                    a.iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| if self.key_columns.iter().any(|col| col == &i) {
+                            Some(v)
+                        } else {
+                            None
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                }
+                Record::DeleteRequest(..) => unreachable!(),
+            })
             .collect();
 
         // Remove duplicates
@@ -91,8 +92,10 @@ impl Hook {
 
         // Push to Memcached
         for key in modified_keys {
-            let rows = match self.state
-                      .lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
+            let rows = match self.state.lookup(
+                &self.key_columns[..],
+                &KeyType::from(&key[..]),
+            ) {
                 LookupResult::Some(rows) => rows,
                 LookupResult::Missing => {
                     unreachable!();
@@ -100,13 +103,13 @@ impl Hook {
             };
             let array = key.iter().map(DataType::to_json).collect();
             let k = Value::Array(vec![self.name.clone(), array]).to_string();
-            let v =
-                Value::Array(rows.into_iter()
-                                 .map(|row| {
-                                          Value::Array(row.iter().map(DataType::to_json).collect())
-                                      })
-                                 .collect())
-                    .to_string();
+            let v = Value::Array(
+                rows.into_iter()
+                    .map(|row| {
+                        Value::Array(row.iter().map(DataType::to_json).collect())
+                    })
+                    .collect(),
+            ).to_string();
             let flags = 0xdeadbeef;
             (self.client.0)
                 .set(k.as_bytes(), v.as_bytes(), flags, 0)
@@ -129,10 +132,11 @@ mod tests {
     #[test]
     #[ignore]
     fn it_works() {
-        let mut h = Hook::new(String::from("table_1"),
-                              &[("tcp://127.0.0.1:11211", 1)],
-                              vec![0])
-            .unwrap();
+        let mut h = Hook::new(
+            String::from("table_1"),
+            &[("tcp://127.0.0.1:11211", 1)],
+            vec![0],
+        ).unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 2.into()]].into());
@@ -145,7 +149,9 @@ mod tests {
         assert_eq!(String::from_utf8(row).unwrap(), "[]");
 
         // Insert two more rows
-        h.on_input(vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]].into());
+        h.on_input(
+            vec![vec![2.into(), 3.into()], vec![2.into(), 4.into()]].into(),
+        );
         let row = h.get_row(vec![2.into()]).unwrap().0;
         assert_eq!(String::from_utf8(row).unwrap(), "[[2,3],[2,4]]");
 
@@ -158,10 +164,11 @@ mod tests {
     #[test]
     #[ignore]
     fn it_works_multikey() {
-        let mut h = Hook::new(String::from("table_2"),
-                              &[("tcp://127.0.0.1:11211", 1)],
-                              vec![0, 2])
-            .unwrap();
+        let mut h = Hook::new(
+            String::from("table_2"),
+            &[("tcp://127.0.0.1:11211", 1)],
+            vec![0, 2],
+        ).unwrap();
 
         // Insert a row
         h.on_input(vec![vec![2.into(), 5.into(), 3.into()]].into());
@@ -174,9 +181,12 @@ mod tests {
         assert_eq!(String::from_utf8(row).unwrap(), "[]");
 
         // Insert two more rows
-        h.on_input(vec![vec![2.into(), 6.into(), 3.into()],
-                        vec![2.into(), "xyz".into(), 3.into()]]
-                       .into());
+        h.on_input(
+            vec![
+                vec![2.into(), 6.into(), 3.into()],
+                vec![2.into(), "xyz".into(), 3.into()],
+            ].into(),
+        );
         let row = h.get_row(vec![2.into(), 3.into()]).unwrap().0;
         assert_eq!(String::from_utf8(row).unwrap(), "[[2,6,3],[2,\"xyz\",3]]");
 

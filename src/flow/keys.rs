@@ -5,22 +5,26 @@ use petgraph::graph::NodeIndex;
 
 use std::collections::HashMap;
 
-pub fn provenance_of<F>(graph: &Graph,
-                        node: NodeIndex,
-                        column: usize,
-                        mut on_join: F)
-                        -> Vec<Vec<(NodeIndex, Option<usize>)>>
-    where F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>
+pub fn provenance_of<F>(
+    graph: &Graph,
+    node: NodeIndex,
+    column: usize,
+    mut on_join: F,
+) -> Vec<Vec<(NodeIndex, Option<usize>)>>
+where
+    F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>,
 {
     let path = vec![(node, Some(column))];
     trace(graph, &mut on_join, path)
 }
 
-fn trace<F>(graph: &Graph,
-            on_join: &mut F,
-            mut path: Vec<(NodeIndex, Option<usize>)>)
-            -> Vec<Vec<(NodeIndex, Option<usize>)>>
-    where F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>
+fn trace<F>(
+    graph: &Graph,
+    on_join: &mut F,
+    mut path: Vec<(NodeIndex, Option<usize>)>,
+) -> Vec<Vec<(NodeIndex, Option<usize>)>>
+where
+    F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>,
 {
     // figure out what node/column we're looking up
     let (node, column) = path.last().cloned().unwrap();
@@ -118,9 +122,9 @@ fn trace<F>(graph: &Graph,
     let mut resolved: HashMap<_, _> = resolved
         .into_iter()
         .map(|(p, col)| {
-                 // we know joins don't generate values.
-                 (p, col.unwrap())
-             })
+            // we know joins don't generate values.
+            (p, col.unwrap())
+        })
         .collect();
 
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*

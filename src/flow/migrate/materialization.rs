@@ -63,9 +63,10 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
             // nodes should be materialized
             if n.is_internal() {
                 if n.should_materialize() ||
-                   graph
-                       .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                       .any(|e| *e.weight()) {
+                    graph
+                        .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                        .any(|e| *e.weight())
+                {
                     trace!(log, "should materialize"; "node" => format!("{}", ni.index()));
                     Some(n.global_addr())
                 } else {
@@ -115,10 +116,11 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
                     while !q.is_empty() {
                         let ni = q.pop().unwrap();
                         for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                            let next =
-                                mark_parent_inquisitive_or_materialize(ni,
-                                                                       &mut materialize,
-                                                                       &mut inquisitive_children);
+                            let next = mark_parent_inquisitive_or_materialize(
+                                ni,
+                                &mut materialize,
+                                &mut inquisitive_children,
+                            );
                             match next {
                                 Some(next_ni) => q.push(next_ni),
                                 None => continue,
@@ -133,12 +135,15 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     for &(ni, n, _) in &nodes {
         if n.is_ingress() {
             if graph
-                   .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                   .any(|child| inquisitive_children.contains(&child)) {
+                .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                .any(|child| inquisitive_children.contains(&child))
+            {
                 // we have children that may query us, so our output should be materialized
-                trace!(log,
-                       "querying children force materialization of node {}",
-                       ni.index());
+                trace!(
+                    log,
+                    "querying children force materialization of node {}",
+                    ni.index()
+                );
                 materialize.insert(n.global_addr());
             }
         }
@@ -158,8 +163,9 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
             }
 
             if graph
-                   .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
-                   .any(|e| *e.weight()) {
+                .edges_directed(ni, petgraph::EdgeDirection::Outgoing)
+                .any(|e| *e.weight())
+            {
                 // our output is materialized! what a waste. instead, materialize our input.
                 materialize.remove(&n.global_addr());
                 trace!(log, "hoisting materialization"; "past" => ni.index());
@@ -176,11 +182,12 @@ pub fn pick(log: &Logger, graph: &Graph, nodes: &[(NodeIndex, bool)]) -> HashSet
     materialize
 }
 
-pub fn index(log: &Logger,
-             graph: &Graph,
-             nodes: &[(NodeIndex, bool)],
-             materialize: HashSet<NodeIndex>)
-             -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
+pub fn index(
+    log: &Logger,
+    graph: &Graph,
+    nodes: &[(NodeIndex, bool)],
+    materialize: HashSet<NodeIndex>,
+) -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
 
     let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
@@ -274,12 +281,14 @@ pub fn index(log: &Logger,
                         // hence the two nested loops are required here.
                         for (n, cols) in cols_to_index_per_node {
                             for col in cols {
-                                trace!(log,
-                                       "pushing up index {:?} on {} into columns {:?} of {}",
-                                       idx,
-                                       v.index(),
-                                       col,
-                                       n.index());
+                                trace!(
+                                    log,
+                                    "pushing up index {:?} on {} into columns {:?} of {}",
+                                    idx,
+                                    v.index(),
+                                    col,
+                                    n.index()
+                                );
                                 tmp.entry(n).or_insert_with(HashSet::new).insert(vec![col]);
                             }
                         }
@@ -316,12 +325,12 @@ pub fn index(log: &Logger,
         .collect()
 }
 
-pub fn initialize(log: &Logger,
-                  blender: &mut flow::Blender,
-                  new: &HashSet<NodeIndex>,
-                  mut materialize: HashMap<domain::Index,
-                                           HashMap<LocalNodeIndex, Vec<Vec<usize>>>>)
-                  -> HashMap<Tag, Vec<domain::Index>> {
+pub fn initialize(
+    log: &Logger,
+    blender: &mut flow::Blender,
+    new: &HashSet<NodeIndex>,
+    mut materialize: HashMap<domain::Index, HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
+) -> HashMap<Tag, Vec<domain::Index>> {
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&blender.ingredients);
     while let Some(node) = topo.next(&blender.ingredients) {
@@ -349,16 +358,16 @@ pub fn initialize(log: &Logger,
             .and_then(|ss| ss.get(&addr))
             .cloned()
             .map(|idxs| {
-                     // we've been told to materialize a node using 0 indices
-                     assert!(!idxs.is_empty());
-                     idxs
-                 })
+                // we've been told to materialize a node using 0 indices
+                assert!(!idxs.is_empty());
+                idxs
+            })
             .unwrap_or_else(Vec::new);
         let mut has_state = !index_on.is_empty();
 
         blender.ingredients[node].with_reader(|r| if r.is_materialized() {
-                                                  has_state = true;
-                                              });
+            has_state = true;
+        });
 
         // ready communicates to the domain in charge of a particular node that it should start
         // delivering updates to a given new node. note that we wait for the domain to acknowledge
@@ -371,10 +380,10 @@ pub fn initialize(log: &Logger,
             txs.get_mut(&d)
                 .unwrap()
                 .send(box Packet::Ready {
-                          node: addr,
-                          index: index_on,
-                          ack: ack_tx,
-                      })
+                    node: addr,
+                    index: index_on,
+                    ack: ack_tx,
+                })
                 .unwrap();
             match ack_rx.recv() {
                 Err(mpsc::RecvError) => (),
@@ -384,10 +393,11 @@ pub fn initialize(log: &Logger,
         };
 
         if blender
-               .ingredients
-               .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-               .filter(|&ni| ni != blender.source)
-               .all(|n| empty.contains(&n)) {
+            .ingredients
+            .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+            .filter(|&ni| ni != blender.source)
+            .all(|n| empty.contains(&n))
+        {
             // all parents are empty, so we can materialize it immediately
             info!(log, "no need to replay empty view"; "node" => node.index());
             empty.insert(node);
@@ -425,9 +435,11 @@ pub fn initialize(log: &Logger,
             // we have a parent that has data, so we need to replay and reconstruct
             let start = ::std::time::Instant::now();
             let log = log.new(o!("node" => node.index()));
-            info!(log,
-                  "beginning reconstruction of {:?}",
-                  blender.ingredients[node]);
+            info!(
+                log,
+                "beginning reconstruction of {:?}",
+                blender.ingredients[node]
+            );
             let new_paths = reconstruct(&log, blender, &empty, &materialize, node, index_on);
             domains_on_path.extend(new_paths.into_iter());
 
@@ -440,25 +452,25 @@ pub fn initialize(log: &Logger,
     domains_on_path
 }
 
-pub fn reconstruct(log: &Logger,
-                   blender: &mut flow::Blender,
-                   empty: &HashSet<NodeIndex>,
-                   materialized: &HashMap<domain::Index,
-                                          HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
-                   node: NodeIndex,
-                   mut index_on: Vec<Vec<usize>>)
-                   -> HashMap<Tag, Vec<domain::Index>> {
+pub fn reconstruct(
+    log: &Logger,
+    blender: &mut flow::Blender,
+    empty: &HashSet<NodeIndex>,
+    materialized: &HashMap<domain::Index, HashMap<LocalNodeIndex, Vec<Vec<usize>>>>,
+    node: NodeIndex,
+    mut index_on: Vec<Vec<usize>>,
+) -> HashMap<Tag, Vec<domain::Index>> {
 
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
         // figure out what key that Reader is using
         blender.ingredients[node]
             .with_reader(|r| {
-                             assert!(r.is_materialized());
-                             if let Some(rh) = r.key() {
-                                 index_on.push(vec![rh]);
-                             }
-                         })
+                assert!(r.is_materialized());
+                if let Some(rh) = r.key() {
+                    index_on.push(vec![rh]);
+                }
+            })
             .unwrap();
     }
 
@@ -480,12 +492,14 @@ pub fn reconstruct(log: &Logger,
     //
     // so, first things first, let's find all our paths up the tree
     let paths = {
-        let mut on_join = cost_fn(log,
-                                  &blender.ingredients,
-                                  &blender.partial,
-                                  &mut blender.domains,
-                                  empty,
-                                  materialized);
+        let mut on_join = cost_fn(
+            log,
+            &blender.ingredients,
+            &blender.partial,
+            &mut blender.domains,
+            empty,
+            materialized,
+        );
         // TODO: what if we're constructing multiple indices?
         // TODO: what if we have a compound index?
         let trace_col = index_on[0][0];
@@ -547,22 +561,24 @@ pub fn reconstruct(log: &Logger,
     let mut partial_ok = blender.partial_enabled;
     if partial_ok {
         partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-                     paths.iter().all(|path| {
-            let &(node, col) = path.last().unwrap();
-            if col.is_none() {
-                // doesn't trace back to a column
-                return false;
-            }
+            paths.iter().all(|path| {
+                let &(node, col) = path.last().unwrap();
+                if col.is_none() {
+                    // doesn't trace back to a column
+                    return false;
+                }
 
-            let n = &blender.ingredients[node];
-            let col = col.unwrap();
-            // node must also have an *index* on col
-            materialized
-                .get(&n.domain())
-                .and_then(|d| d.get(n.local_addr()))
-                .map(|indices| indices.iter().any(|idx| idx.len() == 1 && idx[0] == col))
-                .unwrap_or(false)
-        });
+                let n = &blender.ingredients[node];
+                let col = col.unwrap();
+                // node must also have an *index* on col
+                materialized
+                    .get(&n.domain())
+                    .and_then(|d| d.get(n.local_addr()))
+                    .map(|indices| {
+                        indices.iter().any(|idx| idx.len() == 1 && idx[0] == col)
+                    })
+                    .unwrap_or(false)
+            });
     }
 
     // FIXME: if a reader has no materialized views between it and a union, we will end
@@ -585,8 +601,10 @@ pub fn reconstruct(log: &Logger,
     let domain = graph[node].domain();
     let addr = *graph[node].local_addr();
     let cols = graph[node].fields().len();
-    assert!(!index_on.is_empty(),
-            "all materialized nodes must have a state key");
+    assert!(
+        !index_on.is_empty(),
+        "all materialized nodes must have a state key"
+    );
 
     // tell the domain in question to create an empty state for the node in question
     use flow::payload::InitialState;
@@ -625,21 +643,21 @@ pub fn reconstruct(log: &Logger,
             }
         })
         .unwrap_or_else(|| if partial_ok {
-                            assert_eq!(index_on.len(), 1);
-                            assert_eq!(index_on[0].len(), 1);
-                            InitialState::PartialLocal(index_on[0][0])
-                        } else {
-                            InitialState::IndexedLocal(index_on)
-                        });
+            assert_eq!(index_on.len(), 1);
+            assert_eq!(index_on[0].len(), 1);
+            InitialState::PartialLocal(index_on[0][0])
+        } else {
+            InitialState::IndexedLocal(index_on)
+        });
 
     blender
         .domains
         .get_mut(&domain)
         .unwrap()
         .send(box Packet::PrepareState {
-                  node: addr,
-                  state: s,
-              })
+            node: addr,
+            state: s,
+        })
         .unwrap();
 
     // NOTE:
@@ -664,15 +682,17 @@ pub fn reconstruct(log: &Logger,
     // set up channels for replay along each path
     for mut path in paths {
         // there should always be a replay path
-        assert!(!path.is_empty(),
-                "needed to replay non-empty node, but no materializations found");
+        assert!(
+            !path.is_empty(),
+            "needed to replay non-empty node, but no materializations found"
+        );
 
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        let tag = first_tag
-            .take()
-            .unwrap_or_else(|| Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
+        let tag = first_tag.take().unwrap_or_else(|| {
+            Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32)
+        });
         trace!(log, "replaying along path {:?}", path; "tag" => tag.id());
 
         // partial materialization possible?
@@ -734,8 +754,10 @@ pub fn reconstruct(log: &Logger,
             // TODO:
             //  a domain may appear multiple times in this list if a path crosses into the same
             //  domain more than once. currently, that will cause a deadlock.
-            assert!(!seen.contains(domain),
-                    "a-b-a domain replays are not yet supported");
+            assert!(
+                !seen.contains(domain),
+                "a-b-a domain replays are not yet supported"
+            );
             seen.insert(*domain);
 
             let locals = locals(i);
@@ -808,10 +830,10 @@ pub fn reconstruct(log: &Logger,
                         .get_mut(domain)
                         .unwrap()
                         .send(box Packet::UpdateEgress {
-                                  node: *n.local_addr(),
-                                  new_tx: None,
-                                  new_tag: Some((tag, segments[i + 1].1[0].0.into())),
-                              })
+                            node: *n.local_addr(),
+                            new_tx: None,
+                            new_tag: Some((tag, segments[i + 1].1[0].0.into())),
+                        })
                         .unwrap();
                 } else {
                     assert!(n.is_sharder());
@@ -841,9 +863,9 @@ pub fn reconstruct(log: &Logger,
                 .get_mut(&segments[0].0)
                 .unwrap()
                 .send(box Packet::StartReplay {
-                          tag: tag,
-                          from: *graph[segments[0].1[0].0].local_addr(),
-                      })
+                    tag: tag,
+                    from: *graph[segments[0].1[0].0].local_addr(),
+                })
                 .unwrap();
 
             // and finally, wait for the last domain to finish the replay
@@ -858,13 +880,14 @@ pub fn reconstruct(log: &Logger,
     domains_on_path
 }
 
-fn cost_fn<'a, T>(log: &'a Logger,
-                  graph: &'a Graph,
-                  partial: &'a HashSet<NodeIndex>,
-                  txs: &'a mut HashMap<domain::Index, domain::DomainHandle>,
-                  empty: &'a HashSet<NodeIndex>,
-                  materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>)
-                  -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
+fn cost_fn<'a, T>(
+    log: &'a Logger,
+    graph: &'a Graph,
+    partial: &'a HashSet<NodeIndex>,
+    txs: &'a mut HashMap<domain::Index, domain::DomainHandle>,
+    empty: &'a HashSet<NodeIndex>,
+    materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
+) -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
 
     Box::new(move |node, parents| {
         assert!(parents.len() > 1);
@@ -890,8 +913,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
             .map(|ni| *graph[*ni].local_addr())
             .collect();
 
-        let options = n.must_replay_among()
-            .expect("join did not have must replay preference");
+        let options = n.must_replay_among().expect(
+            "join did not have must replay preference",
+        );
 
         // we *must* replay the state of one of the nodes in options
         parents.retain(|&parent| options.contains(&parent));
@@ -904,9 +928,10 @@ fn cost_fn<'a, T>(log: &'a Logger,
         }
 
         // if *all* the options are empty, we can safely pick any of them
-        if parents
-               .iter()
-               .all(|&p| empty.contains(graph[p].local_addr())) {
+        if parents.iter().all(
+            |&p| empty.contains(graph[p].local_addr()),
+        )
+        {
             return parents.pop();
         }
 
@@ -914,9 +939,10 @@ fn cost_fn<'a, T>(log: &'a Logger,
         // must indeed be), and therefore that we can just pick that parent and get a free full
         // materialization. *however*, this would cause the node to be marked as fully
         // materialized, which is *not* okay if it has partially a materialized ancestor!
-        if let Some(&parent) = parents
-               .iter()
-               .find(|&&p| empty.contains(graph[p].local_addr())) {
+        if let Some(&parent) = parents.iter().find(
+            |&&p| empty.contains(graph[p].local_addr()),
+        )
+        {
             if !parents.iter().any(|p| partial.contains(p)) {
                 // no partial ancestors!
                 return Some(parent);
@@ -995,9 +1021,9 @@ fn cost_fn<'a, T>(log: &'a Logger,
                 txs.get_mut(&stateful.domain())
                     .unwrap()
                     .send(box Packet::StateSizeProbe {
-                              node: *stateful.local_addr(),
-                              ack: tx,
-                          })
+                        node: *stateful.local_addr(),
+                        ack: tx,
+                    })
                     .unwrap();
                 let mut size: usize = rx.into_iter().sum();
 

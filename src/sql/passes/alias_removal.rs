@@ -7,9 +7,10 @@ pub trait AliasRemoval {
     fn expand_table_aliases(self) -> SqlQuery;
 }
 
-fn rewrite_conditional(table_aliases: &HashMap<String, String>,
-                       ce: ConditionExpression)
-                       -> ConditionExpression {
+fn rewrite_conditional(
+    table_aliases: &HashMap<String, String>,
+    ce: ConditionExpression,
+) -> ConditionExpression {
     let translate_column = |f: Column| {
         let new_f = match f.table {
             None => f,
@@ -105,28 +106,28 @@ impl AliasRemoval for SqlQuery {
                 sq.fields = sq.fields
                     .into_iter()
                     .map(|field| match field {
-                             // WTF rustfmt?
-                             FieldExpression::Col(mut col) => {
-                                 if col.table.is_some() {
-                                     let t = col.table.take().unwrap();
-                                     col.table = if table_aliases.contains_key(&t) {
-                                         Some(table_aliases[&t].clone())
-                                     } else {
-                                         Some(t.clone())
-                                     };
-                                     col.function = None;
-                                 }
-                                 FieldExpression::Col(col)
-                             }
-                             FieldExpression::AllInTable(t) => {
-                                 if table_aliases.contains_key(&t) {
-                                     FieldExpression::AllInTable(table_aliases[&t].clone())
-                                 } else {
-                                     FieldExpression::AllInTable(t)
-                                 }
-                             }
-                             f => f,
-                         })
+                        // WTF rustfmt?
+                        FieldExpression::Col(mut col) => {
+                            if col.table.is_some() {
+                                let t = col.table.take().unwrap();
+                                col.table = if table_aliases.contains_key(&t) {
+                                    Some(table_aliases[&t].clone())
+                                } else {
+                                    Some(t.clone())
+                                };
+                                col.function = None;
+                            }
+                            FieldExpression::Col(col)
+                        }
+                        FieldExpression::AllInTable(t) => {
+                            if table_aliases.contains_key(&t) {
+                                FieldExpression::AllInTable(table_aliases[&t].clone())
+                            } else {
+                                FieldExpression::AllInTable(t)
+                            }
+                        }
+                        f => f,
+                    })
                     .collect();
                 // Remove them from join clauses
                 sq.join = sq.join
@@ -166,10 +167,12 @@ mod tests {
 
         let wrap = |cb| Box::new(ConditionExpression::Base(cb));
         let q = SelectStatement {
-            tables: vec![Table {
-                             name: String::from("PaperTag"),
-                             alias: Some(String::from("t")),
-                         }],
+            tables: vec![
+                Table {
+                    name: String::from("PaperTag"),
+                    alias: Some(String::from("t")),
+                },
+            ],
             fields: vec![FieldExpression::Col(Column::from("t.id"))],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
@@ -182,14 +185,18 @@ mod tests {
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
-                assert_eq!(tq.fields,
-                           vec![FieldExpression::Col(Column::from("PaperTag.id"))]);
-                assert_eq!(tq.where_clause,
-                           Some(ConditionExpression::ComparisonOp(ConditionTree {
-                               operator: Operator::Equal,
-                               left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
-                               right: wrap(ConditionBase::Placeholder),
-                           })));
+                assert_eq!(
+                    tq.fields,
+                    vec![FieldExpression::Col(Column::from("PaperTag.id"))]
+                );
+                assert_eq!(
+                    tq.where_clause,
+                    Some(ConditionExpression::ComparisonOp(ConditionTree {
+                        operator: Operator::Equal,
+                        left: wrap(ConditionBase::Field(Column::from("PaperTag.id"))),
+                        right: wrap(ConditionBase::Placeholder),
+                    }))
+                );
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),

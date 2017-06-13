@@ -57,22 +57,24 @@ impl CountStarRewrite for SqlQuery {
                     let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
                     let mut bogo_column = schema_iter.next().unwrap();
                     while avoid_columns
-                              .iter()
-                              .position(|c| c.name == *bogo_column)
-                              .is_some() {
-                        bogo_column =
-                        schema_iter
-                            .next()
-                            .expect("ran out of columns trying to pick a bogo column for COUNT(*)");
+                        .iter()
+                        .position(|c| c.name == *bogo_column)
+                        .is_some()
+                    {
+                        bogo_column = schema_iter.next().expect(
+                            "ran out of columns trying to pick a bogo column for COUNT(*)",
+                        );
                     }
 
-                    c.function = Some(Box::new(Count(Column {
-                                                         name: bogo_column.clone(),
-                                                         alias: None,
-                                                         table: Some(bogo_table.name.clone()),
-                                                         function: None,
-                                                     },
-                                                     false)));
+                    c.function = Some(Box::new(Count(
+                        Column {
+                            name: bogo_column.clone(),
+                            alias: None,
+                            table: Some(bogo_table.name.clone()),
+                            function: None,
+                        },
+                        false,
+                    )));
                 }
             };
 
@@ -123,20 +125,27 @@ mod tests {
         // SELECT COUNT(users.id) FROM users;
         let q = parse_query("SELECT COUNT(*) FROM users;").unwrap();
         let mut schema = HashMap::new();
-        schema.insert("users".into(),
-                      vec!["id".into(), "name".into(), "age".into()]);
+        schema.insert(
+            "users".into(),
+            vec!["id".into(), "name".into(), "age".into()],
+        );
 
         let res = q.rewrite_count_star(&schema);
         match res {
             SqlQuery::Select(tq) => {
-                assert_eq!(tq.fields,
-                           vec![FieldExpression::Col(Column {
-                               name: String::from("count(all)"),
-                               alias: None,
-                               table: None,
-                               function: Some(Box::new(FunctionExpression::Count(
-                                   Column::from("users.id"), false))),
-                           })]);
+                assert_eq!(
+                    tq.fields,
+                    vec![
+                        FieldExpression::Col(Column {
+                            name: String::from("count(all)"),
+                            alias: None,
+                            table: None,
+                            function: Some(Box::new(
+                                FunctionExpression::Count(Column::from("users.id"), false),
+                            )),
+                        }),
+                    ]
+                );
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
@@ -153,20 +162,27 @@ mod tests {
         // SELECT COUNT(users.name) FROM users GROUP BY id;
         let q = parse_query("SELECT COUNT(*) FROM users GROUP BY id;").unwrap();
         let mut schema = HashMap::new();
-        schema.insert("users".into(),
-                      vec!["id".into(), "name".into(), "age".into()]);
+        schema.insert(
+            "users".into(),
+            vec!["id".into(), "name".into(), "age".into()],
+        );
 
         let res = q.rewrite_count_star(&schema);
         match res {
             SqlQuery::Select(tq) => {
-                assert_eq!(tq.fields,
-                           vec![FieldExpression::Col(Column {
-                               name: String::from("count(all)"),
-                               alias: None,
-                               table: None,
-                               function: Some(Box::new(FunctionExpression::Count(
-                                   Column::from("users.name"), false))),
-                           })]);
+                assert_eq!(
+                    tq.fields,
+                    vec![
+                        FieldExpression::Col(Column {
+                            name: String::from("count(all)"),
+                            alias: None,
+                            table: None,
+                            function: Some(Box::new(
+                                FunctionExpression::Count(Column::from("users.name"), false),
+                            )),
+                        }),
+                    ]
+                );
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
