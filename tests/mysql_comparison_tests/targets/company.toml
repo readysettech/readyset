@@ -1,11 +1,16 @@
-[q1]
-2 = []
-0 = [["1", "Tresa", "Coleborn", "tcoleborn0", "1", "1"], ["2", "Nessa", "Waple", "nwaple1", "1", "1"], ["3", "Hetti", "Larderot", "hlarderot2", "1", "2"], ["4", "Dalt", "Gallegos", "dgallegos3", "1", "2"], ["5", "Winnie", "Dafforne", "wdafforne4", "1", "4"], ["6", "Joby", "Wansbury", "jwansbury5", "1", "2"], ["7", "Gerta", "Rannald", "grannald6", "1", "1"], ["8", "Rudy", "Omond", "romond7", "1", "4"], ["10", "Zaccaria", "Walbrun", "zwalbrun9", "1", "2"], ["11", "Dalli", "Gwyn", "dgwyna", "1", "3"], ["12", "Angeli", "Bain", "abainb", "1", "1"], ["13", "Janenna", "Trehearne", "jtrehearnec", "1", "2"], ["14", "Leta", "Rugieri", "lrugierid", "1", "1"], ["15", "Pennie", "Clarabut", "pclarabute", "1", "2"], ["16", "Jard", "Kearton", "jkeartonf", "1", "2"], ["18", "Silvester", "Hearfield", "shearfieldh", "1", "4"], ["19", "Maisie", "Mathwin", "mmathwini", "1", "3"], ["20", "Kitti", "Wormstone", "kwormstonej", "1", "1"], ["21", "Wang", "Egalton", "wegaltonk", "1", "1"], ["22", "Laughton", "Glave", "lglavel", "1", "2"], ["23", "Knox", "McAulay", "kmcaulaym", "1", "2"], ["24", "Waylen", "Handling", "whandlingn", "1", "1"], ["25", "Lutero", "Thripp", "lthrippo", "1", "2"]]
-1 = [["9", "Ellene", "Reihill", "ereihill8", "0", "3"], ["17", "Deerdre", "Lettuce", "dlettuceg", "0", "1"]]
-
 [q0]
+0 = [["1", "Tresa", "Coleborn", "tcoleborn0", "1", "1"]]
+1 = [["7", "Gerta", "Rannald", "grannald6", "1", "1"]]
+2 = []
 3 = []
 4 = []
-0 = [["1", "Tresa", "Coleborn", "tcoleborn0", "1", "1"]]
+
+[q1]
+0 = [["1", "Tresa", "Coleborn", "tcoleborn0", "1", "1"], ["2", "Nessa", "Waple", "nwaple1", "1", "1"], ["3", "Hetti", "Larderot", "hlarderot2", "1", "2"], ["4", "Dalt", "Gallegos", "dgallegos3", "1", "2"], ["5", "Winnie", "Dafforne", "wdafforne4", "1", "4"], ["6", "Joby", "Wansbury", "jwansbury5", "1", "2"], ["7", "Gerta", "Rannald", "grannald6", "1", "1"], ["8", "Rudy", "Omond", "romond7", "1", "4"], ["10", "Zaccaria", "Walbrun", "zwalbrun9", "1", "2"], ["11", "Dalli", "Gwyn", "dgwyna", "1", "3"], ["12", "Angeli", "Bain", "abainb", "1", "1"], ["13", "Janenna", "Trehearne", "jtrehearnec", "1", "2"], ["14", "Leta", "Rugieri", "lrugierid", "1", "1"], ["15", "Pennie", "Clarabut", "pclarabute", "1", "2"], ["16", "Jard", "Kearton", "jkeartonf", "1", "2"], ["18", "Silvester", "Hearfield", "shearfieldh", "1", "4"], ["19", "Maisie", "Mathwin", "mmathwini", "1", "3"], ["20", "Kitti", "Wormstone", "kwormstonej", "1", "1"], ["21", "Wang", "Egalton", "wegaltonk", "1", "1"], ["22", "Laughton", "Glave", "lglavel", "1", "2"], ["23", "Knox", "McAulay", "kmcaulaym", "1", "2"], ["24", "Waylen", "Handling", "whandlingn", "1", "1"], ["25", "Lutero", "Thripp", "lthrippo", "1", "2"]]
+1 = [["9", "Ellene", "Reihill", "ereihill8", "0", "3"], ["17", "Deerdre", "Lettuce", "dlettuceg", "0", "1"]]
 2 = []
-1 = [["7", "Gerta", "Rannald", "grannald6", "1", "1"]]
+
+[q2]
+0 = [["1", "Tresa", "Coleborn", "tcoleborn0", "1", "1"], ["2", "Nessa", "Waple", "nwaple1", "1", "1"], ["3", "Hetti", "Larderot", "hlarderot2", "1", "2"], ["4", "Dalt", "Gallegos", "dgallegos3", "1", "2"], ["5", "Winnie", "Dafforne", "wdafforne4", "1", "4"], ["6", "Joby", "Wansbury", "jwansbury5", "1", "2"], ["7", "Gerta", "Rannald", "grannald6", "1", "1"], ["8", "Rudy", "Omond", "romond7", "1", "4"], ["10", "Zaccaria", "Walbrun", "zwalbrun9", "1", "2"], ["11", "Dalli", "Gwyn", "dgwyna", "1", "3"], ["12", "Angeli", "Bain", "abainb", "1", "1"], ["13", "Janenna", "Trehearne", "jtrehearnec", "1", "2"], ["14", "Leta", "Rugieri", "lrugierid", "1", "1"], ["15", "Pennie", "Clarabut", "pclarabute", "1", "2"], ["16", "Jard", "Kearton", "jkeartonf", "1", "2"], ["18", "Silvester", "Hearfield", "shearfieldh", "1", "4"], ["19", "Maisie", "Mathwin", "mmathwini", "1", "3"], ["20", "Kitti", "Wormstone", "kwormstonej", "1", "1"], ["21", "Wang", "Egalton", "wegaltonk", "1", "1"], ["22", "Laughton", "Glave", "lglavel", "1", "2"], ["23", "Knox", "McAulay", "kmcaulaym", "1", "2"], ["24", "Waylen", "Handling", "whandlingn", "1", "1"], ["25", "Lutero", "Thripp", "lthrippo", "1", "2"]]
+1 = [["9", "Ellene", "Reihill", "ereihill8", "0", "3"], ["17", "Deerdre", "Lettuce", "dlettuceg", "0", "1"]]
+2 = []

@@ -13,7 +13,7 @@ use mysql::value::Params;
 use std::path::Path;
 use std::io::{Read, Write};
 use std::fs::{self, File};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::slice::SliceConcatExt;
 use std::str::FromStr;
 
@@ -56,8 +56,8 @@ struct Query {
 #[derive(Debug, Deserialize)]
 struct Schema {
     name: String,
-    tables: HashMap<String, Table>,
-    queries: HashMap<String, Query>,
+    tables: BTreeMap<String, Table>,
+    queries: BTreeMap<String, Query>,
 }
 
 fn read_file<P: AsRef<Path>>(file_name: P) -> String {
@@ -113,7 +113,7 @@ pub fn setup_mysql(addr: &str) -> mysql::Pool {
     mysql::Pool::new_manual(1, 4, opts).unwrap()
 }
 
-fn generate_target_results(schemas: &HashMap<String, Schema>) {
+fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
     for (schema_name, schema) in schemas.iter() {
         let pool = setup_mysql("soup:password@127.0.0.1:3306/mysql_comparison_test");
         for (table_name, table) in schema.tables.iter() {
@@ -132,9 +132,9 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
             }
         }
 
-        let mut target_data: HashMap<String, HashMap<String, Vec<Vec<String>>>> = HashMap::new();
+        let mut target_data: BTreeMap<String, BTreeMap<String, Vec<Vec<String>>>> = BTreeMap::new();
         for (query_name, query) in schema.queries.iter() {
-            target_data.insert(query_name.clone(), HashMap::new());
+            target_data.insert(query_name.clone(), BTreeMap::new());
 
             for (i, values) in query.values.iter().enumerate() {
                 target_data.get_mut(query_name).unwrap().insert(
@@ -171,10 +171,10 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
 }
 
 fn check_query(
-    tables: &HashMap<String, Table>,
+    tables: &BTreeMap<String, Table>,
     query_name: &str,
     query: &Query,
-    target: &HashMap<String, Vec<Vec<String>>>,
+    target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
     let mut g = Blender::new();
     let recipe;
@@ -254,7 +254,7 @@ fn check_query(
 
 #[test]
 fn mysql_comparison() {
-    let mut schemas: HashMap<String, Schema> = HashMap::new();
+    let mut schemas: BTreeMap<String, Schema> = BTreeMap::new();
     run_for_all_in_directory("schemas", |file_name, contents| {
         {
             let ext = Path::new(&file_name).extension();
@@ -273,7 +273,7 @@ fn mysql_comparison() {
         let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
             schema_name,
         );
-        let target_data: HashMap<String, HashMap<String, Vec<Vec<String>>>> =
+        let target_data: BTreeMap<String, BTreeMap<String, Vec<Vec<String>>>> =
             toml::from_str(&read_file(target_data_file)).unwrap();
 
         for (query_name, query) in schema.queries.iter() {
