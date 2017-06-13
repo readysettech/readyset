@@ -1569,7 +1569,13 @@ fn make_topk_node(
 
             let columns: Vec<_> = o.iter()
                 .map(|&(ref c, ref order_type)| {
-                    (parent.borrow().column_id_for_column(c), order_type.clone())
+                    // SQL and Soup disagree on what ascending and descending order means, so do the
+                    // conversion here.
+                    let reversed_order_type = match *order_type {
+                        OrderType::OrderAscending => OrderType::OrderDescending,
+                        OrderType::OrderDescending => OrderType::OrderAscending,
+                    };
+                    (parent.borrow().column_id_for_column(c), reversed_order_type)
                 })
                 .collect();
 
