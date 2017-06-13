@@ -34,9 +34,11 @@ impl Base {
 
     /// Add a new column to this base node.
     pub fn add_column(&mut self, default: DataType) -> usize {
-        assert!(!self.defaults.is_empty(),
-                "cannot add columns to base nodes without\
-                setting default values for initial columns");
+        assert!(
+            !self.defaults.is_empty(),
+            "cannot add columns to base nodes without\
+                setting default values for initial columns"
+        );
         self.defaults.push(default);
         self.unmodified = false;
         self.defaults.len() - 1
@@ -44,9 +46,11 @@ impl Base {
 
     /// Drop a column from this base node.
     pub fn drop_column(&mut self, column: usize) {
-        assert!(!self.defaults.is_empty(),
-                "cannot add columns to base nodes without\
-                setting default values for initial columns");
+        assert!(
+            !self.defaults.is_empty(),
+            "cannot add columns to base nodes without\
+                setting default values for initial columns"
+        );
         assert!(column < self.defaults.len());
         self.unmodified = false;
 
@@ -120,25 +124,26 @@ impl Ingredient for Base {
         self.us = Some(remap[&us]);
     }
 
-    fn on_input(&mut self,
-                _: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                state: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        _: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        state: &StateMap,
+    ) -> ProcessingResult {
         let results = rs.into_iter().map(|r| {
             //rustfmt
             match r {
                 Record::Positive(u) => Record::Positive(u),
                 Record::Negative(u) => Record::Negative(u),
                 Record::DeleteRequest(key) => {
-                    let cols = self.primary_key
-                        .as_ref()
-                        .expect("base must have a primary key to support deletions");
-                    let db =
-                    state.get(&*self.us.unwrap())
-                        .expect("base must have its own state materialized to support deletions");
+                    let cols = self.primary_key.as_ref().expect(
+                        "base must have a primary key to support deletions",
+                    );
+                    let db = state.get(&*self.us.unwrap()).expect(
+                        "base must have its own state materialized to support deletions",
+                    );
 
                     match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
                         LookupResult::Some(rows) => {

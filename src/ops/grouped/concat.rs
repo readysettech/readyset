@@ -60,20 +60,25 @@ impl GroupConcat {
     /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
     /// the individual record strings from a group string. It should therefore not appear in the
     /// record data.
-    pub fn new(src: NodeIndex,
-               components: Vec<TextComponent>,
-               separator: String)
-               -> GroupedOperator<GroupConcat> {
-        assert!(!separator.is_empty(),
-                "group concat separator cannot be empty");
+    pub fn new(
+        src: NodeIndex,
+        components: Vec<TextComponent>,
+        separator: String,
+    ) -> GroupedOperator<GroupConcat> {
+        assert!(
+            !separator.is_empty(),
+            "group concat separator cannot be empty"
+        );
 
-        GroupedOperator::new(src,
-                             GroupConcat {
-                                 components: components,
-                                 separator: separator,
-                                 group: Vec::new(),
-                                 slen: 0,
-                             })
+        GroupedOperator::new(
+            src,
+            GroupConcat {
+                components: components,
+                separator: separator,
+                group: Vec::new(),
+                slen: 0,
+            },
+        )
     }
 
     fn build(&self, rec: &[DataType]) -> String {
@@ -180,13 +185,14 @@ impl GroupedOperation for GroupConcat {
         }
 
         // WHY doesn't rust have an iterator joiner?
-        let mut new = current
-            .into_iter()
-            .fold(String::with_capacity(2 * clen), |mut acc, s| {
+        let mut new = current.into_iter().fold(
+            String::with_capacity(2 * clen),
+            |mut acc, s| {
                 acc.push_str(s);
                 acc.push_str(&self.separator);
                 acc
-            });
+            },
+        );
         // we pushed one separator too many above
         let real_len = new.len() - self.separator.len();
         new.truncate(real_len);
@@ -197,9 +203,9 @@ impl GroupedOperation for GroupConcat {
         let fields = self.components
             .iter()
             .map(|c| match *c {
-                     TextComponent::Literal(ref s) => format!("\"{}\"", s),
-                     TextComponent::Column(ref i) => i.to_string(),
-                 })
+                TextComponent::Literal(ref s) => format!("\"{}\"", s),
+                TextComponent::Column(ref i) => i.to_string(),
+            })
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -212,10 +218,12 @@ impl GroupedOperation for GroupConcat {
             .collect::<Vec<_>>()
             .join(", ");
 
-        format!("||([{}], \"{}\") γ[{}]",
-                fields,
-                self.separator,
-                group_cols)
+        format!(
+            "||([{}], \"{}\") γ[{}]",
+            fields,
+            self.separator,
+            group_cols
+        )
     }
 }
 
@@ -229,11 +237,15 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let c = GroupConcat::new(s.as_global(),
-                                 vec![TextComponent::Literal(".".to_owned()),
-                                      TextComponent::Column(1),
-                                      TextComponent::Literal(";".to_owned())],
-                                 String::from("#"));
+        let c = GroupConcat::new(
+            s.as_global(),
+            vec![
+                TextComponent::Literal(".".to_owned()),
+                TextComponent::Column(1),
+                TextComponent::Literal(";".to_owned()),
+            ],
+            String::from("#"),
+        );
         g.set_op("concat", &["x", "ys"], c, mat);
         g
     }
@@ -322,75 +334,77 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let u = vec![// remove non-existing
-                     (vec![1.into(), 1.into()], false),
-                     // add old
-                     (vec![1.into(), 1.into()], true),
-                     // add duplicate
-                     (vec![1.into(), 2.into()], true),
-                     (vec![2.into(), 2.into()], false),
-                     (vec![2.into(), 3.into()], true),
-                     (vec![2.into(), 2.into()], true),
-                     (vec![2.into(), 1.into()], true),
-                     // new group
-                     (vec![3.into(), 3.into()], true)];
+        let u = vec![
+            // remove non-existing
+            (vec![1.into(), 1.into()], false),
+            // add old
+            (vec![1.into(), 1.into()], true),
+            // add duplicate
+            (vec![1.into(), 2.into()], true),
+            (vec![2.into(), 2.into()], false),
+            (vec![2.into(), 3.into()], true),
+            (vec![2.into(), 2.into()], true),
+            (vec![2.into(), 1.into()], true),
+            // new group
+            (vec![3.into(), 3.into()], true),
+        ];
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
         // group 1 had [2], now has [1,2]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  if r[0] == 1.into() {
-                                      assert_eq!(r[1], ".2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+            if r[0] == 1.into() {
+                assert_eq!(r[1], ".2;".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 1.into() {
-                                      assert_eq!(r[1], ".1;#.2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+            if r[0] == 1.into() {
+                assert_eq!(r[1], ".1;#.2;".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
         // group 2 was [2], is now [1,2,3]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-                                  if r[0] == 2.into() {
-                                      assert_eq!(r[1], ".2;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+            if r[0] == 2.into() {
+                assert_eq!(r[1], ".2;".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 2.into() {
-                                      assert_eq!(r[1], ".1;#.2;#.3;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+            if r[0] == 2.into() {
+                assert_eq!(r[1], ".1;#.2;#.3;".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
         // group 3 was [], is now [3]
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-                                  if r[0] == 3.into() {
-                                      assert_eq!(r[1], ".3;".into());
-                                      true
-                                  } else {
-                                      false
-                                  }
-                              } else {
-                                  false
-                              }));
+            if r[0] == 3.into() {
+                assert_eq!(r[1], ".3;".into());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
     }
 
     #[test]
@@ -410,8 +424,10 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0),
-                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
+        assert_eq!(
+            c.node().resolve(0),
+            Some(vec![(c.narrow_base_id().as_global(), 0)])
+        );
         assert_eq!(c.node().resolve(1), None);
     }
 }

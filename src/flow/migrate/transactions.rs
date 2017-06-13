@@ -7,11 +7,12 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use slog::Logger;
 
-fn count_base_ingress(graph: &Graph,
-                      source: NodeIndex,
-                      nodes: &[(NodeIndex, bool)],
-                      domain: &domain::Index)
-                      -> IngressFromBase {
+fn count_base_ingress(
+    graph: &Graph,
+    source: NodeIndex,
+    nodes: &[(NodeIndex, bool)],
+    domain: &domain::Index,
+) -> IngressFromBase {
     let ingress_nodes: Vec<_> = nodes
         .into_iter()
         .map(|&(ni, _)| ni)
@@ -24,12 +25,14 @@ fn count_base_ingress(graph: &Graph,
         .map(|base| {
             let mut num_paths = ingress_nodes
                 .iter()
-                .filter(|&&ingress| petgraph::algo::has_path_connecting(graph, base, ingress, None))
+                .filter(|&&ingress| {
+                    petgraph::algo::has_path_connecting(graph, base, ingress, None)
+                })
                 .map(|&ingress| if graph[ingress].is_shard_merger() {
-                         ::SHARDS
-                     } else {
-                         1
-                     })
+                    ::SHARDS
+                } else {
+                    1
+                })
                 .sum();
 
             // Domains containing a base node will get a single copy of each packet sent to it.
@@ -55,41 +58,47 @@ fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]
     graph
         .neighbors_directed(source, petgraph::EdgeDirection::Outgoing)
         .map(|base| {
-                 let outs = output_nodes
-                     .iter()
-                     .filter(|&&out| petgraph::algo::has_path_connecting(graph, base, out, None))
-                     .map(|&out| *graph[out].local_addr())
-                     .collect();
-                 (base, outs)
-             })
+            let outs = output_nodes
+                .iter()
+                .filter(|&&out| {
+                    petgraph::algo::has_path_connecting(graph, base, out, None)
+                })
+                .map(|&out| *graph[out].local_addr())
+                .collect();
+            (base, outs)
+        })
         .collect()
 }
 
-pub fn analyze_graph(graph: &Graph,
-                     source: NodeIndex,
-                     domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>)
-                     -> HashMap<domain::Index, (IngressFromBase, EgressForBase)> {
+pub fn analyze_graph(
+    graph: &Graph,
+    source: NodeIndex,
+    domain_nodes: HashMap<domain::Index, Vec<(NodeIndex, bool)>>,
+) -> HashMap<domain::Index, (IngressFromBase, EgressForBase)> {
     domain_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
-                 (domain,
-                  (count_base_ingress(graph, source, &nodes[..], &domain),
-                   base_egress_map(graph, source, &nodes[..])))
-             })
+            (domain, (
+                count_base_ingress(graph, source, &nodes[..], &domain),
+                base_egress_map(graph, source, &nodes[..]),
+            ))
+        })
         .collect()
 }
 
-pub fn finalize(deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
-                log: &Logger,
-                txs: &mut HashMap<domain::Index, domain::DomainHandle>,
-                at: i64) {
+pub fn finalize(
+    deps: HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    log: &Logger,
+    txs: &mut HashMap<domain::Index, domain::DomainHandle>,
+    at: i64,
+) {
     for (domain, (ingress_from_base, egress_for_base)) in deps {
         trace!(log, "notifying domain of migration completion"; "domain" => domain.index());
         let ctx = txs.get_mut(&domain).unwrap();
         let _ = ctx.send(box Packet::CompleteMigration {
-                             at,
-                             ingress_from_base,
-                             egress_for_base,
-                         });
+            at,
+            ingress_from_base,
+            egress_for_base,
+        });
     }
 }

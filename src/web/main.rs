@@ -25,21 +25,27 @@ fn main() {
         let _user = mig.add_ingredient("user", &["id", "username", "hash"], Base::default());
 
         // add vote count
-        let vc = mig.add_ingredient("votecount",
-                                    &["id", "votes"],
-                                    Aggregation::COUNT.over(vote, 0, &[1]));
+        let vc = mig.add_ingredient(
+            "votecount",
+            &["id", "votes"],
+            Aggregation::COUNT.over(vote, 0, &[1]),
+        );
 
         // add final join -- joins on first field of each input
         use distributary::JoinSource::*;
-        let j = Join::new(article,
-                          vc,
-                          JoinType::Inner,
-                          vec![B(0, 0), L(1), L(2), L(3), R(1)]);
+        let j = Join::new(
+            article,
+            vc,
+            JoinType::Inner,
+            vec![B(0, 0), L(1), L(2), L(3), R(1)],
+        );
         let awvc = mig.add_ingredient("awvc", &["id", "user", "title", "url", "votes"], j);
 
-        let karma = mig.add_ingredient("karma",
-                                       &["user", "votes"],
-                                       Aggregation::SUM.over(awvc, 4, &[1]));
+        let karma = mig.add_ingredient(
+            "karma",
+            &["user", "votes"],
+            Aggregation::SUM.over(awvc, 4, &[1]),
+        );
 
         mig.maintain(awvc, 0);
         mig.maintain(karma, 0);

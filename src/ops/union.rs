@@ -96,10 +96,11 @@ impl Ingredient for Union {
 
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
-                   ref mut cols,
-                   ref emit,
-                   ..
-               } = self.emit {
+                ref mut cols,
+                ref emit,
+                ..
+            } = self.emit
+        {
             cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
         }
     }
@@ -115,17 +116,17 @@ impl Ingredient for Union {
                 use std::mem;
                 let mapped_emit = emit.drain()
                     .map(|(mut k, v)| {
-                             k.remap(remap);
-                             emit_l.insert(*k, v.clone());
-                             (k, v)
-                         })
+                        k.remap(remap);
+                        emit_l.insert(*k, v.clone());
+                        (k, v)
+                    })
                     .collect();
                 let mapped_cols = cols.drain()
                     .map(|(mut k, v)| {
-                             k.remap(remap);
-                             cols_l.insert(*k, v.clone());
-                             (k, v)
-                         })
+                        k.remap(remap);
+                        cols_l.insert(*k, v.clone());
+                        (k, v)
+                    })
                     .collect();
                 mem::replace(emit, mapped_emit);
                 mem::replace(cols, mapped_cols);
@@ -136,13 +137,14 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                _: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        _: &StateMap,
+    ) -> ProcessingResult {
         match self.emit {
             Emit::AllFrom(_) => {
                 ProcessingResult {
@@ -176,15 +178,16 @@ impl Ingredient for Union {
         }
     }
 
-    fn on_input_raw(&mut self,
-                    from: LocalNodeIndex,
-                    rs: Records,
-                    tracer: &mut Tracer,
-                    is_replay_of: Option<(usize, DataType)>,
-                    nshards: usize,
-                    n: &DomainNodes,
-                    s: &StateMap)
-                    -> RawProcessingResult {
+    fn on_input_raw(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        tracer: &mut Tracer,
+        is_replay_of: Option<(usize, DataType)>,
+        nshards: usize,
+        n: &DomainNodes,
+        s: &StateMap,
+    ) -> RawProcessingResult {
         // NOTE: in the special case of us being a shard merge node (i.e., when
         // self.emit.is_empty()), `from` will *actually* hold the shard index of
         // the sharded egress that sent us this record. this should make everything
@@ -232,19 +235,21 @@ impl Ingredient for Union {
                             self.replay_key = Some(Some((from, key_col)).into_iter().collect());
                         }
                         Emit::Project { ref emit_l, .. } => {
-                            self.replay_key = Some(emit_l
-                                                       .iter()
-                                                       .map(|(src, emit)| (src, emit[key_col]))
-                                                       .collect());
+                            self.replay_key = Some(
+                                emit_l
+                                    .iter()
+                                    .map(|(src, emit)| (src, emit[key_col]))
+                                    .collect(),
+                            );
                         }
                     }
                 }
 
                 let finished = {
                     // store this replay piece
-                    let pieces = self.replay_pieces
-                        .entry(key_val.clone())
-                        .or_insert_with(Map::new);
+                    let pieces = self.replay_pieces.entry(key_val.clone()).or_insert_with(
+                        Map::new,
+                    );
                     // there better be only one replay from each ancestor
                     assert!(!pieces.contains_key(&from));
                     pieces.insert(from, rs);
@@ -283,9 +288,11 @@ impl Ingredient for Union {
         match self.emit {
             Emit::AllFrom(p) => Some(vec![(p.as_global(), col)]),
             Emit::Project { ref emit, .. } => {
-                Some(emit.iter()
-                         .map(|(src, emit)| (src.as_global(), emit[col]))
-                         .collect())
+                Some(
+                    emit.iter()
+                        .map(|(src, emit)| (src.as_global(), emit[col]))
+                        .collect(),
+                )
             }
         }
     }
@@ -299,12 +306,12 @@ impl Ingredient for Union {
                 emit.sort();
                 emit.iter()
                     .map(|&(src, emit)| {
-                             let cols = emit.iter()
-                                 .map(|e| e.to_string())
-                                 .collect::<Vec<_>>()
-                                 .join(", ");
-                             format!("{}:[{}]", src.as_global().index(), cols)
-                         })
+                        let cols = emit.iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{}:[{}]", src.as_global().index(), cols)
+                    })
                     .collect::<Vec<_>>()
                     .join(" ⋃ ")
             }
@@ -343,8 +350,10 @@ mod tests {
     #[test]
     fn it_describes() {
         let (u, l, r) = setup();
-        assert_eq!(u.node().description(),
-                   format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r));
+        assert_eq!(
+            u.node().description(),
+            format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r)
+        );
     }
 
     #[test]
@@ -357,8 +366,10 @@ mod tests {
 
         // forward from right should emit subset record
         let right = vec![1.into(), "skipped".into(), "x".into()];
-        assert_eq!(u.one_row(r, right.clone(), false),
-                   vec![vec![1.into(), "x".into()]].into());
+        assert_eq!(
+            u.one_row(r, right.clone(), false),
+            vec![vec![1.into(), "x".into()]].into()
+        );
     }
 
     #[test]
@@ -373,22 +384,18 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup();
         let r0 = u.node().resolve(0);
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l.as_global() && c == 0));
-        assert!(r0.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r.as_global() && c == 0));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| {
+            n == l.as_global() && c == 0
+        }));
+        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| {
+            n == r.as_global() && c == 0
+        }));
         let r1 = u.node().resolve(1);
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == l.as_global() && c == 1));
-        assert!(r1.as_ref()
-                    .unwrap()
-                    .iter()
-                    .any(|&(n, c)| n == r.as_global() && c == 2));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| {
+            n == l.as_global() && c == 1
+        }));
+        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| {
+            n == r.as_global() && c == 2
+        }));
     }
 }

@@ -23,7 +23,8 @@ pub enum RawProcessingResult {
 }
 
 pub trait Ingredient
-    where Self: Send
+where
+    Self: Send,
 {
     /// Construct a new node from this node that will be given to the domain running this node.
     /// Whatever is left behind in self is what remains observable in the graph.
@@ -89,29 +90,33 @@ pub trait Ingredient
     /// Called when a domain is finalized and is about to be booted.
     ///
     /// The provided arguments give mappings from global to local addresses.
-    fn on_commit(&mut self,
-                 you: prelude::NodeIndex,
-                 remap: &HashMap<prelude::NodeIndex, prelude::IndexPair>);
+    fn on_commit(
+        &mut self,
+        you: prelude::NodeIndex,
+        remap: &HashMap<prelude::NodeIndex, prelude::IndexPair>,
+    );
 
     /// Process a single incoming message, optionally producing an update to be propagated to
     /// children.
-    fn on_input(&mut self,
-                from: prelude::LocalNodeIndex,
-                data: prelude::Records,
-                tracer: &mut prelude::Tracer,
-                domain: &prelude::DomainNodes,
-                states: &prelude::StateMap)
-                -> ProcessingResult;
+    fn on_input(
+        &mut self,
+        from: prelude::LocalNodeIndex,
+        data: prelude::Records,
+        tracer: &mut prelude::Tracer,
+        domain: &prelude::DomainNodes,
+        states: &prelude::StateMap,
+    ) -> ProcessingResult;
 
-    fn on_input_raw(&mut self,
-                    from: prelude::LocalNodeIndex,
-                    data: prelude::Records,
-                    tracer: &mut prelude::Tracer,
-                    is_replay_of: Option<(usize, prelude::DataType)>,
-                    nshards: usize,
-                    domain: &prelude::DomainNodes,
-                    states: &prelude::StateMap)
-                    -> RawProcessingResult {
+    fn on_input_raw(
+        &mut self,
+        from: prelude::LocalNodeIndex,
+        data: prelude::Records,
+        tracer: &mut prelude::Tracer,
+        is_replay_of: Option<(usize, prelude::DataType)>,
+        nshards: usize,
+        domain: &prelude::DomainNodes,
+        states: &prelude::StateMap,
+    ) -> RawProcessingResult {
         let _ = is_replay_of;
         let _ = nshards;
         RawProcessingResult::Regular(self.on_input(from, data, tracer, domain, states))
@@ -121,12 +126,12 @@ pub trait Ingredient
         false
     }
 
-    fn query_through<'a>
-        (&self,
-         _columns: &[usize],
-         _key: &prelude::KeyType<prelude::DataType>,
-         _states: &'a prelude::StateMap)
-         -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
+    fn query_through<'a>(
+        &self,
+        _columns: &[usize],
+        _key: &prelude::KeyType<prelude::DataType>,
+        _states: &'a prelude::StateMap,
+    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
         None
     }
 
@@ -136,21 +141,20 @@ pub trait Ingredient
     ///  - `None` => no materialization of the parent state exists
     ///  - `Some(None)` => materialization exists, but lookup got a miss
     ///  - `Some(Some(rs))` => materialization exists, and got results rs
-    fn lookup<'a>(&self,
-                  parent: prelude::LocalNodeIndex,
-                  columns: &[usize],
-                  key: &prelude::KeyType<prelude::DataType>,
-                  domain: &prelude::DomainNodes,
-                  states: &'a prelude::StateMap)
-                  -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
+    fn lookup<'a>(
+        &self,
+        parent: prelude::LocalNodeIndex,
+        columns: &[usize],
+        key: &prelude::KeyType<prelude::DataType>,
+        domain: &prelude::DomainNodes,
+        states: &'a prelude::StateMap,
+    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                          prelude::LookupResult::Some(rs) => {
-                              Some(Some(Box::new(rs.iter()) as Box<_>))
-                          }
-                          prelude::LookupResult::Missing => Some(None),
-                      })
+                prelude::LookupResult::Some(rs) => Some(Some(Box::new(rs.iter()) as Box<_>)),
+                prelude::LookupResult::Missing => Some(None),
+            })
             .or_else(|| {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead

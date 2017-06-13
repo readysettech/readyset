@@ -13,15 +13,17 @@ pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
 pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (ReadHandle, WriteHandle)
-    where F: Fn(&DataType) + 'static + Send + Sync
+where
+    F: Fn(&DataType) + 'static + Send + Sync,
 {
     new_inner(cols, key, Some(Arc::new(trigger)))
 }
 
-fn new_inner(cols: usize,
-             key: usize,
-             trigger: Option<Arc<Fn(&DataType) + Send + Sync>>)
-             -> (ReadHandle, WriteHandle) {
+fn new_inner(
+    cols: usize,
+    key: usize,
+    trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
+) -> (ReadHandle, WriteHandle) {
     let (r, w) = evmap::Options::default()
         .with_meta(-1)
         .with_hasher(FnvBuildHasher::default())
@@ -56,7 +58,8 @@ impl WriteHandle {
     ///
     /// These will be made visible to readers after the next call to `swap()`.
     pub fn add<I>(&mut self, rs: I)
-        where I: IntoIterator<Item = Record>
+    where
+        I: IntoIterator<Item = Record>,
     {
         for r in rs {
             debug_assert_eq!(r.len(), self.cols);
@@ -89,7 +92,8 @@ impl WriteHandle {
     }
 
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
-        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    where
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -124,12 +128,14 @@ impl ReadHandle {
     ///
     /// If `block` is set, this call will block if it encounters a hole in partially materialized
     /// state.
-    pub fn find_and<F, T>(&self,
-                          key: &DataType,
-                          mut then: F,
-                          block: bool)
-                          -> Result<(Option<T>, i64), ()>
-        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    pub fn find_and<F, T>(
+        &self,
+        key: &DataType,
+        mut then: F,
+        block: bool,
+    ) -> Result<(Option<T>, i64), ()>
+    where
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
         match self.try_find_and(key, &mut then) {
             Ok((None, ts)) if self.trigger.is_some() => {
@@ -160,7 +166,8 @@ impl ReadHandle {
     }
 
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
-        where F: FnMut(&[Arc<Vec<DataType>>]) -> T
+    where
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -197,12 +204,15 @@ mod tests {
 
         // but after the swap, the record is there!
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 
     #[test]
@@ -212,9 +222,9 @@ mod tests {
         let n = 10000;
         let (r, mut w) = new(1, 0);
         thread::spawn(move || for i in 0..n {
-                          w.add(vec![Record::Positive(Arc::new(vec![i.into()]))]);
-                          w.swap();
-                      });
+            w.add(vec![Record::Positive(Arc::new(vec![i.into()]))]);
+            w.swap();
+        });
 
         for i in 0..n {
             let i = i.into();
@@ -240,12 +250,15 @@ mod tests {
         w.add(vec![Record::Positive(b.clone())]);
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 
     #[test]
@@ -261,18 +274,24 @@ mod tests {
         w.add(vec![Record::Positive(c.clone())]);
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(2));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 
     #[test]
@@ -287,12 +306,15 @@ mod tests {
         w.swap();
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 
     #[test]
@@ -308,12 +330,15 @@ mod tests {
         w.swap();
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 
     #[test]
@@ -323,34 +348,48 @@ mod tests {
         let c = Arc::new(vec![1.into(), "c".into()]);
 
         let (r, mut w) = new(2, 0);
-        w.add(vec![Record::Positive(a.clone()), Record::Positive(b.clone())]);
+        w.add(vec![
+            Record::Positive(a.clone()),
+            Record::Positive(b.clone()),
+        ]);
         w.swap();
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(2));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
 
-        w.add(vec![Record::Negative(a.clone()),
-                   Record::Positive(c.clone()),
-                   Record::Negative(c.clone())]);
+        w.add(vec![
+            Record::Negative(a.clone()),
+            Record::Positive(c.clone()),
+            Record::Negative(c.clone()),
+        ]);
         w.swap();
 
         assert_eq!(r.find_and(&a[0], |rs| rs.len(), true).unwrap().0, Some(1));
-        assert!(r.find_and(&a[0],
-                           |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                           true)
-                    .unwrap()
-                    .0
-                    .unwrap());
+        assert!(
+            r.find_and(
+                &a[0],
+                |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
+                true,
+            ).unwrap()
+                .0
+                .unwrap()
+        );
     }
 }

@@ -16,11 +16,12 @@ use slog::Logger;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
 /// communication.
-pub fn add(log: &Logger,
-           graph: &mut Graph,
-           source: NodeIndex,
-           new: &mut HashSet<NodeIndex>)
-           -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
+pub fn add(
+    log: &Logger,
+    graph: &mut Graph,
+    source: NodeIndex,
+    new: &mut HashSet<NodeIndex>,
+) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
 
     // find all new nodes in topological order. we collect first since we'll be mutating the graph
     // below. it's convenient to have the nodes in topological order, because we then know that
@@ -84,12 +85,18 @@ pub fn add(log: &Logger,
             // parent is in other domain! does it already have an egress?
             let mut ingress = None;
             if parent != source {
-                'search: for pchild in
-                    graph.neighbors_directed(parent, petgraph::EdgeDirection::Outgoing) {
+                'search: for pchild in graph.neighbors_directed(
+                    parent,
+                    petgraph::EdgeDirection::Outgoing,
+                )
+                {
                     if graph[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
-                        for i in
-                            graph.neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing) {
+                        for i in graph.neighbors_directed(
+                            pchild,
+                            petgraph::EdgeDirection::Outgoing,
+                        )
+                        {
                             assert!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
@@ -247,10 +254,12 @@ pub fn add(log: &Logger,
     swaps
 }
 
-pub fn connect(log: &Logger,
-               graph: &mut Graph,
-               domains: &mut HashMap<domain::Index, domain::DomainHandle>,
-               new: &HashSet<NodeIndex>) {
+pub fn connect(
+    log: &Logger,
+    graph: &mut Graph,
+    domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+    new: &HashSet<NodeIndex>,
+) {
 
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
     for &node in new {
@@ -282,12 +291,14 @@ pub fn connect(log: &Logger,
                     // that the sharding must be the same.
                     for (i, tx) in txs.into_iter().enumerate() {
                         domain
-                            .send_to_shard(i,
-                                           box Packet::UpdateEgress {
-                                               node: *sender_node.local_addr(),
-                                               new_tx: Some((node.into(), *n.local_addr(), tx)),
-                                               new_tag: None,
-                                           })
+                            .send_to_shard(
+                                i,
+                                box Packet::UpdateEgress {
+                                    node: *sender_node.local_addr(),
+                                    new_tx: Some((node.into(), *n.local_addr(), tx)),
+                                    new_tag: None,
+                                },
+                            )
                             .unwrap();
                     }
                 } else {
@@ -298,10 +309,10 @@ pub fn connect(log: &Logger,
                     assert_eq!(txs.len(), 1);
                     domain
                         .send(box Packet::UpdateEgress {
-                                  node: *sender_node.local_addr(),
-                                  new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
-                                  new_tag: None,
-                              })
+                            node: *sender_node.local_addr(),
+                            new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
+                            new_tag: None,
+                        })
                         .unwrap();
                 }
             } else if sender_node.is_sharder() {
@@ -316,9 +327,9 @@ pub fn connect(log: &Logger,
                     .get_mut(&sender_node.domain())
                     .unwrap()
                     .send(box Packet::UpdateSharder {
-                              node: *sender_node.local_addr(),
-                              new_txs: (*n.local_addr(), txs),
-                          })
+                        node: *sender_node.local_addr(),
+                        new_txs: (*n.local_addr(), txs),
+                    })
                     .unwrap();
             } else if sender_node.is_source() {
             } else {

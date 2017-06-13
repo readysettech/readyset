@@ -18,19 +18,24 @@ impl Extremum {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier. The `over` column should not be in the `group_by` array.
-    pub fn over(self,
-                src: NodeIndex,
-                over: usize,
-                group_by: &[usize])
-                -> GroupedOperator<ExtremumOperator> {
-        assert!(!group_by.iter().any(|&i| i == over),
-                "cannot group by aggregation column");
-        GroupedOperator::new(src,
-                             ExtremumOperator {
-                                 op: self,
-                                 over: over,
-                                 group: group_by.into(),
-                             })
+    pub fn over(
+        self,
+        src: NodeIndex,
+        over: usize,
+        group_by: &[usize],
+    ) -> GroupedOperator<ExtremumOperator> {
+        assert!(
+            !group_by.iter().any(|&i| i == over),
+            "cannot group by aggregation column"
+        );
+        GroupedOperator::new(
+            src,
+            ExtremumOperator {
+                op: self,
+                over: over,
+                group: group_by.into(),
+            },
+        )
     }
 }
 
@@ -62,8 +67,10 @@ impl GroupedOperation for ExtremumOperator {
     type Diff = DiffType;
 
     fn setup(&mut self, parent: &Node) {
-        assert!(self.over < parent.fields().len(),
-                "cannot aggregate over non-existing column");
+        assert!(
+            self.over < parent.fields().len(),
+            "cannot aggregate over non-existing column"
+        );
     }
 
     fn group_by(&self) -> &[usize] {
@@ -169,10 +176,12 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        g.set_op("agg",
-                 &["x", "ys"],
-                 Extremum::MAX.over(s.as_global(), 1, &[0]),
-                 mat);
+        g.set_op(
+            "agg",
+            &["x", "ys"],
+            Extremum::MAX.over(s.as_global(), 1, &[0]),
+            mat,
+        );
         g
     }
 
@@ -237,14 +246,18 @@ mod tests {
         check_new_max(1.into(), 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
-        let u = vec![(vec![1.into(), 22.into()], false),
-                     (vec![1.into(), 23.into()], true)];
+        let u = vec![
+            (vec![1.into(), 22.into()], false),
+            (vec![1.into(), 23.into()], true),
+        ];
         let out = c.narrow_one(u, true);
         check_new_max(1.into(), 22.into(), 23.into(), out);
 
         // Competing positive and negative should cancel out.
-        let u = vec![(vec![1.into(), 24.into()], true),
-                     (vec![1.into(), 24.into()], false)];
+        let u = vec![
+            (vec![1.into(), 24.into()], true),
+            (vec![1.into(), 24.into()], false),
+        ];
         let rs = c.narrow_one(u, true);
         assert!(rs.is_empty());
     }
@@ -268,8 +281,10 @@ mod tests {
     #[test]
     fn it_resolves() {
         let c = setup(false);
-        assert_eq!(c.node().resolve(0),
-                   Some(vec![(c.narrow_base_id().as_global(), 0)]));
+        assert_eq!(
+            c.node().resolve(0),
+            Some(vec![(c.narrow_base_id().as_global(), 0)])
+        );
         assert_eq!(c.node().resolve(1), None);
     }
 }

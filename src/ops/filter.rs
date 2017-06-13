@@ -51,13 +51,14 @@ impl Ingredient for Filter {
         self.src.remap(remap);
     }
 
-    fn on_input(&mut self,
-                _: LocalNodeIndex,
-                mut rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                _: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        _: LocalNodeIndex,
+        mut rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        _: &StateMap,
+    ) -> ProcessingResult {
 
         rs.retain(|r| {
             self.filter.iter().enumerate().all(|(i, fi)| {
@@ -103,32 +104,33 @@ impl Ingredient for Filter {
                 .replace_all(s, "\\$1")
                 .to_string()
         };
-        format!("σ[{}]",
-                self.filter
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, ref e)| match e.as_ref() {
-                                    Some(&(ref op, ref x)) => {
-                                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                                    }
-                                    None => None,
-                                })
-                    .collect::<Vec<_>>()
-                    .as_slice()
-                    .join(", "))
-            .into()
+        format!(
+            "σ[{}]",
+            self.filter
+                .iter()
+                .enumerate()
+                .filter_map(|(i, ref e)| match e.as_ref() {
+                    Some(&(ref op, ref x)) => {
+                        Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                    }
+                    None => None,
+                })
+                .collect::<Vec<_>>()
+                .as_slice()
+                .join(", ")
+        ).into()
     }
 
     fn can_query_through(&self) -> bool {
         true
     }
 
-    fn query_through<'a>
-        (&self,
-         columns: &[usize],
-         key: &KeyType<DataType>,
-         states: &'a StateMap)
-         -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
+    fn query_through<'a>(
+        &self,
+        columns: &[usize],
+        key: &KeyType<DataType>,
+        states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
         states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
             match state.lookup(columns, key) {
@@ -174,16 +176,21 @@ mod tests {
 
     use ops;
 
-    fn setup(materialized: bool,
-             filters: Option<&[Option<(Operator, DataType)>]>)
-             -> ops::test::MockGraph {
+    fn setup(
+        materialized: bool,
+        filters: Option<&[Option<(Operator, DataType)>]>,
+    ) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
-        g.set_op("filter",
-                 &["x", "y"],
-                 Filter::new(s.as_global(),
-                             filters.unwrap_or(&[None, Some((Operator::Equal, "a".into()))])),
-                 materialized);
+        g.set_op(
+            "filter",
+            &["x", "y"],
+            Filter::new(
+                s.as_global(),
+                filters.unwrap_or(&[None, Some((Operator::Equal, "a".into()))]),
+            ),
+            materialized,
+        );
         g
     }
 
@@ -221,9 +228,15 @@ mod tests {
 
     #[test]
     fn it_forwards_mfilter() {
-        let mut g = setup(false,
-                          Some(&[Some((Operator::Equal, 1.into())),
-                                 Some((Operator::Equal, "a".into()))]));
+        let mut g = setup(
+            false,
+            Some(
+                &[
+                    Some((Operator::Equal, 1.into())),
+                    Some((Operator::Equal, "a".into())),
+                ],
+            ),
+        );
 
         let mut left: Vec<DataType>;
 
@@ -251,10 +264,14 @@ mod tests {
     #[test]
     fn it_resolves() {
         let g = setup(false, None);
-        assert_eq!(g.node().resolve(0),
-                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
-        assert_eq!(g.node().resolve(1),
-                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
+        assert_eq!(
+            g.node().resolve(0),
+            Some(vec![(g.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            g.node().resolve(1),
+            Some(vec![(g.narrow_base_id().as_global(), 1)])
+        );
     }
 
     #[test]
@@ -272,9 +289,15 @@ mod tests {
 
     #[test]
     fn it_works_with_inequalities() {
-        let mut g = setup(false,
-                          Some(&[Some((Operator::LessOrEqual, 2.into())),
-                                 Some((Operator::NotEqual, "a".into()))]));
+        let mut g = setup(
+            false,
+            Some(
+                &[
+                    Some((Operator::LessOrEqual, 2.into())),
+                    Some((Operator::NotEqual, "a".into())),
+                ],
+            ),
+        );
 
         let mut left: Vec<DataType>;
 

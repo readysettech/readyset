@@ -18,37 +18,41 @@ fn main() {
         let mut mig = g.start_migration();
 
         // add article base node
-        let _article = inc.add_query("CREATE TABLE article \
+        let _article = inc.add_query(
+            "CREATE TABLE article \
                                      (id int, user int, title varchar(255), url text);",
-                                     None,
-                                     &mut mig)
-            .unwrap();
+            None,
+            &mut mig,
+        ).unwrap();
 
         // add vote base table
         let _vote = inc.add_query("CREATE TABLE vote (user int, id int);", None, &mut mig)
             .unwrap();
 
         // add a user account base table
-        let _user = inc.add_query("CREATE TABLE user \
+        let _user = inc.add_query(
+            "CREATE TABLE user \
                                   (id int, username varchar(40), hash varchar(64));",
-                                  None,
-                                  &mut mig)
-            .unwrap();
+            None,
+            &mut mig,
+        ).unwrap();
 
         // add vote count
-        inc.add_query("SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
-                      Some("vc".into()),
-                      &mut mig)
-            .unwrap();
+        inc.add_query(
+            "SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
+            Some("vc".into()),
+            &mut mig,
+        ).unwrap();
 
         println!("done vc");
 
         // add final join -- joins on first field of each input
-        inc.add_query("SELECT article.id, article.user, title, url, vc.votes FROM article, \
+        inc.add_query(
+            "SELECT article.id, article.user, title, url, vc.votes FROM article, \
                             vc WHERE article.id = vc.id;",
-                      Some("awvc".into()),
-                      &mut mig)
-            .unwrap();
+            Some("awvc".into()),
+            &mut mig,
+        ).unwrap();
 
         println!("done awvc");
 

@@ -81,37 +81,35 @@ mod tests {
 
     #[test]
     fn it_normalizes() {
-        let mut expr = ConditionExpression::NegationOp(Box::new(ConditionExpression::LogicalOp(
-            ConditionTree {
+        let mut expr = ConditionExpression::NegationOp(
+            Box::new(ConditionExpression::LogicalOp(ConditionTree {
                 operator: Operator::And,
-                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree{
+                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
                     operator: Operator::Less,
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
                 })),
-                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree{
+                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
                     operator: Operator::Equal,
                     left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
                     right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
                 })),
-            }
-        )));
-
-        let target = ConditionExpression::LogicalOp(
-            ConditionTree {
-                operator: Operator::Or,
-                left: Box::new(ConditionExpression::ComparisonOp(ConditionTree{
-                    operator: Operator::GreaterOrEqual,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-                })),
-                right: Box::new(ConditionExpression::ComparisonOp(ConditionTree{
-                    operator: Operator::NotEqual,
-                    left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
-                    right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
-                })),
-            }
+            })),
         );
+
+        let target = ConditionExpression::LogicalOp(ConditionTree {
+            operator: Operator::Or,
+            left: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::GreaterOrEqual,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field("a".into()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
+            })),
+            right: Box::new(ConditionExpression::ComparisonOp(ConditionTree {
+                operator: Operator::NotEqual,
+                left: Box::new(ConditionExpression::Base(ConditionBase::Field("c".into()))),
+                right: Box::new(ConditionExpression::Base(ConditionBase::Field("b".into()))),
+            })),
+        });
 
         normalize_condition_expr(&mut expr, false);
         assert_eq!(expr, target);

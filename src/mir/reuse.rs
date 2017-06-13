@@ -1,10 +1,11 @@
 use mir::{MirNode, MirNodeRef, MirNodeType, MirQuery};
 use slog;
 
-pub fn merge_mir_for_queries(log: &slog::Logger,
-                             new_query: &MirQuery,
-                             old_query: &MirQuery)
-                             -> (MirQuery, usize) {
+pub fn merge_mir_for_queries(
+    log: &slog::Logger,
+    new_query: &MirQuery,
+    old_query: &MirQuery,
+) -> (MirQuery, usize) {
     use std::collections::{HashSet, HashMap, VecDeque};
     use std::rc::Rc;
     use std::cell::RefCell;
@@ -31,10 +32,12 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
     while let Some((old, new)) = trace_nodes.pop_front() {
         let new_id = new.borrow().versioned_name();
         // reuseable node found, keep going
-        trace!(log,
-               "found reuseable node {:?} for {:?}, continuing",
-               old,
-               new);
+        trace!(
+            log,
+            "found reuseable node {:?} for {:?}, continuing",
+            old,
+            new
+        );
         assert!(!reuse.contains_key(&new_id));
 
         let reuse_node;
@@ -46,14 +49,14 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
             // don't want to do this here because we later re-write the ancestors' child that this
             // node replaces to point to this node.
             reuse_node = Rc::new(RefCell::new(MirNode {
-                                                  name: o.name.clone(),
-                                                  from_version: o.from_version,
-                                                  columns: o.columns.clone(),
-                                                  inner: MirNodeType::Reuse { node: o_ref },
-                                                  ancestors: o.ancestors.clone(),
-                                                  children: o.children.clone(),
-                                                  flow_node: None,
-                                              }));
+                name: o.name.clone(),
+                from_version: o.from_version,
+                columns: o.columns.clone(),
+                inner: MirNodeType::Reuse { node: o_ref },
+                ancestors: o.ancestors.clone(),
+                children: o.children.clone(),
+                flow_node: None,
+            }));
         }
         reuse.insert(new_id.clone(), reuse_node);
 
@@ -63,9 +66,11 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
         for new_child in new.borrow().children() {
             let new_child_id = new_child.borrow().versioned_name();
             if visited.contains(&new_child_id) {
-                trace!(log,
-                       "hit previously visited node {:?}, ignoring",
-                       new_child_id);
+                trace!(
+                    log,
+                    "hit previously visited node {:?}, ignoring",
+                    new_child_id
+                );
                 continue;
             }
 
@@ -75,18 +80,22 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
             let mut found = false;
             for old_child in old.borrow().children() {
                 if old_child.borrow().can_reuse_as(&*new_child.borrow()) {
-                    trace!(log,
-                           "add child {:?} to queue as it has a match",
-                           new_child_id);
+                    trace!(
+                        log,
+                        "add child {:?} to queue as it has a match",
+                        new_child_id
+                    );
                     trace_nodes.push_back((old_child.clone(), new_child.clone()));
                     found = true;
                 }
             }
             if !found {
                 // if no child of this node is reusable, we give up on this path
-                trace!(log,
-                       "no reuseable node found for {:?} in old query, giving up",
-                       new_child);
+                trace!(
+                    log,
+                    "no reuseable node found for {:?} in old query, giving up",
+                    new_child
+                );
             }
         }
     }
@@ -111,18 +120,18 @@ pub fn merge_mir_for_queries(log: &slog::Logger,
             .ancestors()
             .iter()
             .map(|a| match reuse.get(&a.borrow().versioned_name()) {
-                     None => a,
-                     Some(ref reused) => reused,
-                 })
+                None => a,
+                Some(ref reused) => reused,
+            })
             .cloned()
             .collect();
         let children: Vec<_> = n.borrow()
             .children()
             .iter()
             .map(|c| match reuse.get(&c.borrow().versioned_name()) {
-                     None => c,
-                     Some(ref reused) => reused,
-                 })
+                None => c,
+                Some(ref reused) => reused,
+            })
             .cloned()
             .collect();
 
@@ -176,49 +185,60 @@ mod tests {
 
     fn make_nodes() -> (MirNodeRef, MirNodeRef, MirNodeRef, MirNodeRef) {
         let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
-            (ColumnSpecification::new(Column::from(n), SqlType::Text), None)
+            (
+                ColumnSpecification::new(Column::from(n), SqlType::Text),
+                None,
+            )
         };
-        let a = MirNode::new("a",
-                             0,
-                             vec![Column::from("aa"), Column::from("ab")],
-                             MirNodeType::Base {
-                                 column_specs: vec![cspec("aa"), cspec("ab")],
-                                 keys: vec![Column::from("aa")],
-                                 transactional: false,
-                                 adapted_over: None,
-                             },
-                             vec![],
-                             vec![]);
-        let b = MirNode::new("b",
-                             0,
-                             vec![Column::from("ba"), Column::from("bb")],
-                             MirNodeType::Base {
-                                 column_specs: vec![cspec("ba"), cspec("bb")],
-                                 keys: vec![Column::from("ba")],
-                                 transactional: false,
-                                 adapted_over: None,
-                             },
-                             vec![],
-                             vec![]);
-        let c = MirNode::new("c",
-                             0,
-                             vec![Column::from("aa"), Column::from("ba")],
-                             MirNodeType::Join {
-                                 on_left: vec![Column::from("ab")],
-                                 on_right: vec![Column::from("bb")],
-                                 project: vec![Column::from("aa"), Column::from("ba")],
-                             },
-                             vec![],
-                             vec![]);
-        let d = MirNode::new("d",
-                             0,
-                             vec![Column::from("aa"), Column::from("ba")],
-                             MirNodeType::Leaf {
-                                 node: c.clone(),
-                                 keys: vec![Column::from("ba")],
-                             },
-                             vec![],
-                             vec![]);
+        let a = MirNode::new(
+            "a",
+            0,
+            vec![Column::from("aa"), Column::from("ab")],
+            MirNodeType::Base {
+                column_specs: vec![cspec("aa"), cspec("ab")],
+                keys: vec![Column::from("aa")],
+                transactional: false,
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        );
+        let b = MirNode::new(
+            "b",
+            0,
+            vec![Column::from("ba"), Column::from("bb")],
+            MirNodeType::Base {
+                column_specs: vec![cspec("ba"), cspec("bb")],
+                keys: vec![Column::from("ba")],
+                transactional: false,
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        );
+        let c = MirNode::new(
+            "c",
+            0,
+            vec![Column::from("aa"), Column::from("ba")],
+            MirNodeType::Join {
+                on_left: vec![Column::from("ab")],
+                on_right: vec![Column::from("bb")],
+                project: vec![Column::from("aa"), Column::from("ba")],
+            },
+            vec![],
+            vec![],
+        );
+        let d = MirNode::new(
+            "d",
+            0,
+            vec![Column::from("aa"), Column::from("ba")],
+            MirNodeType::Leaf {
+                node: c.clone(),
+                keys: vec![Column::from("ba")],
+            },
+            vec![],
+            vec![],
+        );
         (a, b, c, d)
     }
 
@@ -246,24 +266,25 @@ mod tests {
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
         let (merged_reflexive, _) = merge_mir_for_queries(&log, &mq1, &mq1);
-        assert!(merged_reflexive
-                    .topo_nodes()
-                    .iter()
-                    .all(|n| match n.borrow().inner {
-                             MirNodeType::Reuse { .. } => true,
-                             _ => false,
-                         }));
+        assert!(merged_reflexive.topo_nodes().iter().all(|n| {
+            match n.borrow().inner {
+                MirNodeType::Reuse { .. } => true,
+                _ => false,
+            }
+        }));
 
         let (a, b, c, d) = make_nodes();
-        let e = MirNode::new("e",
-                             0,
-                             vec![Column::from("aa")],
-                             MirNodeType::Project {
-                                 emit: vec![Column::from("aa")],
-                                 literals: vec![],
-                             },
-                             vec![c.clone()],
-                             vec![d.clone()]);
+        let e = MirNode::new(
+            "e",
+            0,
+            vec![Column::from("aa")],
+            MirNodeType::Project {
+                emit: vec![Column::from("aa")],
+                literals: vec![],
+            },
+            vec![c.clone()],
+            vec![d.clone()],
+        );
         a.borrow_mut().add_child(c.clone());
         b.borrow_mut().add_child(c.clone());
         c.borrow_mut().add_ancestor(a.clone());

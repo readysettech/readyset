@@ -83,20 +83,22 @@ impl DomainHandle {
         nodes
             .into_iter()
             .map(|(ni, _)| {
-                     let node = graph.node_weight_mut(ni).unwrap().take();
-                     node.finalize(graph)
-                 })
+                let node = graph.node_weight_mut(ni).unwrap().take();
+                node.finalize(graph)
+            })
             .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
     }
 
-    pub fn boot(&mut self,
-                log: &Logger,
-                graph: &mut Graph,
-                nodes: Vec<(NodeIndex, bool)>,
-                persistence_params: persistence::Parameters,
-                checktable: Arc<Mutex<checktable::CheckTable>>,
-                ts: i64) {
+    pub fn boot(
+        &mut self,
+        log: &Logger,
+        graph: &mut Graph,
+        nodes: Vec<(NodeIndex, bool)>,
+        persistence_params: persistence::Parameters,
+        checktable: Arc<Mutex<checktable::CheckTable>>,
+        ts: i64,
+    ) {
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
         let n = self.rxs.len();
         for (i, (rx, in_rx)) in self.rxs.drain(..).enumerate() {
@@ -110,14 +112,16 @@ impl DomainHandle {
             } else {
                 nodes.clone().unwrap()
             };
-            let domain = domain::Domain::new(logger,
-                                             self.idx,
-                                             i,
-                                             n,
-                                             nodes,
-                                             persistence_params.clone(),
-                                             checktable.clone(),
-                                             ts);
+            let domain = domain::Domain::new(
+                logger,
+                self.idx,
+                i,
+                n,
+                nodes,
+                persistence_params.clone(),
+                checktable.clone(),
+                ts,
+            );
             self.threads.push(domain.boot(rx, in_rx));
         }
     }
@@ -276,17 +280,19 @@ impl DomainHandle {
         Ok(())
     }
 
-    pub fn send_to_shard(&mut self,
-                         i: usize,
-                         p: Box<Packet>)
-                         -> Result<(), mpsc::SendError<Box<Packet>>> {
+    pub fn send_to_shard(
+        &mut self,
+        i: usize,
+        p: Box<Packet>,
+    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
         self.txs[i].send(p)
     }
 
-    pub fn base_send(&mut self,
-                     p: Box<Packet>,
-                     key: &[usize])
-                     -> Result<(), mpsc::SendError<Box<Packet>>> {
+    pub fn base_send(
+        &mut self,
+        p: Box<Packet>,
+        key: &[usize],
+    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
         if self.txs.len() == 1 {
             self.in_txs[0].send(p)
         } else {
@@ -305,21 +311,15 @@ impl DomainHandle {
                     Record::DeleteRequest(ref k) => &k[0],
                 };
                 if !p.data().iter().all(|r| match *r {
-                                            Record::Positive(ref r) |
-                                            Record::Negative(ref r) => &r[key_col] == key,
-                                            Record::DeleteRequest(ref k) => {
-                                                k.len() == 1 && &k[0] == key
-                                            }
-                                        }) {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col] == key,
+                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
+                })
+                {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }
-                // TODO: avoid duplicating sharding code from Sharder
-                match *key {
-                    DataType::Int(n) => n as usize % self.txs.len(),
-                    DataType::BigInt(n) => n as usize % self.txs.len(),
-                    _ => unimplemented!(),
-                }
+                ::shard_by(key, self.txs.len())
             };
             self.in_txs[shard].send(p)
         }

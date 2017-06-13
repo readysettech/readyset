@@ -317,14 +317,16 @@ impl Into<Vec<Record>> for Records {
 use std::iter::FromIterator;
 impl FromIterator<Record> for Records {
     fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = Record>
+    where
+        I: IntoIterator<Item = Record>,
     {
         Records(iter.into_iter().collect())
     }
 }
 impl FromIterator<sync::Arc<Vec<DataType>>> for Records {
     fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = sync::Arc<Vec<DataType>>>
+    where
+        I: IntoIterator<Item = sync::Arc<Vec<DataType>>>,
     {
         Records(iter.into_iter().map(Record::Positive).collect())
     }

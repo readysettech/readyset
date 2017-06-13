@@ -42,18 +42,22 @@ pub fn make_server(soup: &flow::Blender) -> Server {
     let ins = soup.inputs()
         .into_iter()
         .map(|(ni, n)| {
-                 (ni.index(),
-                  (n.name().to_owned(), n.fields().iter().cloned().collect(), soup.get_mutator(ni)))
-             })
+            (ni.index(), (
+                n.name().to_owned(),
+                n.fields().iter().cloned().collect(),
+                soup.get_mutator(ni),
+            ))
+        })
         .collect();
     let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n)| {
-                 (ni.index(),
-                  (n.name().to_owned(),
-                   n.fields().iter().cloned().collect(),
-                   soup.get_getter(ni).unwrap()))
-             })
+            (ni.index(), (
+                n.name().to_owned(),
+                n.fields().iter().cloned().collect(),
+                soup.get_getter(ni).unwrap(),
+            ))
+        })
         .collect();
 
     Server {
@@ -78,9 +82,12 @@ pub fn main(stream: TcpStream, mut s: Server) {
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
             Ok(Method::Query { view, key }) => {
-                if let Err(e) = bincode::serialize_into(&mut stream,
-                                                        &s.get[view].2(&key, true),
-                                                        bincode::Infinite) {
+                if let Err(e) = bincode::serialize_into(
+                    &mut stream,
+                    &s.get[view].2(&key, true),
+                    bincode::Infinite,
+                )
+                {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
@@ -123,9 +130,9 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender, addr: T) {
                 thread::Builder::new()
                     .name(format!("rpc{}", i))
                     .spawn(move || {
-                               stream.set_nodelay(true).unwrap();
-                               main(stream, s);
-                           })
+                        stream.set_nodelay(true).unwrap();
+                        main(stream, s);
+                    })
                     .unwrap();
                 i += 1;
             }

@@ -60,6 +60,7 @@ pub struct Blender {
     checktable: Arc<Mutex<checktable::CheckTable>>,
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
+    sharding_enabled: bool,
 
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
@@ -72,10 +73,12 @@ pub struct Blender {
 impl Default for Blender {
     fn default() -> Self {
         let mut g = petgraph::Graph::new();
-        let source = g.add_node(node::Node::new("source",
-                                                &["because-type-inference"],
-                                                node::special::Source,
-                                                true));
+        let source = g.add_node(node::Node::new(
+            "source",
+            &["because-type-inference"],
+            node::special::Source,
+            true,
+        ));
         Blender {
             ingredients: g,
             source: source,
@@ -83,6 +86,7 @@ impl Default for Blender {
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
             partial: Default::default(),
             partial_enabled: true,
+            sharding_enabled: true,
 
             persistence: persistence::Parameters::default(),
 
@@ -102,6 +106,11 @@ impl Blender {
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
         self.partial_enabled = false;
+    }
+
+    /// Disable sharding for all subsequent migrations
+    pub fn disable_sharding(&mut self) {
+        self.sharding_enabled = false;
     }
 
     /// Controls the persistence mode, and parameters related to persistence.
@@ -150,7 +159,9 @@ impl Blender {
     /// Get a boxed function which can be used to validate tokens.
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
         let checktable = self.checktable.clone();
-        Box::new(move |t: &checktable::Token| checktable.lock().unwrap().validate_token(t))
+        Box::new(move |t: &checktable::Token| {
+            checktable.lock().unwrap().validate_token(t)
+        })
     }
 
     #[cfg(test)]
@@ -169,11 +180,11 @@ impl Blender {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
-                     let base = &self.ingredients[n];
-                     assert!(base.is_internal());
-                     assert!(base.get_base().is_some());
-                     (n.into(), base)
-                 })
+                let base = &self.ingredients[n];
+                assert!(base.is_internal());
+                assert!(base.get_base().is_some());
+                (n.into(), base)
+            })
             .collect()
     }
 
@@ -209,8 +220,9 @@ impl Blender {
         let mut reader = None;
         while let Some(child) = bfs.next(&self.ingredients) {
             if self.ingredients[child]
-                   .with_reader(|r| r.is_for() == node)
-                   .unwrap_or(false) {
+                .with_reader(|r| r.is_for() == node)
+                .unwrap_or(false)
+            {
                 reader = Some(child);
                 break;
             }
@@ -220,10 +232,10 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter
-        (&self,
-         node: prelude::NodeIndex)
-         -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
+    pub fn get_getter(
+        &self,
+        node: prelude::NodeIndex,
+    ) -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
 
         // look up the read handle, clone it, and construct the read closure
         self.find_getter_for(node).and_then(|r| {
@@ -248,12 +260,16 @@ impl Blender {
     }
 
     /// Obtain a new function for querying a given (already maintained) transactional reader node.
-    pub fn get_transactional_getter(&self,
-                                    node: prelude::NodeIndex)
-                                    -> Result<Box<Fn(&prelude::DataType)
-                                                     -> Result<(core::Datas, checktable::Token),
-                                                                ()> + Send>,
-                                              ()> {
+    pub fn get_transactional_getter(
+        &self,
+        node: prelude::NodeIndex,
+    ) -> Result<
+        Box<
+            Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()>
+                + Send,
+        >,
+        (),
+    > {
 
         if !self.ingredients[node].is_transactional() {
             return Err(());
@@ -312,8 +328,9 @@ impl Blender {
         }
 
         let num_fields = node.fields().len();
-        let base_operator = node.get_base()
-            .expect("asked to get mutator for non-base node");
+        let base_operator = node.get_base().expect(
+            "asked to get mutator for non-base node",
+        );
         Mutator {
             tx: tx,
             addr: (*node.local_addr()).into(),
@@ -415,28 +432,33 @@ impl<'a> Migration<'a> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self,
-                                         name: S1,
-                                         fields: FS,
-                                         mut i: I)
-                                         -> prelude::NodeIndex
-        where S1: ToString,
-              S2: ToString,
-              FS: IntoIterator<Item = S2>,
-              I: prelude::Ingredient + Into<prelude::NodeOperator>
+    pub fn add_ingredient<S1, FS, S2, I>(
+        &mut self,
+        name: S1,
+        fields: FS,
+        mut i: I,
+    ) -> prelude::NodeIndex
+    where
+        S1: ToString,
+        S2: ToString,
+        FS: IntoIterator<Item = S2>,
+        I: prelude::Ingredient + Into<prelude::NodeOperator>,
     {
         i.on_connected(&self.mainline.ingredients);
         let parents = i.ancestors();
 
         let transactional = !parents.is_empty() &&
-                            parents
-                                .iter()
-                                .all(|&p| self.mainline.ingredients[p].is_transactional());
+            parents.iter().all(|&p| {
+                self.mainline.ingredients[p].is_transactional()
+            });
 
         // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name.to_string(), fields, i.into(), transactional));
+        let ni = self.mainline.ingredients.add_node(node::Node::new(
+            name.to_string(),
+            fields,
+            i.into(),
+            transactional,
+        ));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -447,9 +469,11 @@ impl<'a> Migration<'a> {
         self.added.push(ni);
         // insert it into the graph
         if parents.is_empty() {
-            self.mainline
-                .ingredients
-                .add_edge(self.mainline.source, ni, false);
+            self.mainline.ingredients.add_edge(
+                self.mainline.source,
+                ni,
+                false,
+            );
         } else {
             for parent in parents {
                 self.mainline.ingredients.add_edge(parent, ni, false);
@@ -460,22 +484,27 @@ impl<'a> Migration<'a> {
     }
 
     /// Add a transactional base node to the graph
-    pub fn add_transactional_base<S1, FS, S2>(&mut self,
-                                              name: S1,
-                                              fields: FS,
-                                              mut b: Base)
-                                              -> prelude::NodeIndex
-        where S1: ToString,
-              S2: ToString,
-              FS: IntoIterator<Item = S2>
+    pub fn add_transactional_base<S1, FS, S2>(
+        &mut self,
+        name: S1,
+        fields: FS,
+        mut b: Base,
+    ) -> prelude::NodeIndex
+    where
+        S1: ToString,
+        S2: ToString,
+        FS: IntoIterator<Item = S2>,
     {
         b.on_connected(&self.mainline.ingredients);
         let b: prelude::NodeOperator = b.into();
 
         // add to the graph
-        let ni = self.mainline
-            .ingredients
-            .add_node(node::Node::new(name.to_string(), fields, b, true));
+        let ni = self.mainline.ingredients.add_node(node::Node::new(
+            name.to_string(),
+            fields,
+            b,
+            true,
+        ));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -485,9 +514,11 @@ impl<'a> Migration<'a> {
         // keep track of the fact that it's new
         self.added.push(ni);
         // insert it into the graph
-        self.mainline
-            .ingredients
-            .add_edge(self.mainline.source, ni, false);
+        self.mainline.ingredients.add_edge(
+            self.mainline.source,
+            ni,
+            false,
+        );
         // and tell the caller its id
         ni.into()
     }
@@ -496,11 +527,12 @@ impl<'a> Migration<'a> {
     ///
     /// Note that a default value must be provided such that old writes can be converted into this
     /// new type.
-    pub fn add_column<S: ToString>(&mut self,
-                                   node: prelude::NodeIndex,
-                                   field: S,
-                                   default: prelude::DataType)
-                                   -> usize {
+    pub fn add_column<S: ToString>(
+        &mut self,
+        node: prelude::NodeIndex,
+        field: S,
+        default: prelude::DataType,
+    ) -> usize {
         // not allowed to add columns to new nodes
         assert!(!self.added.iter().any(|&ni| ni == node));
 
@@ -513,10 +545,9 @@ impl<'a> Migration<'a> {
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
-            let col_i2 = base.inner_mut()
-                .get_base_mut()
-                .unwrap()
-                .add_column(default.clone());
+            let col_i2 = base.inner_mut().get_base_mut().unwrap().add_column(
+                default.clone(),
+            );
             assert_eq!(col_i1, col_i2);
         }
 
@@ -560,10 +591,9 @@ impl<'a> Migration<'a> {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
         // converted to an egress/ingress pair?
-        let e = self.mainline
-            .ingredients
-            .find_edge(src, dst)
-            .expect("asked to materialize non-existing edge");
+        let e = self.mainline.ingredients.find_edge(src, dst).expect(
+            "asked to materialize non-existing edge",
+        );
 
         debug!(self.log, "told to materialize"; "node" => src.index());
 
@@ -591,8 +621,9 @@ impl<'a> Migration<'a> {
     fn ensure_token_generator(&mut self, n: prelude::NodeIndex, key: usize) {
         let ri = self.readers[&n];
         if self.mainline.ingredients[ri]
-               .with_reader(|r| r.token_generator().is_some())
-               .expect("tried to add token generator to non-reader node") {
+            .with_reader(|r| r.token_generator().is_some())
+            .expect("tried to add token generator to non-reader node")
+        {
             return;
         }
 
@@ -603,9 +634,9 @@ impl<'a> Migration<'a> {
             keys::provenance_of(&self.mainline.ingredients, n, key, |_, _| None)
                 .into_iter()
                 .map(|path| {
-                         // we want the base node corresponding to each path
-                         path.into_iter().last().unwrap()
-                     })
+                    // we want the base node corresponding to each path
+                    path.into_iter().last().unwrap()
+                })
                 .collect();
 
         let coarse_parents = base_columns
@@ -616,21 +647,20 @@ impl<'a> Migration<'a> {
         let granular_parents = base_columns
             .into_iter()
             .filter_map(|(ni, o)| if o.is_some() {
-                            Some((ni, o.unwrap()))
-                        } else {
-                            None
-                        })
+                Some((ni, o.unwrap()))
+            } else {
+                None
+            })
             .collect();
 
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
-        self.mainline
-            .checktable
-            .lock()
-            .unwrap()
-            .track(&token_generator);
+        self.mainline.checktable.lock().unwrap().track(
+            &token_generator,
+        );
 
-        self.mainline.ingredients[ri]
-            .with_reader_mut(|r| { r.set_token_generator(token_generator); });
+        self.mainline.ingredients[ri].with_reader_mut(|r| {
+            r.set_token_generator(token_generator);
+        });
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -675,21 +705,22 @@ impl<'a> Migration<'a> {
             .get_mut(&reader.domain())
             .unwrap()
             .send(box payload::Packet::AddStreamer {
-                      node: *reader.local_addr(),
-                      new_streamer: tx,
-                  })
+                node: *reader.local_addr(),
+                new_streamer: tx,
+            })
             .unwrap();
 
         rx
     }
 
     /// Set up the given node such that its output is stored in Memcached.
-    pub fn memcached_hook(&mut self,
-                          n: prelude::NodeIndex,
-                          name: String,
-                          servers: &[(&str, usize)],
-                          key: usize)
-                          -> io::Result<prelude::NodeIndex> {
+    pub fn memcached_hook(
+        &mut self,
+        n: prelude::NodeIndex,
+        name: String,
+        servers: &[(&str, usize)],
+        key: usize,
+    ) -> io::Result<prelude::NodeIndex> {
         let h = try!(hook::Hook::new(name, servers, vec![key]));
         let h = self.mainline.ingredients[n].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
@@ -716,15 +747,20 @@ impl<'a> Migration<'a> {
         }
 
         // Shard the graph as desired
-        let mut swapped0 =
-            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new);
+        let mut swapped0 = if mainline.sharding_enabled {
+            migrate::sharding::shard(&log, &mut mainline.ingredients, mainline.source, &mut new)
+        } else {
+            HashMap::default()
+        };
 
         // Assign domains
-        migrate::assignment::assign(&log,
-                                    &mut mainline.ingredients,
-                                    mainline.source,
-                                    &new,
-                                    &mut mainline.ndomains);
+        migrate::assignment::assign(
+            &log,
+            &mut mainline.ingredients,
+            mainline.source,
+            &new,
+            &mut mainline.ndomains,
+        );
 
         // Set up ingress and egress nodes
         let swapped1 =
@@ -783,7 +819,9 @@ impl<'a> Migration<'a> {
             .node_indices()
             .filter(|&ni| ni != mainline.source)
             .filter(|&ni| !mainline.ingredients[ni].is_dropped())
-            .map(|ni| (mainline.ingredients[ni].domain(), ni, new.contains(&ni)))
+            .map(|ni| {
+                (mainline.ingredients[ni].domain(), ni, new.contains(&ni))
+            })
             .fold(HashMap::new(), |mut dns, (d, ni, new)| {
                 dns.entry(d).or_insert_with(Vec::new).push((ni, new));
                 dns
@@ -893,9 +931,11 @@ impl<'a> Migration<'a> {
             .collect();
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
-        let deps = migrate::transactions::analyze_graph(&mainline.ingredients,
-                                                        mainline.source,
-                                                        domain_nodes);
+        let deps = migrate::transactions::analyze_graph(
+            &mainline.ingredients,
+            mainline.source,
+            domain_nodes,
+        );
         let (start_ts, end_ts, prevs) =
             mainline.checktable.lock().unwrap().perform_migration(&deps);
 
@@ -910,24 +950,28 @@ impl<'a> Migration<'a> {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let mut d = domain::DomainHandle::new(domain,
-                                                  mainline.ingredients[nodes[0].0].sharded_by());
-            d.boot(&log,
-                   &mut mainline.ingredients,
-                   nodes,
-                   mainline.persistence.clone(),
-                   mainline.checktable.clone(),
-                   start_ts);
+            let mut d =
+                domain::DomainHandle::new(domain, mainline.ingredients[nodes[0].0].sharded_by());
+            d.boot(
+                &log,
+                &mut mainline.ingredients,
+                nodes,
+                mainline.persistence.clone(),
+                mainline.checktable.clone(),
+                start_ts,
+            );
             mainline.domains.insert(domain, d);
         }
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
         debug!(log, "mutating existing domains");
-        migrate::augmentation::inform(&log,
-                                      &mut mainline,
-                                      uninformed_domain_nodes,
-                                      start_ts,
-                                      prevs.unwrap());
+        migrate::augmentation::inform(
+            &log,
+            &mut mainline,
+            uninformed_domain_nodes,
+            start_ts,
+            prevs.unwrap(),
+        );
 
         // Tell all base nodes about newly added columns
         let acks: Vec<_> = self.columns
@@ -982,11 +1026,9 @@ impl<'a> Migration<'a> {
         // Ideally this should happen as part of checktable::perform_migration(), but we don't know
         // the replay paths then. It is harmless to do now since we know the new replay paths won't
         // request timestamps until after the migration in finished.
-        mainline
-            .checktable
-            .lock()
-            .unwrap()
-            .add_replay_paths(domains_on_path);
+        mainline.checktable.lock().unwrap().add_replay_paths(
+            domains_on_path,
+        );
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 

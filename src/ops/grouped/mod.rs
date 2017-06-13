@@ -87,7 +87,8 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 }
 
 impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
-    where Self: Into<NodeOperator>
+where
+    Self: Into<NodeOperator>,
 {
     fn take(&mut self) -> NodeOperator {
         Clone::clone(self).into()
@@ -143,13 +144,14 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
         self.us = Some(remap[&us]);
     }
 
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                state: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        state: &StateMap,
+    ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
@@ -168,10 +170,10 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
             let group = rec.iter()
                 .enumerate()
                 .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                                Some(v)
-                            } else {
-                                None
-                            })
+                    Some(v)
+                } else {
+                    None
+                })
                 .collect::<Vec<_>>();
 
             consolidate.entry(group).or_insert_with(Vec::new).push(val);
@@ -182,9 +184,9 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
         let mut out = Vec::with_capacity(2 * consolidate.len());
         for (group, diffs) in consolidate {
             // find the current value for this group
-            let db = state
-                .get(&*us)
-                .expect("grouped operators must have their own state materialized");
+            let db = state.get(&*us).expect(
+                "grouped operators must have their own state materialized",
+            );
 
             let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
                 LookupResult::Some(rs) => {
@@ -193,9 +195,9 @@ impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
                 }
                 LookupResult::Missing => {
                     misses.push(Miss {
-                                    node: *us,
-                                    key: group.iter().map(|&dt| dt.clone()).collect(),
-                                });
+                        node: *us,
+                        key: group.iter().map(|&dt| dt.clone()).collect(),
+                    });
                     continue;
                 }
             };

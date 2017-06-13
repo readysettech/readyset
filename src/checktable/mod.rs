@@ -87,16 +87,17 @@ pub struct TokenGenerator {
 }
 
 impl TokenGenerator {
-    pub fn new(base_table_conflicts: Vec<NodeIndex>,
-               base_column_conflicts: Vec<(NodeIndex, usize)>)
-               -> Self {
+    pub fn new(
+        base_table_conflicts: Vec<NodeIndex>,
+        base_column_conflicts: Vec<(NodeIndex, usize)>,
+    ) -> Self {
         TokenGenerator {
             conflicts: base_table_conflicts
                 .into_iter()
                 .map(Conflict::BaseTable)
-                .chain(base_column_conflicts
-                           .into_iter()
-                           .map(|(n, c)| Conflict::BaseColumn(n, c)))
+                .chain(base_column_conflicts.into_iter().map(|(n, c)| {
+                    Conflict::BaseColumn(n, c)
+                }))
                 .collect(),
         }
     }
@@ -191,13 +192,14 @@ impl CheckTable {
     /// Return whether a transaction with this Token should commit.
     pub fn validate_token(&self, token: &Token) -> bool {
         !token.conflicts.iter().any(|&(ts, ref key, ref conflicts)| {
-                                        conflicts.iter().any(|c| self.check_conflict(ts, key, c))
-                                    })
+            conflicts.iter().any(|c| self.check_conflict(ts, key, c))
+        })
     }
 
-    fn compute_previous_timestamps(&self,
-                                   base: Option<NodeIndex>)
-                                   -> Option<Box<HashMap<domain::Index, i64>>> {
+    fn compute_previous_timestamps(
+        &self,
+        base: Option<NodeIndex>,
+    ) -> Option<Box<HashMap<domain::Index, i64>>> {
         if self.last_base.is_some() && self.last_base == base {
             return None;
         }
@@ -229,20 +231,22 @@ impl CheckTable {
         }
     }
 
-    pub fn apply_batch(&mut self,
-                       base: NodeIndex,
-                       packets: &mut Vec<Box<Packet>>,
-                       decisions: &mut Vec<bool>)
-                       -> TransactionResult {
+    pub fn apply_batch(
+        &mut self,
+        base: NodeIndex,
+        packets: &mut Vec<Box<Packet>>,
+        decisions: &mut Vec<bool>,
+    ) -> TransactionResult {
         decisions.clear();
 
         let mut result = TransactionResult::Aborted;
         for packet in packets.iter() {
             let (commit, rs) = if let box Packet::Transaction {
-                       ref data,
-                       ref state,
-                       ..
-                   } = *packet {
+                    ref data,
+                    ref state,
+                    ..
+                } = *packet
+            {
                 match *state {
                     TransactionState::Pending(ref token, _) => (self.validate_token(token), data),
                     TransactionState::WillCommit => (true, data),
@@ -289,10 +293,11 @@ impl CheckTable {
         }
     }
 
-    pub fn apply_unconditional(&mut self,
-                               base: NodeIndex,
-                               rs: &Records)
-                               -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+    pub fn apply_unconditional(
+        &mut self,
+        base: NodeIndex,
+        rs: &Records,
+    ) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;
@@ -307,9 +312,10 @@ impl CheckTable {
         (ts, prev_times)
     }
 
-    pub fn claim_replay_timestamp(&mut self,
-                                  path: &ReplayPath)
-                                  -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
+    pub fn claim_replay_timestamp(
+        &mut self,
+        path: &ReplayPath,
+    ) -> (i64, Option<Box<HashMap<domain::Index, i64>>>) {
         // Take timestamp
         let ts = self.next_timestamp;
         self.next_timestamp += 1;
@@ -328,9 +334,10 @@ impl CheckTable {
 
     /// Transition to using `new_domain_dependencies`, and reserve a pair of
     /// timestamps for the migration to happen between.
-    pub fn perform_migration(&mut self,
-                             deps: &HashMap<domain::Index, (IngressFromBase, EgressForBase)>)
-                             -> (i64, i64, Option<Box<HashMap<domain::Index, i64>>>) {
+    pub fn perform_migration(
+        &mut self,
+        deps: &HashMap<domain::Index, (IngressFromBase, EgressForBase)>,
+    ) -> (i64, i64, Option<Box<HashMap<domain::Index, i64>>>) {
         let ts = self.next_timestamp;
         let prevs = self.compute_previous_timestamps(None);
 
@@ -339,22 +346,27 @@ impl CheckTable {
         self.last_migration = Some(ts + 1);
         self.domain_dependencies = deps.iter()
             .map(|(domain, &(ref ingress_from_base, _))| {
-                     (*domain,
-                      ingress_from_base
-                          .iter()
-                          .filter(|&(_, n)| *n > 0)
-                          .map(|(k, _)| *k)
-                          .collect())
-                 })
+                (
+                    *domain,
+                    ingress_from_base
+                        .iter()
+                        .filter(|&(_, n)| *n > 0)
+                        .map(|(k, _)| *k)
+                        .collect(),
+                )
+            })
             .collect();
 
         (ts, ts + 1, prevs)
     }
 
-    pub fn add_replay_paths(&mut self,
-                            additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>) {
-        self.replay_paths
-            .extend(additional_replay_paths.into_iter());
+    pub fn add_replay_paths(
+        &mut self,
+        additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
+    ) {
+        self.replay_paths.extend(
+            additional_replay_paths.into_iter(),
+        );
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {
@@ -363,8 +375,9 @@ impl CheckTable {
                 Conflict::BaseTable(..) => {}
                 Conflict::BaseColumn(base, col) => {
                     let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-                    t.entry(col)
-                        .or_insert((HashMap::new(), self.next_timestamp - 1));
+                    t.entry(col).or_insert(
+                        (HashMap::new(), self.next_timestamp - 1),
+                    );
                 }
             }
         }

@@ -22,22 +22,23 @@ impl Backend {
     }
 
     pub fn put(&mut self, kind: &str, data: &[DataType]) -> Result<(), String> {
-        let mtr = self.mutators
-            .entry(String::from(kind))
-            .or_insert(self.soup.get_mutator(self.recipe.node_addr_for(kind)?));
+        let mtr = self.mutators.entry(String::from(kind)).or_insert(
+            self.soup.get_mutator(self.recipe.node_addr_for(kind)?),
+        );
 
         mtr.put(data).unwrap();
         Ok(())
     }
 
     pub fn get<I>(&mut self, kind: &str, key: I) -> Result<Datas, String>
-        where I: Into<DataType>
+    where
+        I: Into<DataType>,
     {
-        let get_fn = self.getters
-            .entry(String::from(kind))
-            .or_insert(self.soup
-                           .get_getter(self.recipe.node_addr_for(kind)?)
-                           .unwrap());
+        let get_fn = self.getters.entry(String::from(kind)).or_insert(
+            self.soup
+                .get_getter(self.recipe.node_addr_for(kind)?)
+                .unwrap(),
+        );
 
         match get_fn(&key.into(), true) {
             Ok(records) => Ok(records),

@@ -38,9 +38,11 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self,
-                             dst: LocalNodeIndex,
-                             txs: Vec<mpsc::SyncSender<Box<Packet>>>) {
+    pub fn add_sharded_child(
+        &mut self,
+        dst: LocalNodeIndex,
+        txs: Vec<mpsc::SyncSender<Box<Packet>>>,
+    ) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
@@ -59,17 +61,15 @@ impl Sharder {
 
     #[inline]
     fn shard(&self, dt: &DataType) -> usize {
-        match *dt {
-            DataType::Int(n) => n as usize % self.txs.len(),
-            DataType::BigInt(n) => n as usize % self.txs.len(),
-            _ => unimplemented!(),
-        }
+        ::shard_by(dt, self.txs.len())
     }
 
-    pub fn process(&mut self,
-                   m: &mut Option<Box<Packet>>,
-                   index: LocalNodeIndex,
-                   is_sharded: bool) {
+    pub fn process(
+        &mut self,
+        m: &mut Option<Box<Packet>>,
+        index: LocalNodeIndex,
+        is_sharded: bool,
+    ) {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
 
@@ -98,13 +98,15 @@ impl Sharder {
             }
 
             if let box Packet::ReplayPiece {
-                       context: payload::ReplayPieceContext::Partial { .. }, ..
-                   } = m {
+                    context: payload::ReplayPieceContext::Partial { .. }, ..
+                } = m
+            {
                 // we only need to send this to the shard responsible for the key being replayed!
                 // ugh, I'm sad about this double destruct, but it's necessary for borrowing :(
                 let shard = if let box Packet::ReplayPiece {
-                           context: payload::ReplayPieceContext::Partial { ref for_key, .. }, ..
-                       } = m {
+                        context: payload::ReplayPieceContext::Partial { ref for_key, .. }, ..
+                    } = m
+                {
                     assert_eq!(for_key.len(), 1);
                     self.shard(&for_key[0])
                 } else {
@@ -129,16 +131,17 @@ impl Sharder {
 
         for record in m.take_data() {
             let shard = self.to_shard(&record);
-            let p = self.sharded
-                .entry(shard)
-                .or_insert_with(|| box m.clone_data());
+            let p = self.sharded.entry(shard).or_insert_with(
+                || box m.clone_data(),
+            );
             p.map_data(|rs| rs.push(record));
         }
 
         let mut force_all = false;
         if let Packet::ReplayPiece {
-                   context: payload::ReplayPieceContext::Regular { last: true }, ..
-               } = *m {
+                context: payload::ReplayPieceContext::Regular { last: true }, ..
+            } = *m
+        {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node
             force_all = true;
@@ -149,9 +152,9 @@ impl Sharder {
         }
         if force_all {
             for shard in 0..self.txs.len() {
-                self.sharded
-                    .entry(shard)
-                    .or_insert_with(|| box m.clone_data());
+                self.sharded.entry(shard).or_insert_with(
+                    || box m.clone_data(),
+                );
             }
         }
 

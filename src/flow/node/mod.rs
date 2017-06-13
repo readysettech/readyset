@@ -35,10 +35,11 @@ pub struct Node {
 // constructors
 impl Node {
     pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT, transactional: bool) -> Node
-        where S1: ToString,
-              S2: ToString,
-              FS: IntoIterator<Item = S2>,
-              NT: Into<NodeType>
+    where
+        S1: ToString,
+        S2: ToString,
+        FS: IntoIterator<Item = S2>,
+        NT: Into<NodeType>,
     {
         Node {
             name: name.to_string(),
@@ -82,8 +83,10 @@ impl DanglingDomainNode {
 impl Node {
     pub fn take(&mut self) -> DanglingDomainNode {
         assert!(!self.taken);
-        assert!(!self.is_internal() || self.domain.is_some(),
-                "tried to take unassigned node");
+        assert!(
+            !self.is_internal() || self.domain.is_some(),
+            "tried to take unassigned node"
+        );
 
         let inner = self.inner.take();
         let mut n = self.mirror(inner);
@@ -115,7 +118,8 @@ impl Node {
 // derefs
 impl Node {
     pub fn with_sharder_mut<F>(&mut self, f: F)
-        where F: FnOnce(&mut special::Sharder)
+    where
+        F: FnOnce(&mut special::Sharder),
     {
         match self.inner {
             NodeType::Sharder(ref mut s) => f(s),
@@ -124,8 +128,9 @@ impl Node {
     }
 
     pub fn with_sharder<'a, F, R>(&'a self, f: F) -> Option<R>
-        where F: FnOnce(&'a special::Sharder) -> R,
-              R: 'a
+    where
+        F: FnOnce(&'a special::Sharder) -> R,
+        R: 'a,
     {
         match self.inner {
             NodeType::Sharder(ref s) => Some(f(s)),
@@ -134,7 +139,8 @@ impl Node {
     }
 
     pub fn with_egress_mut<F>(&mut self, f: F)
-        where F: FnOnce(&mut special::Egress)
+    where
+        F: FnOnce(&mut special::Egress),
     {
         match self.inner {
             NodeType::Egress(Some(ref mut e)) => f(e),
@@ -143,7 +149,8 @@ impl Node {
     }
 
     pub fn with_reader_mut<F>(&mut self, f: F)
-        where F: FnOnce(&mut special::Reader)
+    where
+        F: FnOnce(&mut special::Reader),
     {
         match self.inner {
             NodeType::Reader(ref mut r) => f(r),
@@ -152,8 +159,9 @@ impl Node {
     }
 
     pub fn with_reader<'a, F, R>(&'a self, f: F) -> Option<R>
-        where F: FnOnce(&'a special::Reader) -> R,
-              R: 'a
+    where
+        F: FnOnce(&'a special::Reader) -> R,
+        R: 'a,
     {
         match self.inner {
             NodeType::Reader(ref r) => Some(f(r)),
@@ -267,10 +275,9 @@ impl Node {
     }
 
     pub fn is_localized(&self) -> bool {
-        self.index
-            .as_ref()
-            .map(|idx| idx.has_local())
-            .unwrap_or(false) && self.domain.is_some()
+        self.index.as_ref().map(|idx| idx.has_local()).unwrap_or(
+            false,
+        ) && self.domain.is_some()
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {

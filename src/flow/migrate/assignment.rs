@@ -6,11 +6,13 @@ use std::collections::HashSet;
 use petgraph::graph::NodeIndex;
 use petgraph;
 
-pub fn assign(log: &Logger,
-              graph: &mut Graph,
-              source: NodeIndex,
-              new: &HashSet<NodeIndex>,
-              ndomains: &mut usize) {
+pub fn assign(
+    log: &Logger,
+    graph: &mut Graph,
+    source: NodeIndex,
+    new: &HashSet<NodeIndex>,
+    ndomains: &mut usize,
+) {
 
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we use a couple of heuristics to pick and assignment:
@@ -60,8 +62,10 @@ pub fn assign(log: &Logger,
                 // sharder belongs to parent domain
                 ps[0].1.domain().index()
             } else if n.sharded_by() == Sharding::None &&
-                      ps.iter()
-                          .any(|&(_, ref p)| p.sharded_by() != Sharding::None) {
+                       ps.iter().any(
+                |&(_, ref p)| p.sharded_by() != Sharding::None,
+            )
+            {
                 // shard merger
                 next_domain()
             } else if n.is_reader() {
@@ -83,7 +87,8 @@ pub fn assign(log: &Logger,
                         // "all other nodes", but only internal
                         // prefer new
                         if let Some(&(_, ref p)) =
-                            ps.iter().find(|&&(ref pni, _)| new.contains(pni)) {
+                            ps.iter().find(|&&(ref pni, _)| new.contains(pni))
+                        {
                             p.domain().index()
                         } else {
                             ps[0].1.domain().index()

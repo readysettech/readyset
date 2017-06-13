@@ -18,10 +18,12 @@ impl Default for Egress {
 }
 
 impl Egress {
-    pub fn add_tx(&mut self,
-                  dst_g: NodeIndex,
-                  dst_l: LocalNodeIndex,
-                  tx: mpsc::SyncSender<Box<Packet>>) {
+    pub fn add_tx(
+        &mut self,
+        dst_g: NodeIndex,
+        dst_l: LocalNodeIndex,
+        tx: mpsc::SyncSender<Box<Packet>>,
+    ) {
         self.txs.push((dst_g, dst_l, tx));
     }
 
@@ -42,9 +44,9 @@ impl Egress {
         // with replay.tag, and then forward this message only on the channel corresponding
         // to that ingress node.
         let replay_to = m.as_ref().unwrap().tag().map(|tag| {
-            tags.get(&tag)
-                .map(|n| *n)
-                .expect("egress node told about replay message, but not on replay path")
+            tags.get(&tag).map(|n| *n).expect(
+                "egress node told about replay message, but not on replay path",
+            )
         });
 
         for (txi, &mut (ref globaddr, dst, ref mut tx)) in txs.iter_mut().enumerate() {

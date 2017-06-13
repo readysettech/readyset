@@ -60,10 +60,9 @@ impl<T> Map<T> {
     }
 
     pub fn contains_key(&self, addr: &LocalNodeIndex) -> bool {
-        self.things
-            .get(addr.id())
-            .map(|v| v.is_some())
-            .unwrap_or(false)
+        self.things.get(addr.id()).map(|v| v.is_some()).unwrap_or(
+            false,
+        )
     }
 
     pub fn remove(&mut self, addr: &LocalNodeIndex) -> Option<T> {
@@ -81,15 +80,17 @@ impl<T> Map<T> {
 
     pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (LocalNodeIndex, &'a T)> + 'a> {
         Box::new(self.things.iter().enumerate().filter_map(|(i, t)| {
-            t.as_ref()
-                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
+            t.as_ref().map(
+                |v| (unsafe { LocalNodeIndex::make(i as u32) }, v),
+            )
         }))
     }
 
     pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (LocalNodeIndex, &'a mut T)> + 'a> {
         Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
-            t.as_mut()
-                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
+            t.as_mut().map(
+                |v| (unsafe { LocalNodeIndex::make(i as u32) }, v),
+            )
         }))
     }
 
@@ -104,7 +105,8 @@ impl<T> Map<T> {
 
 use std::fmt;
 impl<T> fmt::Debug for Map<T>
-    where T: fmt::Debug
+where
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
@@ -125,7 +127,8 @@ impl<'a, T> IndexMut<&'a LocalNodeIndex> for Map<T> {
 
 impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
     fn from_iter<I>(iter: I) -> Self
-        where I: IntoIterator<Item = (LocalNodeIndex, T)>
+    where
+        I: IntoIterator<Item = (LocalNodeIndex, T)>,
     {
         use std::collections::BTreeMap;
 
@@ -156,12 +159,9 @@ impl<T: 'static> IntoIterator for Map<T> {
     type Item = (LocalNodeIndex, T);
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
-        Box::new(self.things
-                     .into_iter()
-                     .enumerate()
-                     .filter_map(|(i, v)| {
-                         v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
-                     }))
+        Box::new(self.things.into_iter().enumerate().filter_map(|(i, v)| {
+            v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
+        }))
     }
 }
 
@@ -194,10 +194,12 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
             2 => KeyType::Double((other[0].clone(), other[1].clone())),
             3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
             4 => {
-                KeyType::Quad((other[0].clone(),
-                               other[1].clone(),
-                               other[2].clone(),
-                               other[3].clone()))
+                KeyType::Quad((
+                    other[0].clone(),
+                    other[1].clone(),
+                    other[2].clone(),
+                    other[3].clone(),
+                ))
             }
             _ => unimplemented!(),
         }
@@ -212,10 +214,12 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [&'a T]> for KeyType<'a, T> {
             2 => KeyType::Double((other[0].clone(), other[1].clone())),
             3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
             4 => {
-                KeyType::Quad((other[0].clone(),
-                               other[1].clone(),
-                               other[2].clone(),
-                               other[3].clone()))
+                KeyType::Quad((
+                    other[0].clone(),
+                    other[1].clone(),
+                    other[2].clone(),
+                    other[3].clone(),
+                ))
             }
             _ => unimplemented!(),
         }
@@ -306,8 +310,9 @@ impl<T: Hash + Eq + Clone> State<T> {
             unimplemented!();
         }
 
-        self.state
-            .push((Vec::from(columns), columns.into(), partial));
+        self.state.push(
+            (Vec::from(columns), columns.into(), partial),
+        );
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
@@ -365,10 +370,12 @@ impl<T: Hash + Eq + Clone> State<T> {
                             }
                         }
                         KeyedState::Quad(ref mut map) => {
-                            let key = (r[s.0[0]].clone(),
-                                       r[s.0[1]].clone(),
-                                       r[s.0[2]].clone(),
-                                       r[s.0[3]].clone());
+                            let key = (
+                                r[s.0[0]].clone(),
+                                r[s.0[1]].clone(),
+                                r[s.0[2]].clone(),
+                                r[s.0[3]].clone(),
+                            );
                             match map.entry(key) {
                                 Entry::Occupied(mut rs) => rs.get_mut().push(r),
                                 Entry::Vacant(..) if s.2 => unimplemented!(),
@@ -415,10 +422,12 @@ impl<T: Hash + Eq + Clone> State<T> {
                             }
                         }
                         KeyedState::Quad(ref mut map) => {
-                            let key = (r[s.0[0]].clone(),
-                                       r[s.0[1]].clone(),
-                                       r[s.0[2]].clone(),
-                                       r[s.0[3]].clone());
+                            let key = (
+                                r[s.0[0]].clone(),
+                                r[s.0[1]].clone(),
+                                r[s.0[2]].clone(),
+                                r[s.0[3]].clone(),
+                            );
                             if let Some(ref mut rs) = map.get_mut(&key) {
                                 rs.retain(keep);
                             }
@@ -462,8 +471,10 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn mark_filled(&mut self, key: Vec<T>) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        assert!(self.state.len() == 1,
-                "partially materializing to multi-index materialization");
+        assert!(
+            self.state.len() == 1,
+            "partially materializing to multi-index materialization"
+        );
         let state = &mut self.state[0];
         let mut key = key.into_iter();
         let replaced = match state.1 {
@@ -472,15 +483,25 @@ impl<T: Hash + Eq + Clone> State<T> {
                 map.insert((key.next().unwrap(), key.next().unwrap()), Vec::new())
             }
             KeyedState::Tri(ref mut map) => {
-                map.insert((key.next().unwrap(), key.next().unwrap(), key.next().unwrap()),
-                           Vec::new())
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Vec::new(),
+                )
             }
             KeyedState::Quad(ref mut map) => {
-                map.insert((key.next().unwrap(),
-                            key.next().unwrap(),
-                            key.next().unwrap(),
-                            key.next().unwrap()),
-                           Vec::new())
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Vec::new(),
+                )
             }
         };
         assert!(replaced.is_none());
@@ -488,8 +509,10 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn mark_hole(&mut self, key: &[T]) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
-        assert!(self.state.len() == 1,
-                "partially materializing to multi-index materialization");
+        assert!(
+            self.state.len() == 1,
+            "partially materializing to multi-index materialization"
+        );
         let state = &mut self.state[0];
         let removed = match state.1 {
             KeyedState::Single(ref mut map) => map.remove(&key[0]),
@@ -498,7 +521,12 @@ impl<T: Hash + Eq + Clone> State<T> {
                 map.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
             }
             KeyedState::Quad(ref mut map) => {
-                map.remove(&(key[0].clone(), key[1].clone(), key[2].clone(), key[3].clone()))
+                map.remove(&(
+                    key[0].clone(),
+                    key[1].clone(),
+                    key[2].clone(),
+                    key[3].clone(),
+                ))
             }
         };
         assert!(removed.is_some());
@@ -530,10 +558,12 @@ impl<T: Hash + Eq + Clone> State<T> {
                     }
                 }
                 KeyedState::Quad(ref map) => {
-                    let key = (r[s.0[0]].clone(),
-                               r[s.0[1]].clone(),
-                               r[s.0[2]].clone(),
-                               r[s.0[3]].clone());
+                    let key = (
+                        r[s.0[0]].clone(),
+                        r[s.0[1]].clone(),
+                        r[s.0[2]].clone(),
+                        r[s.0[3]].clone(),
+                    );
                     if !map.contains_key(&key) {
                         return Some(&s.0[..]);
                     }
@@ -546,8 +576,9 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let state = &self.state[self.state_for(columns)
-                                    .expect("lookup on non-indexed column set")];
+        let state = &self.state[self.state_for(columns).expect(
+            "lookup on non-indexed column set",
+        )];
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {
@@ -581,13 +612,13 @@ impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
             .into_iter()
             .find(|&(_, _, partial)| !partial)
             .map(|(_, state, _)| -> Self::IntoIter {
-                     match state {
-                         KeyedState::Single(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                         KeyedState::Double(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                         KeyedState::Tri(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                         KeyedState::Quad(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                     }
-                 })
+                match state {
+                    KeyedState::Single(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                    KeyedState::Double(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                    KeyedState::Tri(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                    KeyedState::Quad(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                }
+            })
             .unwrap()
     }
 }

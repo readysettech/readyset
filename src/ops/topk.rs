@@ -58,11 +58,12 @@ impl TopK {
     /// `src` is this operator's ancestor, `over` is the column to compute the top K over,
     /// `group_by` indicates the columns that this operator is keyed on, and k is the maximum number
     /// of results per group.
-    pub fn new(src: NodeIndex,
-               order: Vec<(usize, OrderType)>,
-               group_by: Vec<usize>,
-               k: usize)
-               -> Self {
+    pub fn new(
+        src: NodeIndex,
+        order: Vec<(usize, OrderType)>,
+        group_by: Vec<usize>,
+        k: usize,
+    ) -> Self {
         let mut group_by = group_by;
         group_by.sort();
 
@@ -87,12 +88,13 @@ impl TopK {
     /// Cannot result in partial misses because we received a record with this key, so our parent
     /// must have seen and emitted that key. If they missed, they would have replayed *before*
     /// relaying to us. thus, since we got this key, our parent must have it.
-    fn apply(&self,
-             current_topk: &[Arc<Vec<DataType>>],
-             new: Records,
-             state: &StateMap,
-             group: &[DataType])
-             -> Records {
+    fn apply(
+        &self,
+        current_topk: &[Arc<Vec<DataType>>],
+        new: Records,
+        state: &StateMap,
+        group: &[DataType],
+    ) -> Records {
 
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
@@ -109,16 +111,16 @@ impl TopK {
 
         let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
             .filter_map(|r| match r {
-                            &Record::Positive(ref a) => Some((a, false)),
-                            _ => None,
-                        })
+                &Record::Positive(ref a) => Some((a, false)),
+                _ => None,
+            })
             .chain(current.into_iter().map(|a| (a, true)))
             .collect();
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
-        let src_db = state
-            .get(&*self.src)
-            .expect("topk must have its parent's state materialized");
+        let src_db = state.get(&*self.src).expect(
+            "topk must have its parent's state materialized",
+        );
         if output_rows.len() < self.k {
             let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
                 LookupResult::Some(rs) => rs,
@@ -173,17 +175,15 @@ impl TopK {
 
             // Emit negatives for any elements in `bottom_rows` that were originally in
             // current_topk.
-            delta.extend(bottom_rows
-                             .into_iter()
-                             .filter(|p| p.1)
-                             .map(|p| Record::Negative(p.0.clone())));
+            delta.extend(bottom_rows.into_iter().filter(|p| p.1).map(|p| {
+                Record::Negative(p.0.clone())
+            }));
         }
 
         // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows
-                         .into_iter()
-                         .filter(|p| !p.1)
-                         .map(|p| Record::Positive(p.0.clone())));
+        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
+            Record::Positive(p.0.clone())
+        }));
         delta.into()
     }
 }
@@ -231,13 +231,14 @@ impl Ingredient for TopK {
         self.us = Some(remap[&us]);
     }
 
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                state: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        state: &StateMap,
+    ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
 
         if rs.is_empty() {
@@ -255,44 +256,43 @@ impl Ingredient for TopK {
             let group = rec.iter()
                 .enumerate()
                 .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                                Some(v)
-                            } else {
-                                None
-                            })
+                    Some(v)
+                } else {
+                    None
+                })
                 .cloned()
                 .collect::<Vec<_>>();
 
-            consolidate
-                .entry(group)
-                .or_insert_with(Vec::new)
-                .push(rec.clone());
+            consolidate.entry(group).or_insert_with(Vec::new).push(
+                rec.clone(),
+            );
         }
 
         // find the current value for each group
         let us = self.us.unwrap();
-        let db = state
-            .get(&*us)
-            .expect("topk must have its own state materialized");
+        let db = state.get(&*us).expect(
+            "topk must have its own state materialized",
+        );
 
         let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * self.k);
         {
             let group_by = &self.group_by[..];
-            let current = consolidate
-                .into_iter()
-                .filter_map(|(group, diffs)| match db.lookup(
+            let current = consolidate.into_iter().filter_map(
+                |(group, diffs)| match db.lookup(
                     group_by,
                     &KeyType::from(&group[..]),
                 ) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
                         misses.push(Miss {
-                                        node: *us,
-                                        key: group.clone(),
-                                    });
+                            node: *us,
+                            key: group.clone(),
+                        });
                         None
                     }
-                });
+                },
+            );
 
             for (group, mut diffs, old_rs) in current {
                 // Retrieve then update the number of times in this group
@@ -300,10 +300,10 @@ impl Ingredient for TopK {
                 let count_diff: i64 = diffs
                     .iter()
                     .map(|r| match r {
-                             &Record::Positive(..) => 1,
-                             &Record::Negative(..) => -1,
-                             &Record::DeleteRequest(..) => unreachable!(),
-                         })
+                        &Record::Positive(..) => 1,
+                        &Record::Negative(..) => -1,
+                        &Record::DeleteRequest(..) => unreachable!(),
+                    })
                     .sum();
 
                 if count + count_diff <= self.k as i64 {
@@ -311,7 +311,8 @@ impl Ingredient for TopK {
                 } else {
                     assert!(count as usize >= old_rs.len());
 
-                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..]).into());
+                    out.append(&mut self.apply(old_rs, diffs.into(), state, &group[..])
+                        .into());
                 }
                 self.counts.insert(group, (count + count_diff) as usize);
             }
@@ -324,9 +325,10 @@ impl Ingredient for TopK {
     }
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
-        vec![(this, self.group_by.clone()),
-             (self.src.as_global(), self.group_by.clone())]
-            .into_iter()
+        vec![
+            (this, self.group_by.clone()),
+            (self.src.as_global(), self.group_by.clone()),
+        ].into_iter()
             .collect()
     }
 
@@ -358,10 +360,12 @@ mod tests {
 
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
-        g.set_op("topk",
-                 &["x", "y", "z"],
-                 TopK::new(s.as_global(), cmp_rows, vec![1], 3),
-                 true);
+        g.set_op(
+            "topk",
+            &["x", "y", "z"],
+            TopK::new(s.as_global(), cmp_rows, vec![1], 3),
+            true,
+        );
         (g, s)
     }
 
@@ -482,22 +486,34 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (g, _) = setup(false);
-        assert_eq!(g.node().resolve(0),
-                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
-        assert_eq!(g.node().resolve(1),
-                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
-        assert_eq!(g.node().resolve(2),
-                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
+        assert_eq!(
+            g.node().resolve(0),
+            Some(vec![(g.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            g.node().resolve(1),
+            Some(vec![(g.narrow_base_id().as_global(), 1)])
+        );
+        assert_eq!(
+            g.node().resolve(2),
+            Some(vec![(g.narrow_base_id().as_global(), 2)])
+        );
     }
 
     #[test]
     fn it_parent_columns() {
         let (g, _) = setup(false);
-        assert_eq!(g.node().resolve(0),
-                   Some(vec![(g.narrow_base_id().as_global(), 0)]));
-        assert_eq!(g.node().resolve(1),
-                   Some(vec![(g.narrow_base_id().as_global(), 1)]));
-        assert_eq!(g.node().resolve(2),
-                   Some(vec![(g.narrow_base_id().as_global(), 2)]));
+        assert_eq!(
+            g.node().resolve(0),
+            Some(vec![(g.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            g.node().resolve(1),
+            Some(vec![(g.narrow_base_id().as_global(), 1)])
+        );
+        assert_eq!(
+            g.node().resolve(2),
+            Some(vec![(g.narrow_base_id().as_global(), 2)])
+        );
     }
 }

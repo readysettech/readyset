@@ -41,12 +41,14 @@ impl QueryGraph {
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations
-            .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
+        self.relations.values().fold(
+            Vec::new(),
+            |mut acc: Vec<&'a Column>,
+             ref qgn| {
                 acc.extend(qgn.parameters.iter());
                 acc
-            })
+            },
+        )
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -126,27 +128,33 @@ impl QueryGraph {
 // 2. Extract local predicates
 // 3. Extract join predicates
 // 4. Collect remaining predicates as global predicates
-fn classify_conditionals(ce: &ConditionExpression,
-                         mut local: &mut HashMap<String, Vec<ConditionTree>>,
-                         mut join: &mut Vec<ConditionTree>,
-                         mut global: &mut Vec<ConditionTree>,
-                         mut params: &mut Vec<Column>) {
+fn classify_conditionals(
+    ce: &ConditionExpression,
+    mut local: &mut HashMap<String, Vec<ConditionTree>>,
+    mut join: &mut Vec<ConditionTree>,
+    mut global: &mut Vec<ConditionTree>,
+    mut params: &mut Vec<Column>,
+) {
     use std::cmp::Ordering;
 
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
             // conjunction, check both sides (which must be selection predicates or
             // atomatic selection predicates)
-            classify_conditionals(ct.left.as_ref(),
-                                  &mut local,
-                                  &mut join,
-                                  &mut global,
-                                  &mut params);
-            classify_conditionals(ct.right.as_ref(),
-                                  &mut local,
-                                  &mut join,
-                                  &mut global,
-                                  &mut params);
+            classify_conditionals(
+                ct.left.as_ref(),
+                &mut local,
+                &mut join,
+                &mut global,
+                &mut params,
+            );
+            classify_conditionals(
+                ct.right.as_ref(),
+                &mut local,
+                &mut join,
+                &mut global,
+                &mut params,
+            );
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
@@ -160,9 +168,10 @@ fn classify_conditionals(ce: &ConditionExpression,
                                 if ct.operator == Operator::Equal {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
-                                    if let Ordering::Less = fr.table
-                                           .as_ref()
-                                           .cmp(&fl.table.as_ref()) {
+                                    if let Ordering::Less = fr.table.as_ref().cmp(
+                                        &fl.table.as_ref(),
+                                    )
+                                    {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
                                     }
@@ -211,51 +220,55 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node =
-        |rel: String, preds: Vec<ConditionTree>, st: &SelectStatement| -> QueryGraphNode {
-            QueryGraphNode {
-                rel_name: rel.clone(),
-                predicates: preds,
-                columns: st.fields
-                    .iter()
-                    .filter_map(|field| match field {
-                        &FieldExpression::All => unimplemented!(),
-                        &FieldExpression::AllInTable(_) => unimplemented!(),
-                        &FieldExpression::Col(ref c) => {
-                            match c.table.as_ref() {
-                                None => {
-                                    match c.function {
-                                        // XXX(malte): don't drop aggregation columns
-                                        Some(_) => None,
-                                        None => {
-                                            panic!("No table name set for column {} on {}",
-                                                   c.name,
-                                                   rel)
-                                        }
+    let new_node = |rel: String,
+                    preds: Vec<ConditionTree>,
+                    st: &SelectStatement|
+     -> QueryGraphNode {
+        QueryGraphNode {
+            rel_name: rel.clone(),
+            predicates: preds,
+            columns: st.fields
+                .iter()
+                .filter_map(|field| match field {
+                    &FieldExpression::All => unimplemented!(),
+                    &FieldExpression::AllInTable(_) => unimplemented!(),
+                    &FieldExpression::Col(ref c) => {
+                        match c.table.as_ref() {
+                            None => {
+                                match c.function {
+                                    // XXX(malte): don't drop aggregation columns
+                                    Some(_) => None,
+                                    None => {
+                                        panic!("No table name set for column {} on {}", c.name, rel)
                                     }
                                 }
-                                Some(t) => if *t == rel { Some(c.clone()) } else { None },
                             }
+                            Some(t) => if *t == rel { Some(c.clone()) } else { None },
                         }
-                    })
-                    .collect(),
-                parameters: Vec::new(),
-            }
-        };
+                    }
+                })
+                .collect(),
+            parameters: Vec::new(),
+        }
+    };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table in &st.tables {
-        qg.relations.insert(table.name.clone(),
-                            new_node(table.name.clone(), Vec::new(), st));
+        qg.relations.insert(
+            table.name.clone(),
+            new_node(table.name.clone(), Vec::new(), st),
+        );
     }
     for jc in &st.join {
         match jc.right {
             JoinRightSide::Table(ref table) => {
                 if !qg.relations.contains_key(&table.name) {
-                    qg.relations.insert(table.name.clone(),
-                                        new_node(table.name.clone(), Vec::new(), st));
+                    qg.relations.insert(
+                        table.name.clone(),
+                        new_node(table.name.clone(), Vec::new(), st),
+                    );
                 }
             }
             _ => unimplemented!(),
@@ -311,7 +324,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     _ => unimplemented!(),
                                 };
                                 if *l.table.as_ref().unwrap() == right_table &&
-                                   *r.table.as_ref().unwrap() == left_table {
+                                    *r.table.as_ref().unwrap() == left_table
+                                {
                                     ConditionTree {
                                         operator: ct.operator.clone(),
                                         left: ct.right.clone(),
@@ -343,12 +357,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 let mut _e = qg.edges
                     .entry((left_table.clone(), right_table.clone()))
                     .or_insert_with(|| match jc.operator {
-                                        JoinOperator::LeftJoin => {
-                                            QueryGraphEdge::LeftJoin(vec![join_pred])
-                                        }
-                                        JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
-                                        _ => unimplemented!(),
-                                    });
+                        JoinOperator::LeftJoin => QueryGraphEdge::LeftJoin(vec![join_pred]),
+                        JoinOperator::Join => QueryGraphEdge::Join(vec![join_pred]),
+                        _ => unimplemented!(),
+                    });
             }
             _ => unimplemented!(),
         }
@@ -359,20 +371,24 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         let mut global_predicates = Vec::<ConditionTree>::new();
         let mut query_parameters = Vec::new();
         // Let's classify the predicates we have in the query
-        classify_conditionals(cond,
-                              &mut local_predicates,
-                              &mut join_predicates,
-                              &mut global_predicates,
-                              &mut query_parameters);
+        classify_conditionals(
+            cond,
+            &mut local_predicates,
+            &mut join_predicates,
+            &mut global_predicates,
+            &mut query_parameters,
+        );
 
         // 1. Add local predicates for each node that has them
         for (rel, preds) in local_predicates {
             if !qg.relations.contains_key(&rel) {
                 // can't have predicates on tables that do not appear in the FROM part of the
                 // statement
-                panic!("predicate(s) {:?} on relation {} that is not in query graph",
-                       preds,
-                       rel);
+                panic!(
+                    "predicate(s) {:?} on relation {} that is not in query graph",
+                    preds,
+                    rel
+                );
             } else {
                 qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
             }
@@ -429,11 +445,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         // exists, add another computed column to it
                         let mut n = qg.relations
                             .entry(String::from("computed_columns"))
-                            .or_insert_with(|| {
-                                                new_node(String::from("computed_columns"),
-                                                         vec![],
-                                                         st)
-                                            });
+                            .or_insert_with(
+                                || new_node(String::from("computed_columns"), vec![], st),
+                            );
                         n.columns.push(c.clone());
                     }
                 }
@@ -447,8 +461,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             for column in &clause.columns {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
                 let mut e = qg.edges
-                    .entry((String::from("computed_columns"),
-                            column.table.as_ref().unwrap().clone()))
+                    .entry((
+                        String::from("computed_columns"),
+                        column.table.as_ref().unwrap().clone(),
+                    ))
                     .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
                 match *e {
                     QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),

@@ -7,11 +7,13 @@ pub trait ImpliedTableExpansion {
     fn expand_implied_tables(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
 }
 
-fn rewrite_conditional<F>(expand_columns: &F,
-                          ce: ConditionExpression,
-                          avail_tables: &Vec<Table>)
-                          -> ConditionExpression
-    where F: Fn(Column, &Vec<Table>) -> Column
+fn rewrite_conditional<F>(
+    expand_columns: &F,
+    ce: ConditionExpression,
+    avail_tables: &Vec<Table>,
+) -> ConditionExpression
+where
+    F: Fn(Column, &Vec<Table>) -> Column,
 {
     use nom_sql::ConditionExpression::*;
     use nom_sql::ConditionBase::*;
@@ -42,10 +44,10 @@ fn rewrite_conditional<F>(expand_columns: &F,
                       box right,
                   }) => {
             LogicalOp(ConditionTree {
-                          operator: operator,
-                          left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
-                          right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
-                      })
+                operator: operator,
+                left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
+                right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+            })
         }
         x => x,
     }
@@ -64,16 +66,16 @@ impl ImpliedTableExpansion for SqlQuery {
             let mut matches = write_schemas
                 .iter()
                 .filter(|&(t, _)| if tables_in_query.len() > 0 {
-                            for qt in tables_in_query {
-                                if qt.name == *t {
-                                    return true;
-                                }
-                            }
-                            false
-                        } else {
-                            // preserve all tables if there are no tables in the query
-                            true
-                        })
+                    for qt in tables_in_query {
+                        if qt.name == *t {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // preserve all tables if there are no tables in the query
+                    true
+                })
                 .filter_map(|(t, ws)| {
                     let num_matching = ws.iter().filter(|c| **c == f.name).count();
                     assert!(num_matching <= 1);
@@ -85,9 +87,11 @@ impl ImpliedTableExpansion for SqlQuery {
                 })
                 .collect::<Vec<String>>();
             if matches.len() > 1 {
-                println!("Ambiguous column {} exists in tables: {} -- picking a random one",
-                         f.name,
-                         matches.as_slice().join(", "));
+                println!(
+                    "Ambiguous column {} exists in tables: {} -- picking a random one",
+                    f.name,
+                    matches.as_slice().join(", ")
+                );
                 Some(matches.pop().unwrap())
             } else if matches.is_empty() {
                 panic!("Failed to resolve table for column named {}", f.name);
@@ -140,9 +144,11 @@ impl ImpliedTableExpansion for SqlQuery {
                 None => {
                     match f.function {
                         Some(ref mut f) => {
-                            panic!("set_table({}) invoked on computed column {:?}",
-                                   table.name,
-                                   f)
+                            panic!(
+                                "set_table({}) invoked on computed column {:?}",
+                                table.name,
+                                f
+                            )
                         }
                         None => Some(table.name.clone()),
                     }
@@ -185,17 +191,15 @@ impl ImpliedTableExpansion for SqlQuery {
                     None => None,
                     Some(gbc) => {
                         Some(GroupByClause {
-                                 columns: gbc.columns
-                                     .into_iter()
-                                     .map(|f| expand_columns(f, &tables))
-                                     .collect(),
-                                 having: match gbc.having {
-                                     None => None,
-                                     Some(hc) => {
-                                         Some(rewrite_conditional(&expand_columns, hc, &tables))
-                                     }
-                                 },
-                             })
+                            columns: gbc.columns
+                                .into_iter()
+                                .map(|f| expand_columns(f, &tables))
+                                .collect(),
+                            having: match gbc.having {
+                                None => None,
+                                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
+                            },
+                        })
                     }
                 };
                 // Expand within ORDER BY clause
@@ -203,11 +207,11 @@ impl ImpliedTableExpansion for SqlQuery {
                     None => None,
                     Some(oc) => {
                         Some(OrderClause {
-                                 columns: oc.columns
-                                     .into_iter()
-                                     .map(|(f, o)| (expand_columns(f, &tables), o))
-                                     .collect(),
-                             })
+                            columns: oc.columns
+                                .into_iter()
+                                .map(|(f, o)| (expand_columns(f, &tables), o))
+                                .collect(),
+                        })
                     }
                 };
 
@@ -222,29 +226,28 @@ impl ImpliedTableExpansion for SqlQuery {
                 ctq.fields = ctq.fields
                     .into_iter()
                     .map(|mut tfs| {
-                             tfs.column = set_table(tfs.column, &table);
-                             tfs
-                         })
+                        tfs.column = set_table(tfs.column, &table);
+                        tfs
+                    })
                     .collect();
                 // Expand tables for key specification
                 if ctq.keys.is_some() {
-                    ctq.keys =
-                        Some(ctq.keys
-                                 .unwrap()
-                                 .into_iter()
-                                 .map(|k| match k {
-                                          PrimaryKey(key_cols) => {
-                                              PrimaryKey(transform_key(key_cols))
-                                          }
-                                          UniqueKey(name, key_cols) => {
-                                              UniqueKey(name, transform_key(key_cols))
-                                          }
-                                          FulltextKey(name, key_cols) => {
-                                              FulltextKey(name, transform_key(key_cols))
-                                          }
-                                          Key(name, key_cols) => Key(name, transform_key(key_cols)),
-                                      })
-                                 .collect());
+                    ctq.keys = Some(
+                        ctq.keys
+                            .unwrap()
+                            .into_iter()
+                            .map(|k| match k {
+                                PrimaryKey(key_cols) => PrimaryKey(transform_key(key_cols)),
+                                UniqueKey(name, key_cols) => {
+                                    UniqueKey(name, transform_key(key_cols))
+                                }
+                                FulltextKey(name, key_cols) => {
+                                    FulltextKey(name, transform_key(key_cols))
+                                }
+                                Key(name, key_cols) => Key(name, transform_key(key_cols)),
+                            })
+                            .collect(),
+                    );
                 }
                 SqlQuery::CreateTable(ctq)
             }
@@ -276,8 +279,10 @@ mod tests {
         // CREATE TABLE address (address.addr_id, address.addr_street1);
         let q = CreateTableStatement {
             table: Table::from("address"),
-            fields: vec![ColumnSpecification::new(Column::from("addr_id"), SqlType::Text),
-                         ColumnSpecification::new(Column::from("addr_street1"), SqlType::Text)],
+            fields: vec![
+                ColumnSpecification::new(Column::from("addr_id"), SqlType::Text),
+                ColumnSpecification::new(Column::from("addr_street1"), SqlType::Text),
+            ],
             ..Default::default()
         };
 
@@ -286,11 +291,10 @@ mod tests {
         let res = SqlQuery::CreateTable(q).expand_implied_tables(&schema);
         match res {
             SqlQuery::CreateTable(tq) => {
-                assert_eq!(tq.fields,
-                           vec![ColumnSpecification::new(Column::from("address.addr_id"),
-                                                         SqlType::Text),
-                                ColumnSpecification::new(Column::from("address.addr_street1"),
-                                                         SqlType::Text)]);
+                let cs1 = ColumnSpecification::new(Column::from("address.addr_id"), SqlType::Text);
+                let cs2 =
+                    ColumnSpecification::new(Column::from("address.addr_street1"), SqlType::Text);
+                assert_eq!(tq.fields, vec![cs1, cs2]);
                 assert_eq!(tq.table, Table::from("address"));
             }
             // if we get anything other than a table creation query back,
@@ -310,8 +314,10 @@ mod tests {
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
-            fields: vec![FieldExpression::Col(Column::from("name")),
-                         FieldExpression::Col(Column::from("title"))],
+            fields: vec![
+                FieldExpression::Col(Column::from("name")),
+                FieldExpression::Col(Column::from("title")),
+            ],
             where_clause: Some(ConditionExpression::ComparisonOp(ConditionTree {
                 operator: Operator::Equal,
                 left: wrap(ConditionBase::Field(Column::from("users.id"))),
@@ -320,23 +326,33 @@ mod tests {
             ..Default::default()
         };
         let mut schema = HashMap::new();
-        schema.insert("users".into(),
-                      vec!["id".into(), "name".into(), "age".into()]);
-        schema.insert("articles".into(),
-                      vec!["id".into(), "title".into(), "text".into(), "author".into()]);
+        schema.insert(
+            "users".into(),
+            vec!["id".into(), "name".into(), "age".into()],
+        );
+        schema.insert(
+            "articles".into(),
+            vec!["id".into(), "title".into(), "text".into(), "author".into()],
+        );
 
         let res = SqlQuery::Select(q).expand_implied_tables(&schema);
         match res {
             SqlQuery::Select(tq) => {
-                assert_eq!(tq.fields,
-                           vec![FieldExpression::Col(Column::from("users.name")),
-                                FieldExpression::Col(Column::from("articles.title"))]);
-                assert_eq!(tq.where_clause,
-                           Some(ConditionExpression::ComparisonOp(ConditionTree {
-                               operator: Operator::Equal,
-                               left: wrap(ConditionBase::Field(Column::from("users.id"))),
-                               right: wrap(ConditionBase::Field(Column::from("articles.author"))),
-                           })));
+                assert_eq!(
+                    tq.fields,
+                    vec![
+                        FieldExpression::Col(Column::from("users.name")),
+                        FieldExpression::Col(Column::from("articles.title")),
+                    ]
+                );
+                assert_eq!(
+                    tq.where_clause,
+                    Some(ConditionExpression::ComparisonOp(ConditionTree {
+                        operator: Operator::Equal,
+                        left: wrap(ConditionBase::Field(Column::from("users.id"))),
+                        right: wrap(ConditionBase::Field(Column::from("articles.author"))),
+                    }))
+                );
             }
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),

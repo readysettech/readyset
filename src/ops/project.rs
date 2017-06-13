@@ -27,8 +27,10 @@ impl Project {
 
     fn resolve_col(&self, col: usize) -> usize {
         if self.emit.is_some() && col >= self.emit.as_ref().unwrap().len() {
-            panic!("can't resolve literal column {} that doesn't come from parent node!",
-                   col);
+            panic!(
+                "can't resolve literal column {} that doesn't come from parent node!",
+                col
+            );
         } else {
             self.emit.as_ref().map_or(col, |emit| emit[col])
         }
@@ -74,13 +76,14 @@ impl Ingredient for Project {
         });
     }
 
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                mut rs: Records,
-                _: &mut Tracer,
-                _: &DomainNodes,
-                _: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        mut rs: Records,
+        _: &mut Tracer,
+        _: &DomainNodes,
+        _: &StateMap,
+    ) -> ProcessingResult {
         debug_assert_eq!(from, *self.src);
 
         if self.emit.is_some() {
@@ -169,10 +172,12 @@ mod tests {
         } else {
             None
         };
-        g.set_op("permute",
-                 &["x", "y", "z"],
-                 Project::new(s.as_global(), &permutation[..], additional),
-                 materialized);
+        g.set_op(
+            "permute",
+            &["x", "y", "z"],
+            Project::new(s.as_global(), &permutation[..], additional),
+            materialized,
+        );
         g
     }
 
@@ -191,8 +196,10 @@ mod tests {
     #[test]
     fn it_describes_all_w_literals() {
         let p = setup(false, true, true);
-        assert_eq!(p.node().description(),
-                   "π[0, 1, 2, lit: \"hello\", lit: 42]");
+        assert_eq!(
+            p.node().description(),
+            "π[0, 1, 2, lit: \"hello\", lit: 42]"
+        );
     }
 
     #[test]
@@ -200,8 +207,10 @@ mod tests {
         let mut p = setup(false, false, true);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
-        assert_eq!(p.narrow_one_row(rec, false),
-                   vec![vec!["c".into(), "a".into(), "hello".into(), 42.into()]].into());
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec!["c".into(), "a".into(), "hello".into(), 42.into()]].into()
+        );
     }
 
     #[test]
@@ -209,8 +218,10 @@ mod tests {
         let mut p = setup(false, true, false);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
-        assert_eq!(p.narrow_one_row(rec, false),
-                   vec![vec!["a".into(), "b".into(), "c".into()]].into());
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec!["a".into(), "b".into(), "c".into()]].into()
+        );
     }
 
     #[test]
@@ -218,13 +229,18 @@ mod tests {
         let mut p = setup(false, true, true);
 
         let rec = vec!["a".into(), "b".into(), "c".into()];
-        assert_eq!(p.narrow_one_row(rec, false),
-                   vec![vec!["a".into(),
-                             "b".into(),
-                             "c".into(),
-                             "hello".into(),
-                             42.into()]]
-                       .into());
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![
+                vec![
+                    "a".into(),
+                    "b".into(),
+                    "c".into(),
+                    "hello".into(),
+                    42.into(),
+                ],
+            ].into()
+        );
     }
 
     #[test]
@@ -238,21 +254,31 @@ mod tests {
     #[test]
     fn it_resolves() {
         let p = setup(false, false, true);
-        assert_eq!(p.node().resolve(0),
-                   Some(vec![(p.narrow_base_id().as_global(), 2)]));
-        assert_eq!(p.node().resolve(1),
-                   Some(vec![(p.narrow_base_id().as_global(), 0)]));
+        assert_eq!(
+            p.node().resolve(0),
+            Some(vec![(p.narrow_base_id().as_global(), 2)])
+        );
+        assert_eq!(
+            p.node().resolve(1),
+            Some(vec![(p.narrow_base_id().as_global(), 0)])
+        );
     }
 
     #[test]
     fn it_resolves_all() {
         let p = setup(false, true, true);
-        assert_eq!(p.node().resolve(0),
-                   Some(vec![(p.narrow_base_id().as_global(), 0)]));
-        assert_eq!(p.node().resolve(1),
-                   Some(vec![(p.narrow_base_id().as_global(), 1)]));
-        assert_eq!(p.node().resolve(2),
-                   Some(vec![(p.narrow_base_id().as_global(), 2)]));
+        assert_eq!(
+            p.node().resolve(0),
+            Some(vec![(p.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(
+            p.node().resolve(1),
+            Some(vec![(p.narrow_base_id().as_global(), 1)])
+        );
+        assert_eq!(
+            p.node().resolve(2),
+            Some(vec![(p.narrow_base_id().as_global(), 2)])
+        );
     }
 
     #[test]

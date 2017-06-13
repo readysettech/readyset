@@ -129,24 +129,26 @@ impl Ingredient for NodeOperator {
     fn on_commit(&mut self, you: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         impl_ingredient_fn_mut!(self, on_commit, you, remap)
     }
-    fn on_input(&mut self,
-                from: LocalNodeIndex,
-                data: Records,
-                tracer: &mut Tracer,
-                domain: &DomainNodes,
-                states: &StateMap)
-                -> ProcessingResult {
+    fn on_input(
+        &mut self,
+        from: LocalNodeIndex,
+        data: Records,
+        tracer: &mut Tracer,
+        domain: &DomainNodes,
+        states: &StateMap,
+    ) -> ProcessingResult {
         impl_ingredient_fn_mut!(self, on_input, from, data, tracer, domain, states)
     }
-    fn on_input_raw(&mut self,
-                    from: LocalNodeIndex,
-                    data: Records,
-                    tracer: &mut Tracer,
-                    is_replay_of: Option<(usize, DataType)>,
-                    nshards: usize,
-                    domain: &DomainNodes,
-                    states: &StateMap)
-                    -> RawProcessingResult {
+    fn on_input_raw(
+        &mut self,
+        from: LocalNodeIndex,
+        data: Records,
+        tracer: &mut Tracer,
+        is_replay_of: Option<(usize, DataType)>,
+        nshards: usize,
+        domain: &DomainNodes,
+        states: &StateMap,
+    ) -> RawProcessingResult {
         impl_ingredient_fn_mut!(self,
                                 on_input_raw,
                                 from,
@@ -160,20 +162,22 @@ impl Ingredient for NodeOperator {
     fn can_query_through(&self) -> bool {
         impl_ingredient_fn_ref!(self, can_query_through, )
     }
-    fn query_through<'a>(&self,
-                         columns: &[usize],
-                         key: &KeyType<DataType>,
-                         states: &'a StateMap)
-                         -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+    fn query_through<'a>(
+        &self,
+        columns: &[usize],
+        key: &KeyType<DataType>,
+        states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, states)
     }
-    fn lookup<'a>(&self,
-                  parent: LocalNodeIndex,
-                  columns: &[usize],
-                  key: &KeyType<DataType>,
-                  domain: &DomainNodes,
-                  states: &'a StateMap)
-                  -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+    fn lookup<'a>(
+        &self,
+        parent: LocalNodeIndex,
+        columns: &[usize],
+        key: &KeyType<DataType>,
+        domain: &DomainNodes,
+        states: &'a StateMap,
+    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
     }
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
@@ -206,10 +210,12 @@ pub mod test {
     impl MockGraph {
         pub fn new() -> MockGraph {
             let mut graph = Graph::new();
-            let source = graph.add_node(node::Node::new("source",
-                                                        &["because-type-inference"],
-                                                        node::special::Source,
-                                                        true));
+            let source = graph.add_node(node::Node::new(
+                "source",
+                &["because-type-inference"],
+                node::special::Source,
+                true,
+            ));
             MockGraph {
                 graph: graph,
                 source: source,
@@ -224,11 +230,12 @@ pub mod test {
             self.add_base_defaults(name, fields, vec![])
         }
 
-        pub fn add_base_defaults(&mut self,
-                                 name: &str,
-                                 fields: &[&str],
-                                 defaults: Vec<DataType>)
-                                 -> IndexPair {
+        pub fn add_base_defaults(
+            &mut self,
+            name: &str,
+            fields: &[&str],
+            defaults: Vec<DataType>,
+        ) -> IndexPair {
             use ops::base::Base;
             let mut i = Base::new(defaults);
             i.on_connected(&self.graph);
@@ -244,17 +251,17 @@ pub mod test {
                 .unwrap()
                 .set_finalized_addr(ip);
             remap.insert(global, ip);
-            self.graph
-                .node_weight_mut(global)
-                .unwrap()
-                .on_commit(&remap);
+            self.graph.node_weight_mut(global).unwrap().on_commit(
+                &remap,
+            );
             self.states.insert(local, State::default());
             self.remap.insert(global, ip);
             ip
         }
 
         pub fn set_op<I>(&mut self, name: &str, fields: &[&str], mut i: I, materialized: bool)
-            where I: Ingredient + Into<NodeOperator>
+        where
+            I: Ingredient + Into<NodeOperator>,
         {
             use petgraph;
             assert!(self.nut.is_none(), "only one node under test is supported");
@@ -279,10 +286,9 @@ pub mod test {
                 .node_weight_mut(global)
                 .unwrap()
                 .set_finalized_addr(ip);
-            self.graph
-                .node_weight_mut(global)
-                .unwrap()
-                .on_commit(&self.remap);
+            self.graph.node_weight_mut(global).unwrap().on_commit(
+                &self.remap,
+            );
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);
@@ -295,9 +301,9 @@ pub mod test {
             let unused: Vec<_> = self.remap
                 .values()
                 .filter_map(|ni| {
-                                let ni = *self.graph[ni.as_global()].local_addr();
-                                self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
-                            })
+                    let ni = *self.graph[ni.as_global()].local_addr();
+                    self.states.get(&ni).map(move |s| (ni, !s.is_useful()))
+                })
                 .filter(|&(_, x)| x)
                 .collect();
             for (ni, _) in unused {
@@ -329,9 +335,9 @@ pub mod test {
             self.nodes = nodes
                 .into_iter()
                 .map(|(_, n)| {
-                         use std::cell;
-                         (*n.local_addr(), cell::RefCell::new(n))
-                     })
+                    use std::cell;
+                    (*n.local_addr(), cell::RefCell::new(n))
+                })
                 .collect();
         }
 
@@ -382,18 +388,21 @@ pub mod test {
                 return u;
             }
 
-            let misses = node::materialize(&mut u,
-                                           *self.nut.unwrap(),
-                                           self.states.get_mut(&*self.nut.unwrap()));
+            let misses = node::materialize(
+                &mut u,
+                *self.nut.unwrap(),
+                self.states.get_mut(&*self.nut.unwrap()),
+            );
             assert_eq!(misses, vec![]);
             u
         }
 
-        pub fn one_row<R: Into<Record>>(&mut self,
-                                        src: IndexPair,
-                                        d: R,
-                                        remember: bool)
-                                        -> Records {
+        pub fn one_row<R: Into<Record>>(
+            &mut self,
+            src: IndexPair,
+            d: R,
+            remember: bool,
+        ) -> Records {
             self.one::<Record>(src, d.into(), remember)
         }
 
