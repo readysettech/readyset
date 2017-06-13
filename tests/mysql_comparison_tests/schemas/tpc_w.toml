@@ -1,0 +1,12 @@
+
+name = "tpc_w"
+
+[tables.address]
+create_query = "CREATE TABLE address ( addr_id int not null, addr_street1 varchar(40), addr_street2 varchar(40), addr_city varchar(30), addr_state varchar(20), addr_zip varchar(10), addr_co_id int, PRIMARY KEY(addr_id));"
+types = ["Int", "Text", "Text", "Text", "Text", "Text", "Int"]
+data = [["1", "1", "1", "1", "1", "1", "1"]]
+
+[queries.q0]
+select_query = "Select * from address where addr_id = ?;"
+types = ["Int"]
+values = [["1"], ["2"]]
