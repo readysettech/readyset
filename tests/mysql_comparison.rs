@@ -19,6 +19,7 @@ use std::str::FromStr;
 
 use std::thread;
 use std::time;
+use std::io;
 
 use distributary::{Blender, Recipe, DataType};
 
@@ -278,6 +279,7 @@ fn mysql_comparison() {
 
         for (query_name, query) in schema.queries.iter() {
             print!("{}.{}... ", schema.name, query_name);
+            io::stdout().flush().ok().expect("Could not flush stdout");
             match check_query(&schema.tables, query_name, query, &target_data[query_name]) {
                 Ok(()) => println!("\x1B[32;1mPASS\x1B[m"),
                 Err(e) => println!("\x1B[31;1mFAIL\x1B[m: {}", e),
