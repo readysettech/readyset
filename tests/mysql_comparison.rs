@@ -17,6 +17,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::slice::SliceConcatExt;
 use std::str::FromStr;
 
+use std::fmt::Write as FmtWrite;
+
 use std::thread;
 use std::time;
 use std::io;
@@ -177,6 +179,7 @@ fn check_query(
     query: &Query,
     target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
+    let mut error_log = String::new();
     let mut g = Blender::new();
     g.disable_sharding();
     let recipe;
@@ -238,16 +241,33 @@ fn check_query(
             })
             .collect();
 
+        writeln!(&mut error_log, "query_results").unwrap();
+        for r in query_results.iter() {
+            writeln!(&mut error_log, "{:?}", r).unwrap();
+        }
+        writeln!(&mut error_log, "\ntarget_results").unwrap();
+        for r in target_results.iter() {
+            writeln!(&mut error_log, "{:?}", r).unwrap();
+        }
+        writeln!(&mut error_log, "").unwrap();
+
         if query_results.len() != target_results.len() {
-            return Err(format!(
+            writeln!(
+                &mut error_log,
                 "Wrong number of results (expected {}, got {})",
                 target_results.len(),
                 query_results.len()
-            ));
+            ).unwrap();
+
+            return Err(error_log);
         }
         for target_row in target_results.iter() {
             if !query_results.remove(target_row) {
-                return Err(format!("Row not found in output: {:?}", target_row));
+                writeln!(
+                    &mut error_log,
+                    "query_results and target_results do not match"
+                ).unwrap();
+                return Err(error_log);
             }
         }
     }
@@ -283,7 +303,7 @@ fn mysql_comparison() {
             io::stdout().flush().ok().expect("Could not flush stdout");
             match check_query(&schema.tables, query_name, query, &target_data[query_name]) {
                 Ok(()) => println!("\x1B[32;1mPASS\x1B[m"),
-                Err(e) => println!("\x1B[31;1mFAIL\x1B[m: {}", e),
+                Err(e) => println!("\x1B[31;1mFAIL\x1B[m:\n{}", e),
             }
         }
     }
