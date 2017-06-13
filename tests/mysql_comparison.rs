@@ -1,6 +1,5 @@
 #![feature(slice_concat_ext)]
 
-#[macro_use]
 extern crate slog;
 #[macro_use]
 extern crate serde_derive;
@@ -77,8 +76,10 @@ fn run_for_all_in_directory<F: FnMut(String, String)>(directory: &str, mut f: F)
     let directory = Path::new(DIRECTORY_PREFIX).join(directory);
     for entry in fs::read_dir(directory).unwrap() {
         let entry = entry.unwrap();
-        f(entry.file_name().to_str().unwrap().to_owned(),
-          read_file(entry.path().to_str().unwrap()));
+        f(
+            entry.file_name().to_str().unwrap().to_owned(),
+            read_file(entry.path().to_str().unwrap()),
+        );
     }
 }
 
@@ -118,9 +119,15 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
         for (table_name, table) in schema.tables.iter() {
             pool.prep_exec(&table.create_query, ()).unwrap();
             for row in table.data.iter() {
+                let row: Vec<_> = row.iter()
+                    .zip(table.types.iter())
+                    .map(|(v, t)| match *t {
+                        Type::Text => format!("\"{}\"", v),
+                        Type::Int => v.clone(),
+                    })
+                    .collect();
                 let insert_query =
                     format!("INSERT INTO {} VALUES ({})", table_name, row.join(", "));
-                println!("{}", insert_query);
                 pool.prep_exec(&insert_query, ()).unwrap();
             }
         }
@@ -130,10 +137,10 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
             target_data.insert(query_name.clone(), HashMap::new());
 
             for (i, values) in query.values.iter().enumerate() {
-                target_data
-                    .get_mut(query_name)
-                    .unwrap()
-                    .insert(i.to_string(), Vec::new());
+                target_data.get_mut(query_name).unwrap().insert(
+                    i.to_string(),
+                    Vec::new(),
+                );
 
                 let values = Params::Positional(values.iter().map(|v| v.into()).collect());
                 for row in pool.prep_exec(&query.select_query, values).unwrap() {
@@ -141,10 +148,10 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
                         .unwrap()
                         .into_iter()
                         .map(|v| {
-                                 v.into_str()
-                                     .trim_matches(|c| c == '\'' || c == '"')
-                                     .to_owned()
-                             })
+                            v.into_str()
+                                .trim_matches(|c| c == '\'' || c == '"')
+                                .to_owned()
+                        })
                         .collect();
                     target_data
                         .get_mut(query_name)
@@ -156,11 +163,93 @@ fn generate_target_results(schemas: &HashMap<String, Schema>) {
             }
         }
         let target_data_toml = toml::to_string(&target_data).unwrap();
-        let target_data_file = Path::new(DIRECTORY_PREFIX)
-            .join("targets")
-            .join(schema_name);
+        let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
+            schema_name,
+        );
         write_file(target_data_file, target_data_toml);
     }
+}
+
+fn check_query(
+    tables: &HashMap<String, Table>,
+    query_name: &str,
+    query: &Query,
+    target: &HashMap<String, Vec<Vec<String>>>,
+) -> Result<(), String> {
+    let mut g = Blender::new();
+    let recipe;
+    {
+        // migrate
+        let mut mig = g.start_migration();
+
+        let queries: Vec<_> = tables
+            .values()
+            .map(|t| t.create_query.clone())
+            .chain(Some(query_name.to_owned() + ": " + &query.select_query))
+            .collect();
+
+        recipe = match Recipe::from_str(&queries.join("\n"), None) {
+            Ok(mut recipe) => {
+                recipe.activate(&mut mig, false).unwrap();
+                recipe
+            }
+            Err(e) => panic!(e),
+        };
+
+        mig.commit();
+    }
+
+    for (table_name, table) in tables.iter() {
+        let mut mutator = g.get_mutator(recipe.node_addr_for(table_name).unwrap());
+        for row in table.data.iter() {
+            assert_eq!(row.len(), table.types.len());
+            let row: Vec<DataType> = row.iter()
+                .enumerate()
+                .map(|(i, v)| table.types[i].make_datatype(v))
+                .collect();
+            mutator.put(row).unwrap();
+        }
+    }
+
+    thread::sleep(time::Duration::from_millis(300));
+
+    let nd = recipe.node_addr_for(query_name).unwrap();
+    let getter = g.get_getter(nd).unwrap();
+
+    for (i, query_parameter) in query.values.iter().enumerate() {
+        let query_parameter = query.types[0].make_datatype(&query_parameter[0]);
+        let query_results = getter(&query_parameter, true).unwrap();
+
+        let target_results = &target[&i.to_string()];
+        let mut query_results: HashSet<Vec<String>> = query_results
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|v| match v {
+                        DataType::BigInt(i) => i.to_string(),
+                        DataType::Text(_) |
+                        DataType::TinyText(_) => v.into(),
+                        _ => unimplemented!(),
+
+                    })
+                    .collect()
+            })
+            .collect();
+
+        if query_results.len() != target_results.len() {
+            return Err(format!(
+                "Wrong number of results (expected {}, got {})",
+                target_results.len(),
+                query_results.len()
+            ));
+        }
+        for target_row in target_results.iter() {
+            if !query_results.remove(target_row) {
+                return Err(format!("Row not found in output: {:?}", target_row));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -181,89 +270,18 @@ fn mysql_comparison() {
     }
 
     for (schema_name, schema) in schemas.iter() {
-        let target_data_file = Path::new(DIRECTORY_PREFIX)
-            .join("targets")
-            .join(schema_name);
+        let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
+            schema_name,
+        );
         let target_data: HashMap<String, HashMap<String, Vec<Vec<String>>>> =
             toml::from_str(&read_file(target_data_file)).unwrap();
 
         for (query_name, query) in schema.queries.iter() {
-            let mut g = Blender::new();
-            let main_log = distributary::logger_pls();
-            let recipe_log = main_log.new(o!());
-            g.log_with(main_log);
-            let recipe;
-            {
-                // migrate
-                let mut mig = g.start_migration();
-
-                let queries: Vec<_> = schema
-                    .tables
-                    .values()
-                    .map(|t| t.create_query.clone())
-                    .chain(Some(query_name.clone() + ": " + &query.select_query))
-                    .collect();
-
-                println!("{:?}", queries);
-
-                recipe = match Recipe::from_str(&queries.join("\n"), Some(recipe_log)) {
-                    Ok(mut recipe) => {
-                        recipe.activate(&mut mig, false).unwrap();
-                        recipe
-                    }
-                    Err(e) => panic!(e),
-                };
-
-                mig.commit();
-            }
-
-            for (table_name, table) in schema.tables.iter() {
-                let mut mutator = g.get_mutator(recipe.node_addr_for(table_name).unwrap());
-                for row in table.data.iter() {
-                    assert_eq!(row.len(), table.types.len());
-                    let row: Vec<DataType> = row.iter()
-                        .enumerate()
-                        .map(|(i, v)| table.types[i].make_datatype(v))
-                        .collect();
-                    println!("row: {:?}", row);
-                    mutator.put(row).unwrap();
-                }
-            }
-
-            thread::sleep(time::Duration::from_millis(300));
-
-            let nd = recipe.node_addr_for(query_name).unwrap();
-            let getter = g.get_getter(nd).unwrap();
-
-            for (i, query_parameter) in query.values.iter().enumerate() {
-                let query_parameter = query.types[0].make_datatype(&query_parameter[0]);
-                let query_results = getter(&query_parameter, true).unwrap();
-
-                let target_results = &target_data[query_name][&i.to_string()];
-                let mut query_results: HashSet<Vec<String>> = query_results
-                    .into_iter()
-                    .map(|row| {
-                        row.into_iter()
-                            .map(|v| match v {
-                                     DataType::BigInt(i) => i.to_string(),
-                                     DataType::Text(_) |
-                                     DataType::TinyText(_) => v.into(),
-                                     _ => unimplemented!(),
-
-                                 })
-                            .collect()
-                    })
-                    .collect();
-
-                assert_eq!(query_results.len(), target_results.len());
-                for target_row in target_results.iter() {
-                    assert!(query_results.remove(target_row));
-                    println!("Matching row: {:?}", target_row);
-                }
+            print!("{}.{}... ", schema.name, query_name);
+            match check_query(&schema.tables, query_name, query, &target_data[query_name]) {
+                Ok(()) => println!("\x1B[32;1mPASS\x1B[m"),
+                Err(e) => println!("\x1B[31;1mFAIL\x1B[m: {}", e),
             }
         }
     }
-
-    //    println!("{:?}", schemas);
-    assert_eq!(2 + 2, 4);
 }
