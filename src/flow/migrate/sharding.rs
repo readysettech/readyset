@@ -491,6 +491,30 @@ pub fn shard(
         }
     }
 
+    // and finally, because we don't *currently* support sharded shuffles (i.e., going directly
+    // from one sharding to another), we replace such patterns with a merge + a shuffle. the merge
+    // will ensure that replays from the first sharding are turned into a single update before
+    // arriving at the second sharding, and the merged sharder will ensure that nshards is set
+    // correctly.
+    let sharded_sharders: Vec<_> = new.iter()
+        .filter(|&&n| {
+            graph[n].is_sharder() && graph[n].sharded_by() != Sharding::None
+        })
+        .cloned()
+        .collect();
+    for n in sharded_sharders {
+        // sharding what?
+        let p = {
+            let mut ps = graph.neighbors_directed(n, petgraph::EdgeDirection::Incoming);
+            let p = ps.next().unwrap();
+            assert_eq!(ps.count(), 0);
+            p
+        };
+        error!(log, "preventing unsupported sharded shuffle"; "sharder" => ?n);
+        reshard(log, new, &mut swaps, graph, p, n, Sharding::None);
+        graph.node_weight_mut(n).unwrap().shard_by(Sharding::None);
+    }
+
     swaps
 }
 
