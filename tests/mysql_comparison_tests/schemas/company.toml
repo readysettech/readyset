@@ -49,6 +49,6 @@ types = ["Int"]
 values = [["1"], ["0"], ["-7"]]
 
 [queries.q2]
-select_query = "SELECT * FROM employees WHERE active = ? ORDER BY employeeId;"
+select_query = "SELECT * FROM employees WHERE active = ? ORDER BY employeeId LIMIT 5;"
 types = ["Int"]
 values = [["1"], ["0"], ["-7"]]
