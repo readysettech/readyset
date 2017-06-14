@@ -62,9 +62,16 @@ values = [["1"], ["7"], ["8"], ["18"], ["32"]]
 select_query = "SELECT * FROM employees JOIN salaries ON employees.payGrade = salaries.payGrade where employees.employeeId = ?;"
 types = ["Int"]
 values = [["1"], ["7"], ["8"], ["18"], ["32"]]
-
+ignore = true
 
 [queries.q5]
 select_query = "SELECT * FROM employees LEFT JOIN salaries ON employees.payGrade = salaries.payGrade where employees.employeeId = ?;"
 types = ["Int"]
 values = [["1"], ["7"], ["8"], ["18"], ["32"]]
+ignore = true
+
+[queries.q6]
+select_query = "SELECT employees.*, salaries.* FROM employees, salaries WHERE employees.employeeId = ?;"
+types = ["Int"]
+values = [["1"], ["7"], ["8"], ["18"], ["32"]]
+ignore = true

@@ -57,6 +57,7 @@ struct Query {
     select_query: String,
     types: Vec<Type>,
     values: Vec<Vec<String>>,
+    ignore: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,6 +360,11 @@ fn mysql_comparison() {
             print!("{}.{}... ", schema.name, query_name);
             io::stdout().flush().ok().expect("Could not flush stdout");
 
+            if let Some(true) = query.ignore {
+                println!("\x1B[33mIGNORED\x1B[m");
+                continue;
+            }
+
             let panic_state: Arc<Mutex<Option<PanicState>>> = Arc::new(Mutex::new(None));
             set_panic_hook(panic_state.clone());
             let result = panic::catch_unwind(|| {
@@ -388,5 +394,6 @@ fn mysql_comparison() {
         }
     }
 
+    panic::set_hook(Box::new(|_info|{}));
     assert!(!fail);
 }
