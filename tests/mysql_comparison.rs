@@ -78,6 +78,10 @@ struct PanicState {
 
 fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
     panic::set_hook(Box::new(move |info| {
+        if panic_state.lock().unwrap().is_some() {
+            return;
+        }
+
         let backtrace = backtrace::Backtrace::new();
 
         let thread = thread::current();
