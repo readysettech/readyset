@@ -4,6 +4,7 @@ use flow;
 use bincode;
 use bufstream::BufStream;
 use std::io::prelude::*;
+use std::io;
 
 use vec_map::VecMap;
 
@@ -108,7 +109,16 @@ pub fn main(stream: TcpStream, mut s: Server) {
                 }
             }
             Err(e) => {
-                println!("client left: {:?}", e);
+                match *e {
+                    bincode::internal::ErrorKind::IoError(e) => {
+                        if e.kind() != io::ErrorKind::UnexpectedEof {
+                            println!("client left: {:?}", e);
+                        }
+                    }
+                    e => {
+                        println!("client sent bad request: {:?}", e);
+                    }
+                }
                 break;
             }
         }
