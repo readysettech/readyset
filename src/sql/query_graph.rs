@@ -229,10 +229,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             predicates: preds,
             columns: st.fields
                 .iter()
-                .filter_map(|field| match field {
-                    &FieldExpression::All => unimplemented!(),
-                    &FieldExpression::AllInTable(_) => unimplemented!(),
-                    &FieldExpression::Col(ref c) => {
+                .filter_map(|field| match *field {
+                    // unreachable because SQL rewrite passes will have expanded these already
+                    FieldExpression::All => unreachable!(),
+                    FieldExpression::AllInTable(_) => unreachable!(),
+                    FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
                                 match c.function {
