@@ -13,11 +13,13 @@ use ops::grouped::extremum::Extremum as ExtremumKind;
 use ops::join::{Join, JoinType};
 use ops::latest::Latest;
 use ops::project::Project;
+use ops::security::filter::{FilterType};
 use sql::QueryFlowParts;
 
 pub mod reuse;
 mod rewrite;
 mod optimize;
+mod security;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -156,6 +158,10 @@ impl MirQuery {
     pub fn optimize_post_reuse(mut self) -> MirQuery {
         optimize::optimize_post_reuse(&mut self);
         self
+    }
+
+    pub fn apply_policies(mut self, policies: HashMap<String, MirNodeRef>) -> MirQuery {
+        security::apply_policies(self, policies)
     }
 }
 
@@ -717,7 +723,8 @@ impl MirNode {
                             *offset,
                             mig,
                         )
-                    }
+                    },
+                    MirNodeType::SecurityFilter { .. } => unimplemented!(),
                 };
 
                 // any new flow nodes have been instantiated by now, so we replace them with
@@ -806,6 +813,7 @@ pub enum MirNodeType {
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
     Leaf { node: MirNodeRef, keys: Vec<Column> },
+    SecurityFilter { conditions: Vec<Option<(Operator, DataType)>> },
 }
 
 impl MirNodeType {
@@ -1203,10 +1211,10 @@ impl Debug for MirNodeType {
                         .join(", ")
                     )
                     .collect::<Vec<_>>()
-                    .join(" ⋃ ");
-
-                write!(f, "{}", cols)
+                    .join(", ");
+                write!(f, "{} ⋃ {}", cols_left, cols_right)
             },
+            MirNodeType::SecurityFilter { .. } => unimplemented!(),
         }
     }
 }

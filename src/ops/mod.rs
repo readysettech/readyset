@@ -12,6 +12,7 @@ pub mod union;
 pub mod identity;
 pub mod filter;
 pub mod topk;
+pub mod security;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum NodeOperator {
@@ -26,6 +27,7 @@ pub enum NodeOperator {
     Identity(identity::Identity),
     Filter(filter::Filter),
     TopK(topk::TopK),
+    SecurityFilter(security::SecurityOperator<security::filter::SecurityFilter>)
 }
 
 macro_rules! nodeop_from_impl {
@@ -52,6 +54,8 @@ nodeop_from_impl!(NodeOperator::Union, union::Union);
 nodeop_from_impl!(NodeOperator::Identity, identity::Identity);
 nodeop_from_impl!(NodeOperator::Filter, filter::Filter);
 nodeop_from_impl!(NodeOperator::TopK, topk::TopK);
+nodeop_from_impl!(NodeOperator::SecurityFilter,
+                  security::SecurityOperator<security::filter::SecurityFilter>);
 
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
@@ -67,6 +71,7 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::SecurityFilter(ref mut i) => i.$fn($($arg),*),
         }
     }
 }
@@ -85,6 +90,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Identity(ref i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
+            NodeOperator::SecurityFilter(ref i) => i.$fn($($arg),*),
         }
     }
 }

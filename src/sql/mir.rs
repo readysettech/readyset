@@ -3,6 +3,7 @@ use flow::prelude::NodeIndex;
 use mir::{GroupedNodeType, MirNode, MirNodeType};
 // TODO(malte): remove if possible
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
+use security::{Policy};
 use ops::join::JoinType;
 
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
@@ -12,6 +13,7 @@ use sql::query_graph::{QueryGraph, QueryGraphEdge, OutputColumn};
 
 use slog;
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
 use std::ops::Deref;
 use std::vec::Vec;
 
@@ -48,6 +50,7 @@ pub struct SqlToMirConverter {
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
+    policies: HashMap<String, Vec<(Policy, QueryGraph)>>,
 }
 
 impl Default for SqlToMirConverter {
@@ -58,6 +61,7 @@ impl Default for SqlToMirConverter {
             log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
             schema_version: 0,
+            policies: HashMap::default(),
         }
     }
 }
@@ -67,6 +71,14 @@ impl SqlToMirConverter {
         SqlToMirConverter {
             log: log,
             ..Default::default()
+        }
+    }
+
+    pub fn add_policy(&mut self, p: &Policy, qg: QueryGraph) {
+        let key = p.table.clone();
+        match self.policies.entry(key) {
+            Entry::Vacant(e) => { e.insert(vec![(p.clone(), qg)]); } ,
+            Entry::Occupied(mut e) => { e.get_mut().push((p.clone(), qg)); },
         }
     }
 
@@ -942,6 +954,67 @@ impl SqlToMirConverter {
         predicates_above_group_by_nodes
     }
 
+    fn make_security_filter(
+        &self,
+        name: &str,
+        parent: MirNodeRef,
+        predicates: &Vec<ConditionTree>,
+    ) -> Vec<MirNodeRef> {
+        let mut new_nodes = vec![];
+
+        let mut prev_node = parent;
+
+        for (i, cond) in predicates.iter().enumerate() {
+            let mut fields = prev_node.borrow().columns().iter().cloned().collect();
+
+            let filter = self.to_conditions(cond, &mut fields, &prev_node);
+            let f_name = format!("{}_f{}", name, i);
+
+            let n = MirNode::new(
+                &f_name,
+                self.schema_version,
+                fields,
+                MirNodeType::SecurityFilter { conditions: filter },
+                vec![prev_node.clone()],
+                vec![],
+            );
+            new_nodes.push(n.clone());
+            prev_node = n;
+        }
+
+        new_nodes
+    }
+
+    fn make_security_nodes(&self, rel: &str, base_node: &MirNodeRef) -> Vec<MirNodeRef> {
+        let mut security_nodes = Vec::new();
+        let policies = match self.policies.get(rel) {
+            Some(p) => p,
+            // no policies associated with this base node
+            None => return security_nodes
+        };
+
+        let mut prev_node = base_node.clone();
+        // make security filters from policies predicates
+        for p in policies.iter() {
+            let qg = &p.1;
+            let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
+            sorted_rels.sort();
+            for rel in &sorted_rels {
+                let qgn = &qg.relations[*rel];
+                assert!(*rel != "computed_collumns");
+                let new_nodes = self.make_security_filter(
+                    &format!("security_{}", *rel),
+                    prev_node,
+                    &qgn.predicates
+                );
+                prev_node = new_nodes.iter().last().unwrap().clone();
+                security_nodes.extend(new_nodes);
+            }
+        }
+
+        security_nodes
+    }
+
     /// Returns list of nodes added
     fn make_nodes_for_selection(
         &mut self,
@@ -985,8 +1058,15 @@ impl SqlToMirConverter {
                         }
                     }
                 };
+
+                // 0.1 Policies over base nodes
+                // TODO(larat): move security boundary downwards to later maximize reuse opportunities
+                let policies = self.make_security_nodes(*rel, &base_for_rel);
+
                 base_nodes.insert(*rel, base_for_rel);
             }
+
+
 
             // 1. Generate join nodes for the query. This starts out by joining two of the base
             //    nodes corresponding to relations in the first join predicate, and then continues
@@ -1082,10 +1162,19 @@ impl SqlToMirConverter {
             }
 
 
+<<<<<<< HEAD
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
             let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> = HashMap::new();
             let mut predicate_nodes = Vec::new();
+=======
+            // 2. Get columns used by each filter node.
+            let mut filter_columns = HashMap::new();
+            let mut filter_nodes = Vec::new();
+            let mut moved_filters = Vec::new();
+
+            // TODO(larat): remove redundant code.
+>>>>>>> Basic implementation of security policies at the MIR level.
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             let mut created_predicates = Vec::new();
             sorted_rels.sort();

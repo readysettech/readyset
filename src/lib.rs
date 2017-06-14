@@ -399,6 +399,7 @@ mod mir;
 mod ops;
 mod recipe;
 mod sql;
+mod security;
 
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Migration, Getter, Mutator, MutatorError};

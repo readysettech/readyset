@@ -3,7 +3,7 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-mod reuse;
+mod reuse; 
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
@@ -14,6 +14,7 @@ use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
 use self::reuse::ReuseType;
 use sql::query_graph::{QueryGraph, to_query_graph};
+use security::{Policy};
 
 use slog;
 use std::collections::HashMap;
@@ -50,6 +51,7 @@ pub struct SqlIncorporator {
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
+    policies: HashMap<u64, (Policy, QueryGraph)>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
@@ -68,6 +70,7 @@ impl Default for SqlIncorporator {
             view_schemas: HashMap::default(),
             transactional: false,
             enable_reuse: true,
+            policies: HashMap::default(),
         }
     }
 }
@@ -96,6 +99,24 @@ impl SqlIncorporator {
     /// Disable node reuse for future migrations.
     pub fn enable_reuse(&mut self) {
         self.enable_reuse = true;
+    }
+
+    /// Adds new security policies.
+    /// Added policies are automatically incorporated into the flow graph when a new query is added.
+    pub fn add_policies(&mut self, policies: HashMap<u64, Policy>) {
+        for (pid, ref p) in policies.iter() {
+            let st = match p.predicate {
+                SqlQuery::Select(ref s) => s,
+                _ => unreachable!(),
+            };
+
+            let qg = match to_query_graph(st) {
+                Ok(qg) => qg,
+                Err(e) => panic!(e),
+            };
+
+            self.mir_converter.add_policy(p, qg);
+        }
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -363,6 +384,11 @@ impl SqlIncorporator {
         self.query_graphs.insert(qg.signature().hash, (qg, mir));
 
         qfp
+    }
+
+    fn policies_for_query(&self, qp: &QueryGraph) -> Vec<Policy> {
+        // Select security policies over the tables used in the query
+        unimplemented!();
     }
 
     fn extend_existing_query(

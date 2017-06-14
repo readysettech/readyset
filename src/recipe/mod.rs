@@ -3,6 +3,8 @@ use nom_sql::SqlQuery;
 use {SqlIncorporator, Migration};
 use flow::prelude::NodeIndex;
 
+use security::{Policy};
+
 use slog;
 use std::collections::HashMap;
 use std::str;
@@ -30,6 +32,8 @@ pub struct Recipe {
     expression_order: Vec<QueryID>,
     /// Named read/write expression aliases, mapping to queries in `expressions`.
     aliases: HashMap<String, QueryID>,
+    /// Security policies enforced in the recipe.
+    policies: HashMap<u64, Policy>,
 
     /// Recipe revision.
     version: usize,
@@ -83,6 +87,7 @@ impl Recipe {
                 None => slog::Logger::root(slog::Discard, o!()),
                 Some(log) => log,
             },
+            policies: HashMap::default(),
         }
     }
 
@@ -121,6 +126,36 @@ impl Recipe {
         }
     }
 
+    /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file) and from
+    /// a set of security policies in a string.
+    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
+    /// it.
+    pub fn from_str_with_policy(recipe_text: &str, policy_text: Option<&str>, log: Option<slog::Logger>) -> Result<Recipe, String> {
+        let recipe = match Recipe::from_str(recipe_text, log) {
+            Ok(mut r) => {
+                let ps = match policy_text {
+                    Some(pt) => Policy::parse(pt),
+                    None => Vec::default(),
+                };
+
+                let policies = ps.into_iter().enumerate()
+                .map(|(i, p)| {
+                    // TODO(larat): hash policy to get pid
+                    let pid: u64 = hash_query(&p.predicate);
+                    (pid, p)
+                })
+                .collect::<HashMap<u64, Policy>>();
+
+                r.policies = policies;
+
+                Ok(r)
+            },
+            Err(e) => Err(e),
+        };
+
+        recipe
+    }
+
     /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
@@ -138,6 +173,7 @@ impl Recipe {
 
         // parse and compute differences to current recipe
         let parsed_queries = Recipe::parse(&cleaned_recipe_text)?;
+
         Ok(Recipe::from_queries(parsed_queries, log))
     }
 
@@ -182,6 +218,7 @@ impl Recipe {
             expressions: expressions,
             expression_order: expression_order,
             aliases: aliases,
+            policies: HashMap::default(),
             version: 0,
             prior: None,
             inc: Some(inc),
@@ -200,6 +237,10 @@ impl Recipe {
         debug!(self.log, "{} queries, {} of which are named",
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
+
+        // TODO(larat): this should be done over a delta of policies
+        let policies_delta = self.policies.clone();
+        self.inc.as_mut().unwrap().add_policies(policies_delta);
 
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
@@ -258,6 +299,8 @@ impl Recipe {
             //unimplemented!()
         }
 
+        // TODO(larat): deal with adding policies
+
         Ok(result)
     }
 
@@ -312,6 +355,7 @@ impl Recipe {
             log: self.log.clone(),
             // retain the old recipe for future reference
             prior: Some(Box::new(self)),
+            policies: HashMap::default(),
         };
 
         // apply changes
