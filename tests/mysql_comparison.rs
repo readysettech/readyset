@@ -13,7 +13,7 @@ use mysql::OptsBuilder;
 use mysql::value::Params;
 
 use std::path::Path;
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufRead, BufReader};
 use std::fs::{self, File};
 use std::collections::BTreeMap;
 use std::slice::SliceConcatExt;
@@ -29,11 +29,15 @@ use std::time;
 use distributary::{Blender, Recipe, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
+const MAX_DATA_FILE_ROWS: usize = 100;
 
 #[derive(Debug, Deserialize)]
 enum Type {
     Int,
     Text,
+    Real,
+    Date,
+    Timestamp,
 }
 
 impl Type {
@@ -41,6 +45,9 @@ impl Type {
         match *self {
             Type::Int => i64::from_str(value).unwrap().into(),
             Type::Text => value.into(),
+            Type::Real => f64::from_str(value).unwrap().into(),
+            Type::Date => value.into(),
+            Type::Timestamp => value.into(),
         }
     }
 }
@@ -49,7 +56,8 @@ impl Type {
 struct Table {
     create_query: String,
     types: Vec<Type>,
-    data: Vec<Vec<String>>,
+    data: Option<Vec<Vec<String>>>,
+    data_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,17 +177,15 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
         let pool = setup_mysql("soup:password@127.0.0.1:3306/mysql_comparison_test");
         for (table_name, table) in schema.tables.iter() {
             pool.prep_exec(&table.create_query, ()).unwrap();
-            for row in table.data.iter() {
-                let row: Vec<_> = row.iter()
-                    .zip(table.types.iter())
-                    .map(|(v, t)| match *t {
-                        Type::Text => format!("\"{}\"", v),
-                        Type::Int => v.clone(),
-                    })
-                    .collect();
+            for row in table.data.as_ref().unwrap().iter() {
+                let row: Vec<_> = row.iter().map(|v| format!("\"{}\"", v)).collect();
                 let insert_query =
                     format!("INSERT INTO {} VALUES ({})", table_name, row.join(", "));
-                pool.prep_exec(&insert_query, ()).unwrap();
+                if let Err(msg) = pool.prep_exec(&insert_query, ()) {
+                    println!("MySQL query failed: {}", insert_query);
+                    println!("{:?}", msg);
+                    panic!();
+                }
             }
         }
 
@@ -279,7 +285,7 @@ fn check_query(
 
     for (table_name, table) in tables.iter() {
         let mut mutator = g.get_mutator(recipe.node_addr_for(table_name).unwrap());
-        for row in table.data.iter() {
+        for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
             let row: Vec<DataType> = row.iter()
                 .enumerate()
@@ -304,11 +310,13 @@ fn check_query(
             .map(|row| {
                 row.into_iter()
                     .map(|v| match v {
+                        DataType::None => "NULL".to_owned(),
+                        DataType::Int(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
+                        DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
                         DataType::Text(_) |
                         DataType::TinyText(_) => v.into(),
-                        _ => unimplemented!(),
-
+                        DataType::Timestamp(_) => unimplemented!(),
                     })
                     .collect()
             })
@@ -348,6 +356,29 @@ fn mysql_comparison() {
         }
     });
 
+    for schema in schemas.values_mut() {
+        for table in schema.tables.values_mut() {
+            assert_ne!(table.data.is_some(), table.data_file.is_some());
+            if let Some(ref file_name) = table.data_file {
+                table.data = Some(Vec::new());
+                let data = table.data.as_mut().unwrap();
+
+                let f = File::open(file_name).unwrap();
+                let mut reader = BufReader::new(f);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap() > 0 && data.len() < MAX_DATA_FILE_ROWS {
+                    data.push(
+                        line.split("\t")
+                            .map(str::trim)
+                            .map(|s| s.to_owned())
+                            .collect(),
+                    );
+                    line.clear();
+                }
+            }
+        }
+    }
+
     if cfg!(feature = "generate_mysql_tests") {
         generate_target_results(&schemas);
     }
@@ -366,6 +397,11 @@ fn mysql_comparison() {
 
             if let Some(true) = query.ignore {
                 println!("\x1B[33mIGNORED\x1B[m");
+                continue;
+            }
+
+            if query.values.len() == 0 {
+                println!("\x1B[33mPASS\x1B[m");
                 continue;
             }
 
@@ -398,6 +434,6 @@ fn mysql_comparison() {
         }
     }
 
-    panic::set_hook(Box::new(|_info|{}));
+    panic::set_hook(Box::new(|_info| {}));
     assert!(!fail);
 }

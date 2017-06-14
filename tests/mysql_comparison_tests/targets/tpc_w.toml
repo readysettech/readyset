@@ -1,3 +1,66 @@
-[q0]
-0 = [["1", "1", "1", "1", "1", "1", "1"]]
-1 = []
+[addItem]
+
+[addRandomItemToCartIfNecessary]
+
+[createEmptyCart]
+
+[createNewCustomerMaxId]
+
+[doAuthorSearch]
+
+[doSubjectSearch]
+
+[doTitleSearch]
+
+[enterAddressId]
+
+[enterAddressMatch]
+
+[enterAddressMaxId]
+
+[enterOrderMaxId]
+
+[getBestSellers]
+
+[getBook]
+0 = []
+1 = [["42", "BABABABABAOGUL Black, dangerous", "4", "1998-09-22", "32:@$@h5m!oQ]ou|nZPd.JC =BN#K)ScKK~IGCdSxNto+NB b*ct", "COOKING", "sw|]uY9#=FH-~$IbQ5!9)WlG(JIf{)6fA_sUHmRsR{yQ06$fB9 FQl@T&iZ3]Q;NVl?|yOGaX[#nW@Oi5!9k-K[0%!O]pHD@^V{yuPU(1wqms[Q+Zos5_hQ_*;!sXyoB)xZz~iCZ0S?(38[shE+|7Z?!S||epB1t_L%(Uf2F)YJMRy4Z{##VA8ueZHE%;.s$G?*lbIR-s[S9JHxxi~d5|x,Q[yP)P;V=[Xsm.,sJ_!hPg1/LZafRTvsIT8M~+sf#&xj?sCFxbM/icqT{q_0,e(C)@ *XshU/14;e.UX?.*Au?)hn{7h|!6@L]$tig%B:HQ?C ^UrV-LS}S]$K/[j}=&b- j]$", "63", "24", "62", "38", "90", "Images/img42/thumb_42.jpg", "Images/img42/image_42.jpg", "9529.47", "5297.86", "1998-09-28", "11", "DWw dH$;jmmuR", "5181", "HARDBACK", "55.30x60.92x7.41", "4", "U@*W}cI3FZf5aCRb08", "BABABABABABAAL", "FeoS0_bC%g", "1830-09-05", "wHJy&x}0CU1[w2QpegusYfc=Hb|qw$@%Gjyl2I?;n))56y-!0eoojqv#Nmn,k{9Qs?+_0f~%{(I&Bs@|S}B1AWY%;#8z-2&z_{EK:DncG*(7 %_R3kEo||ng3=G!9H~TuC:n5Bpahs;C.$__jJ~wAHDps,}nBi6*K_;BGEXNW#b%@gX_P*f^o4p2_z^kH6|dPgE-LmUsk*.-+^4BV,B,-R)4&XanPnMptbw[n&ix(dh4(?,ZnRT//B1 k+IZ"]]
+
+[getCAddr]
+
+[getCAddrId]
+
+[getCDiscount]
+
+[getCart]
+
+[getCustomer]
+
+[getMostRecentOrderId]
+
+[getMostRecentOrderLines]
+
+[getMostRecentOrderOrder]
+
+[getName]
+0 = [["HPCt}+%xW7wJ=Ge", ".yg~k)-KtX-K"]]
+1 = [["c4a3U6E2s09b}o", "BZQ9DSq_sLx7"]]
+2 = []
+
+[getNewProducts]
+
+[getPassword]
+
+[getRelated]
+
+[getRelated1]
+
+[getStock]
+
+[getUserName]
+
+[verifyDBConsistencyAddrId]
+
+[verifyDBConsistencyCustId]
+
+[verifyDBConsistencyItemId]
