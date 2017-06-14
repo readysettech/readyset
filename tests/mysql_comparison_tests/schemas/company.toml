@@ -52,3 +52,19 @@ values = [["1"], ["0"], ["-7"]]
 select_query = "SELECT * FROM employees WHERE active = ? ORDER BY employeeId LIMIT 5;"
 types = ["Int"]
 values = [["1"], ["0"], ["-7"]]
+
+[queries.q3]
+select_query = "SELECT employees.*, salaries.* FROM employees JOIN salaries ON employees.payGrade = salaries.payGrade where employees.employeeId = ?;"
+types = ["Int"]
+values = [["1"], ["7"], ["8"], ["18"], ["32"]]
+
+[queries.q4]
+select_query = "SELECT * FROM employees JOIN salaries ON employees.payGrade = salaries.payGrade where employees.employeeId = ?;"
+types = ["Int"]
+values = [["1"], ["7"], ["8"], ["18"], ["32"]]
+
+
+[queries.q5]
+select_query = "SELECT * FROM employees LEFT JOIN salaries ON employees.payGrade = salaries.payGrade where employees.employeeId = ?;"
+types = ["Int"]
+values = [["1"], ["7"], ["8"], ["18"], ["32"]]
