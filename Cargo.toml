@@ -64,7 +64,9 @@ buf_redux = "0.6.1"
 time = "0.1"
 
 [dev-dependencies]
-toml = "0.4.0"
+toml = "0.4"
+backtrace = "0.3"
+diff = "0.1"
 
 [dependencies.rustful]
 version = "0.9.0"

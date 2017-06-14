@@ -6,6 +6,8 @@ extern crate serde_derive;
 extern crate toml;
 extern crate distributary;
 extern crate mysql;
+extern crate backtrace;
+extern crate diff;
 
 use mysql::OptsBuilder;
 use mysql::value::Params;
@@ -13,15 +15,16 @@ use mysql::value::Params;
 use std::path::Path;
 use std::io::{Read, Write};
 use std::fs::{self, File};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::slice::SliceConcatExt;
 use std::str::FromStr;
-
+use std::sync::{Arc, Mutex};
 use std::fmt::Write as FmtWrite;
 
+use std::io;
+use std::panic;
 use std::thread;
 use std::time;
-use std::io;
 
 use distributary::{Blender, Recipe, DataType};
 
@@ -61,6 +64,46 @@ struct Schema {
     name: String,
     tables: BTreeMap<String, Table>,
     queries: BTreeMap<String, Query>,
+}
+
+#[derive(Clone)]
+struct PanicState {
+    message: String,
+    thread: String,
+    file: String,
+    line: u32,
+    backtrace: backtrace::Backtrace,
+}
+
+fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
+    panic::set_hook(Box::new(move |info| {
+        let backtrace = backtrace::Backtrace::new();
+
+        let thread = thread::current();
+        let thread = thread.name().unwrap_or("unnamed").to_owned();
+
+        let message = match info.payload().downcast_ref::<&'static str>() {
+            Some(s) => *s,
+            None => {
+                match info.payload().downcast_ref::<String>() {
+                    Some(s) => &**s,
+                    None => "Box<Any>",
+                }
+            }
+        }.to_owned();
+
+        let (file, line) = match info.location() {
+            Some(ref l) => (l.file().to_owned(), l.line()),
+            None => ("[unknown]".to_owned(), 0),
+        };
+        *panic_state.lock().unwrap() = Some(PanicState {
+            message,
+            thread,
+            file,
+            line,
+            backtrace,
+        });
+    }));
 }
 
 fn read_file<P: AsRef<Path>>(file_name: P) -> String {
@@ -173,13 +216,38 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
     }
 }
 
+/// Compare two sets of results, returning none if they are the same, and the diff between them
+/// otherwise.
+fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<String> {
+    let mut mysql = mysql.clone();
+    let mut soup = soup.clone();
+    mysql.sort();
+    soup.sort();
+
+    if mysql.len() == soup.len() && mysql.iter().zip(soup.iter()).all(|(m, s)| m == s) {
+        return None;
+    }
+
+    let mysql: Vec<_> = mysql.into_iter().map(|r| format!("{:?}", r)).collect();
+    let soup: Vec<_> = soup.into_iter().map(|r| format!("{:?}", r)).collect();
+
+    let mut output = String::new();
+    for diff in diff::lines(&mysql.join("\n"), &soup.join("\n")) {
+        match diff {
+            diff::Result::Left(l) => writeln!(&mut output, "-{}", l).unwrap(),
+            diff::Result::Both(l, _) => writeln!(&mut output, " {}", l).unwrap(),
+            diff::Result::Right(r) => writeln!(&mut output, "+{}", r).unwrap(),
+        }
+    }
+    Some(output)
+}
+
 fn check_query(
     tables: &BTreeMap<String, Table>,
     query_name: &str,
     query: &Query,
     target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
-    let mut error_log = String::new();
     let mut g = Blender::new();
     g.disable_sharding();
     let recipe;
@@ -222,11 +290,11 @@ fn check_query(
     let getter = g.get_getter(nd).unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
-        let query_parameter = query.types[0].make_datatype(&query_parameter[0]);
-        let query_results = getter(&query_parameter, true).unwrap();
+        let query_param = query.types[0].make_datatype(&query_parameter[0]);
+        let query_results = getter(&query_param, true).unwrap();
 
         let target_results = &target[&i.to_string()];
-        let mut query_results: HashSet<Vec<String>> = query_results
+        let query_results: Vec<Vec<String>> = query_results
             .into_iter()
             .map(|row| {
                 row.into_iter()
@@ -241,34 +309,15 @@ fn check_query(
             })
             .collect();
 
-        writeln!(&mut error_log, "query_results").unwrap();
-        for r in query_results.iter() {
-            writeln!(&mut error_log, "{:?}", r).unwrap();
-        }
-        writeln!(&mut error_log, "\ntarget_results").unwrap();
-        for r in target_results.iter() {
-            writeln!(&mut error_log, "{:?}", r).unwrap();
-        }
-        writeln!(&mut error_log, "").unwrap();
-
-        if query_results.len() != target_results.len() {
-            writeln!(
-                &mut error_log,
-                "Wrong number of results (expected {}, got {})",
-                target_results.len(),
-                query_results.len()
-            ).unwrap();
-
-            return Err(error_log);
-        }
-        for target_row in target_results.iter() {
-            if !query_results.remove(target_row) {
-                writeln!(
-                    &mut error_log,
-                    "query_results and target_results do not match"
-                ).unwrap();
-                return Err(error_log);
+        match compare_results(&target_results, &query_results) {
+            Some(diff) => {
+                return Err(format!(
+                    "MySQL and Soup results do not match for ? = {:?}\n{}",
+                    query_parameter,
+                    diff
+                ))
             }
+            None => {}
         }
     }
     Ok(())
@@ -276,6 +325,8 @@ fn check_query(
 
 #[test]
 fn mysql_comparison() {
+    println!("");
+
     let mut schemas: BTreeMap<String, Schema> = BTreeMap::new();
     run_for_all_in_directory("schemas", |file_name, contents| {
         {
@@ -284,7 +335,12 @@ fn mysql_comparison() {
                 return;
             }
         }
-        schemas.insert(file_name, toml::from_str(&contents).unwrap());
+        match toml::from_str(&contents) {
+            Ok(schema) => {
+                schemas.insert(file_name, schema);
+            }
+            Err(e) => panic!("Failed to parse {}: {}", file_name, e),
+        }
     });
 
     if cfg!(feature = "generate_mysql_tests") {
@@ -302,12 +358,32 @@ fn mysql_comparison() {
         for (query_name, query) in schema.queries.iter() {
             print!("{}.{}... ", schema.name, query_name);
             io::stdout().flush().ok().expect("Could not flush stdout");
-            match check_query(&schema.tables, query_name, query, &target_data[query_name]) {
-                Ok(()) => println!("\x1B[32;1mPASS\x1B[m"),
-                Err(e) => {
+
+            let panic_state: Arc<Mutex<Option<PanicState>>> = Arc::new(Mutex::new(None));
+            set_panic_hook(panic_state.clone());
+            let result = panic::catch_unwind(|| {
+                check_query(&schema.tables, query_name, query, &target_data[query_name])
+            });
+            panic::take_hook();
+            match result {
+                Ok(Ok(())) => println!("\x1B[32;1mPASS\x1B[m"),
+                Ok(Err(e)) => {
+                    // No panic, but test didn't pass
                     fail = true;
-                    println!("\x1B[31;1mFAIL\x1B[m:\n{}", e)
-                },
+                    print!("\x1B[31;1mFAIL\x1B[m: {}", e)
+                }
+                Err(_) => {
+                    // Panicked
+                    fail = true;
+                    let panic_state = panic_state.lock().unwrap().take().unwrap();
+                    println!(
+                        "\x1B[31;1mFAIL\x1B[m: \"{}\" at {}:{}\n{:?}",
+                        panic_state.message,
+                        panic_state.file,
+                        panic_state.line,
+                        panic_state.backtrace,
+                    );
+                }
             }
         }
     }
