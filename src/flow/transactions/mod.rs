@@ -166,10 +166,10 @@ impl DomainState {
                         box Packet::CompleteMigration { .. } => {
                             let m = *m; // workaround for #16223
                             if let Packet::CompleteMigration {
-                                    ingress_from_base,
-                                    egress_for_base,
-                                    ..
-                                } = m
+                                ingress_from_base,
+                                egress_for_base,
+                                ..
+                            } = m
                             {
                                 Bundle::MigrationEnd(ingress_from_base, egress_for_base)
                             } else {
@@ -194,10 +194,10 @@ impl DomainState {
                 box Packet::CompleteMigration { .. } => {
                     let m = *m; // workaround for #16223
                     if let Packet::CompleteMigration {
-                            ingress_from_base,
-                            egress_for_base,
-                            ..
-                        } = m
+                        ingress_from_base,
+                        egress_for_base,
+                        ..
+                    } = m
                     {
                         BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base)
                     } else {

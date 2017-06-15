@@ -96,10 +96,10 @@ impl Ingredient for Union {
 
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
-                ref mut cols,
-                ref emit,
-                ..
-            } = self.emit
+            ref mut cols,
+            ref emit,
+            ..
+        } = self.emit
         {
             cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
         }

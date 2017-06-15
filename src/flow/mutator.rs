@@ -23,7 +23,10 @@ pub struct Mutator {
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
-    pub(crate) tx_reply_channel: (mpsc::Sender<Result<i64, ()>>, mpsc::Receiver<Result<i64, ()>>),
+    pub(crate) tx_reply_channel: (
+        mpsc::Sender<Result<i64, ()>>,
+        mpsc::Receiver<Result<i64, ()>>,
+    ),
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
     pub(crate) tracer: Tracer,

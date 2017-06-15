@@ -373,10 +373,10 @@ impl Domain {
 
         let mut egress_messages = HashMap::new();
         let (ts, tracer) = if let Packet::Transaction {
-                state: ref ts @ TransactionState::Committed(..),
-                ref tracer,
-                ..
-            } = *messages[0]
+            state: ref ts @ TransactionState::Committed(..),
+            ref tracer,
+            ..
+        } = *messages[0]
         {
             (ts.clone(), tracer.clone())
         } else {
@@ -687,8 +687,8 @@ impl Domain {
                         }
 
                         if let &mut ReplayPath {
-                                trigger: TriggerEndpoint::End(ref mut triggers), ..
-                            } = self.replay_paths.get_mut(&tag).unwrap()
+                            trigger: TriggerEndpoint::End(ref mut triggers), ..
+                        } = self.replay_paths.get_mut(&tag).unwrap()
                         {
                             // pick the right shard
                             // TODO: avoid duplicating sharding code
@@ -848,10 +848,10 @@ impl Domain {
     ) {
         if transaction_state.is_none() {
             if let ReplayPath {
-                    source: Some(source),
-                    trigger: TriggerEndpoint::Start(..),
-                    ..
-                } = self.replay_paths[&tag]
+                source: Some(source),
+                trigger: TriggerEndpoint::Start(..),
+                ..
+            } = self.replay_paths[&tag]
             {
                 if self.nodes[&source].borrow().is_transactional() {
                     self.transaction_state.schedule_replay(tag, key.into());
@@ -1018,8 +1018,8 @@ impl Domain {
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
 
             if let box Packet::ReplayPiece {
-                    context: ReplayPieceContext::Partial { ignore: true, .. }, ..
-                } = m
+                context: ReplayPieceContext::Partial { ignore: true, .. }, ..
+            } = m
             {
                 let mut n = self.nodes[&path.last().unwrap().0].borrow_mut();
                 if n.is_egress() && n.is_transactional() {
@@ -1216,8 +1216,8 @@ impl Domain {
 
                         if !n.is_transactional() {
                             if let Some(box Packet::ReplayPiece {
-                                         ref mut transaction_state, ..
-                                     }) = m
+                                            ref mut transaction_state, ..
+                                        }) = m
                             {
                                 // Transactional replays that cross into non-transactional subgraphs
                                 // should stop being transactional. This is necessary to ensure that
@@ -1520,10 +1520,10 @@ impl Domain {
 
     fn finish_replay(&mut self, tag: Tag, node: LocalNodeIndex) {
         let finished = if let DomainMode::Replaying {
-                ref to,
-                ref mut buffered,
-                ref mut passes,
-            } = self.mode
+            ref to,
+            ref mut buffered,
+            ref mut passes,
+        } = self.mode
         {
             if *to != node {
                 // we're told to continue replay for node a, but not b is being replayed
