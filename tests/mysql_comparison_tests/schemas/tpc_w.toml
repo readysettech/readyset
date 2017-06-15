@@ -4,42 +4,42 @@ name = "tpc_w"
 [tables.address]
 create_query = "CREATE TABLE address ( addr_id int not null, addr_street1 varchar(40), addr_street2 varchar(40), addr_city varchar(30), addr_state varchar(20), addr_zip varchar(10), addr_co_id int, PRIMARY KEY(addr_id));"
 types = ["Int", "Text", "Text", "Text", "Text", "Text", "Int"]
-data_file = "benchmarks/tpc_w/data/addresses.tsv"
+data_file = "addresses.tsv"
 
 [tables.author]
 create_query = "CREATE TABLE author ( a_id int not null, a_fname varchar(20), a_lname varchar(20), a_mname varchar(20), a_dob date, a_bio text, PRIMARY KEY(a_id));"
 types = ["Int", "Text", "Text", "Text", "Date", "Text"]
-data_file = "benchmarks/tpc_w/data/authors.tsv"
+data_file = "authors.tsv"
 
 [tables.cc_xacts]
 create_query = "CREATE TABLE cc_xacts ( cx_o_id int not null, cx_type varchar(10), cx_num varchar(20), cx_name varchar(30), cx_expire date, cx_auth_id char(15), cx_xact_amt double, cx_xact_date date, cx_co_id int, PRIMARY KEY(cx_o_id));"
 types = ["Int", "Text", "Text", "Text", "Date", "Text", "Real", "Date", "Int"]
-data_file = "benchmarks/tpc_w/data/cc_xacts.data"
+data_file = "cc_xacts.tsv"
 
 [tables.country]
 create_query = "CREATE TABLE country ( co_id int not null, co_name varchar(50), co_exchange double, co_currency varchar(18), PRIMARY KEY(co_id));"
 types = ["Int", "Text", "Real", "Text"]
-data_file = "benchmarks/tpc_w/data/countries.tsv"
+data_file = "countries.tsv"
 
 [tables.customer]
 create_query = "CREATE TABLE customer ( c_id int not null, c_uname varchar(20), c_passwd varchar(20), c_fname varchar(17), c_lname varchar(17), c_addr_id int, c_phone varchar(18), c_email varchar(50), c_since date, c_last_login date, c_login timestamp, c_expiration timestamp, c_discount real, c_balance double, c_ytd_pmt double, c_birthdate date, c_data text, PRIMARY KEY(c_id));"
 types = ["Int", "Text", "Text", "Text", "Text", "Int", "Text", "Text", "Date", "Date", "Timestamp", "Timestamp", "Real", "Real", "Real", "Date", "Text"]
-data_file = "benchmarks/tpc_w/data/customers.tsv"
+data_file = "customers.tsv"
 
 [tables.item]
 create_query = "CREATE TABLE item ( i_id int not null, i_title varchar(60), i_a_id int, i_pub_date date, i_publisher varchar(60), i_subject varchar(60), i_desc text, i_related1 int, i_related2 int, i_related3 int, i_related4 int, i_related5 int, i_thumbnail varchar(40), i_image varchar(40), i_srp double, i_cost double, i_avail date, i_stock int, i_isbn char(13), i_page int, i_backing varchar(15), i_dimensions varchar(25), PRIMARY KEY(i_id));"
 types = ["Int", "Text", "Int", "Date", "Text", "Text", "Text", "Int", "Int", "Int", "Int", "Int", "Text", "Text", "Real", "Real", "Date", "Int", "Text", "Int", "Text", "Text"]
-data_file = "benchmarks/tpc_w/data/items.tsv"
+data_file = "items.tsv"
 
 [tables.order_line]
 create_query = "CREATE TABLE order_line ( ol_id int not null, ol_o_id int not null, ol_i_id int, ol_qty int, ol_discount double, ol_comments varchar(110), PRIMARY KEY(ol_id, ol_o_id));"
 types = ["Int", "Int", "Int", "Int", "Real", "Text"]
-data_file = "benchmarks/tpc_w/data/order_line.data"
+data_file = "order_line.tsv"
 
 [tables.orders]
 create_query = "CREATE TABLE orders ( o_id int not null, o_c_id int, o_date date, o_sub_total double, o_tax double, o_total double, o_ship_type varchar(10), o_ship_date date, o_bill_addr_id int, o_ship_addr_id int, o_status varchar(15), PRIMARY KEY(o_id));"
 types = ["Int", "Int", "Date", "Real", "Real", "Real", "Text", "Date", "Int", "Int", "Text"]
-data_file = "benchmarks/tpc_w/data/orders.tsv"
+data_file = "orders.tsv"
 
 [tables.shopping_cart]
 create_query = "CREATE TABLE shopping_cart ( sc_id int not null, sc_time timestamp, PRIMARY KEY(sc_id));"
@@ -63,13 +63,13 @@ values = [["23"], ["42"]]
 
 [queries.getCustomer]
 select_query = "SELECT * FROM customer, address, country WHERE customer.c_addr_id = address.addr_id AND address.addr_co_id = country.co_id AND customer.c_uname = ?;"
-types = []
-values = []
+types = ["Text"]
+values = [["SE"], ["OGAT"], ["RIAL"]]
 
 [queries.doSubjectSearch]
 select_query = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND item.i_subject = ? ORDER BY item.i_title limit 50;"
-types = []
-values = []
+types = ["Text"]
+values = [["YOUTH"], ["TRAVEL"], ["HOME"], ["LITERATURE"]]
 
 [queries.doTitleSearch]
 select_query = "SELECT * FROM item, author WHERE item.i_a_id = author.a_id AND substring(soundex(item.i_title),0,4)=substring(soundex(?),0,4) ORDER BY item.i_title limit 50;"
@@ -85,12 +85,12 @@ ignore = true
 
 [queries.getNewProducts]
 select_query = "SELECT i_id, i_title, a_fname, a_lname FROM item, author WHERE item.i_a_id = author.a_id AND item.i_subject = ? ORDER BY item.i_pub_date DESC,item.i_title limit 50;"
-types = []
-values = []
+types = ["Text"]
+values = [["YOUTH"], ["TRAVEL"], ["HOME"], ["LITERATURE"]]
 
 [queries.getBestSellers]
 select_query = "SELECT i_id, i_title, a_fname, a_lname FROM item, author, order_line WHERE item.i_id = order_line.ol_i_id AND item.i_a_id = author.a_id AND order_line.ol_o_id > (SELECT MAX(o_id)-3333 FROM orders) AND item.i_subject = ? GROUP BY i_id, i_title, a_fname, a_lname ORDER BY SUM(ol_qty) DESC limit 50;"
-types = []
+types = ["Text"]
 values = []
 ignore = true
 
@@ -102,110 +102,120 @@ ignore = true
 
 [queries.getUserName]
 select_query = "SELECT c_uname FROM customer WHERE c_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["3"], ["78"]]
 
 [queries.getPassword]
 select_query = "SELECT c_passwd FROM customer WHERE c_uname = ?;"
-types = []
-values = []
+types = ["Text"]
+values = [["AL"], ["SE"]]
 
 [queries.getRelated1]
 select_query = "SELECT i_related1 FROM item where i_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["12"], ["34"], ["98"]]
 
 [queries.getMostRecentOrderId]
 select_query = "SELECT o_id FROM customer, orders WHERE customer.c_id = orders.o_c_id AND c_uname = ? ORDER BY o_date, orders.o_id DESC limit 1;"
-types = []
-values = []
+types = ["Text"]
+values = [["SE"], ["OGAT"], ["RIAL"]]
+
 
 [queries.getMostRecentOrderOrder]
 select_query = "SELECT orders.*, customer.*, cc_xacts.cx_type, ship.addr_street1 AS ship_addr_street1, ship.addr_street2 AS ship_addr_street2, ship.addr_state AS ship_addr_state, ship.addr_zip AS ship_addr_zip, ship_co.co_name AS ship_co_name, bill.addr_street1 AS bill_addr_street1, bill.addr_street2 AS bill_addr_street2, bill.addr_state AS bill_addr_state, bill.addr_zip AS bill_addr_zip, bill_co.co_name AS bill_co_name FROM customer, orders, cc_xacts, address AS ship, country AS ship_co, address AS bill, country AS bill_co WHERE orders.o_id = ? AND cx_o_id = orders.o_id AND customer.c_id = orders.o_c_id AND orders.o_bill_addr_id = bill.addr_id AND bill.addr_co_id = bill_co.co_id AND orders.o_ship_addr_id = ship.addr_id AND ship.addr_co_id = ship_co.co_id AND orders.o_c_id = customer.c_id;"
-types = []
-values = []
+types = ["Int"]
+values = [["91"], ["45"], ["18"]]
 
 [queries.getMostRecentOrderLines]
 select_query = "SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;"
-types = []
-values = []
+types = ["Int"]
+values = [["32"], ["92"]]
 
 [queries.createEmptyCart]
 select_query = "SELECT COUNT(*) FROM shopping_cart;"
 types = []
 values = []
+ignore = true
 
 [queries.addItem]
 select_query = "SELECT scl_qty FROM shopping_cart_line WHERE scl_sc_id = ? AND scl_i_id = ?;"
-types = []
+types = ["Int", "Int"]
 values = []
+ignore = true
 
 [queries.addRandomItemToCartIfNecessary]
 select_query = "SELECT COUNT(*) from shopping_cart_line where scl_sc_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["12"], ["31"]]
 
 [queries.getCart]
 select_query = "SELECT * FROM shopping_cart_line, item WHERE scl_i_id = item.i_id AND scl_sc_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["31"], ["97"]]
 
 [queries.createNewCustomerMaxId]
 select_query = "SELECT max(c_id) FROM customer;"
 types = []
 values = []
+ignore = true
 
 [queries.getCDiscount]
 select_query = "SELECT c_discount FROM customer WHERE customer.c_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["18"], ["-4"]]
 
 [queries.getCAddrId]
 select_query = "SELECT c_addr_id FROM customer WHERE customer.c_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["999999"], ["22"]]
 
 [queries.getCAddr]
 select_query = "SELECT c_addr_id FROM customer WHERE customer.c_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["0"], ["71"]]
 
 [queries.enterAddressId]
 select_query = "SELECT co_id FROM country WHERE co_name = ?;"
-types = []
-values = []
+types = ["Text"]
+values = [["Cayman Islands"], ["Malaysia"], ["Trinidad"]]
 
 [queries.enterAddressMatch]
 select_query = "SELECT addr_id FROM address WHERE addr_street1 = ? AND addr_street2 = ? AND addr_city = ? AND addr_state = ? AND addr_zip = ? AND addr_co_id = ?;"
 types = []
 values = []
+ignore = true
 
 [queries.enterAddressMaxId]
 select_query = "SELECT max(addr_id) FROM address;"
 types = []
 values = []
+ignore = true
 
 [queries.enterOrderMaxId]
 select_query = "SELECT count(o_id) FROM orders;"
 types = []
 values = []
+ignore = true
 
 [queries.getStock]
 select_query = "SELECT i_stock FROM item WHERE i_id = ?;"
-types = []
-values = []
+types = ["Int"]
+values = [["65"], ["56"]]
 
 [queries.verifyDBConsistencyCustId]
 select_query = "SELECT c_id FROM customer;"
 types = []
 values = []
+ignore = true
 
 [queries.verifyDBConsistencyItemId]
 select_query = "SELECT i_id FROM item;"
 types = []
 values = []
+ignore = true
 
 [queries.verifyDBConsistencyAddrId]
 select_query = "SELECT addr_id FROM address;"
 types = []
 values = []
+ignore = true

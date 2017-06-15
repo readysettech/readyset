@@ -29,7 +29,6 @@ use std::time;
 use distributary::{Blender, Recipe, DataType};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
-const MAX_DATA_FILE_ROWS: usize = 100;
 
 #[derive(Debug, Deserialize)]
 enum Type {
@@ -177,12 +176,19 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
         let pool = setup_mysql("soup:password@127.0.0.1:3306/mysql_comparison_test");
         for (table_name, table) in schema.tables.iter() {
             pool.prep_exec(&table.create_query, ()).unwrap();
+            let query = format!(
+                "INSERT INTO {} VALUES ({})",
+                table_name,
+                vec!["?"; table.types.len()].join(", ")
+            );
+            let mut insert = pool.prepare(query).unwrap();
             for row in table.data.as_ref().unwrap().iter() {
-                let row: Vec<_> = row.iter().map(|v| format!("\"{}\"", v)).collect();
-                let insert_query =
-                    format!("INSERT INTO {} VALUES ({})", table_name, row.join(", "));
-                if let Err(msg) = pool.prep_exec(&insert_query, ()) {
-                    println!("MySQL query failed: {}", insert_query);
+                if let Err(msg) = insert.execute(row.clone()) {
+                    println!(
+                        "MySQL insert query failed for table: {}, values: {:?}",
+                        table_name,
+                        row
+                    );
                     println!("{:?}", msg);
                     panic!();
                 }
@@ -191,8 +197,11 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
 
         let mut target_data: BTreeMap<String, BTreeMap<String, Vec<Vec<String>>>> = BTreeMap::new();
         for (query_name, query) in schema.queries.iter() {
-            target_data.insert(query_name.clone(), BTreeMap::new());
+            if query.values.is_empty() {
+                continue;
+            }
 
+            target_data.insert(query_name.clone(), BTreeMap::new());
             for (i, values) in query.values.iter().enumerate() {
                 target_data.get_mut(query_name).unwrap().insert(
                     i.to_string(),
@@ -235,7 +244,12 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
     mysql.sort();
     soup.sort();
 
-    if mysql.len() == soup.len() && mysql.iter().zip(soup.iter()).all(|(m, s)| m == s) {
+    // TODO: Remove hack to drop key column from Soup output.
+    if mysql.len() == soup.len() &&
+        mysql.iter().zip(soup.iter()).all(|(m, s)| {
+            m == s || m[..] == s[..(s.len() - 1)]
+        })
+    {
         return None;
     }
 
@@ -363,10 +377,11 @@ fn mysql_comparison() {
                 table.data = Some(Vec::new());
                 let data = table.data.as_mut().unwrap();
 
-                let f = File::open(file_name).unwrap();
+                let path = Path::new(DIRECTORY_PREFIX).join("data").join(file_name);
+                let f = File::open(path).unwrap();
                 let mut reader = BufReader::new(f);
                 let mut line = String::new();
-                while reader.read_line(&mut line).unwrap() > 0 && data.len() < MAX_DATA_FILE_ROWS {
+                while reader.read_line(&mut line).unwrap() > 0 {
                     data.push(
                         line.split("\t")
                             .map(str::trim)
