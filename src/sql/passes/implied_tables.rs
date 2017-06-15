@@ -176,6 +176,7 @@ impl ImpliedTableExpansion for SqlQuery {
                     match field {
                         &mut FieldExpression::All => panic!(err),
                         &mut FieldExpression::AllInTable(_) => panic!(err),
+                        &mut FieldExpression::Literal(_) => (),
                         &mut FieldExpression::Col(ref mut f) => {
                             *f = expand_columns(f.clone(), &tables);
                         }
