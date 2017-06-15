@@ -104,6 +104,9 @@ pub struct Domain {
     replay_paths: HashMap<Tag, ReplayPath>,
     reader_triggered: local::Map<HashSet<DataType>>,
 
+    concurrent_replays: usize,
+    replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
+
     inject_tx: Option<mpsc::SyncSender<Box<Packet>>>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -145,6 +148,9 @@ impl Domain {
             replay_paths: HashMap::new(),
 
             inject_tx: None,
+
+            concurrent_replays: 0,
+            replay_request_queue: Default::default(),
 
             total_time: Timer::new(),
             total_ptime: Timer::new(),
@@ -201,28 +207,75 @@ impl Domain {
                 continue;
             }
 
-            if let TriggerEndpoint::End(ref mut triggers) =
-                self.replay_paths.get_mut(&tag).unwrap().trigger
-            {
-                // find right shard. it's important that we only request a replay from the right
-                // shard, because otherwise all the other shard domains will miss, and then request
-                // replays themselves for the miss key. however, the response to that request will
-                // never be routed to them, leading to infinite loops and whatnot.
-                // TODO: avoid duplicating sharding code
-                let shard = if triggers.len() == 1 {
-                    0
-                } else {
-                    assert!(key.len() == 1);
-                    ::shard_by(&key[0], triggers.len())
-                };
-                if triggers[shard]
-                    .send(box Packet::RequestPartialReplay { tag, key })
-                    .is_err()
-                {
-                    // we're shutting down -- it's fine.
-                }
+            // NOTE: due to MAX_CONCURRENT_REPLAYS, it may be that we only replay from *some* of
+            // these ancestors now, and some later. this will cause more of the replay to be
+            // buffered up at the union above us, but that's probably fine.
+            self.request_partial_replay(tag, key);
+        }
+    }
+
+    fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
+        debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
+        warn!(self.log, "sending partial replay request"; "tag" => ?tag, "key" => ?key);
+        if let TriggerEndpoint::End(ref mut triggers) =
+            self.replay_paths.get_mut(&tag).unwrap().trigger
+        {
+            // find right shard. it's important that we only request a replay from the right
+            // shard, because otherwise all the other shard domains will miss, and then request
+            // replays themselves for the miss key. however, the response to that request will
+            // never be routed to them, leading to infinite loops and whatnot.
+            let shard = if triggers.len() == 1 {
+                0
             } else {
-                unreachable!("asked to replay along non-existing path")
+                assert!(key.len() == 1);
+                ::shard_by(&key[0], triggers.len())
+            };
+            self.concurrent_replays += 1;
+            warn!(
+                self.log,
+                "partial replay request count is now {}",
+                self.concurrent_replays
+            );
+            if triggers[shard]
+                .send(box Packet::RequestPartialReplay { tag, key })
+                .is_err()
+            {
+                // we're shutting down -- it's fine.
+            }
+        } else {
+            unreachable!("asked to replay along non-existing path")
+        }
+    }
+
+    fn request_partial_replay(&mut self, tag: Tag, key: Vec<DataType>) {
+        if self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
+            self.send_partial_replay_request(tag, key);
+        } else {
+            warn!(self.log, "buffering partial replay request"; "tag" => ?tag, "key" => ?key);
+            self.replay_request_queue.push_back((tag, key));
+        }
+    }
+
+    fn finished_partial_replay(&mut self, tag: &Tag) {
+        match self.replay_paths[tag].trigger {
+            TriggerEndpoint::End(..) => {
+                self.concurrent_replays -= 1;
+                warn!(self.log,
+                      "finished serving partial replay request; popping next";
+                      "count" => self.concurrent_replays,
+                      "left" => self.replay_request_queue.len());
+                debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
+                if let Some((tag, key)) = self.replay_request_queue.pop_front() {
+                    assert_eq!(self.concurrent_replays, ::MAX_CONCURRENT_REPLAYS - 1);
+                    self.send_partial_replay_request(tag, key);
+                }
+            }
+            TriggerEndpoint::Local(..) => {
+                // didn't count against our quote, so we're also not decementing
+            }
+            TriggerEndpoint::Start(..) |
+            TriggerEndpoint::None => {
+                unreachable!();
             }
         }
     }
@@ -686,24 +739,11 @@ impl Domain {
                             return;
                         }
 
-                        if let &mut ReplayPath {
-                            trigger: TriggerEndpoint::End(ref mut triggers), ..
-                        } = self.replay_paths.get_mut(&tag).unwrap()
+                        if let ReplayPath { trigger: TriggerEndpoint::End(..), .. } =
+                            self.replay_paths[&tag]
                         {
-                            // pick the right shard
-                            // TODO: avoid duplicating sharding code
-                            let shard = if triggers.len() == 1 {
-                                0
-                            } else {
-                                assert!(key.len() == 1);
-                                ::shard_by(&key[0], triggers.len())
-                            };
-                            if triggers[shard]
-                                .send(box Packet::RequestPartialReplay { tag, key })
-                                .is_err()
-                            {
-                                // we're shutting down -- it's fine
-                            }
+                            // request came in from reader -- forward
+                            self.request_partial_replay(tag, key);
                             return;
                         }
 
@@ -941,6 +981,7 @@ impl Domain {
         let mut finished = None;
         let mut playback = None;
         let mut need_replay = None;
+        let mut finished_partial = false;
         'outer: loop {
             // this loop is just here so we have a way of giving up the borrow of self.replay_paths
 
@@ -1400,9 +1441,11 @@ impl Domain {
                             if self.waiting.contains_key(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 finished = Some((tag, dst, Some(for_key)));
+                                finished_partial = true;
+                            } else if self.nodes[&dst].borrow().is_reader() {
+                                finished_partial = true;
                             } else {
-                                // replay to a node that's not waiting for it?
-                                // TODO: could be a Reader
+                                // we're just on the replay path
                             }
                         }
                     }
@@ -1410,6 +1453,10 @@ impl Domain {
                 _ => unreachable!(),
             }
             break;
+        }
+
+        if finished_partial {
+            self.finished_partial_replay(&tag);
         }
 
         if let Some((node, key, tag)) = need_replay {
