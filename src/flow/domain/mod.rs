@@ -216,7 +216,6 @@ impl Domain {
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
         debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
-        warn!(self.log, "sending partial replay request"; "tag" => ?tag, "key" => ?key);
         if let TriggerEndpoint::End(ref mut triggers) =
             self.replay_paths.get_mut(&tag).unwrap().trigger
         {
@@ -231,11 +230,6 @@ impl Domain {
                 ::shard_by(&key[0], triggers.len())
             };
             self.concurrent_replays += 1;
-            warn!(
-                self.log,
-                "partial replay request count is now {}",
-                self.concurrent_replays
-            );
             if triggers[shard]
                 .send(box Packet::RequestPartialReplay { tag, key })
                 .is_err()
@@ -251,7 +245,6 @@ impl Domain {
         if self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
             self.send_partial_replay_request(tag, key);
         } else {
-            warn!(self.log, "buffering partial replay request"; "tag" => ?tag, "key" => ?key);
             self.replay_request_queue.push_back((tag, key));
         }
     }
@@ -260,10 +253,6 @@ impl Domain {
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End(..) => {
                 self.concurrent_replays -= 1;
-                warn!(self.log,
-                      "finished serving partial replay request; popping next";
-                      "count" => self.concurrent_replays,
-                      "left" => self.replay_request_queue.len());
                 debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
                 if let Some((tag, key)) = self.replay_request_queue.pop_front() {
                     assert_eq!(self.concurrent_replays, ::MAX_CONCURRENT_REPLAYS - 1);
