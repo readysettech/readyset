@@ -229,9 +229,9 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
             }
         }
         let target_data_toml = toml::to_string(&target_data).unwrap();
-        let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
-            schema_name,
-        );
+        let target_data_file = Path::new(DIRECTORY_PREFIX)
+            .join("targets")
+            .join(schema_name);
         write_file(target_data_file, target_data_toml);
     }
 }
@@ -246,9 +246,10 @@ fn compare_results(mysql: &Vec<Vec<String>>, soup: &Vec<Vec<String>>) -> Option<
 
     // TODO: Remove hack to drop key column from Soup output.
     if mysql.len() == soup.len() &&
-        mysql.iter().zip(soup.iter()).all(|(m, s)| {
-            m == s || m[..] == s[..(s.len() - 1)]
-        })
+        mysql
+            .iter()
+            .zip(soup.iter())
+            .all(|(m, s)| m == s || m[..] == s[..(s.len() - 1)])
     {
         return None;
     }
@@ -399,9 +400,9 @@ fn mysql_comparison() {
 
     let mut fail = false;
     for (schema_name, schema) in schemas.iter() {
-        let target_data_file = Path::new(DIRECTORY_PREFIX).join("targets").join(
-            schema_name,
-        );
+        let target_data_file = Path::new(DIRECTORY_PREFIX)
+            .join("targets")
+            .join(schema_name);
         let target_data: BTreeMap<String, BTreeMap<String, Vec<Vec<String>>>> =
             toml::from_str(&read_file(target_data_file)).unwrap();
 
