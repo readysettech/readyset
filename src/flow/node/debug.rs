@@ -59,9 +59,11 @@ impl Node {
                     Some(k) => format!("{}", k),
                 };
                 use flow::VIEW_READERS;
-                let size = match VIEW_READERS.lock().unwrap().get(&idx).map(
-                    |state| state.len(),
-                ) {
+                let size = match VIEW_READERS
+                    .lock()
+                    .unwrap()
+                    .get(&idx)
+                    .map(|state| state.len()) {
                     None => String::from("empty"),
                     Some(s) => format!("{} distinct keys", s),
                 };

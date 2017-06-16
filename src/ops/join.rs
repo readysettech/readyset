@@ -182,9 +182,8 @@ impl Ingredient for Join {
                 self.right_counts.insert(key.clone(), (adjust(rc), rc));
             }
 
-            self.right_counts.retain(|_, &mut (before, after)| {
-                (before == 0) != (after == 0)
-            });
+            self.right_counts
+                .retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
         let (other, from_key, other_key) = if from == *self.left {
@@ -255,13 +254,13 @@ impl Ingredient for Join {
             }
 
             if from == *self.right {
-                ret.extend(other_rows.map(
-                    |r| (self.generate_row(r, &row), positive).into(),
-                ));
+                ret.extend(
+                    other_rows.map(|r| (self.generate_row(r, &row), positive).into()),
+                );
             } else {
-                ret.extend(other_rows.map(
-                    |r| (self.generate_row(&row, r), positive).into(),
-                ));
+                ret.extend(
+                    other_rows.map(|r| (self.generate_row(&row, r), positive).into()),
+                );
             }
         }
 

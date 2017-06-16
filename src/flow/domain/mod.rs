@@ -429,9 +429,10 @@ impl Domain {
             let new_messages = self.dispatch_(m, false);
 
             for (key, mut value) in new_messages {
-                egress_messages.entry(key).or_insert_with(Vec::new).append(
-                    &mut value,
-                );
+                egress_messages
+                    .entry(key)
+                    .or_insert_with(Vec::new)
+                    .append(&mut value);
             }
         }
 
@@ -576,9 +577,11 @@ impl Domain {
                         self.not_ready.insert(addr);
 
                         for p in parents {
-                            self.nodes.get_mut(&p).unwrap().borrow_mut().add_child(
-                                *node.local_addr(),
-                            );
+                            self.nodes
+                                .get_mut(&p)
+                                .unwrap()
+                                .borrow_mut()
+                                .add_child(*node.local_addr());
                         }
                         self.nodes.insert(addr, cell::RefCell::new(node));
                         trace!(self.log, "new node incorporated"; "local" => addr.id());
@@ -1245,9 +1248,9 @@ impl Domain {
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         if !n.is_transactional() {
-                            if let Some(box Packet::ReplayPiece {
-                                            ref mut transaction_state, ..
-                                        }) = m
+                            if let Some(
+                                box Packet::ReplayPiece { ref mut transaction_state, .. },
+                            ) = m
                             {
                                 // Transactional replays that cross into non-transactional subgraphs
                                 // should stop being transactional. This is necessary to ensure that
@@ -1539,9 +1542,10 @@ impl Domain {
             // this (informal) argument relies on there only being one active replay in the system
             // at any given point in time, so we may need to revisit it for partial materialization
             // (TODO)
-            match self.inject_tx.as_mut().unwrap().try_send(
-                box Packet::Finish(tag, ni),
-            ) {
+            match self.inject_tx
+                .as_mut()
+                .unwrap()
+                .try_send(box Packet::Finish(tag, ni)) {
                 Ok(_) => {}
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     // can't happen, since we know the reader thread (us) is still running
@@ -1632,9 +1636,9 @@ impl Domain {
                 unreachable!();
             }
 
-            if let Some(done_tx) = self.replay_paths.get_mut(&tag).and_then(
-                |p| p.done_tx.take(),
-            )
+            if let Some(done_tx) = self.replay_paths
+                .get_mut(&tag)
+                .and_then(|p| p.done_tx.take())
             {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
@@ -1721,8 +1725,8 @@ impl Domain {
                 let mut packet = None;
                 loop {
                     let duration_until_flush = group_commit_queues.duration_until_flush();
-                    let spin_duration =
-                        duration_until_flush.unwrap_or(time::Duration::from_millis(1));
+                    let spin_duration = duration_until_flush
+                        .unwrap_or(time::Duration::from_millis(1));
 
                     // If a flush is needed at some point then spin waiting for packets until
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps

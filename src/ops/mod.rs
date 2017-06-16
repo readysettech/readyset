@@ -251,9 +251,10 @@ pub mod test {
                 .unwrap()
                 .set_finalized_addr(ip);
             remap.insert(global, ip);
-            self.graph.node_weight_mut(global).unwrap().on_commit(
-                &remap,
-            );
+            self.graph
+                .node_weight_mut(global)
+                .unwrap()
+                .on_commit(&remap);
             self.states.insert(local, State::default());
             self.remap.insert(global, ip);
             ip
@@ -286,9 +287,10 @@ pub mod test {
                 .node_weight_mut(global)
                 .unwrap()
                 .set_finalized_addr(ip);
-            self.graph.node_weight_mut(global).unwrap().on_commit(
-                &self.remap,
-            );
+            self.graph
+                .node_weight_mut(global)
+                .unwrap()
+                .on_commit(&self.remap);
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);

@@ -138,9 +138,9 @@ impl Ingredient for Base {
                 Record::Positive(u) => Record::Positive(u),
                 Record::Negative(u) => Record::Negative(u),
                 Record::DeleteRequest(key) => {
-                    let cols = self.primary_key.as_ref().expect(
-                        "base must have a primary key to support deletions",
-                    );
+                    let cols = self.primary_key
+                        .as_ref()
+                        .expect("base must have a primary key to support deletions");
                     let db = state.get(&*self.us.unwrap()).expect(
                         "base must have its own state materialized to support deletions",
                     );

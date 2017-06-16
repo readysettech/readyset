@@ -49,10 +49,10 @@ fn rewrite_conditional(
             ConditionExpression::ComparisonOp(rewritten_ct)
         }
         ConditionExpression::LogicalOp(ConditionTree {
-                                           operator,
-                                           box left,
-                                           box right,
-                                       }) => {
+            operator,
+            box left,
+            box right,
+        }) => {
             let rewritten_ct = ConditionTree {
                 operator: operator,
                 left: Box::new(rewrite_conditional(table_aliases, left)),

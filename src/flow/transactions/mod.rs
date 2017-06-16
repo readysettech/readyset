@@ -150,8 +150,8 @@ impl DomainState {
                 Bundle::Empty => {
                     let bundle = match m {
                         box Packet::Transaction { .. } => {
-                            let count =
-                                base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
+                            let count = base.map(|b| self.ingress_from_base[b.index()])
+                                .unwrap_or(1);
                             if count == 0 {
                                 println!(
                                     "{:?} got transaction from base {:?}, which it shouldn't",
@@ -221,9 +221,10 @@ impl DomainState {
     }
 
     fn update_next_transaction(&mut self) {
-        let has_next = self.buffer.peek().map(|e| e.prev_ts == self.ts).unwrap_or(
-            false,
-        );
+        let has_next = self.buffer
+            .peek()
+            .map(|e| e.prev_ts == self.ts)
+            .unwrap_or(false);
 
         if has_next {
             let entry = self.buffer.pop().unwrap();

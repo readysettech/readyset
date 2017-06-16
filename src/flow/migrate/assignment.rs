@@ -62,9 +62,8 @@ pub fn assign(
                 // sharder belongs to parent domain
                 ps[0].1.domain().index()
             } else if n.sharded_by() == Sharding::None &&
-                       ps.iter().any(
-                    |&(_, ref p)| p.sharded_by() != Sharding::None,
-                )
+                       ps.iter()
+                           .any(|&(_, ref p)| p.sharded_by() != Sharding::None)
             {
                 // shard merger
                 next_domain()

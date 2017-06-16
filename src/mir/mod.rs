@@ -405,9 +405,9 @@ impl MirNode {
                 match column_specs.iter().rposition(|cs| cs.0.column == *c) {
                     None => panic!("tried to look up non-existent column {:?}", c.name),
                     Some(id) => {
-                        column_specs[id].1.expect(
-                            "must have an absolute column ID on base",
-                        )
+                        column_specs[id]
+                            .1
+                            .expect("must have an absolute column ID on base")
                     }
                 }
             }
@@ -1251,9 +1251,9 @@ fn adapt_base_node(
             .iter()
             .position(|&(ref ecs, _)| ecs == r)
             .unwrap();
-        let cid = over_node.column_specifications()[pos].1.expect(
-            "base column ID must be set to remove column",
-        );
+        let cid = over_node.column_specifications()[pos]
+            .1
+            .expect("base column ID must be set to remove column");
         mig.drop_column(na, cid);
     }
 
@@ -1446,8 +1446,10 @@ fn make_join_node(
         proj_cols.len()
     );
 
-    let find_column_id =
-        |n: &MirNodeRef, col: &Column| -> usize { n.borrow().column_id_for_column(col) };
+    let find_column_id = |n: &MirNodeRef, col: &Column| -> usize {
+        //rustfmt
+        n.borrow().column_id_for_column(col)
+    };
 
     let join_config = proj_cols
         .iter()
@@ -1601,9 +1603,8 @@ fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mu
         // TODO(malte): this does not yet cover the case when there are multiple query
         // parameters, which requires compound key support on Reader nodes.
         //assert_eq!(key_cols.len(), 1);
-        let first_key_col_id = node.borrow().column_id_for_column(
-            key_cols.iter().next().unwrap(),
-        );
+        let first_key_col_id = node.borrow()
+            .column_id_for_column(key_cols.iter().next().unwrap());
         mig.maintain(na, first_key_col_id);
     } else {
         // if no key specified, default to the first column

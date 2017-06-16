@@ -95,9 +95,11 @@ impl TokenGenerator {
             conflicts: base_table_conflicts
                 .into_iter()
                 .map(Conflict::BaseTable)
-                .chain(base_column_conflicts.into_iter().map(|(n, c)| {
-                    Conflict::BaseColumn(n, c)
-                }))
+                .chain(
+                    base_column_conflicts
+                        .into_iter()
+                        .map(|(n, c)| Conflict::BaseColumn(n, c)),
+                )
                 .collect(),
         }
     }
@@ -364,9 +366,8 @@ impl CheckTable {
         &mut self,
         additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
     ) {
-        self.replay_paths.extend(
-            additional_replay_paths.into_iter(),
-        );
+        self.replay_paths
+            .extend(additional_replay_paths.into_iter());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {
@@ -375,9 +376,8 @@ impl CheckTable {
                 Conflict::BaseTable(..) => {}
                 Conflict::BaseColumn(base, col) => {
                     let t = &mut self.granular.entry(base).or_insert_with(HashMap::new);
-                    t.entry(col).or_insert(
-                        (HashMap::new(), self.next_timestamp - 1),
-                    );
+                    t.entry(col)
+                        .or_insert((HashMap::new(), self.next_timestamp - 1));
                 }
             }
         }

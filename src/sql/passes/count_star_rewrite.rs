@@ -11,20 +11,20 @@ pub trait CountStarRewrite {
 fn extract_condition_columns(ce: &ConditionExpression) -> Vec<Column> {
     match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
-                                           box ref left,
-                                           box ref right,
-                                           ..
-                                       }) => {
+            box ref left,
+            box ref right,
+            ..
+        }) => {
             return extract_condition_columns(left)
                 .into_iter()
                 .chain(extract_condition_columns(right).into_iter())
                 .collect();
         }
         ConditionExpression::ComparisonOp(ConditionTree {
-                                              box ref left,
-                                              box ref right,
-                                              ..
-                                          }) => {
+            box ref left,
+            box ref right,
+            ..
+        }) => {
             let mut cols = vec![];
             match *left {
                 ConditionExpression::Base(ConditionBase::Field(ref f)) => cols.push(f.clone()),

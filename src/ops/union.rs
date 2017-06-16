@@ -247,9 +247,9 @@ impl Ingredient for Union {
 
                 let finished = {
                     // store this replay piece
-                    let pieces = self.replay_pieces.entry(key_val.clone()).or_insert_with(
-                        Map::new,
-                    );
+                    let pieces = self.replay_pieces
+                        .entry(key_val.clone())
+                        .or_insert_with(Map::new);
                     // there better be only one replay from each ancestor
                     assert!(!pieces.contains_key(&from));
                     pieces.insert(from, rs);
@@ -384,18 +384,30 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup();
         let r0 = u.node().resolve(0);
-        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| {
-            n == l.as_global() && c == 0
-        }));
-        assert!(r0.as_ref().unwrap().iter().any(|&(n, c)| {
-            n == r.as_global() && c == 0
-        }));
+        assert!(
+            r0.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == l.as_global() && c == 0)
+        );
+        assert!(
+            r0.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == r.as_global() && c == 0)
+        );
         let r1 = u.node().resolve(1);
-        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| {
-            n == l.as_global() && c == 1
-        }));
-        assert!(r1.as_ref().unwrap().iter().any(|&(n, c)| {
-            n == r.as_global() && c == 2
-        }));
+        assert!(
+            r1.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == l.as_global() && c == 1)
+        );
+        assert!(
+            r1.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == r.as_global() && c == 2)
+        );
     }
 }

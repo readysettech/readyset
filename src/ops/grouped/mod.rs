@@ -184,9 +184,9 @@ where
         let mut out = Vec::with_capacity(2 * consolidate.len());
         for (group, diffs) in consolidate {
             // find the current value for this group
-            let db = state.get(&*us).expect(
-                "grouped operators must have their own state materialized",
-            );
+            let db = state
+                .get(&*us)
+                .expect("grouped operators must have their own state materialized");
 
             let old = match db.lookup(&self.out_key[..], &KeyType::from(&group[..])) {
                 LookupResult::Some(rs) => {

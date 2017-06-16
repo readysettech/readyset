@@ -60,9 +60,10 @@ impl<T> Map<T> {
     }
 
     pub fn contains_key(&self, addr: &LocalNodeIndex) -> bool {
-        self.things.get(addr.id()).map(|v| v.is_some()).unwrap_or(
-            false,
-        )
+        self.things
+            .get(addr.id())
+            .map(|v| v.is_some())
+            .unwrap_or(false)
     }
 
     pub fn remove(&mut self, addr: &LocalNodeIndex) -> Option<T> {
@@ -80,17 +81,15 @@ impl<T> Map<T> {
 
     pub fn iter<'a>(&'a self) -> Box<Iterator<Item = (LocalNodeIndex, &'a T)> + 'a> {
         Box::new(self.things.iter().enumerate().filter_map(|(i, t)| {
-            t.as_ref().map(
-                |v| (unsafe { LocalNodeIndex::make(i as u32) }, v),
-            )
+            t.as_ref()
+                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
     pub fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item = (LocalNodeIndex, &'a mut T)> + 'a> {
         Box::new(self.things.iter_mut().enumerate().filter_map(|(i, t)| {
-            t.as_mut().map(
-                |v| (unsafe { LocalNodeIndex::make(i as u32) }, v),
-            )
+            t.as_mut()
+                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
         }))
     }
 
@@ -310,9 +309,8 @@ impl<T: Hash + Eq + Clone> State<T> {
             unimplemented!();
         }
 
-        self.state.push(
-            (Vec::from(columns), columns.into(), partial),
-        );
+        self.state
+            .push((Vec::from(columns), columns.into(), partial));
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {
@@ -576,9 +574,8 @@ impl<T: Hash + Eq + Clone> State<T> {
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let state = &self.state[self.state_for(columns).expect(
-            "lookup on non-indexed column set",
-        )];
+        let state = &self.state[self.state_for(columns)
+                                    .expect("lookup on non-indexed column set")];
         if let Some(rs) = state.1.lookup(key) {
             LookupResult::Some(&rs[..])
         } else {
