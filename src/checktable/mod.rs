@@ -242,10 +242,10 @@ impl CheckTable {
         let mut result = TransactionResult::Aborted;
         for packet in packets.iter() {
             let (commit, rs) = if let box Packet::Transaction {
-                    ref data,
-                    ref state,
-                    ..
-                } = *packet
+                ref data,
+                ref state,
+                ..
+            } = *packet
             {
                 match *state {
                     TransactionState::Pending(ref token, _) => (self.validate_token(token), data),

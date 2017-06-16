@@ -320,6 +320,7 @@
 #![deny(missing_docs)]
 
 const SHARDS: usize = 2;
+const MAX_CONCURRENT_REPLAYS: usize = 4096;
 
 #[inline]
 fn shard_by(dt: &DataType, shards: usize) -> usize {

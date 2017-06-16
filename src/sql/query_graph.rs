@@ -229,10 +229,14 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             predicates: preds,
             columns: st.fields
                 .iter()
-                .filter_map(|field| match field {
-                    &FieldExpression::All => unimplemented!(),
-                    &FieldExpression::AllInTable(_) => unimplemented!(),
-                    &FieldExpression::Col(ref c) => {
+                .filter_map(|field| match *field {
+                    // unreachable because SQL rewrite passes will have expanded these already
+                    FieldExpression::All => unreachable!(),
+                    FieldExpression::AllInTable(_) => unreachable!(),
+                    // XXX(malte): handle this case! requires either `Column` or
+                    // `QueryGraphNode.columns` to change to be able to represent literals.
+                    FieldExpression::Literal(_) => unimplemented!(),
+                    FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
                                 match c.function {
@@ -437,6 +441,8 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         match *field {
             FieldExpression::All |
             FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
+            // No need to do anything for literals here
+            FieldExpression::Literal(_) => (),
             FieldExpression::Col(ref c) => {
                 match c.function {
                     None => (),  // we've already dealt with this column as part of some relation

@@ -98,14 +98,14 @@ impl Sharder {
             }
 
             if let box Packet::ReplayPiece {
-                    context: payload::ReplayPieceContext::Partial { .. }, ..
-                } = m
+                context: payload::ReplayPieceContext::Partial { .. }, ..
+            } = m
             {
                 // we only need to send this to the shard responsible for the key being replayed!
                 // ugh, I'm sad about this double destruct, but it's necessary for borrowing :(
                 let shard = if let box Packet::ReplayPiece {
-                        context: payload::ReplayPieceContext::Partial { ref for_key, .. }, ..
-                    } = m
+                    context: payload::ReplayPieceContext::Partial { ref for_key, .. }, ..
+                } = m
                 {
                     assert_eq!(for_key.len(), 1);
                     self.shard(&for_key[0])
@@ -139,8 +139,8 @@ impl Sharder {
 
         let mut force_all = false;
         if let Packet::ReplayPiece {
-                context: payload::ReplayPieceContext::Regular { last: true }, ..
-            } = *m
+            context: payload::ReplayPieceContext::Regular { last: true }, ..
+        } = *m
         {
             // this is the last replay piece for a full replay
             // we need to make sure it gets to every shard so they know to ready the node

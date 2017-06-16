@@ -60,12 +60,12 @@ impl Node {
                     };
 
                     let replay = if let Packet::ReplayPiece {
-                            context: payload::ReplayPieceContext::Partial {
-                                ref for_key,
-                                ignore,
-                            },
-                            ..
-                        } = **m
+                        context: payload::ReplayPieceContext::Partial {
+                            ref for_key,
+                            ignore,
+                        },
+                        ..
+                    } = **m
                     {
                         assert!(!ignore);
                         assert!(keyed_by.is_some());

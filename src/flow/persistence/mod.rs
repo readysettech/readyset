@@ -339,8 +339,8 @@ impl GroupCommitQueueSet {
                 checktable::TransactionResult::Aborted => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                                 state: TransactionState::Pending(_, ref mut sender), ..
-                             },) = (packet,)
+                                    state: TransactionState::Pending(_, ref mut sender), ..
+                                },) = (packet,)
                         {
                             sender.send(Err(())).unwrap();
                         } else {
@@ -358,8 +358,8 @@ impl GroupCommitQueueSet {
             .zip(commit_decisions.iter())
             .map(|(mut packet, committed)| {
                 if let box Packet::Transaction {
-                        state: TransactionState::Pending(_, ref mut sender), ..
-                    } = packet
+                    state: TransactionState::Pending(_, ref mut sender), ..
+                } = packet
                 {
                     if *committed {
                         sender.send(Ok(ts)).unwrap();
