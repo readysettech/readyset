@@ -173,7 +173,7 @@ pub fn setup_mysql(addr: &str) -> mysql::Pool {
 
 fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
     for (schema_name, schema) in schemas.iter() {
-        let pool = setup_mysql("soup:password@127.0.0.1:3306/mysql_comparison_test");
+        let pool = setup_mysql("soup@127.0.0.1:3306/mysql_comparison_test");
         for (table_name, table) in schema.tables.iter() {
             pool.prep_exec(&table.create_query, ()).unwrap();
             let query = format!(
