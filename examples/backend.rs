@@ -22,9 +22,9 @@ impl Backend {
     }
 
     pub fn put(&mut self, kind: &str, data: &[DataType]) -> Result<(), String> {
-        let mtr = self.mutators.entry(String::from(kind)).or_insert(
-            self.soup.get_mutator(self.recipe.node_addr_for(kind)?),
-        );
+        let mtr = self.mutators
+            .entry(String::from(kind))
+            .or_insert(self.soup.get_mutator(self.recipe.node_addr_for(kind)?));
 
         mtr.put(data).unwrap();
         Ok(())

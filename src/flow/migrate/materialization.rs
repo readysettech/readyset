@@ -690,9 +690,9 @@ pub fn reconstruct(
         // we want path to have the ancestor closest to the root *first*
         path.reverse();
 
-        let tag = first_tag.take().unwrap_or_else(|| {
-            Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32)
-        });
+        let tag = first_tag
+            .take()
+            .unwrap_or_else(|| Tag(TAG_GENERATOR.fetch_add(1, Ordering::SeqCst) as u32));
         trace!(log, "replaying along path {:?}", path; "tag" => tag.id());
 
         // partial materialization possible?
@@ -913,9 +913,8 @@ fn cost_fn<'a, T>(
             .map(|ni| *graph[*ni].local_addr())
             .collect();
 
-        let options = n.must_replay_among().expect(
-            "join did not have must replay preference",
-        );
+        let options = n.must_replay_among()
+            .expect("join did not have must replay preference");
 
         // we *must* replay the state of one of the nodes in options
         parents.retain(|&parent| options.contains(&parent));
@@ -928,9 +927,9 @@ fn cost_fn<'a, T>(
         }
 
         // if *all* the options are empty, we can safely pick any of them
-        if parents.iter().all(
-            |&p| empty.contains(graph[p].local_addr()),
-        )
+        if parents
+            .iter()
+            .all(|&p| empty.contains(graph[p].local_addr()))
         {
             return parents.pop();
         }
@@ -939,9 +938,9 @@ fn cost_fn<'a, T>(
         // must indeed be), and therefore that we can just pick that parent and get a free full
         // materialization. *however*, this would cause the node to be marked as fully
         // materialized, which is *not* okay if it has partially a materialized ancestor!
-        if let Some(&parent) = parents.iter().find(
-            |&&p| empty.contains(graph[p].local_addr()),
-        )
+        if let Some(&parent) = parents
+            .iter()
+            .find(|&&p| empty.contains(graph[p].local_addr()))
         {
             if !parents.iter().any(|p| partial.contains(p)) {
                 // no partial ancestors!

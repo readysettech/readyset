@@ -125,9 +125,11 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
     // -- already established via signature check
     // 2. NQG's attributes is subset of NQG's edges
     // -- already established via signature check
-    assert!(existing_qg.signature().is_generalization_of(
-        &new_qg.signature(),
-    ));
+    assert!(
+        existing_qg
+            .signature()
+            .is_generalization_of(&new_qg.signature())
+    );
 
     // 3. NQC's edges are superset of EQG's
     //    (N.B.: this does not yet consider the relationships of the edge predicates; we do that

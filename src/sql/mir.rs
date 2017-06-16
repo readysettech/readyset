@@ -386,9 +386,10 @@ impl SqlToMirConverter {
         }
 
         // all columns on a base must have the base as their table
-        assert!(cols.iter().all(
-            |c| c.column.table == Some(String::from(name)),
-        ));
+        assert!(
+            cols.iter()
+                .all(|c| c.column.table == Some(String::from(name)))
+        );
 
         let primary_keys = match keys {
             None => vec![],
@@ -405,9 +406,9 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let mut base_schemas = self.base_schemas.entry(String::from(name)).or_insert(
-            Vec::new(),
-        );
+        let mut base_schemas = self.base_schemas
+            .entry(String::from(name))
+            .or_insert(Vec::new());
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -946,9 +947,10 @@ impl SqlToMirConverter {
                         _ => unimplemented!(),
                     };
 
-                    filter_columns.entry(col).or_insert(Vec::new()).push(
-                        rel.to_string(),
-                    );
+                    filter_columns
+                        .entry(col)
+                        .or_insert(Vec::new())
+                        .push(rel.to_string());
                 }
             }
 
@@ -977,9 +979,8 @@ impl SqlToMirConverter {
                                         let table =
                                             gbc.into_iter().next().unwrap().table.as_ref().unwrap();
                                         assert!(
-                                            gbc.into_iter().all(
-                                                |c| c.table.as_ref().unwrap() == table,
-                                            )
+                                            gbc.into_iter()
+                                                .all(|c| c.table.as_ref().unwrap() == table)
                                         );
                                         gb_cols.extend(gbc);
                                     }

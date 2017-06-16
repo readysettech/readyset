@@ -72,9 +72,9 @@ impl IndexPair {
     }
 
     pub fn remap(&mut self, mapping: &HashMap<NodeIndex, IndexPair>) {
-        *self = *mapping.get(&self.global).expect(
-            "asked to remap index that is unknown in mapping",
-        );
+        *self = *mapping
+            .get(&self.global)
+            .expect("asked to remap index that is unknown in mapping");
     }
 }
 

@@ -10,10 +10,10 @@ pub trait NegationRemoval {
 fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
     match *ce {
         ConditionExpression::LogicalOp(ConditionTree {
-                                           ref mut operator,
-                                           box ref mut left,
-                                           box ref mut right,
-                                       }) => {
+            ref mut operator,
+            box ref mut left,
+            box ref mut right,
+        }) => {
             if negate {
                 *operator = match *operator {
                     Operator::And => Operator::Or,
@@ -26,10 +26,10 @@ fn normalize_condition_expr(ce: &mut ConditionExpression, negate: bool) {
             normalize_condition_expr(right, negate);
         }
         ConditionExpression::ComparisonOp(ConditionTree {
-                                              ref mut operator,
-                                              box ref mut left,
-                                              box ref mut right,
-                                          }) => {
+            ref mut operator,
+            box ref mut left,
+            box ref mut right,
+        }) => {
             if negate {
                 *operator = match *operator {
                     Operator::Equal => Operator::NotEqual,

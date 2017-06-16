@@ -1142,12 +1142,14 @@ fn state_replay_migration_stream() {
     // they may arrive in any order
     let res = out.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS))
         .unwrap();
-    assert!(res.iter().any(|r| {
-        r == &vec![1.into(), "a".into(), "n".into()].into()
-    }));
-    assert!(res.iter().any(|r| {
-        r == &vec![1.into(), "b".into(), "n".into()].into()
-    }));
+    assert!(
+        res.iter()
+            .any(|r| r == &vec![1.into(), "a".into(), "n".into()].into())
+    );
+    assert!(
+        res.iter()
+            .any(|r| r == &vec![1.into(), "b".into(), "n".into()].into())
+    );
 
     // there are (/should be) one record in a with x == 2
     mutb.put(vec![2.into(), "o".into()]).unwrap();
@@ -1481,12 +1483,14 @@ fn state_replay_migration_query() {
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
     let res = out(&1.into(), true).unwrap();
-    assert!(res.iter().any(
-        |r| r == &vec![1.into(), "a".into(), "n".into()],
-    ));
-    assert!(res.iter().any(
-        |r| r == &vec![1.into(), "b".into(), "n".into()],
-    ));
+    assert!(
+        res.iter()
+            .any(|r| r == &vec![1.into(), "a".into(), "n".into()])
+    );
+    assert!(
+        res.iter()
+            .any(|r| r == &vec![1.into(), "b".into(), "n".into()])
+    );
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(

@@ -328,9 +328,8 @@ impl Blender {
         }
 
         let num_fields = node.fields().len();
-        let base_operator = node.get_base().expect(
-            "asked to get mutator for non-base node",
-        );
+        let base_operator = node.get_base()
+            .expect("asked to get mutator for non-base node");
         Mutator {
             tx: tx,
             addr: (*node.local_addr()).into(),
@@ -448,9 +447,9 @@ impl<'a> Migration<'a> {
         let parents = i.ancestors();
 
         let transactional = !parents.is_empty() &&
-            parents.iter().all(|&p| {
-                self.mainline.ingredients[p].is_transactional()
-            });
+            parents
+                .iter()
+                .all(|&p| self.mainline.ingredients[p].is_transactional());
 
         // add to the graph
         let ni = self.mainline.ingredients.add_node(node::Node::new(
@@ -545,9 +544,10 @@ impl<'a> Migration<'a> {
         let col_i1 = base.add_column(&field);
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
-            let col_i2 = base.inner_mut().get_base_mut().unwrap().add_column(
-                default.clone(),
-            );
+            let col_i2 = base.inner_mut()
+                .get_base_mut()
+                .unwrap()
+                .add_column(default.clone());
             assert_eq!(col_i1, col_i2);
         }
 
@@ -591,9 +591,10 @@ impl<'a> Migration<'a> {
         // TODO
         // what about if a user tries to materialize a cross-domain edge that has already been
         // converted to an egress/ingress pair?
-        let e = self.mainline.ingredients.find_edge(src, dst).expect(
-            "asked to materialize non-existing edge",
-        );
+        let e = self.mainline
+            .ingredients
+            .find_edge(src, dst)
+            .expect("asked to materialize non-existing edge");
 
         debug!(self.log, "told to materialize"; "node" => src.index());
 
@@ -654,13 +655,14 @@ impl<'a> Migration<'a> {
             .collect();
 
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
-        self.mainline.checktable.lock().unwrap().track(
-            &token_generator,
-        );
+        self.mainline
+            .checktable
+            .lock()
+            .unwrap()
+            .track(&token_generator);
 
-        self.mainline.ingredients[ri].with_reader_mut(|r| {
-            r.set_token_generator(token_generator);
-        });
+        self.mainline.ingredients[ri]
+            .with_reader_mut(|r| { r.set_token_generator(token_generator); });
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -1026,9 +1028,11 @@ impl<'a> Migration<'a> {
         // Ideally this should happen as part of checktable::perform_migration(), but we don't know
         // the replay paths then. It is harmless to do now since we know the new replay paths won't
         // request timestamps until after the migration in finished.
-        mainline.checktable.lock().unwrap().add_replay_paths(
-            domains_on_path,
-        );
+        mainline
+            .checktable
+            .lock()
+            .unwrap()
+            .add_replay_paths(domains_on_path);
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 

@@ -247,9 +247,9 @@ impl GroupCommitQueueSet {
         self.wait_start
             .values()
             .map(|i| {
-                self.timeout.checked_sub(i.elapsed()).unwrap_or(
-                    time::Duration::from_millis(0),
-                )
+                self.timeout
+                    .checked_sub(i.elapsed())
+                    .unwrap_or(time::Duration::from_millis(0))
             })
             .min()
     }
@@ -272,16 +272,16 @@ impl GroupCommitQueueSet {
         let merged_data = packets.fold(Records::default(), |mut acc, p| {
             match (p,) {
                 (box Packet::Message {
-                     ref link,
-                     ref mut data,
-                     ref mut tracer,
-                 },) |
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                },) |
                 (box Packet::Transaction {
-                     ref link,
-                     ref mut data,
-                     ref mut tracer,
-                     ..
-                 },) => {
+                    ref link,
+                    ref mut data,
+                    ref mut tracer,
+                    ..
+                },) => {
                     assert_eq!(merged_link, *link);
                     acc.append(data);
 
@@ -339,8 +339,8 @@ impl GroupCommitQueueSet {
                 checktable::TransactionResult::Aborted => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                                    state: TransactionState::Pending(_, ref mut sender), ..
-                                },) = (packet,)
+                            state: TransactionState::Pending(_, ref mut sender), ..
+                        },) = (packet,)
                         {
                             sender.send(Err(())).unwrap();
                         } else {

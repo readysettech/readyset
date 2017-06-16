@@ -118,9 +118,9 @@ impl TopK {
             .collect();
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
-        let src_db = state.get(&*self.src).expect(
-            "topk must have its parent's state materialized",
-        );
+        let src_db = state
+            .get(&*self.src)
+            .expect("topk must have its parent's state materialized");
         if output_rows.len() < self.k {
             let rs = match src_db.lookup(&self.group_by[..], &KeyType::from(group)) {
                 LookupResult::Some(rs) => rs,
@@ -175,15 +175,21 @@ impl TopK {
 
             // Emit negatives for any elements in `bottom_rows` that were originally in
             // current_topk.
-            delta.extend(bottom_rows.into_iter().filter(|p| p.1).map(|p| {
-                Record::Negative(p.0.clone())
-            }));
+            delta.extend(
+                bottom_rows
+                    .into_iter()
+                    .filter(|p| p.1)
+                    .map(|p| Record::Negative(p.0.clone())),
+            );
         }
 
         // Emit positives for any elements in `output_rows` that weren't originally in current_topk.
-        delta.extend(output_rows.into_iter().filter(|p| !p.1).map(|p| {
-            Record::Positive(p.0.clone())
-        }));
+        delta.extend(
+            output_rows
+                .into_iter()
+                .filter(|p| !p.1)
+                .map(|p| Record::Positive(p.0.clone())),
+        );
         delta.into()
     }
 }
@@ -263,26 +269,24 @@ impl Ingredient for TopK {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            consolidate.entry(group).or_insert_with(Vec::new).push(
-                rec.clone(),
-            );
+            consolidate
+                .entry(group)
+                .or_insert_with(Vec::new)
+                .push(rec.clone());
         }
 
         // find the current value for each group
         let us = self.us.unwrap();
-        let db = state.get(&*us).expect(
-            "topk must have its own state materialized",
-        );
+        let db = state
+            .get(&*us)
+            .expect("topk must have its own state materialized");
 
         let mut misses = Vec::new();
         let mut out = Vec::with_capacity(2 * self.k);
         {
             let group_by = &self.group_by[..];
-            let current = consolidate.into_iter().filter_map(
-                |(group, diffs)| match db.lookup(
-                    group_by,
-                    &KeyType::from(&group[..]),
-                ) {
+            let current = consolidate.into_iter().filter_map(|(group, diffs)| {
+                match db.lookup(group_by, &KeyType::from(&group[..])) {
                     LookupResult::Some(rs) => Some((group, diffs, rs)),
                     LookupResult::Missing => {
                         misses.push(Miss {
@@ -291,8 +295,8 @@ impl Ingredient for TopK {
                         });
                         None
                     }
-                },
-            );
+                }
+            });
 
             for (group, mut diffs, old_rs) in current {
                 // Retrieve then update the number of times in this group

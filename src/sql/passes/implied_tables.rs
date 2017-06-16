@@ -39,10 +39,10 @@ where
             ComparisonOp(rewritten_ct)
         }
         LogicalOp(ConditionTree {
-                      operator,
-                      box left,
-                      box right,
-                  }) => {
+            operator,
+            box left,
+            box right,
+        }) => {
             LogicalOp(ConditionTree {
                 operator: operator,
                 left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),

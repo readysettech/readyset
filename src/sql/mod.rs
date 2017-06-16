@@ -203,9 +203,9 @@ impl SqlIncorporator {
         let mut reuse_candidates = Vec::new();
         for &(ref existing_qg, _) in self.query_graphs.values() {
             // queries are different, but one might be a generalization of the other
-            if existing_qg.signature().is_generalization_of(
-                &qg.signature(),
-            )
+            if existing_qg
+                .signature()
+                .is_generalization_of(&qg.signature())
             {
                 match reuse::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {

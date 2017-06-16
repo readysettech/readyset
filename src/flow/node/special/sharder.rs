@@ -131,9 +131,9 @@ impl Sharder {
 
         for record in m.take_data() {
             let shard = self.to_shard(&record);
-            let p = self.sharded.entry(shard).or_insert_with(
-                || box m.clone_data(),
-            );
+            let p = self.sharded
+                .entry(shard)
+                .or_insert_with(|| box m.clone_data());
             p.map_data(|rs| rs.push(record));
         }
 
@@ -152,9 +152,9 @@ impl Sharder {
         }
         if force_all {
             for shard in 0..self.txs.len() {
-                self.sharded.entry(shard).or_insert_with(
-                    || box m.clone_data(),
-                );
+                self.sharded
+                    .entry(shard)
+                    .or_insert_with(|| box m.clone_data());
             }
         }
 
