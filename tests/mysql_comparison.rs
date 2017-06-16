@@ -274,7 +274,6 @@ fn check_query(
     target: &BTreeMap<String, Vec<Vec<String>>>,
 ) -> Result<(), String> {
     let mut g = Blender::new();
-    g.disable_sharding();
     let recipe;
     {
         // migrate
