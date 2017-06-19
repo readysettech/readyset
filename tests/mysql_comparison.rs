@@ -351,6 +351,7 @@ fn check_query(
 }
 
 #[test]
+#[ignore]
 fn mysql_comparison() {
     println!("");
 
