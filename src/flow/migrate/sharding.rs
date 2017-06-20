@@ -137,11 +137,10 @@ pub fn shard(
                 None => {
                     // base nodes -- what do we shard them by?
                     warn!(log, "sharding base node"; "node" => ?node, "column" => want_sharding);
-                    graph.node_weight_mut(node).unwrap().shard_by(
-                        Sharding::ByColumn(
-                            want_sharding,
-                        ),
-                    );
+                    graph
+                        .node_weight_mut(node)
+                        .unwrap()
+                        .shard_by(Sharding::ByColumn(want_sharding));
                     continue;
                 }
                 Some(want_sharding_input) => {

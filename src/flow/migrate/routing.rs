@@ -85,17 +85,13 @@ pub fn add(
             // parent is in other domain! does it already have an egress?
             let mut ingress = None;
             if parent != source {
-                'search: for pchild in graph.neighbors_directed(
-                    parent,
-                    petgraph::EdgeDirection::Outgoing,
-                )
+                'search: for pchild in graph
+                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
                 {
                     if graph[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
-                        for i in graph.neighbors_directed(
-                            pchild,
-                            petgraph::EdgeDirection::Outgoing,
-                        )
+                        for i in graph
+                            .neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing)
                         {
                             assert!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
@@ -177,8 +173,8 @@ pub fn add(
             }
 
             let sender = {
-                let mut senders =
-                    graph.neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
+                let mut senders = graph
+                    .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
                 let sender = senders.next().expect("ingress has no parents");
                 assert_eq!(senders.count(), 0, "ingress had more than one parent");
                 sender

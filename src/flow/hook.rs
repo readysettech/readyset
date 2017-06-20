@@ -92,10 +92,8 @@ impl Hook {
 
         // Push to Memcached
         for key in modified_keys {
-            let rows = match self.state.lookup(
-                &self.key_columns[..],
-                &KeyType::from(&key[..]),
-            ) {
+            let rows = match self.state
+                .lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
                 LookupResult::Some(rows) => rows,
                 LookupResult::Missing => {
                     unreachable!();

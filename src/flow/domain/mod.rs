@@ -364,8 +364,7 @@ impl Domain {
                     process_times,
                     process_ptimes,
                     enable_output,
-                )
-                {
+                ) {
                     use std::collections::hash_map::Entry;
                     match output_messages.entry(k) {
                         Entry::Occupied(mut rs) => rs.get_mut().append(&mut v),
@@ -475,14 +474,9 @@ impl Domain {
             self.process_times.start(addr);
             self.process_ptimes.start(addr);
             let mut m = Some(m);
-            self.nodes[&addr].borrow_mut().process(
-                &mut m,
-                None,
-                &mut self.state,
-                &self.nodes,
-                self.shard,
-                true,
-            );
+            self.nodes[&addr]
+                .borrow_mut()
+                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().nchildren(), 0);
@@ -661,17 +655,16 @@ impl Domain {
                                 use flow;
                                 use backlog;
                                 let txs = Mutex::new(trigger_txs);
-                                let (r_part, w_part) =
-                                    backlog::new_partial(
-                                        cols,
-                                        key,
-                                        move |key| for tx in &mut *txs.lock().unwrap() {
-                                            tx.send(box Packet::RequestPartialReplay {
-                                                key: vec![key.clone()],
-                                                tag: tag,
-                                            }).unwrap();
-                                        },
-                                    );
+                                let (r_part, w_part) = backlog::new_partial(
+                                    cols,
+                                    key,
+                                    move |key| for tx in &mut *txs.lock().unwrap() {
+                                        tx.send(box Packet::RequestPartialReplay {
+                                            key: vec![key.clone()],
+                                            tag: tag,
+                                        }).unwrap();
+                                    },
+                                );
                                 flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
@@ -1662,12 +1655,10 @@ impl Domain {
             //    true), we also know that it will not send again until the replay is over
             //  - the replay is over when we acknowedge the replay, which we haven't done yet
             //    (otherwise we'd be hitting the if branch above).
-            match self.inject_tx.as_mut().unwrap().try_send(
-                box Packet::Finish(
-                    tag,
-                    node,
-                ),
-            ) {
+            match self.inject_tx
+                .as_mut()
+                .unwrap()
+                .try_send(box Packet::Finish(tag, node)) {
                 Ok(_) => {}
                 Err(mpsc::TrySendError::Disconnected(_)) => {
                     // can't happen, since we know the reader thread (us) is still running
@@ -1749,10 +1740,8 @@ impl Domain {
                     if packet.is_none() && duration_until_flush.is_some() {
                         while let Some(m) = group_commit_queues.flush_if_necessary(
                             &self.nodes,
-                            &self.transaction_state
-                                .get_checktable(),
-                        )
-                        {
+                            &self.transaction_state.get_checktable(),
+                        ) {
                             self.handle(m);
                         }
                         continue;
@@ -1795,10 +1784,8 @@ impl Domain {
                                 if let Some(m) = group_commit_queues.append(
                                     m,
                                     &self.nodes,
-                                    &self.transaction_state
-                                        .get_checktable(),
-                                )
-                                {
+                                    &self.transaction_state.get_checktable(),
+                                ) {
                                     self.handle(m)
                                 }
                             } else {

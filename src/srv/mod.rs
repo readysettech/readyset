@@ -43,21 +43,27 @@ pub fn make_server(soup: &flow::Blender) -> Server {
     let ins = soup.inputs()
         .into_iter()
         .map(|(ni, n)| {
-            (ni.index(), (
-                n.name().to_owned(),
-                n.fields().iter().cloned().collect(),
-                soup.get_mutator(ni),
-            ))
+            (
+                ni.index(),
+                (
+                    n.name().to_owned(),
+                    n.fields().iter().cloned().collect(),
+                    soup.get_mutator(ni),
+                ),
+            )
         })
         .collect();
     let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n)| {
-            (ni.index(), (
-                n.name().to_owned(),
-                n.fields().iter().cloned().collect(),
-                soup.get_getter(ni).unwrap(),
-            ))
+            (
+                ni.index(),
+                (
+                    n.name().to_owned(),
+                    n.fields().iter().cloned().collect(),
+                    soup.get_getter(ni).unwrap(),
+                ),
+            )
         })
         .collect();
 
@@ -87,8 +93,7 @@ pub fn main(stream: TcpStream, mut s: Server) {
                     &mut stream,
                     &s.get[view].2(&key, true),
                     bincode::Infinite,
-                )
-                {
+                ) {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }

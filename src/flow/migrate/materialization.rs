@@ -1005,8 +1005,8 @@ fn cost_fn<'a, T>(
                     // as they increase the cost
                     intermediates.push(n.is_selective());
                     // now walk to the parent.
-                    let mut ps =
-                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    let mut ps = graph
+                        .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
                     // of which there must be at least one
                     stateful = ps.next().expect("recursed all the way to source");
                     // there shouldn't ever be multiple, because neither join nor union

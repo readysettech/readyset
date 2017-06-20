@@ -20,7 +20,7 @@ fn main() {
         // add article base node
         let _article = inc.add_query(
             "CREATE TABLE article \
-                                     (id int, user int, title varchar(255), url text);",
+             (id int, user int, title varchar(255), url text);",
             None,
             &mut mig,
         ).unwrap();
@@ -32,7 +32,7 @@ fn main() {
         // add a user account base table
         let _user = inc.add_query(
             "CREATE TABLE user \
-                                  (id int, username varchar(40), hash varchar(64));",
+             (id int, username varchar(40), hash varchar(64));",
             None,
             &mut mig,
         ).unwrap();
@@ -49,7 +49,7 @@ fn main() {
         // add final join -- joins on first field of each input
         inc.add_query(
             "SELECT article.id, article.user, title, url, vc.votes FROM article, \
-                            vc WHERE article.id = vc.id;",
+             vc WHERE article.id = vc.id;",
             Some("awvc".into()),
             &mut mig,
         ).unwrap();
@@ -59,7 +59,7 @@ fn main() {
         // add user karma
         let _karma = inc.add_query(
             "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
-                            awvc.user;",
+             awvc.user;",
             Some("karma".into()),
             &mut mig,
         ).unwrap();

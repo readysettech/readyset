@@ -266,12 +266,12 @@ mod tests {
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
         let (merged_reflexive, _) = merge_mir_for_queries(&log, &mq1, &mq1);
-        assert!(merged_reflexive.topo_nodes().iter().all(|n| {
-            match n.borrow().inner {
+        assert!(merged_reflexive.topo_nodes().iter().all(
+            |n| match n.borrow().inner {
                 MirNodeType::Reuse { .. } => true,
                 _ => false,
-            }
-        }));
+            },
+        ));
 
         let (a, b, c, d) = make_nodes();
         let e = MirNode::new(

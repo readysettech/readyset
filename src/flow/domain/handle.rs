@@ -314,8 +314,7 @@ impl DomainHandle {
                     Record::Positive(ref r) |
                     Record::Negative(ref r) => &r[key_col] == key,
                     Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                })
-                {
+                }) {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }

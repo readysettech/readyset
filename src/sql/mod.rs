@@ -187,7 +187,7 @@ impl SqlIncorporator {
                     info!(
                         self.log,
                         "Query '{}' has an exact match modulo parameters, \
-                          so making a new reader",
+                         so making a new reader",
                         query_name
                     );
 
@@ -264,11 +264,8 @@ impl SqlIncorporator {
         // step here.
         let final_node_of_query = leaf.borrow().ancestors().iter().next().unwrap().clone();
 
-        let mut mir = self.mir_converter.add_leaf_below(
-            final_node_of_query,
-            query_name,
-            params,
-        );
+        let mut mir = self.mir_converter
+            .add_leaf_below(final_node_of_query, query_name, params);
 
         trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
 
@@ -301,11 +298,8 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(
-            query_name,
-            query,
-            self.transactional,
-        );
+        let mut mir = self.mir_converter
+            .named_base_to_mir(query_name, query, self.transactional);
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -338,11 +332,8 @@ impl SqlIncorporator {
     ) -> QueryFlowParts {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_query_to_mir(
-            query_name,
-            query,
-            &qg,
-        );
+        let mut mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -384,11 +375,8 @@ impl SqlIncorporator {
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let new_query_mir = self.mir_converter.named_query_to_mir(
-            query_name,
-            query,
-            &qg,
-        );
+        let new_query_mir = self.mir_converter
+            .named_query_to_mir(query_name, query, &qg);
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -412,10 +400,8 @@ impl SqlIncorporator {
         );
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs.insert(
-            qg.signature().hash,
-            (qg, post_reuse_opt_mir),
-        );
+        self.query_graphs
+            .insert(qg.signature().hash, (qg, post_reuse_opt_mir));
 
         qfp
     }
@@ -504,10 +490,8 @@ impl SqlIncorporator {
 
         // record info about query
         self.num_queries += 1;
-        self.leaf_addresses.insert(
-            String::from(query_name.as_str()),
-            qfp.query_leaf,
-        );
+        self.leaf_addresses
+            .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
         Ok(qfp)
     }
@@ -586,10 +570,8 @@ mod tests {
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
-        let na = inc.get_flow_node_address(name, 0).expect(&format!(
-            "No node named \"{}\" at v0",
-            name
-        ));
+        let na = inc.get_flow_node_address(name, 0)
+            .expect(&format!("No node named \"{}\" at v0", name));
         mig.graph().node_weight(na).unwrap()
     }
 
@@ -777,7 +759,7 @@ mod tests {
         // Try a simple COUNT function
         let res = inc.add_query(
             "SELECT COUNT(votes.userid) AS votes \
-                                FROM votes GROUP BY votes.aid;",
+             FROM votes GROUP BY votes.aid;",
             None,
             &mut mig,
         );

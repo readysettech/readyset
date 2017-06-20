@@ -158,10 +158,8 @@ impl SqlToMirConverter {
 
         // always register leaves
         self.current.insert(String::from(name), self.schema_version);
-        self.nodes.insert(
-            (String::from(name), self.schema_version),
-            new_leaf.clone(),
-        );
+        self.nodes
+            .insert((String::from(name), self.schema_version), new_leaf.clone());
 
         // wrap in a (very short) query to return
         MirQuery {
@@ -255,10 +253,8 @@ impl SqlToMirConverter {
             leaves
         );
         let leaf = leaves.into_iter().next().unwrap();
-        self.current.insert(
-            String::from(leaf.borrow().name()),
-            self.schema_version,
-        );
+        self.current
+            .insert(String::from(leaf.borrow().name()), self.schema_version);
 
         MirQuery {
             name: String::from(name),
@@ -294,7 +290,7 @@ impl SqlToMirConverter {
                     info!(
                         self.log,
                         "base table for {} already exists with identical \
-                          schema in version {}; reusing it.",
+                         schema in version {}; reusing it.",
                         name,
                         existing_sv
                     );
@@ -308,7 +304,7 @@ impl SqlToMirConverter {
                     info!(
                         self.log,
                         "base table for {} already exists in version {}, \
-                           but has a different schema!",
+                         but has a different schema!",
                         name,
                         existing_sv
                     );
@@ -358,7 +354,7 @@ impl SqlToMirConverter {
                             let pos = columns.iter().position(|cc| cc == *removed).expect(
                                 &format!(
                                     "couldn't find column \"{:#?}\", \
-                                                 which we're removing",
+                                     which we're removing",
                                     removed
                                 ),
                             );

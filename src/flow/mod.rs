@@ -242,19 +242,21 @@ impl Blender {
             let vr = VIEW_READERS.lock().unwrap();
             let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
             rh.map(|rh| {
-                Box::new(move |q: &prelude::DataType,
-                      block: bool|
-                      -> Result<prelude::Datas, ()> {
-                    rh.find_and(
-                        q,
-                        |rs| {
-                            rs.into_iter()
-                                .map(|v| (&**v).into_iter().map(|v| v.external_clone()).collect())
-                                .collect()
-                        },
-                        block,
-                    ).map(|r| r.0.unwrap_or_else(Vec::new))
-                }) as Box<_>
+                Box::new(
+                    move |q: &prelude::DataType, block: bool| -> Result<prelude::Datas, ()> {
+                        rh.find_and(
+                            q,
+                            |rs| {
+                                rs.into_iter()
+                                    .map(|v| {
+                                        (&**v).into_iter().map(|v| v.external_clone()).collect()
+                                    })
+                                    .collect()
+                            },
+                            block,
+                        ).map(|r| r.0.unwrap_or_else(Vec::new))
+                    },
+                ) as Box<_>
             })
         })
     }
@@ -265,7 +267,8 @@ impl Blender {
         node: prelude::NodeIndex,
     ) -> Result<
         Box<
-            Fn(&prelude::DataType) -> Result<(core::Datas, checktable::Token), ()>
+            Fn(&prelude::DataType)
+                -> Result<(core::Datas, checktable::Token), ()>
                 + Send,
         >,
         (),
@@ -468,11 +471,9 @@ impl<'a> Migration<'a> {
         self.added.push(ni);
         // insert it into the graph
         if parents.is_empty() {
-            self.mainline.ingredients.add_edge(
-                self.mainline.source,
-                ni,
-                false,
-            );
+            self.mainline
+                .ingredients
+                .add_edge(self.mainline.source, ni, false);
         } else {
             for parent in parents {
                 self.mainline.ingredients.add_edge(parent, ni, false);
@@ -498,12 +499,9 @@ impl<'a> Migration<'a> {
         let b: prelude::NodeOperator = b.into();
 
         // add to the graph
-        let ni = self.mainline.ingredients.add_node(node::Node::new(
-            name.to_string(),
-            fields,
-            b,
-            true,
-        ));
+        let ni = self.mainline
+            .ingredients
+            .add_node(node::Node::new(name.to_string(), fields, b, true));
         info!(self.log,
               "adding new node";
               "node" => ni.index(),
@@ -513,11 +511,9 @@ impl<'a> Migration<'a> {
         // keep track of the fact that it's new
         self.added.push(ni);
         // insert it into the graph
-        self.mainline.ingredients.add_edge(
-            self.mainline.source,
-            ni,
-            false,
-        );
+        self.mainline
+            .ingredients
+            .add_edge(self.mainline.source, ni, false);
         // and tell the caller its id
         ni.into()
     }

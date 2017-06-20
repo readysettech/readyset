@@ -227,10 +227,8 @@ impl GroupCommitQueueSet {
     ) -> Option<Box<Packet>> {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
-            self.pending_packets.insert(
-                node.clone(),
-                Vec::with_capacity(self.capacity),
-            );
+            self.pending_packets
+                .insert(node.clone(), Vec::with_capacity(self.capacity));
         }
 
         self.pending_packets[&node].push(p);

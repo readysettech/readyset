@@ -203,10 +203,10 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
 
             target_data.insert(query_name.clone(), BTreeMap::new());
             for (i, values) in query.values.iter().enumerate() {
-                target_data.get_mut(query_name).unwrap().insert(
-                    i.to_string(),
-                    Vec::new(),
-                );
+                target_data
+                    .get_mut(query_name)
+                    .unwrap()
+                    .insert(i.to_string(), Vec::new());
 
                 let values = Params::Positional(values.iter().map(|v| v.into()).collect());
                 for row in pool.prep_exec(&query.select_query, values).unwrap() {

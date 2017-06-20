@@ -37,7 +37,7 @@ impl Base {
         assert!(
             !self.defaults.is_empty(),
             "cannot add columns to base nodes without\
-                setting default values for initial columns"
+             setting default values for initial columns"
         );
         self.defaults.push(default);
         self.unmodified = false;
@@ -49,7 +49,7 @@ impl Base {
         assert!(
             !self.defaults.is_empty(),
             "cannot add columns to base nodes without\
-                setting default values for initial columns"
+             setting default values for initial columns"
         );
         assert!(column < self.defaults.len());
         self.unmodified = false;

@@ -78,10 +78,13 @@ pub fn analyze_graph(
     domain_nodes
         .into_iter()
         .map(|(domain, nodes): (_, Vec<(NodeIndex, bool)>)| {
-            (domain, (
-                count_base_ingress(graph, source, &nodes[..], &domain),
-                base_egress_map(graph, source, &nodes[..]),
-            ))
+            (
+                domain,
+                (
+                    count_base_ingress(graph, source, &nodes[..], &domain),
+                    base_egress_map(graph, source, &nodes[..]),
+                ),
+            )
         })
         .collect()
 }

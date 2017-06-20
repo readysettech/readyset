@@ -20,11 +20,10 @@ impl ReferredTables for ConditionExpression {
         match *self {
             ConditionExpression::LogicalOp(ref ct) |
             ConditionExpression::ComparisonOp(ref ct) => {
-                for t in ct.left.referred_tables().into_iter().chain(
-                    ct.right
-                        .referred_tables()
-                        .into_iter(),
-                )
+                for t in ct.left
+                    .referred_tables()
+                    .into_iter()
+                    .chain(ct.right.referred_tables().into_iter())
                 {
                     if !tables.contains(&t) {
                         tables.push(t);
