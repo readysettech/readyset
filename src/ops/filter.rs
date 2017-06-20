@@ -130,7 +130,7 @@ impl Ingredient for Filter {
         columns: &[usize],
         key: &KeyType<DataType>,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a Vec<DataType>> + 'a>>> {
         states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
             match state.lookup(columns, key) {

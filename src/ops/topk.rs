@@ -1,6 +1,5 @@
 use std::mem;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use flow::prelude::*;
 use std::cmp::Ordering;
@@ -10,7 +9,7 @@ use nom_sql::OrderType;
 #[derive(Clone, Serialize, Deserialize)]
 struct Order(Vec<(usize, OrderType)>);
 impl Order {
-    fn cmp(&self, a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>) -> Ordering {
+    fn cmp(&self, a: &&Vec<DataType>, b: &&Vec<DataType>) -> Ordering {
         for &(c, ref order_type) in &self.0 {
             let result = match *order_type {
                 OrderType::OrderAscending => a[c].cmp(&b[c]),
@@ -90,14 +89,14 @@ impl TopK {
     /// relaying to us. thus, since we got this key, our parent must have it.
     fn apply(
         &self,
-        current_topk: &[Arc<Vec<DataType>>],
+        current_topk: &[Vec<DataType>],
         new: Records,
         state: &StateMap,
         group: &[DataType],
     ) -> Records {
 
         let mut delta: Vec<Record> = Vec::new();
-        let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
+        let mut current: Vec<&Vec<DataType>> = current_topk.iter().collect();
         current.sort_by(|a, b| self.order.cmp(a, b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
@@ -109,7 +108,7 @@ impl TopK {
             }
         }
 
-        let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
+        let mut output_rows: Vec<(&Vec<DataType>, bool)> = new.iter()
             .filter_map(|r| match r {
                 &Record::Positive(ref a) => Some((a, false)),
                 _ => None,
@@ -129,7 +128,7 @@ impl TopK {
 
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
-                let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
+                let is_min = |&&(ref r, _): &&(&Vec<DataType>, bool)| {
                     self.order.cmp(&&r, &&min) == Ordering::Equal
                 };
 

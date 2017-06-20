@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use std::sync::Arc;
-
 use flow::prelude::*;
 
 /// Kind of join
@@ -79,7 +77,7 @@ impl Join {
         }
     }
 
-    fn generate_row(&self, left: &Arc<Vec<DataType>>, right: &Arc<Vec<DataType>>) -> Vec<DataType> {
+    fn generate_row(&self, left: &Vec<DataType>, right: &Vec<DataType>) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {
@@ -90,7 +88,7 @@ impl Join {
             .collect()
     }
 
-    fn generate_null(&self, left: &Arc<Vec<DataType>>) -> Vec<DataType> {
+    fn generate_null(&self, left: &Vec<DataType>) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {

@@ -165,21 +165,7 @@ impl Ingredient for Base {
                     if r.len() != self.defaults.len() {
                         let rlen = r.len();
                         let (mut v, pos) = r.extract();
-
-                        use std::sync::Arc;
-                        if let Some(mut v) = Arc::get_mut(&mut v) {
-                            v.extend(self.defaults.iter().skip(rlen).cloned());
-                        }
-
-                        // the trick above failed, probably because we're doing a replay
-                        if v.len() == rlen {
-                            let newv = v.iter()
-                                .cloned()
-                                .chain(self.defaults.iter().skip(rlen).cloned())
-                                .collect();
-                            v = Arc::new(newv)
-                        }
-
+                        v.extend(self.defaults.iter().skip(rlen).cloned());
                         (v, pos).into()
                     } else {
                         r

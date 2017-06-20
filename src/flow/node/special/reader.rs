@@ -1,4 +1,4 @@
-use std::sync::{self, mpsc};
+use std::sync::mpsc;
 use flow::prelude::*;
 use checktable;
 use backlog;
@@ -7,9 +7,9 @@ use backlog;
 #[derive(Clone, Debug, PartialEq)]
 pub enum StreamUpdate {
     /// Indicates the addition of a new row
-    AddRow(sync::Arc<Vec<DataType>>),
+    AddRow(Vec<DataType>),
     /// Indicates the removal of an existing row
-    DeleteRow(sync::Arc<Vec<DataType>>),
+    DeleteRow(Vec<DataType>),
 }
 
 impl From<Record> for StreamUpdate {
@@ -24,7 +24,7 @@ impl From<Record> for StreamUpdate {
 
 impl From<Vec<DataType>> for StreamUpdate {
     fn from(other: Vec<DataType>) -> Self {
-        StreamUpdate::AddRow(sync::Arc::new(other))
+        StreamUpdate::AddRow(other)
     }
 }
 

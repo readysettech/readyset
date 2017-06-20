@@ -1,6 +1,5 @@
 use std::fmt;
 use std::collections::HashMap;
-use std::sync;
 
 use flow::prelude::*;
 
@@ -231,7 +230,7 @@ where
                         .cloned()
                         .chain(Some(new.into()).into_iter())
                         .collect();
-                    out.push(Record::Positive(sync::Arc::new(rec)));
+                    out.push(Record::Positive(rec));
                 }
             }
         }

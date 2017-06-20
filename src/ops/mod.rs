@@ -1,6 +1,5 @@
 use flow::core::processing::Ingredient;
 use std::collections::{HashSet, HashMap};
-use std::sync::Arc;
 use flow::prelude::*;
 
 pub mod base;
@@ -167,7 +166,7 @@ impl Ingredient for NodeOperator {
         columns: &[usize],
         key: &KeyType<DataType>,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a Vec<DataType>> + 'a>>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, states)
     }
     fn lookup<'a>(
@@ -177,7 +176,7 @@ impl Ingredient for NodeOperator {
         key: &KeyType<DataType>,
         domain: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a Vec<DataType>> + 'a>>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
     }
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {

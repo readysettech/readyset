@@ -8,7 +8,6 @@ use nom_sql::Literal;
 use serde_json::Value;
 
 use std::ops::{Deref, DerefMut};
-use std::sync;
 use std::fmt;
 
 const TINYTEXT_WIDTH: usize = 15;
@@ -224,8 +223,8 @@ impl fmt::Display for DataType {
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Record {
-    Positive(sync::Arc<Vec<DataType>>),
-    Negative(sync::Arc<Vec<DataType>>),
+    Positive(Vec<DataType>),
+    Negative(Vec<DataType>),
     DeleteRequest(Vec<DataType>),
 }
 
@@ -246,7 +245,7 @@ impl Record {
         }
     }
 
-    pub fn extract(self) -> (sync::Arc<Vec<DataType>>, bool) {
+    pub fn extract(self) -> (Vec<DataType>, bool) {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
@@ -256,7 +255,7 @@ impl Record {
 }
 
 impl Deref for Record {
-    type Target = sync::Arc<Vec<DataType>>;
+    type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) |
@@ -276,34 +275,18 @@ impl DerefMut for Record {
     }
 }
 
-impl From<sync::Arc<Vec<DataType>>> for Record {
-    fn from(other: sync::Arc<Vec<DataType>>) -> Self {
-        Record::Positive(other)
-    }
-}
-
 impl From<Vec<DataType>> for Record {
     fn from(other: Vec<DataType>) -> Self {
-        Record::Positive(sync::Arc::new(other))
-    }
-}
-
-impl From<(sync::Arc<Vec<DataType>>, bool)> for Record {
-    fn from(other: (sync::Arc<Vec<DataType>>, bool)) -> Self {
-        if other.1 {
-            Record::Positive(other.0)
-        } else {
-            Record::Negative(other.0)
-        }
+        Record::Positive(other)
     }
 }
 
 impl From<(Vec<DataType>, bool)> for Record {
     fn from(other: (Vec<DataType>, bool)) -> Self {
         if other.1 {
-            Record::Positive(sync::Arc::new(other.0))
+            Record::Positive(other.0)
         } else {
-            Record::Negative(sync::Arc::new(other.0))
+            Record::Negative(other.0)
         }
     }
 }
@@ -323,10 +306,10 @@ impl FromIterator<Record> for Records {
         Records(iter.into_iter().collect())
     }
 }
-impl FromIterator<sync::Arc<Vec<DataType>>> for Records {
+impl FromIterator<Vec<DataType>> for Records {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = sync::Arc<Vec<DataType>>>,
+        I: IntoIterator<Item = Vec<DataType>>,
     {
         Records(iter.into_iter().map(Record::Positive).collect())
     }
@@ -375,12 +358,6 @@ impl Into<Records> for Record {
 impl Into<Records> for Vec<Record> {
     fn into(self) -> Records {
         Records(self)
-    }
-}
-
-impl Into<Records> for Vec<sync::Arc<Vec<DataType>>> {
-    fn into(self) -> Records {
-        Records(self.into_iter().map(|r| r.into()).collect())
     }
 }
 
