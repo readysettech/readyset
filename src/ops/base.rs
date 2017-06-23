@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+
 use vec_map::VecMap;
+
 use flow::prelude::*;
 
 /// Base is used to represent the root nodes of the distributary data flow graph.
@@ -148,7 +150,7 @@ impl Ingredient for Base {
                     match db.lookup(cols.as_slice(), &KeyType::from(&key[..])) {
                         LookupResult::Some(rows) => {
                             assert_eq!(rows.len(), 1);
-                            Record::Negative(rows[0].clone())
+                            Record::Negative((*rows[0]).clone())
                         }
                         LookupResult::Missing => unreachable!(),
                     }

@@ -167,6 +167,7 @@ impl<T: 'static> IntoIterator for Map<T> {
 use std::collections::hash_map;
 use fnv::FnvHashMap;
 use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub enum KeyType<'a, T: 'a> {
@@ -178,10 +179,10 @@ pub enum KeyType<'a, T: 'a> {
 
 #[derive(Clone)]
 enum KeyedState<T: Eq + Hash> {
-    Single(FnvHashMap<T, Vec<Vec<T>>>),
-    Double(FnvHashMap<(T, T), Vec<Vec<T>>>),
-    Tri(FnvHashMap<(T, T, T), Vec<Vec<T>>>),
-    Quad(FnvHashMap<(T, T, T, T), Vec<Vec<T>>>),
+    Single(FnvHashMap<T, Vec<Arc<Vec<T>>>>),
+    Double(FnvHashMap<(T, T), Vec<Arc<Vec<T>>>>),
+    Tri(FnvHashMap<(T, T, T), Vec<Arc<Vec<T>>>>),
+    Quad(FnvHashMap<(T, T, T, T), Vec<Arc<Vec<T>>>>),
 }
 
 impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
@@ -243,7 +244,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Vec<T>>> {
+    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Arc<Vec<T>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -268,7 +269,7 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
 }
 
 pub enum LookupResult<'a, T: 'a> {
-    Some(&'a [Vec<T>]),
+    Some(&'a [Arc<Vec<T>>]),
     Missing,
 }
 
@@ -324,7 +325,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.iter().any(|s| s.2)
     }
 
-    pub fn insert(&mut self, r: Vec<T>) {
+    pub fn insert(&mut self, r: Arc<Vec<T>>) {
         let mut rclones = Vec::with_capacity(self.state.len());
         rclones.extend((0..(self.state.len() - 1)).into_iter().map(|_| r.clone()));
         rclones.push(r);
@@ -390,7 +391,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         let mut removed = 0;
         for s in &mut self.state {
             removed = 0; // otherwise we'd count every removal multiple times
-            let keep = |rsr: &Vec<T>| if &rsr[..] == r {
+            let keep = |rsr: &Arc<Vec<T>>| if &rsr[..] == r {
                 removed += 1;
                 false
             } else {
@@ -437,7 +438,7 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.rows = self.rows.saturating_sub(removed);
     }
 
-    pub fn iter(&self) -> hash_map::Values<T, Vec<Vec<T>>> {
+    pub fn iter(&self) -> hash_map::Values<T, Vec<Arc<Vec<T>>>> {
         for &(_, ref state, partial) in &self.state {
             if let KeyedState::Single(ref map) = *state {
                 if partial {
@@ -601,7 +602,7 @@ impl<T: Hash + Eq + Clone> State<T> {
 }
 
 impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
-    type Item = Vec<Vec<T>>;
+    type Item = Vec<Arc<Vec<T>>>;
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(self) -> Self::IntoIter {
         self.state

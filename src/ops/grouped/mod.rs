@@ -218,7 +218,7 @@ where
                     if let Some(old) = old {
                         // revoke old value
                         debug_assert!(current.is_some());
-                        out.push(Record::Negative(old.clone()));
+                        out.push(Record::Negative((**old).clone()));
                     }
 
                     // emit positive, which is group + new.
