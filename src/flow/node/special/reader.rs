@@ -171,7 +171,11 @@ impl Reader {
                 });
             }
 
-            state.add(m.data().iter().cloned());
+            if self.streamers.as_ref().unwrap().is_empty() {
+                state.add(m.take_data());
+            } else {
+                state.add(m.data().iter().cloned());
+            }
             if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } = **m {
                 state.update_ts(ts);
             }
@@ -187,23 +191,25 @@ impl Reader {
 
         m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
-        let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
-        let mut left = self.streamers.as_ref().unwrap().len();
+        if !self.streamers.as_ref().unwrap().is_empty() {
+            let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
+            let mut left = self.streamers.as_ref().unwrap().len();
 
-        // remove any channels where the receiver has hung up
-        self.streamers.as_mut().unwrap().retain(|tx| {
-            left -= 1;
-            if left == 0 {
-                tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
-            } else {
-                tx.send(
-                    data.clone()
-                        .unwrap()
-                        .into_iter()
-                        .map(|r| r.into())
-                        .collect(),
-                )
-            }.is_ok()
-        });
+            // remove any channels where the receiver has hung up
+            self.streamers.as_mut().unwrap().retain(|tx| {
+                left -= 1;
+                if left == 0 {
+                    tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
+                } else {
+                    tx.send(
+                        data.clone()
+                            .unwrap()
+                            .into_iter()
+                            .map(|r| r.into())
+                            .collect(),
+                    )
+                }.is_ok()
+            });
+        }
     }
 }
