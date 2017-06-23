@@ -246,7 +246,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     }
                                 }
                             }
-                            Some(t) => if *t == rel { Some(c.clone()) } else { None },
+                            Some(t) => {
+                                if *t == rel {
+                                    Some(c.clone())
+                                } else {
+                                    None
+                                }
+                            }
                         }
                     }
                 })

@@ -83,7 +83,11 @@ impl GroupedOperation for Aggregator {
                     DataType::BigInt(n) => n,
                     _ => unreachable!(),
                 };
-                if pos { v } else { 0i64 - v }
+                if pos {
+                    v
+                } else {
+                    0i64 - v
+                }
             }
         }
     }

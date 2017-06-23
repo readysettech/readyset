@@ -645,7 +645,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         // Should have source and "users" base table node
@@ -659,7 +659,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE articles (id int, author int, title varchar(255));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         // Should have source and "users" base table node
@@ -706,7 +706,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         // Should have source and "users" base table node
@@ -805,7 +805,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         let res = inc.add_query(
@@ -845,7 +845,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         // Should have source and "users" base table node
@@ -891,7 +891,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         // Should have source and "users" base table node
@@ -1046,7 +1046,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         assert!(
@@ -1057,7 +1057,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE articles (aid int, title varchar(255), author int);",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
 
@@ -1101,7 +1101,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE users (id int, name varchar(40));",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
         assert!(
@@ -1112,7 +1112,7 @@ mod tests {
             inc.add_query(
                 "CREATE TABLE articles (aid int, title varchar(255), author int);",
                 None,
-                &mut mig,
+                &mut mig
             ).is_ok()
         );
 

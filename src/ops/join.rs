@@ -325,7 +325,7 @@ impl Ingredient for Join {
             vec![
                 (
                     if pcol.0 { &self.left } else { &self.right }.as_global(),
-                    Some(pcol.1)
+                    Some(pcol.1),
                 ),
             ]
         }
@@ -470,7 +470,7 @@ mod tests {
         let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![
             (l.as_global(), vec![0]), /* join column for left */
-            (r.as_global(), vec![0]) /* join column for right */,
+            (r.as_global(), vec![0]), /* join column for right */
         ].into_iter()
             .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);

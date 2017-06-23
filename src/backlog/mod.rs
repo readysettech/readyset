@@ -208,7 +208,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -254,7 +254,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -278,7 +278,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -287,7 +287,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -310,7 +310,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -334,7 +334,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -359,7 +359,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == a[0] && r[1] == a[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -368,7 +368,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
@@ -386,7 +386,7 @@ mod tests {
             r.find_and(
                 &a[0],
                 |rs| rs.iter().any(|r| r[0] == b[0] && r[1] == b[1]),
-                true,
+                true
             ).unwrap()
                 .0
                 .unwrap()
