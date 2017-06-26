@@ -316,7 +316,7 @@ fn check_query(
 
     for (i, query_parameter) in query.values.iter().enumerate() {
         let query_param = query.types[0].make_datatype(&query_parameter[0]);
-        let query_results = getter(&query_param, true).unwrap();
+        let query_results = getter.lookup(&query_param, true).unwrap();
 
         let target_results = &target[&i.to_string()];
         let query_results: Vec<Vec<String>> = query_results

@@ -73,14 +73,12 @@ pub fn make_server(soup: &flow::Blender) -> Server {
     }
 }
 
-type Get = Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>;
-
 /// A handle to Soup put and get endpoints
 pub struct Server {
     /// All put endpoints.
     pub put: VecMap<(String, Vec<String>, flow::Mutator)>,
     /// All get endpoints.
-    pub get: VecMap<(String, Vec<String>, Get)>,
+    pub get: VecMap<(String, Vec<String>, flow::Getter)>,
 }
 
 /// Handle RPCs from a single `TcpStream`
@@ -91,7 +89,7 @@ pub fn main(stream: TcpStream, mut s: Server) {
             Ok(Method::Query { view, key }) => {
                 if let Err(e) = bincode::serialize_into(
                     &mut stream,
-                    &s.get[view].2(&key, true),
+                    &s.get[view].2.lookup(&key, true),
                     bincode::Infinite,
                 ) {
                     println!("client left prematurely: {:?}", e);

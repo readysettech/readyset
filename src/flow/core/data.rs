@@ -17,6 +17,10 @@ const TINYTEXT_WIDTH: usize = 15;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
+///
+/// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
+/// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
+/// clone the *value* of a `DataType` without danger of contention.
 #[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum DataType {
@@ -54,7 +58,11 @@ impl DataType {
 }
 
 impl DataType {
-    pub(crate) fn external_clone(&self) -> Self {
+    /// Clone the value contained within this `DataType`.
+    ///
+    /// This method crucially does not cause cache-line conflicts with the underlying data-store
+    /// (i.e., the owner of `self`), at the cost of requiring additional allocation and copying.
+    pub fn deep_clone(&self) -> Self {
         match *self {
             DataType::Text(ref cstr) => DataType::Text(ArcCStr::from(&**cstr)),
             ref dt => dt.clone(),
