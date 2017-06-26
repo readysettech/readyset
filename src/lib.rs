@@ -319,6 +319,7 @@
 #![feature(box_syntax)]
 #![deny(missing_docs)]
 
+/// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
 
 /// The maximum number of backfill requests any domain can have outstanding to other domains.
