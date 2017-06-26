@@ -7,6 +7,7 @@ use nom_sql::Literal;
 #[cfg(feature = "web")]
 use serde_json::Value;
 
+use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 use std::fmt;
 
@@ -16,7 +17,7 @@ const TINYTEXT_WIDTH: usize = 15;
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
 /// when type information is specifically necessary.
-#[derive(Eq, PartialOrd, Ord, Hash, Debug, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialOrd, Ord, Debug, Clone, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
@@ -79,6 +80,24 @@ impl PartialEq for DataType {
         }
     }
 }
+
+impl Hash for DataType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match *self {
+            DataType::None => {}
+            DataType::Int(n) => n.hash(state),
+            DataType::BigInt(n) => n.hash(state),
+            DataType::Real(i, f) => {
+                i.hash(state);
+                f.hash(state);
+            }
+            DataType::Text(ref t) => t.hash(state),
+            DataType::TinyText(t) => t.hash(state),
+            DataType::Timestamp(ts) => ts.hash(state),
+        }
+    }
+}
+
 
 impl From<i64> for DataType {
     fn from(s: i64) -> Self {
