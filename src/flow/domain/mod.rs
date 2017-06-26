@@ -951,7 +951,7 @@ impl Domain {
             trace!(self.log,
                    "satisfied replay request";
                    "tag" => tag.id(),
-                   "data" => ?m.as_ref().unwrap().data(),
+                   //"data" => ?m.as_ref().unwrap().data(),
                    "key" => ?key,
             );
         }
