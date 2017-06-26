@@ -148,10 +148,10 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
     }
 
     // yes!
-    let mut holes = Vec::new();
     let state = state.unwrap();
-    rs.retain(|r| {
-        if state.is_partial() {
+    if state.is_partial() {
+        let mut holes = Vec::new();
+        rs.retain(|r| {
             // we need to check that we're not hitting any holes
             if let Some(columns) = state.hits_hole(r) {
                 // we would need a replay of this update.
@@ -163,15 +163,23 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
                 // we don't want to propagate records that miss
                 return false;
             }
+            match *r {
+                Record::Positive(ref r) => state.insert(Arc::new(r.clone())),
+                Record::Negative(ref r) => state.remove(r),
+                Record::DeleteRequest(..) => unreachable!(),
+            }
+            true
+        });
+        holes
+    } else {
+        for r in rs.iter() {
+            match *r {
+                Record::Positive(ref r) => state.insert(Arc::new(r.clone())),
+                Record::Negative(ref r) => state.remove(r),
+                Record::DeleteRequest(..) => unreachable!(),
+            }
         }
-        match *r {
-            Record::Positive(ref r) => state.insert(Arc::new(r.clone())),
-            Record::Negative(ref r) => state.remove(r),
-            Record::DeleteRequest(..) => unreachable!(),
-        }
+        Vec::new()
+    }
 
-        true
-    });
-
-    holes
 }
