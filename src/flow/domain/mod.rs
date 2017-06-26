@@ -252,11 +252,41 @@ impl Domain {
     fn finished_partial_replay(&mut self, tag: &Tag) {
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End(..) => {
-                self.concurrent_replays -= 1;
+                // A backfill request we made to another domain was just satisfied!
+                // We can now issue another request from the concurrent replay queue.
+                // However, since unions require multiple backfill requests, but produce only one
+                // backfill reply, we need to check how many requests we're now free to issue. If
+                // we just naively release one slot here, a union with two parents would mean that
+                // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
+                // -1 when satisfied), which would lead to a deadlock!
+                let end = self.replay_paths[tag].path.last().unwrap().0;
+                let requests_satisfied = self.replay_paths
+                    .iter()
+                    .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
+                        p.path.last().unwrap().0 == end
+                    } else {
+                        false
+                    })
+                    .count();
+
+                self.concurrent_replays -= requests_satisfied;
+                trace!(self.log, "notified of finished replay";
+                       "#done" => requests_satisfied,
+                       "ongoing" => self.concurrent_replays,
+                       );
                 debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
-                if let Some((tag, key)) = self.replay_request_queue.pop_front() {
-                    assert_eq!(self.concurrent_replays, ::MAX_CONCURRENT_REPLAYS - 1);
-                    self.send_partial_replay_request(tag, key);
+                while self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
+                    if let Some((tag, key)) = self.replay_request_queue.pop_front() {
+                        trace!(self.log, "releasing replay request";
+                               "tag" => ?tag,
+                               "key" => ?key,
+                               "left" => self.replay_request_queue.len(),
+                               "ongoing" => self.concurrent_replays,
+                               );
+                        self.send_partial_replay_request(tag, key);
+                    } else {
+                        return;
+                    }
                 }
             }
             TriggerEndpoint::Local(..) => {
