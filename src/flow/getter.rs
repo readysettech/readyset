@@ -3,7 +3,7 @@ use flow;
 use checktable;
 use backlog;
 
-use std::iter::FromIterator;
+use std::sync::Arc;
 
 /// A handle for looking up results in a materialized view.
 pub struct Getter {
@@ -40,23 +40,24 @@ impl Getter {
     ///
     /// If you need to clone values out of the returned rows, make sure to use
     /// `DataType::deep_clone` to avoid contention on internally de-duplicated strings!
-    pub fn get_and_then<F, ER, R>(&self, q: &DataType, mut f: F, block: bool) -> Result<R, ()>
+    pub fn lookup_map<F, T>(&self, q: &DataType, mut f: F, block: bool) -> Result<Option<T>, ()>
     where
-        F: FnMut(&[DataType]) -> ER,
-        R: FromIterator<ER>,
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
-        self.handle
-            .find_and(q, |rs| rs.into_iter().map(|v| f(&v[..])).collect(), block)
-            .map(|r| r.0.unwrap_or_else(|| R::from_iter(None)))
+        self.handle.find_and(q, |rs| f(&rs[..]), block).map(|r| r.0)
     }
 
     /// Query for the results for the given key, optionally blocking if it is not yet available.
     pub fn lookup(&self, q: &DataType, block: bool) -> Result<Datas, ()> {
-        self.get_and_then(
+        self.lookup_map(
             q,
-            |r| r.into_iter().map(|v| v.deep_clone()).collect(),
+            |rs| {
+                rs.into_iter()
+                    .map(|r| r.iter().map(|v| v.deep_clone()).collect())
+                    .collect()
+            },
             block,
-        )
+        ).map(|r| r.unwrap_or_else(Vec::new))
     }
 
     /// Transactionally query for the given key, blocking if it is not yet available.
