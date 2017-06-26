@@ -973,6 +973,7 @@ impl Domain {
             let &mut ReplayPath {
                 ref path,
                 ref mut done_tx,
+                ref trigger,
                 ..
             } = self.replay_paths.get_mut(&tag).unwrap();
 
@@ -1380,6 +1381,9 @@ impl Domain {
                             }));
                             let miss = misses.swap_remove(0);
                             need_replay = Some((miss.node, miss.key, tag));
+                            if let TriggerEndpoint::End(..) = *trigger {
+                                finished_partial = true;
+                            }
                             break 'outer;
                         }
 
