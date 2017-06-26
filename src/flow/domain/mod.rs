@@ -230,6 +230,12 @@ impl Domain {
                 ::shard_by(&key[0], triggers.len())
             };
             self.concurrent_replays += 1;
+            trace!(self.log, "sending replay request";
+                   "tag" => ?tag,
+                   "key" => ?key,
+                   "buffered" => self.replay_request_queue.len(),
+                   "concurrent" => self.concurrent_replays,
+                   );
             if triggers[shard]
                 .send(box Packet::RequestPartialReplay { tag, key })
                 .is_err()
@@ -243,8 +249,14 @@ impl Domain {
 
     fn request_partial_replay(&mut self, tag: Tag, key: Vec<DataType>) {
         if self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
+            assert_eq!(self.replay_request_queue.len(), 0);
             self.send_partial_replay_request(tag, key);
         } else {
+            trace!(self.log, "buffering replay request";
+                   "tag" => ?tag,
+                   "key" => ?key,
+                   "buffered" => self.replay_request_queue.len(),
+                   );
             self.replay_request_queue.push_back((tag, key));
         }
     }
