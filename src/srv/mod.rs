@@ -5,6 +5,7 @@ use bincode;
 use bufstream::BufStream;
 use std::io::prelude::*;
 use std::io;
+use std::sync::Arc;
 
 use vec_map::VecMap;
 
@@ -87,11 +88,29 @@ pub fn main(stream: TcpStream, mut s: Server) {
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
             Ok(Method::Query { view, key }) => {
-                if let Err(e) = bincode::serialize_into(
-                    &mut stream,
-                    &s.get[view].2.lookup(&key, true),
-                    bincode::Infinite,
-                ) {
+                let r = s.get[view]
+                    .2
+                    .lookup_map(
+                        &key,
+                        |rs| {
+                            bincode::serialize_into(
+                                &mut stream,
+                                &Ok::<_, ()>(rs),
+                                bincode::Infinite,
+                            )
+                        },
+                        true,
+                    )
+                    .map(|r| r.unwrap())
+                    .unwrap_or_else(|e| {
+                        bincode::serialize_into(
+                            &mut stream,
+                            &Err::<&[Arc<Vec<DataType>>], _>(e),
+                            bincode::Infinite,
+                        )
+                    });
+
+                if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
