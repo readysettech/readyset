@@ -27,11 +27,13 @@ pub mod prelude;
 pub mod statistics;
 
 mod mutator;
+mod getter;
 mod transactions;
 
 use self::prelude::Ingredient;
 
 pub use self::mutator::{Mutator, MutatorError};
+pub use self::getter::Getter;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -231,83 +233,10 @@ impl Blender {
         reader
     }
 
-    /// Obtain a new function for querying a given (already maintained) reader node.
-    pub fn get_getter(
-        &self,
-        node: prelude::NodeIndex,
-    ) -> Option<Box<Fn(&prelude::DataType, bool) -> Result<core::Datas, ()> + Send>> {
-
-        // look up the read handle, clone it, and construct the read closure
-        self.find_getter_for(node).and_then(|r| {
-            let vr = VIEW_READERS.lock().unwrap();
-            let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
-            rh.map(|rh| {
-                Box::new(
-                    move |q: &prelude::DataType, block: bool| -> Result<prelude::Datas, ()> {
-                        rh.find_and(
-                            q,
-                            |rs| {
-                                rs.into_iter()
-                                    .map(|v| {
-                                        (&**v).into_iter().map(|v| v.external_clone()).collect()
-                                    })
-                                    .collect()
-                            },
-                            block,
-                        ).map(|r| r.0.unwrap_or_else(Vec::new))
-                    },
-                ) as Box<_>
-            })
-        })
-    }
-
-    /// Obtain a new function for querying a given (already maintained) transactional reader node.
-    pub fn get_transactional_getter(
-        &self,
-        node: prelude::NodeIndex,
-    ) -> Result<
-        Box<
-            Fn(&prelude::DataType)
-                -> Result<(core::Datas, checktable::Token), ()>
-                + Send,
-        >,
-        (),
-    > {
-
-        if !self.ingredients[node].is_transactional() {
-            return Err(());
-        }
-
-        // look up the read handle, clone it, and construct the read closure
+    /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
+    pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
         self.find_getter_for(node)
-            .and_then(|r| {
-                let inner = self.ingredients[r].with_reader(|r| r).unwrap();
-                let vr = VIEW_READERS.lock().unwrap();
-                let rh: Option<backlog::ReadHandle> = vr.get(&r).cloned();
-                rh.map(|rh| {
-                    let generator = inner.token_generator().cloned().unwrap();
-                    Box::new(move |q: &prelude::DataType|
-                                   -> Result<(core::Datas, checktable::Token), ()> {
-                        rh.find_and(q,
-                                      |rs| {
-                                rs.into_iter()
-                                    .map(|v| {
-                                             (&**v)
-                                                 .into_iter()
-                                                 .map(|v| v.external_clone())
-                                                 .collect()
-                                         })
-                                    .collect()
-                            },
-                                      true)
-                            .map(|(res, ts)| {
-                                     let token = generator.generate(ts, q.clone());
-                                     (res.unwrap_or_else(Vec::new), token)
-                                 })
-                    }) as Box<_>
-                })
-            })
-            .ok_or(())
+            .and_then(|r| Getter::new(r, &self.ingredients))
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.

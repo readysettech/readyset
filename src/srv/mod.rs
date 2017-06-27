@@ -5,6 +5,7 @@ use bincode;
 use bufstream::BufStream;
 use std::io::prelude::*;
 use std::io;
+use std::sync::Arc;
 
 use vec_map::VecMap;
 
@@ -73,14 +74,12 @@ pub fn make_server(soup: &flow::Blender) -> Server {
     }
 }
 
-type Get = Box<Fn(&DataType, bool) -> Result<Vec<Vec<DataType>>, ()> + Send>;
-
 /// A handle to Soup put and get endpoints
 pub struct Server {
     /// All put endpoints.
     pub put: VecMap<(String, Vec<String>, flow::Mutator)>,
     /// All get endpoints.
-    pub get: VecMap<(String, Vec<String>, Get)>,
+    pub get: VecMap<(String, Vec<String>, flow::Getter)>,
 }
 
 /// Handle RPCs from a single `TcpStream`
@@ -89,11 +88,29 @@ pub fn main(stream: TcpStream, mut s: Server) {
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
             Ok(Method::Query { view, key }) => {
-                if let Err(e) = bincode::serialize_into(
-                    &mut stream,
-                    &s.get[view].2(&key, true),
-                    bincode::Infinite,
-                ) {
+                let r = s.get[view]
+                    .2
+                    .lookup_map(
+                        &key,
+                        |rs| {
+                            bincode::serialize_into(
+                                &mut stream,
+                                &Ok::<_, ()>(rs),
+                                bincode::Infinite,
+                            )
+                        },
+                        true,
+                    )
+                    .map(|r| r.unwrap())
+                    .unwrap_or_else(|e| {
+                        bincode::serialize_into(
+                            &mut stream,
+                            &Err::<&[Arc<Vec<DataType>>], _>(e),
+                            bincode::Infinite,
+                        )
+                    });
+
+                if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
