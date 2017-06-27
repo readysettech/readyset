@@ -138,9 +138,7 @@ impl Join {
         left.resize(self.in_place_left_emit.len(), DataType::None);
         for (i, &(from_left, c)) in self.in_place_left_emit.iter().enumerate() {
             if from_left && i != c {
-                let tmp = left[i].clone();
-                left[i] = left[c].clone();
-                left[c] = tmp;
+                left.swap(i, c);
             }
         }
         for (i, &(from_left, c)) in self.in_place_left_emit.iter().enumerate() {
@@ -159,9 +157,7 @@ impl Join {
         right.resize(self.in_place_right_emit.len(), DataType::None);
         for (i, &(from_left, c)) in self.in_place_right_emit.iter().enumerate() {
             if !from_left && i != c{
-                let tmp = right[i].clone();
-                right[i] = right[c].clone();
-                right[c] = tmp;
+                right.swap(i, c);
             }
         }
         for (i, &(from_left, c)) in self.in_place_right_emit.iter().enumerate() {
