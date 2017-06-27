@@ -83,6 +83,9 @@ impl PartialEq for DataType {
 
 impl Hash for DataType {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // The default derived hash function also hashes the variant tag, which turns out to be
+        // rather expensive. This version could (but probably won't) have a higher rate of
+        // collisions, but the decreased overhead is worth it.
         match *self {
             DataType::None => {}
             DataType::Int(n) => n.hash(state),
