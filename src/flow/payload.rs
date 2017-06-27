@@ -93,7 +93,7 @@ pub enum PacketEvent {
     Merged,
 }
 
-pub type Tracer = Option<mpsc::Sender<(time::Instant, PacketEvent)>>;
+pub type Tracer = Option<Vec<mpsc::Sender<(time::Instant, PacketEvent)>>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -397,9 +397,12 @@ impl Packet {
 
     pub fn trace(&self, event: PacketEvent) {
         match *self {
-            Packet::Message { tracer: Some(ref sender), .. } |
-            Packet::Transaction { tracer: Some(ref sender), .. } => {
-                let _ = sender.send((time::Instant::now(), event));
+            Packet::Message { tracer: Some(ref senders), .. } |
+            Packet::Transaction { tracer: Some(ref senders), .. } => {
+                let msg = (time::Instant::now(), event);
+                for sender in senders {
+                    let _ = sender.send(msg.clone());
+                }
             }
             _ => {}
         }

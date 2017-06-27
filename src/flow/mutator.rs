@@ -276,7 +276,7 @@ impl Mutator {
     /// graph.
     pub fn start_tracing(&mut self) -> mpsc::Receiver<(time::Instant, PacketEvent)> {
         let (tx, rx) = mpsc::channel();
-        self.tracer = Some(tx);
+        self.tracer = Some(vec![tx]);
         rx
     }
 

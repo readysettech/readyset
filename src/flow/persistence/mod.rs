@@ -265,7 +265,7 @@ impl GroupCommitQueueSet {
             box Packet::Transaction { ref link, .. } => link.clone(),
             _ => unreachable!(),
         };
-        let mut merged_tracer = None;
+        let mut merged_tracer: Tracer = None;
 
         let merged_data = packets.fold(Records::default(), |mut acc, p| {
             match (p,) {
@@ -284,11 +284,7 @@ impl GroupCommitQueueSet {
                     acc.append(data);
 
                     if merged_tracer.is_some() && tracer.is_some() {
-                        tracer
-                            .as_mut()
-                            .unwrap()
-                            .send((time::Instant::now(), PacketEvent::Merged))
-                            .unwrap();
+                        merged_tracer.as_mut().unwrap().extend(tracer.take().unwrap());
                     } else if tracer.is_some() {
                         merged_tracer = tracer.take();
                     }
