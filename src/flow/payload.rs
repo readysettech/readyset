@@ -89,8 +89,6 @@ pub enum PacketEvent {
     Process,
     /// The packet has reached some reader node.
     ReachedReader,
-    /// The packet has been merged with others, and is no longer being traced.
-    Merged,
 }
 
 pub type Tracer = Option<Vec<mpsc::Sender<(time::Instant, PacketEvent)>>>;
