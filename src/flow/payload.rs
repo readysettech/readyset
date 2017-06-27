@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use std::time;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
     pub src: LocalNodeIndex,
     pub dst: LocalNodeIndex,
@@ -56,7 +56,7 @@ pub enum InitialState {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
         for_key: Vec<DataType>,
@@ -72,14 +72,14 @@ pub enum TransactionState {
     WillCommit,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ReplayTransactionState {
     pub ts: i64,
     pub prevs: Option<Box<HashMap<domain::Index, i64>>>,
 }
 
 /// Different events that can occur as a packet is being processed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PacketEvent {
     /// The packet has been pulled off the input channel.
     ExitInputChannel,

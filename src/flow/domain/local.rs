@@ -177,7 +177,7 @@ pub enum KeyType<'a, T: 'a> {
     Quad((T, T, T, T)),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 enum KeyedState<T: Eq + Hash> {
     Single(FnvHashMap<T, Vec<Arc<Vec<T>>>>),
     Double(FnvHashMap<(T, T), Vec<Arc<Vec<T>>>>),
@@ -273,7 +273,7 @@ pub enum LookupResult<'a, T: 'a> {
     Missing,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct State<T: Hash + Eq + Clone> {
     state: Vec<(Vec<usize>, KeyedState<T>, bool)>,
     rows: usize,

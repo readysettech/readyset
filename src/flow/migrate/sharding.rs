@@ -6,7 +6,7 @@ use slog::Logger;
 use petgraph;
 use ops;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {
     None,
     Random,

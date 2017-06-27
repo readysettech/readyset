@@ -31,7 +31,7 @@ macro_rules! dur_to_ns {
 use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
 static TAG_GENERATOR: AtomicUsize = ATOMIC_USIZE_INIT;
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
 pub struct Tag(u32);
 
 impl Tag {
