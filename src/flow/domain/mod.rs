@@ -956,7 +956,7 @@ impl Domain {
                             for_key: Vec::from(key),
                             ignore: false,
                         },
-                        data: Records::from_iter(rs.into_iter().cloned()),
+                        data: Records::from_iter(rs.into_iter().map(|r| (**r).clone())),
                         transaction_state: transaction_state,
                     });
                     (m, source, false)
@@ -1209,7 +1209,7 @@ impl Domain {
                                 let start = time::Instant::now();
                                 debug!(log, "starting state chunker"; "node" => %link.dst);
 
-                                let iter = state.into_iter().flat_map(|rs| rs).chunks(BATCH_SIZE);
+                                let iter = state.into_iter().flat_map(|rs| rs).map(|rs| (*rs).clone()).chunks(BATCH_SIZE);
                                 let mut iter = iter.into_iter().enumerate().peekable();
 
                                 // process all records in state to completion within domain

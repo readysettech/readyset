@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync;
 
 use flow::prelude::*;
 
@@ -164,9 +163,9 @@ impl Ingredient for Union {
 
                         // return new row with appropriate sign
                         if pos {
-                            Record::Positive(sync::Arc::new(res))
+                            Record::Positive(res)
                         } else {
-                            Record::Negative(sync::Arc::new(res))
+                            Record::Negative(res)
                         }
                     })
                     .collect();

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use std::sync::Arc;
-
 use flow::prelude::*;
 
 /// Kind of join
@@ -38,6 +36,11 @@ pub struct Join {
     // right
     emit: Vec<(bool, usize)>,
 
+    // Which columns to emit when the left/right row is being modified in place. True means the
+    // column is from the left parent, false means from the right
+    in_place_left_emit: Vec<(bool, usize)>,
+    in_place_right_emit: Vec<(bool, usize)>,
+
     // Stores number of records on the right with each key before and after applying the new records
     // within `on_input()`. Used to avoid creating a new HashMap for every call to `on_input()`, but
     // is never used except for in that function.
@@ -55,7 +58,7 @@ impl Join {
     /// means right parent).
     pub fn new(left: NodeIndex, right: NodeIndex, kind: JoinType, emit: Vec<JoinSource>) -> Self {
         let mut join_columns = Vec::new();
-        let emit = emit.into_iter()
+        let emit: Vec<_> = emit.into_iter()
             .map(|join_source| match join_source {
                 JoinSource::L(c) => (true, c),
                 JoinSource::R(c) => (false, c),
@@ -65,21 +68,58 @@ impl Join {
                 }
             })
             .collect();
-
-        assert_eq!(join_columns.len(), 1);
         let on = *join_columns.iter().next().unwrap();
+
+        let (in_place_left_emit, in_place_right_emit) = {
+            let compute_in_place_emit = |left| {
+                let num_columns = emit.iter()
+                    .filter(|&&(from_left, _)| from_left == left)
+                    .map(|&(_, c)| c + 1)
+                    .max()
+                    .unwrap_or(0);
+
+                /// Tracks how columns have moved. At any point during the iteration, column i in
+                /// the original row will be located at position remap[i].
+                let mut remap: Vec<_> = (0..num_columns).collect();
+                emit.iter()
+                    .enumerate()
+                    .map(|(i, &(from_left, c))| {
+                        if from_left == left {
+                            let remapped = remap[c];
+                            let other = remap.iter().position(|&c| c == i);
+
+                            // Columns can't appear multiple times in join output!
+                            assert!((remapped >= i) || (emit[remapped].0 != left));
+
+                            remap[c] = i;
+                            if let Some(other) = other {
+                                remap[other] = remapped;
+                            }
+
+                            (from_left, remapped)
+                        } else {
+                            (from_left, c)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+
+            (compute_in_place_emit(true), compute_in_place_emit(false))
+        };
 
         Self {
             left: left.into(),
             right: right.into(),
             on: on,
             emit: emit,
+            in_place_left_emit,
+            in_place_right_emit,
             right_counts: HashMap::new(),
             kind: kind,
         }
     }
 
-    fn generate_row(&self, left: &Arc<Vec<DataType>>, right: &Arc<Vec<DataType>>) -> Vec<DataType> {
+    fn generate_row(&self, left: &Vec<DataType>, right: &Vec<DataType>) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {
@@ -90,7 +130,45 @@ impl Join {
             .collect()
     }
 
-    fn generate_null(&self, left: &Arc<Vec<DataType>>) -> Vec<DataType> {
+    fn generate_row_from_left(
+        &self,
+        mut left: Vec<DataType>,
+        right: &Vec<DataType>,
+    ) -> Vec<DataType> {
+        left.resize(self.in_place_left_emit.len(), DataType::None);
+        for (i, &(from_left, c)) in self.in_place_left_emit.iter().enumerate() {
+            if from_left && i != c {
+                left.swap(i, c);
+            }
+        }
+        for (i, &(from_left, c)) in self.in_place_left_emit.iter().enumerate() {
+            if !from_left {
+                left[i] = right[c].clone();
+            }
+        }
+        left
+    }
+
+    fn generate_row_from_right(
+        &self,
+        left: &Vec<DataType>,
+        mut right: Vec<DataType>,
+    ) -> Vec<DataType> {
+        right.resize(self.in_place_right_emit.len(), DataType::None);
+        for (i, &(from_left, c)) in self.in_place_right_emit.iter().enumerate() {
+            if !from_left && i != c{
+                right.swap(i, c);
+            }
+        }
+        for (i, &(from_left, c)) in self.in_place_right_emit.iter().enumerate() {
+            if from_left {
+                right[i] = left[c].clone();
+            }
+        }
+        right
+    }
+
+    fn generate_null(&self, left: &Vec<DataType>) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {
@@ -197,12 +275,8 @@ impl Ingredient for Join {
         // other side(s) for records matching the incoming records on that side's join
         // fields.
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
-        for rec in rs.iter() {
-            let (row, positive) = match *rec {
-                Record::Positive(ref row) => (row, true),
-                Record::Negative(ref row) => (row, false),
-                _ => unreachable!(),
-            };
+        for rec in rs {
+            let (row, positive) = rec.extract();
 
             let other_rows = self.lookup(
                 other,
@@ -253,14 +327,20 @@ impl Ingredient for Join {
                 }
             }
 
-            if from == *self.right {
-                ret.extend(
-                    other_rows.map(|r| (self.generate_row(r, &row), positive).into()),
-                );
-            } else {
-                ret.extend(
-                    other_rows.map(|r| (self.generate_row(&row, r), positive).into()),
-                );
+            if from == *self.right && other_rows.peek().is_some() {
+                let mut r = other_rows.next().unwrap();
+                while other_rows.peek().is_some() {
+                    ret.push((self.generate_row(r, &row), positive).into());
+                    r = other_rows.next().unwrap();
+                }
+                ret.push((self.generate_row_from_right(r, row), positive).into());
+            } else if other_rows.peek().is_some() {
+                let mut r = other_rows.next().unwrap();
+                while other_rows.peek().is_some() {
+                    ret.push((self.generate_row(&row, r), positive).into());
+                    r = other_rows.next().unwrap();
+                }
+                ret.push((self.generate_row_from_left(row, r), positive).into());
             }
         }
 

@@ -276,12 +276,11 @@ fn it_works_deletion() {
     );
 
     // delete first value
-    use std::sync::Arc;
     use distributary::StreamUpdate::*;
     muta.delete(vec![2.into()]).unwrap();
     assert_eq!(
         cq.recv_timeout(time::Duration::from_millis(SETTLE_TIME_MS)),
-        Ok(vec![DeleteRow(Arc::new(vec![1.into(), 2.into()]))])
+        Ok(vec![DeleteRow(vec![1.into(), 2.into()])])
     );
 }
 

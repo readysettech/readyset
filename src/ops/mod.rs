@@ -1,6 +1,7 @@
-use flow::core::processing::Ingredient;
 use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
+
+use flow::core::processing::Ingredient;
 use flow::prelude::*;
 
 pub mod base;
@@ -344,6 +345,8 @@ pub mod test {
         }
 
         pub fn seed(&mut self, base: IndexPair, data: Vec<DataType>) {
+            use std::sync::Arc;
+
             assert!(self.nut.is_some(), "seed must happen after set_op");
 
             // base here is some identifier that was returned by Self::add_base.
@@ -358,7 +361,7 @@ pub mod test {
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(&*base) {
                 match data.into() {
-                    Record::Positive(r) => state.insert(r),
+                    Record::Positive(r) => state.insert(Arc::new(r)),
                     Record::Negative(_) => unreachable!(),
                     Record::DeleteRequest(..) => unreachable!(),
                 }

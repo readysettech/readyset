@@ -3,8 +3,6 @@ use flow;
 use checktable;
 use backlog;
 
-use std::sync::Arc;
-
 /// A handle for looking up results in a materialized view.
 pub struct Getter {
     pub(crate) generator: Option<checktable::TokenGenerator>,
@@ -42,7 +40,7 @@ impl Getter {
     /// `DataType::deep_clone` to avoid contention on internally de-duplicated strings!
     pub fn lookup_map<F, T>(&self, q: &DataType, mut f: F, block: bool) -> Result<Option<T>, ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.find_and(q, |rs| f(&rs[..]), block).map(|r| r.0)
     }

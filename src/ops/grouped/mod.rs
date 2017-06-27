@@ -1,6 +1,5 @@
 use std::fmt;
 use std::collections::HashMap;
-use std::sync;
 
 use flow::prelude::*;
 
@@ -165,17 +164,14 @@ where
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries.
         let mut consolidate = HashMap::new();
-        for rec in &rs {
+        for rec in rs {
             let val = self.inner.to_diff(&rec[..], rec.is_positive());
-            let group = rec.iter()
-                .enumerate()
-                .filter_map(|(i, v)| if self.group_by.iter().any(|col| col == &i) {
-                    Some(v)
-                } else {
-                    None
-                })
-                .collect::<Vec<_>>();
 
+            let mut group = rec.extract().0;
+            for (i, &col) in self.group_by.iter().enumerate() {
+                group[i] = group[col].clone();
+            }
+            group.resize(self.group_by.len(), DataType::None);
             consolidate.entry(group).or_insert_with(Vec::new).push(val);
         }
 
@@ -196,7 +192,7 @@ where
                 LookupResult::Missing => {
                     misses.push(Miss {
                         node: *us,
-                        key: group.iter().map(|&dt| dt.clone()).collect(),
+                        key: group,
                     });
                     continue;
                 }
@@ -222,16 +218,13 @@ where
                     if let Some(old) = old {
                         // revoke old value
                         debug_assert!(current.is_some());
-                        out.push(Record::Negative(old.clone()));
+                        out.push(Record::Negative((**old).clone()));
                     }
 
                     // emit positive, which is group + new.
-                    let rec: Vec<_> = group
-                        .into_iter()
-                        .cloned()
-                        .chain(Some(new.into()).into_iter())
-                        .collect();
-                    out.push(Record::Positive(sync::Arc::new(rec)));
+                    let mut rec = group;
+                    rec.push(new);
+                    out.push(Record::Positive(rec));
                 }
             }
         }

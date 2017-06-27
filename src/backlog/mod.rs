@@ -43,7 +43,7 @@ fn new_inner(
 }
 
 pub struct WriteHandle {
-    handle: evmap::WriteHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    handle: evmap::WriteHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
     partial: bool,
     cols: usize,
     key: usize,
@@ -93,7 +93,7 @@ impl WriteHandle {
 
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -113,7 +113,7 @@ impl WriteHandle {
 
 #[derive(Clone)]
 pub struct ReadHandle {
-    handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
+    handle: evmap::ReadHandle<DataType, Vec<DataType>, i64, FnvBuildHasher>,
     trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
     key: usize,
 }
@@ -135,7 +135,7 @@ impl ReadHandle {
         block: bool,
     ) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         match self.try_find_and(key, &mut then) {
             Ok((None, ts)) if self.trigger.is_some() => {
@@ -167,7 +167,7 @@ impl ReadHandle {
 
     pub fn try_find_and<F, T>(&self, key: &DataType, mut then: F) -> Result<(Option<T>, i64), ()>
     where
-        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+        F: FnMut(&[Vec<DataType>]) -> T,
     {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn store_works() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
+        let a = vec![1.into(), "a".into()];
 
         let (r, mut w) = new(2, 0);
 
@@ -222,7 +222,7 @@ mod tests {
         let n = 10000;
         let (r, mut w) = new(1, 0);
         thread::spawn(move || for i in 0..n {
-            w.add(vec![Record::Positive(Arc::new(vec![i.into()]))]);
+            w.add(vec![Record::Positive(vec![i.into()])]);
             w.swap();
         });
 
@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn minimal_query() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
-        let b = Arc::new(vec![1.into(), "b".into()]);
+        let a = vec![1.into(), "a".into()];
+        let b = vec![1.into(), "b".into()];
 
         let (r, mut w) = new(2, 0);
         w.add(vec![Record::Positive(a.clone())]);
@@ -263,9 +263,9 @@ mod tests {
 
     #[test]
     fn non_minimal_query() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
-        let b = Arc::new(vec![1.into(), "b".into()]);
-        let c = Arc::new(vec![1.into(), "c".into()]);
+        let a = vec![1.into(), "a".into()];
+        let b = vec![1.into(), "b".into()];
+        let c = vec![1.into(), "c".into()];
 
         let (r, mut w) = new(2, 0);
         w.add(vec![Record::Positive(a.clone())]);
@@ -296,8 +296,8 @@ mod tests {
 
     #[test]
     fn absorb_negative_immediate() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
-        let b = Arc::new(vec![1.into(), "b".into()]);
+        let a = vec![1.into(), "a".into()];
+        let b = vec![1.into(), "b".into()];
 
         let (r, mut w) = new(2, 0);
         w.add(vec![Record::Positive(a.clone())]);
@@ -319,8 +319,8 @@ mod tests {
 
     #[test]
     fn absorb_negative_later() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
-        let b = Arc::new(vec![1.into(), "b".into()]);
+        let a = vec![1.into(), "a".into()];
+        let b = vec![1.into(), "b".into()];
 
         let (r, mut w) = new(2, 0);
         w.add(vec![Record::Positive(a.clone())]);
@@ -343,9 +343,9 @@ mod tests {
 
     #[test]
     fn absorb_multi() {
-        let a = Arc::new(vec![1.into(), "a".into()]);
-        let b = Arc::new(vec![1.into(), "b".into()]);
-        let c = Arc::new(vec![1.into(), "c".into()]);
+        let a = vec![1.into(), "a".into()];
+        let b = vec![1.into(), "b".into()];
+        let c = vec![1.into(), "c".into()];
 
         let (r, mut w) = new(2, 0);
         w.add(vec![

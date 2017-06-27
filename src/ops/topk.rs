@@ -1,16 +1,16 @@
 use std::mem;
 use std::collections::HashMap;
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use flow::prelude::*;
-use std::cmp::Ordering;
 
 use nom_sql::OrderType;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Order(Vec<(usize, OrderType)>);
 impl Order {
-    fn cmp(&self, a: &&Arc<Vec<DataType>>, b: &&Arc<Vec<DataType>>) -> Ordering {
+    fn cmp(&self, a: &&Vec<DataType>, b: &&Vec<DataType>) -> Ordering {
         for &(c, ref order_type) in &self.0 {
             let result = match *order_type {
                 OrderType::OrderAscending => a[c].cmp(&b[c]),
@@ -98,10 +98,10 @@ impl TopK {
 
         let mut delta: Vec<Record> = Vec::new();
         let mut current: Vec<&Arc<Vec<DataType>>> = current_topk.iter().collect();
-        current.sort_by(|a, b| self.order.cmp(a, b));
+        current.sort_by(|a, b| self.order.cmp(&&***a, &&***b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
-                let idx = current.binary_search_by(|row| self.order.cmp(&row, &&a));
+                let idx = current.binary_search_by(|row| self.order.cmp(&&***row, &&a));
                 if let Ok(idx) = idx {
                     current.remove(idx);
                     delta.push(r.clone())
@@ -109,12 +109,12 @@ impl TopK {
             }
         }
 
-        let mut output_rows: Vec<(&Arc<Vec<DataType>>, bool)> = new.iter()
+        let mut output_rows: Vec<(&Vec<DataType>, bool)> = new.iter()
             .filter_map(|r| match r {
-                &Record::Positive(ref a) => Some((a, false)),
+                &Record::Positive(ref a) => Some((&*a, false)),
                 _ => None,
             })
-            .chain(current.into_iter().map(|a| (a, true)))
+            .chain(current.into_iter().map(|a| (&**a, true)))
             .collect();
         output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
 
@@ -129,7 +129,7 @@ impl TopK {
 
             // Get the minimum element of output_rows.
             if let Some((min, _)) = output_rows.iter().cloned().next() {
-                let is_min = |&&(ref r, _): &&(&Arc<Vec<DataType>>, bool)| {
+                let is_min = |&&(ref r, _): &&(&Vec<DataType>, bool)| {
                     self.order.cmp(&&r, &&min) == Ordering::Equal
                 };
 
@@ -141,10 +141,10 @@ impl TopK {
                         // by the fact that it currently contains all rows greater than `min`, and
                         // none less than it. The only complication are rows which compare equal to
                         // `min`: they get added except if there is already an identical row.
-                        match self.order.cmp(&r, &&min) {
+                        match self.order.cmp(&&**r, &&min) {
                             Ordering::Less => Some((r, false)),
                             Ordering::Equal => {
-                                let e = current_mins.iter().position(|&(ref s, _)| *s == r);
+                                let e = current_mins.iter().position(|&(ref s, _)| **s == **r);
                                 match e {
                                     Some(i) => {
                                         current_mins.swap_remove(i);
@@ -156,10 +156,11 @@ impl TopK {
                             Ordering::Greater => None,
                         }
                     })
+                    .map(|(r, p)| (&**r, p))
                     .chain(output_rows.into_iter())
                     .collect();
             } else {
-                output_rows = rs.iter().map(|rs| (rs, false)).collect();
+                output_rows = rs.iter().map(|rs| (&**rs, false)).collect();
             }
             output_rows.sort_by(|a, b| self.order.cmp(&a.0, &b.0));
         }

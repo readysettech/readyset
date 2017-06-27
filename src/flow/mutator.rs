@@ -59,13 +59,11 @@ impl Mutator {
                 use std::mem;
 
                 // get a handle to the underlying data vector
-                use std::sync::Arc;
-                let v = match *r {
-                    Record::Positive(ref mut v) |
-                    Record::Negative(ref mut v) => v,
+                let r = match *r {
+                    Record::Positive(ref mut r) |
+                    Record::Negative(ref mut r) => r,
                     _ => continue,
                 };
-                let r = Arc::get_mut(v).expect("send should have complete ownership of records");
 
                 // we want to iterate over all the dropped columns
                 let dropped = dropped.clone();

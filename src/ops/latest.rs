@@ -115,7 +115,7 @@ impl Ingredient for Latest {
             // buffer emitted records
             for (r, current) in currents {
                 if let Some(current) = current {
-                    out.push(Record::Negative(current.clone()));
+                    out.push(Record::Negative((**current).clone()));
                 }
 
                 // if there was a previous latest for this key, revoke old record

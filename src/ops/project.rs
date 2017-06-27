@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync;
 
 use flow::prelude::*;
 
@@ -105,7 +104,7 @@ impl Ingredient for Project {
                     }
                     None => (),
                 }
-                **r = sync::Arc::new(new_r);
+                **r = new_r;
             }
         }
         ProcessingResult {
