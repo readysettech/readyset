@@ -68,6 +68,7 @@ pub struct Blender {
     persistence: persistence::Parameters,
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
+    channel_coordinator: Arc<prelude::ChannelCoordinator>,
 
     log: slog::Logger,
 }
@@ -93,6 +94,7 @@ impl Default for Blender {
             persistence: persistence::Parameters::default(),
 
             domains: Default::default(),
+            channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -883,8 +885,9 @@ impl<'a> Migration<'a> {
                 &log,
                 &mut mainline.ingredients,
                 nodes,
-                mainline.persistence.clone(),
-                mainline.checktable.clone(),
+                &mainline.persistence,
+                &mainline.checktable,
+                &mainline.channel_coordinator,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
@@ -967,6 +970,7 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
+        self.channel_coordinator.reset();
         for (_, mut d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));

@@ -108,6 +108,7 @@ pub struct Domain {
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     inject_tx: Option<mpsc::SyncSender<Box<Packet>>>,
+    channel_coordinator: Arc<ChannelCoordinator>,
 
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
@@ -125,6 +126,7 @@ impl Domain {
         nodes: DomainNodes,
         persistence_parameters: persistence::Parameters,
         checktable: Arc<Mutex<checktable::CheckTable>>,
+        channel_coordinator: Arc<ChannelCoordinator>,
         ts: i64,
     ) -> Self {
         // initially, all nodes are not ready
@@ -148,6 +150,7 @@ impl Domain {
             replay_paths: HashMap::new(),
 
             inject_tx: None,
+            channel_coordinator,
 
             concurrent_replays: 0,
             replay_request_queue: Default::default(),
@@ -647,10 +650,13 @@ impl Domain {
                         new_tx,
                         new_tag,
                     } => {
+                        let channel = new_tx
+                            .as_ref()
+                            .and_then(|&(_, _, ref k)| self.channel_coordinator.get_tx(k));
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_egress_mut(move |e| {
-                            if let Some(new_tx) = new_tx {
-                                e.add_tx(new_tx.0, new_tx.1, new_tx.2);
+                            if let (Some(new_tx), Some(channel)) = (new_tx, channel) {
+                                e.add_tx(new_tx.0, new_tx.1, channel);
                             }
                             if let Some(new_tag) = new_tag {
                                 e.add_tag(new_tag.0, new_tag.1);
@@ -658,8 +664,12 @@ impl Domain {
                         });
                     }
                     Packet::UpdateSharder { node, new_txs } => {
+                        let new_channels: Vec<_> = new_txs.1
+                            .iter()
+                            .filter_map(|ntx| self.channel_coordinator.get_tx(ntx))
+                            .collect();
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_sharder_mut(move |s| { s.add_sharded_child(new_txs.0, new_txs.1); });
+                        n.with_sharder_mut(move |s| { s.add_sharded_child(new_txs.0, new_channels); });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();

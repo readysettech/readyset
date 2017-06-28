@@ -390,6 +390,7 @@ extern crate chrono;
 extern crate time;
 
 mod backlog;
+mod channel;
 mod checktable;
 mod flow;
 mod mir;

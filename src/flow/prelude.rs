@@ -27,3 +27,7 @@ pub type State = local::State<core::DataType>;
 pub type StateMap = local::Map<State>;
 pub use flow::domain::local::KeyType;
 pub use flow::domain::local::LookupResult;
+
+use channel;
+use flow::domain;
+pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize), Box<Packet>>;

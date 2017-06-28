@@ -157,7 +157,7 @@ pub enum Packet {
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, (domain::Index, usize))>,
         new_tag: Option<(Tag, NodeIndex)>,
     },
 
@@ -166,7 +166,7 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<mpsc::SyncSender<Box<Packet>>>),
+        new_txs: (LocalNodeIndex, Vec<(domain::Index, usize)>),
     },
 
     /// Add a streamer to an existing reader node.

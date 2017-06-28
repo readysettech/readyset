@@ -1,3 +1,4 @@
+use channel::ChannelSender;
 use flow::prelude::*;
 use flow::domain;
 use flow::checktable;
@@ -79,6 +80,10 @@ impl DomainHandle {
         self.txs.clone()
     }
 
+    pub fn shards(&self) -> usize {
+        self.txs.len()
+    }
+
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
         nodes
             .into_iter()
@@ -95,10 +100,19 @@ impl DomainHandle {
         log: &Logger,
         graph: &mut Graph,
         nodes: Vec<(NodeIndex, bool)>,
-        persistence_params: persistence::Parameters,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
+        persistence_params: &persistence::Parameters,
+        checktable: &Arc<Mutex<checktable::CheckTable>>,
+        channel_coordinator: &Arc<ChannelCoordinator>,
         ts: i64,
     ) {
+        for (i, (tx, in_tx)) in self.txs.iter().zip(self.in_txs.iter()).enumerate() {
+            channel_coordinator.insert_tx(
+                (self.idx, i),
+                ChannelSender::LocalSync(tx.clone()),
+                ChannelSender::LocalSync(in_tx.clone()),
+            );
+        }
+
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
         let n = self.rxs.len();
         for (i, (rx, in_rx)) in self.rxs.drain(..).enumerate() {
@@ -120,6 +134,7 @@ impl DomainHandle {
                 nodes,
                 persistence_params.clone(),
                 checktable.clone(),
+                channel_coordinator.clone(),
                 ts,
             );
             self.threads.push(domain.boot(rx, in_rx));
@@ -314,7 +329,8 @@ impl DomainHandle {
                     Record::Positive(ref r) |
                     Record::Negative(ref r) => &r[key_col] == key,
                     Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                }) {
+                })
+                {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }
