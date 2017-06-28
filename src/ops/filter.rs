@@ -130,30 +130,34 @@ impl Ingredient for Filter {
         columns: &[usize],
         key: &KeyType<DataType>,
         states: &'a StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a sync::Arc<Vec<DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a [DataType]> + 'a>>> {
         states.get(&*self.src).and_then(|state| {
             let f = self.filter.clone();
             match state.lookup(columns, key) {
                 LookupResult::Some(rs) => {
-                    let r = Box::new(rs.iter().filter(move |r| {
-                        r.iter().enumerate().all(|(i, d)| {
-                            // check if this filter matches
-                            if let Some((ref op, ref f)) = f[i] {
-                                match *op {
-                                    Operator::Equal => d == f,
-                                    Operator::NotEqual => d != f,
-                                    Operator::Greater => d > f,
-                                    Operator::GreaterOrEqual => d >= f,
-                                    Operator::Less => d < f,
-                                    Operator::LessOrEqual => d <= f,
-                                    _ => unimplemented!(),
-                                }
-                            } else {
-                                // everything matches no condition
-                                true
-                            }
-                        })
-                    })) as Box<_>;
+                    let r = Box::new(
+                        rs.iter()
+                            .filter(move |r| {
+                                r.iter().enumerate().all(|(i, d)| {
+                                    // check if this filter matches
+                                    if let Some((ref op, ref f)) = f[i] {
+                                        match *op {
+                                            Operator::Equal => d == f,
+                                            Operator::NotEqual => d != f,
+                                            Operator::Greater => d > f,
+                                            Operator::GreaterOrEqual => d >= f,
+                                            Operator::Less => d < f,
+                                            Operator::LessOrEqual => d <= f,
+                                            _ => unimplemented!(),
+                                        }
+                                    } else {
+                                        // everything matches no condition
+                                        true
+                                    }
+                                })
+                            })
+                            .map(|r| &r[..]),
+                    ) as Box<_>;
                     Some(Some(r))
                 }
                 LookupResult::Missing => Some(None),

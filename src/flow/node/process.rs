@@ -2,8 +2,6 @@ use flow::prelude::*;
 use flow::node::NodeType;
 use flow::payload;
 
-use std::sync::Arc;
-
 impl Node {
     pub fn process(
         &mut self,
@@ -164,7 +162,7 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
                 return false;
             }
             match *r {
-                Record::Positive(ref r) => state.insert(Arc::new(r.clone())),
+                Record::Positive(ref r) => state.insert(r.clone()),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
@@ -174,7 +172,7 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
     } else {
         for r in rs.iter() {
             match *r {
-                Record::Positive(ref r) => state.insert(Arc::new(r.clone())),
+                Record::Positive(ref r) => state.insert(r.clone()),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
