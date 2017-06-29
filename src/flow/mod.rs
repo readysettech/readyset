@@ -263,7 +263,7 @@ impl Blender {
         }
 
         let reply_chan = mpsc::channel();
-        let reply_chan = (channel::ChannelSender::Local(reply_chan.0), reply_chan.1);
+        let reply_chan = (channel::TransactionReplySender::from_local(reply_chan.0), reply_chan.1);
 
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
@@ -621,7 +621,7 @@ impl<'a> Migration<'a> {
     pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
         let (tx, rx) = mpsc::channel();
-        let mut tx = channel::ChannelSender::Local(tx);
+        let mut tx = channel::StreamSender::from_local(tx);
 
         // If the reader hasn't been incorporated into the graph yet, just add the streamer
         // directly.

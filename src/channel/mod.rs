@@ -42,6 +42,14 @@ impl<T> ChannelSender<T> {
             ChannelSender::LocalSync(ref s) => s.send(t),
         }
     }
+
+    pub fn from_local(local: mpsc::Sender<T>) -> Self {
+        ChannelSender::Local(local)
+    }
+
+    pub fn from_sync(sync: mpsc::SyncSender<T>) -> Self {
+        ChannelSender::LocalSync(sync)
+    }
 }
 
 pub type TransactionReplySender<T> = ChannelSender<T>;
