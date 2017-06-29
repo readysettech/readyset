@@ -246,7 +246,7 @@ mod tests {
     fn merge_mir() {
         use mir::{MirNode, MirNodeType, MirQuery};
 
-        let log = ::logger_pls();
+        let log = slog::Logger::root(slog::Discard, o!());
 
         let (a, b, c, d) = make_nodes();
 
