@@ -284,7 +284,10 @@ impl GroupCommitQueueSet {
                     acc.append(data);
 
                     if merged_tracer.is_some() && tracer.is_some() {
-                        merged_tracer.as_mut().unwrap().extend(tracer.take().unwrap());
+                        merged_tracer
+                            .as_mut()
+                            .unwrap()
+                            .extend(tracer.take().unwrap());
                     } else if tracer.is_some() {
                         merged_tracer = tracer.take();
                     }

@@ -49,18 +49,29 @@ pub fn shard(
             // global node indices.
             graph[node].suggest_indexes(node.into())
         } else if graph[node].is_reader() {
-            // TODO: we may want to allow sharded Readers eventually...
-            info!(log, "forcing de-sharding prior to Reader"; "node" => ?node);
             assert_eq!(input_shardings.len(), 1);
-            reshard(
-                log,
-                new,
-                &mut swaps,
-                graph,
-                input_shardings.keys().next().cloned().unwrap(),
-                node,
-                Sharding::None,
-            );
+            let ni = input_shardings.keys().next().cloned().unwrap();
+            if let Sharding::None = input_shardings[&ni] {
+                continue;
+            }
+
+            let s = graph[node]
+                .with_reader(|r| r.key())
+                .unwrap()
+                .map(Sharding::ByColumn)
+                .unwrap_or(Sharding::None);
+            if s == Sharding::None {
+                info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
+            } else {
+                info!(log, "sharding reader"; "node" => ?node);
+                graph[node].with_reader_mut(|r| r.shard(::SHARDS));
+            }
+
+            if s != input_shardings[&ni] {
+                // input is sharded by different key -- need shuffle
+                reshard(log, new, &mut swaps, graph, ni, node, s);
+            }
+            graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
         } else {
             // non-internal nodes are always pass-through

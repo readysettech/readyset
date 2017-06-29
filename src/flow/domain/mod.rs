@@ -697,17 +697,26 @@ impl Domain {
                                 use flow;
                                 use backlog;
                                 let txs = Mutex::new(trigger_txs);
-                                let (r_part, w_part) = backlog::new_partial(
-                                    cols,
-                                    key,
-                                    move |key| for tx in &mut *txs.lock().unwrap() {
+                                let (r_part, w_part) =
+                                    backlog::new_partial(cols, key, move |key| {
+                                        let mut txs = txs.lock().unwrap();
+                                        let tx = if txs.len() == 1 {
+                                            &mut txs[0]
+                                        } else {
+                                            let n = txs.len();
+                                            &mut txs[::shard_by(key, n)]
+                                        };
                                         tx.send(box Packet::RequestPartialReplay {
                                             key: vec![key.clone()],
                                             tag: tag,
                                         }).unwrap();
-                                    },
-                                );
-                                flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
+                                    });
+                                flow::VIEW_READERS
+                                    .lock()
+                                    .unwrap()
+                                    .get_mut(&gid)
+                                    .unwrap()
+                                    .set_single_handle(self.shard, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -719,7 +728,12 @@ impl Domain {
                                 use flow;
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, key);
-                                flow::VIEW_READERS.lock().unwrap().insert(gid, r_part);
+                                flow::VIEW_READERS
+                                    .lock()
+                                    .unwrap()
+                                    .get_mut(&gid)
+                                    .unwrap()
+                                    .set_single_handle(self.shard, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -1209,7 +1223,11 @@ impl Domain {
                                 let start = time::Instant::now();
                                 debug!(log, "starting state chunker"; "node" => %link.dst);
 
-                                let iter = state.into_iter().flat_map(|rs| rs).map(|rs| (*rs).clone()).chunks(BATCH_SIZE);
+                                let iter = state
+                                    .into_iter()
+                                    .flat_map(|rs| rs)
+                                    .map(|rs| (*rs).clone())
+                                    .chunks(BATCH_SIZE);
                                 let mut iter = iter.into_iter().enumerate().peekable();
 
                                 // process all records in state to completion within domain

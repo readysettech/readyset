@@ -64,6 +64,7 @@ impl Getter {
         match self.generator {
             None => Err(()),
             Some(ref g) => {
+                // FIXME: keep track of the ts we read, and make sure we never go back in time!
                 self.handle
                     .find_and(
                         q,

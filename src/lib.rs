@@ -357,6 +357,8 @@ extern crate fnv;
 extern crate evmap;
 extern crate arccstr;
 extern crate vec_map;
+extern crate hurdles;
+extern crate arrayvec;
 
 #[macro_use]
 extern crate lazy_static;
