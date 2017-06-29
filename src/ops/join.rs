@@ -119,7 +119,7 @@ impl Join {
         }
     }
 
-    fn generate_row(&self, left: &Vec<DataType>, right: &Vec<DataType>) -> Vec<DataType> {
+    fn generate_row(&self, left: &[DataType], right: &[DataType]) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {
@@ -130,11 +130,7 @@ impl Join {
             .collect()
     }
 
-    fn generate_row_from_left(
-        &self,
-        mut left: Vec<DataType>,
-        right: &Vec<DataType>,
-    ) -> Vec<DataType> {
+    fn generate_row_from_left(&self, mut left: Vec<DataType>, right: &[DataType]) -> Vec<DataType> {
         left.resize(self.in_place_left_emit.len(), DataType::None);
         for (i, &(from_left, c)) in self.in_place_left_emit.iter().enumerate() {
             if from_left && i != c {
@@ -151,12 +147,12 @@ impl Join {
 
     fn generate_row_from_right(
         &self,
-        left: &Vec<DataType>,
+        left: &[DataType],
         mut right: Vec<DataType>,
     ) -> Vec<DataType> {
         right.resize(self.in_place_right_emit.len(), DataType::None);
         for (i, &(from_left, c)) in self.in_place_right_emit.iter().enumerate() {
-            if !from_left && i != c{
+            if !from_left && i != c {
                 right.swap(i, c);
             }
         }
@@ -168,7 +164,7 @@ impl Join {
         right
     }
 
-    fn generate_null(&self, left: &Vec<DataType>) -> Vec<DataType> {
+    fn generate_null(&self, left: &[DataType]) -> Vec<DataType> {
         self.emit
             .iter()
             .map(|&(from_left, col)| if from_left {

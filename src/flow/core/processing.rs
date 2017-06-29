@@ -1,5 +1,4 @@
 use std::collections::{HashSet, HashMap};
-use std::sync::Arc;
 
 use ops::base::Base;
 use ops;
@@ -131,7 +130,7 @@ where
         _columns: &[usize],
         _key: &prelude::KeyType<prelude::DataType>,
         _states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {
         None
     }
 
@@ -148,11 +147,13 @@ where
         key: &prelude::KeyType<prelude::DataType>,
         domain: &prelude::DomainNodes,
         states: &'a prelude::StateMap,
-    ) -> Option<Option<Box<Iterator<Item = &'a Arc<Vec<prelude::DataType>>> + 'a>>> {
+    ) -> Option<Option<Box<Iterator<Item = &'a [prelude::DataType]> + 'a>>> {
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                prelude::LookupResult::Some(rs) => Some(Some(Box::new(rs.iter()) as Box<_>)),
+                prelude::LookupResult::Some(rs) => Some(
+                    Some(Box::new(rs.iter().map(|r| &r[..])) as Box<_>),
+                ),
                 prelude::LookupResult::Missing => Some(None),
             })
             .or_else(|| {

@@ -7,7 +7,6 @@ use memcached::proto::MemCachedResult;
 use serde_json::Value;
 
 use std::io;
-use std::sync::Arc;
 
 use flow::prelude::*;
 
@@ -61,7 +60,7 @@ impl Hook {
         // Update materialized state
         for rec in records.iter() {
             match rec {
-                &Record::Positive(ref r) => self.state.insert(Arc::new(r.clone())),
+                &Record::Positive(ref r) => self.state.insert(r.clone()),
                 &Record::Negative(ref r) => self.state.remove(r),
                 &Record::DeleteRequest(..) => unreachable!(),
             }
