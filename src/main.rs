@@ -30,8 +30,8 @@ use config::Config;
 #[cfg_attr(rustfmt, rustfmt_skip)]
 const TASTER_USAGE: &'static str = "\
 EXAMPLES:
-  taste -w /path/to/workdir -s my_secret
-  taste -l 0.0.0.0:1234 -w /path/to/workdir -s my_secret";
+  taster -w /path/to/workdir -s my_secret
+  taster -l 0.0.0.0:1234 -w /path/to/workdir -s my_secret";
 
 #[derive(Clone, Debug)]
 pub struct Commit {
