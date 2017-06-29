@@ -1742,8 +1742,12 @@ impl Domain {
     ) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
+        let name = match self.shard {
+            Some(shard) => format!("domain{}.{}", name, shard),
+            None => format!("domain{}", name),
+        };
         thread::Builder::new()
-            .name(format!("domain{}", name))
+            .name(name)
             .spawn(move || {
                 let (inject_tx, inject_rx) = mpsc::sync_channel(1);
                 let (back_tx, back_rx) = mpsc::channel();
