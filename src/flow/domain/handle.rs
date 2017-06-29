@@ -1,4 +1,5 @@
 use channel::ChannelSender;
+use flow::payload::ControlReplyPacket;
 use flow::prelude::*;
 use flow::domain;
 use flow::checktable;
@@ -10,32 +11,67 @@ use std::cell;
 use std::thread;
 use slog::Logger;
 
+pub enum WaitError {
+    WrongReply(ControlReplyPacket),
+    RecvError(mpsc::RecvError),
+}
+
+#[derive(Clone)]
+pub struct DomainInputHandle(Vec<mpsc::SyncSender<Box<Packet>>>);
+
+impl DomainInputHandle {
+    pub fn base_send(
+        &mut self,
+        p: Box<Packet>,
+        key: &[usize],
+    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
+        if self.0.len() == 1 {
+            self.0[0].send(p)
+        } else {
+            if key.is_empty() {
+                unreachable!("sharded base without a key?");
+            }
+            if key.len() != 1 {
+                // base sharded by complex key
+                unimplemented!();
+            }
+            let key_col = key[0];
+            let shard = {
+                let key = match p.data()[0] {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col],
+                    Record::DeleteRequest(ref k) => &k[0],
+                };
+                if !p.data().iter().all(|r| match *r {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col] == key,
+                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
+                })
+                {
+                    // batch with different keys to sharded base
+                    unimplemented!();
+                }
+                ::shard_by(key, self.0.len())
+            };
+            self.0[shard].send(p)
+        }
+    }
+}
+
 pub struct DomainHandle {
     idx: domain::Index,
 
     txs: Vec<mpsc::SyncSender<Box<Packet>>>,
     in_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
+    cr_rxs: Vec<mpsc::Receiver<ControlReplyPacket>>,
 
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
     rxs: Vec<(mpsc::Receiver<Box<Packet>>, mpsc::Receiver<Box<Packet>>)>,
+    cr_txs: Vec<mpsc::SyncSender<ControlReplyPacket>>,
 
     // used during operation
     tx_buf: Option<Box<Packet>>,
-}
-
-impl Clone for DomainHandle {
-    /// Note that a `DomainHandle` clone does not also track the underlying threads.
-    fn clone(&self) -> Self {
-        DomainHandle {
-            idx: self.idx,
-            txs: self.txs.clone(),
-            in_txs: self.in_txs.clone(),
-            threads: Vec::new(),
-            rxs: Vec::new(),
-            tx_buf: None,
-        }
-    }
 }
 
 impl DomainHandle {
@@ -43,13 +79,19 @@ impl DomainHandle {
         let mut txs = Vec::new();
         let mut in_txs = Vec::new();
         let mut rxs = Vec::new();
+        let mut cr_txs = Vec::new();
+        let mut cr_rxs = Vec::new();
         {
             let mut add = || {
                 let (in_tx, in_rx) = mpsc::sync_channel(256);
                 let (tx, rx) = mpsc::sync_channel(1);
+                let (cr_tx, cr_rx) = mpsc::sync_channel(1);
+
                 txs.push(tx);
                 in_txs.push(in_tx);
                 rxs.push((rx, in_rx));
+                cr_txs.push(cr_tx);
+                cr_rxs.push(cr_rx);
             };
             add();
             match sharded_by {
@@ -73,11 +115,17 @@ impl DomainHandle {
             idx: domain,
             tx_buf: None,
             threads: Vec::new(),
+            cr_txs,
+            cr_rxs,
         }
     }
 
     pub fn get_txs(&self) -> Vec<mpsc::SyncSender<Box<Packet>>> {
         self.txs.clone()
+    }
+
+    pub fn get_input_handle(&self) -> DomainInputHandle {
+        DomainInputHandle(self.in_txs.clone())
     }
 
     pub fn shards(&self) -> usize {
@@ -115,7 +163,7 @@ impl DomainHandle {
 
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
         let n = self.rxs.len();
-        for (i, (rx, in_rx)) in self.rxs.drain(..).enumerate() {
+        for (i, ((rx, in_rx), cr_tx)) in self.rxs.drain(..).zip(self.cr_txs.drain(..)).enumerate() {
             let logger = if n == 1 {
                 log.new(o!("domain" => self.idx.index()))
             } else {
@@ -137,7 +185,7 @@ impl DomainHandle {
                 channel_coordinator.clone(),
                 ts,
             );
-            self.threads.push(domain.boot(rx, in_rx));
+            self.threads.push(domain.boot(rx, in_rx, cr_tx));
         }
     }
 
@@ -303,40 +351,30 @@ impl DomainHandle {
         self.txs[i].send(p)
     }
 
-    pub fn base_send(
-        &mut self,
-        p: Box<Packet>,
-        key: &[usize],
-    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        if self.txs.len() == 1 {
-            self.in_txs[0].send(p)
-        } else {
-            if key.is_empty() {
-                unreachable!("sharded base without a key?");
+    pub fn wait_for_ack(&self) -> Result<(), WaitError> {
+        for rx in &self.cr_rxs {
+            match rx.recv() {
+                Ok(ControlReplyPacket::Ack) => {}
+                Ok(r) => return Err(WaitError::WrongReply(r)),
+                Err(e) => return Err(WaitError::RecvError(e)),
             }
-            if key.len() != 1 {
-                // base sharded by complex key
-                unimplemented!();
-            }
-            let key_col = key[0];
-            let shard = {
-                let key = match p.data()[0] {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col],
-                    Record::DeleteRequest(ref k) => &k[0],
-                };
-                if !p.data().iter().all(|r| match *r {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col] == key,
-                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                })
-                {
-                    // batch with different keys to sharded base
-                    unimplemented!();
-                }
-                ::shard_by(key, self.txs.len())
-            };
-            self.in_txs[shard].send(p)
         }
+        Ok(())
+    }
+
+    pub fn wait_for_state_size(&self) -> Result<usize, WaitError> {
+        let mut size = 0;
+        for rx in &self.cr_rxs {
+            match rx.recv() {
+                Ok(ControlReplyPacket::StateSize(s)) => size += s,
+                Ok(r) => return Err(WaitError::WrongReply(r)),
+                Err(e) => return Err(WaitError::RecvError(e)),
+            }
+        }
+        Ok(size)
+    }
+
+    pub fn wait_for_statistics(&self) -> Result<usize, WaitError> {
+        unimplemented!()
     }
 }

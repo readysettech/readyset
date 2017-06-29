@@ -19,7 +19,7 @@ pub enum MutatorError {
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    pub(crate) tx: flow::domain::DomainHandle,
+    pub(crate) tx: flow::domain::DomainInputHandle,
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,

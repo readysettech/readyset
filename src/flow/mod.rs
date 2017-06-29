@@ -244,7 +244,7 @@ impl Blender {
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
         let node = &self.ingredients[base];
-        let tx = self.domains[&node.domain()].clone();
+        let tx = self.domains[&node.domain()].get_input_handle();
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 

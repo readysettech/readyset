@@ -5,7 +5,7 @@ use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext};
+use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext, ControlReplyPacket};
 use flow::statistics;
 use flow::transactions;
 use flow::persistence;
@@ -48,7 +48,7 @@ impl Index {
 
 pub mod local;
 mod handle;
-pub use self::handle::DomainHandle;
+pub use self::handle::{DomainHandle, DomainInputHandle};
 
 enum DomainMode {
     Forwarding,
@@ -108,6 +108,7 @@ pub struct Domain {
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     inject_tx: Option<mpsc::SyncSender<Box<Packet>>>,
+    control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -150,6 +151,7 @@ impl Domain {
             replay_paths: HashMap::new(),
 
             inject_tx: None,
+            control_reply_tx: None,
             channel_coordinator,
 
             concurrent_replays: 0,
@@ -1731,6 +1733,7 @@ impl Domain {
         mut self,
         rx: mpsc::Receiver<Box<Packet>>,
         input_rx: mpsc::Receiver<Box<Packet>>,
+        control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
     ) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
@@ -1760,6 +1763,7 @@ impl Domain {
                 }
 
                 self.inject_tx = Some(inject_tx);
+                self.control_reply_tx = Some(control_reply_tx);
 
                 let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
                     self.index,
