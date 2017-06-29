@@ -1,4 +1,5 @@
 use backlog;
+use channel;
 use checktable;
 use ops::base::Base;
 
@@ -261,6 +262,9 @@ impl Blender {
             is_primary = true;
         }
 
+        let reply_chan = mpsc::channel();
+        let reply_chan = (channel::ChannelSender::Local(reply_chan.0), reply_chan.1);
+
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
@@ -269,7 +273,7 @@ impl Blender {
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            tx_reply_channel: mpsc::channel(),
+            tx_reply_channel: reply_chan,
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
             tracer: None,
@@ -616,7 +620,8 @@ impl<'a> Migration<'a> {
     /// slower than the system as a hole will accumulate a large buffer over time.
     pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
-        let (mut tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let mut tx = channel::ChannelSender::Local(tx);
 
         // If the reader hasn't been incorporated into the graph yet, just add the streamer
         // directly.

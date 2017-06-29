@@ -6,6 +6,7 @@ use std::sync::mpsc::{self, SendError};
 
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
+#[derive(Debug)]
 pub enum ChannelSender<T> {
     Local(mpsc::Sender<T>),
     LocalSync(mpsc::SyncSender<T>),
@@ -42,6 +43,10 @@ impl<T> ChannelSender<T> {
         }
     }
 }
+
+pub type TransactionReplySender<T> = ChannelSender<T>;
+pub type StreamSender<T> = ChannelSender<T>;
+pub type TraceSender<T> = ChannelSender<T>;
 
 struct ChannelCoordinatorInner<K: Eq + Hash + Clone, P> {
     txs: HashMap<K, ChannelSender<P>>,
@@ -81,7 +86,7 @@ impl<K: Eq + Hash + Clone, P> ChannelCoordinator<K, P> {
         self.inner.lock().unwrap().txs.get(key).cloned()
     }
 
-    #[ignore(unused)]
+    #[allow(unused)]
     pub fn get_input_tx(&self, key: &K) -> Option<ChannelSender<P>> {
         self.inner.lock().unwrap().input_txs.get(key).cloned()
     }

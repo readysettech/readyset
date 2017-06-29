@@ -1,5 +1,6 @@
 use petgraph;
 
+use channel;
 use checktable;
 use flow::domain;
 use flow::node;
@@ -68,7 +69,7 @@ pub enum ReplayPieceContext {
 #[derive(Clone)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
-    Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
+    Pending(checktable::Token, channel::TransactionReplySender<Result<i64, ()>>),
     WillCommit,
 }
 
@@ -91,7 +92,7 @@ pub enum PacketEvent {
     ReachedReader,
 }
 
-pub type Tracer = Option<Vec<mpsc::Sender<(time::Instant, PacketEvent)>>>;
+pub type Tracer = Option<Vec<channel::TraceSender<(time::Instant, PacketEvent)>>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -170,7 +171,7 @@ pub enum Packet {
     /// Add a streamer to an existing reader node.
     AddStreamer {
         node: LocalNodeIndex,
-        new_streamer: mpsc::Sender<Vec<node::StreamUpdate>>,
+        new_streamer: channel::StreamSender<Vec<node::StreamUpdate>>,
     },
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
