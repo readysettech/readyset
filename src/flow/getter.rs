@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub struct Getter {
     pub(crate) generator: Option<checktable::TokenGenerator>,
     pub(crate) handle: backlog::ReadHandle,
+    last_ts: i64,
 }
 
 impl Getter {
@@ -23,6 +24,7 @@ impl Getter {
             Getter {
                 generator: gen,
                 handle: rh,
+                last_ts: i64::min_value(),
             }
         })
     }
@@ -60,13 +62,12 @@ impl Getter {
     }
 
     /// Transactionally query for the given key, blocking if it is not yet available.
-    pub fn transactional_lookup(&self, q: &DataType) -> Result<(Datas, checktable::Token), ()> {
+    pub fn transactional_lookup(&mut self, q: &DataType) -> Result<(Datas, checktable::Token), ()> {
         match self.generator {
             None => Err(()),
             Some(ref g) => {
-                // FIXME: keep track of the ts we read, and make sure we never go back in time!
-                self.handle
-                    .find_and(
+                loop {
+                    let res = self.handle.find_and(
                         q,
                         |rs| {
                             rs.into_iter()
@@ -74,11 +75,23 @@ impl Getter {
                                 .collect()
                         },
                         true,
-                    )
-                    .map(|(res, ts)| {
-                        let token = g.generate(ts, q.clone());
-                        (res.unwrap_or_else(Vec::new), token)
-                    })
+                    );
+                    match res {
+                        Ok((_, ts)) if ts < self.last_ts => {
+                            // we must have read from a different shard that is not yet up-to-date
+                            // to our last read. this is *extremely* unlikely: you would have to
+                            // issue two reads to different shards *between* the barrier and swap
+                            // inside Reader nodes, which is only a span of a handful of
+                            // instructions. But it is *possible*.
+                        }
+                        Ok((res, ts)) => {
+                            self.last_ts = ts;
+                            let token = g.generate(ts, q.clone());
+                            break Ok((res.unwrap_or_else(Vec::new), token));
+                        }
+                        Err(e) => break Err(e),
+                    }
+                }
             }
         }
     }
