@@ -453,11 +453,11 @@ fn transactional_vote() {
         )
     };
 
-    let articleq = g.get_getter(article).unwrap();
+    let mut articleq = g.get_getter(article).unwrap();
     let vcq = g.get_getter(vc).unwrap();
-    let endq = g.get_getter(end).unwrap();
-    let endq_title = g.get_getter(end_title).unwrap();
-    let endq_votes = g.get_getter(end_votes).unwrap();
+    let mut endq = g.get_getter(end).unwrap();
+    let mut endq_title = g.get_getter(end_title).unwrap();
+    let mut endq_votes = g.get_getter(end_votes).unwrap();
 
     let mut mut1 = g.get_mutator(article1);
     let mut mut2 = g.get_mutator(article2);
@@ -890,7 +890,7 @@ fn transactional_migration() {
         a
     };
 
-    let aq = g.get_getter(a).unwrap();
+    let mut aq = g.get_getter(a).unwrap();
     let mut muta = g.get_mutator(a);
 
     // send a value on a
@@ -915,7 +915,7 @@ fn transactional_migration() {
         b
     };
 
-    let bq = g.get_getter(b).unwrap();
+    let mut bq = g.get_getter(b).unwrap();
     let mut mutb = g.get_mutator(b);
 
     // send a value on b
@@ -943,7 +943,7 @@ fn transactional_migration() {
         c
     };
 
-    let cq = g.get_getter(c).unwrap();
+    let mut cq = g.get_getter(c).unwrap();
 
     // check that c has both previous entries
     assert_eq!(

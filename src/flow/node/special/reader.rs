@@ -1,5 +1,6 @@
 use std::sync::mpsc;
 use flow::prelude::*;
+use hurdles::Barrier;
 use checktable;
 use backlog;
 
@@ -34,11 +35,26 @@ pub struct Reader {
     state: Option<usize>,
     token_generator: Option<checktable::TokenGenerator>,
     for_node: NodeIndex,
+    barrier: Option<Barrier>,
 }
 
 impl Clone for Reader {
     fn clone(&self) -> Self {
-        unreachable!("readers should never be cloned (because they are never sharded)");
+        assert!(self.writer.is_none());
+        assert!(
+            self.streamers
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        );
+        Reader {
+            writer: None,
+            streamers: self.streamers.clone(),
+            state: self.state.clone(),
+            token_generator: self.token_generator.clone(),
+            for_node: self.for_node,
+            barrier: self.barrier.clone(),
+        }
     }
 }
 
@@ -50,7 +66,12 @@ impl Reader {
             state: None,
             token_generator: None,
             for_node,
+            barrier: None,
         }
+    }
+
+    pub fn shard(&mut self, n: usize) {
+        self.barrier = Some(Barrier::new(n));
     }
 
     pub fn is_for(&self) -> NodeIndex {
@@ -72,6 +93,7 @@ impl Reader {
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
+            barrier: self.barrier.take(),
         }
     }
 
@@ -180,9 +202,19 @@ impl Reader {
                 state.update_ts(ts);
             }
 
-            // TODO: avoid swapping if writes are empty
-
-            if swap || (!m.is_regular() && state.is_partial()) {
+            if swap {
+                if let Some(ref mut b) = self.barrier {
+                    if let Packet::Transaction { .. } = **m {
+                        // if the reader is sharded, we want to make sure *all* the shards are
+                        // about to expose this transaction timestamp. note that this will *block*
+                        // the current domain. that is *only* okay here because since *we* released
+                        // this transaction, the other shards must also have been sent a packet
+                        // with the same transaction timestamp, and thus are not waiting on us in
+                        // any way.
+                        b.wait();
+                    }
+                }
+                // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
         }

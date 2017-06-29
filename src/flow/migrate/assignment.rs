@@ -68,8 +68,8 @@ pub fn assign(
                 // shard merger
                 next_domain()
             } else if n.is_reader() {
-                // reader
-                ps[0].1.domain().index()
+                // reader can be in its own domain
+                next_domain()
             } else if n.is_internal() {
                 match **n {
                     NodeOperator::Base(..) => {

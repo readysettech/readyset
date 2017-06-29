@@ -1,18 +1,19 @@
 use flow::core::{DataType, Record};
 use fnv::FnvBuildHasher;
 use evmap;
+use arrayvec::ArrayVec;
 
 use std::sync::Arc;
 
 /// Allocate a new end-user facing result table.
-pub fn new(cols: usize, key: usize) -> (ReadHandle, WriteHandle) {
+pub fn new(cols: usize, key: usize) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
 ///
 /// Misses in this table will call `trigger` to populate the entry, and retry until successful.
-pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (ReadHandle, WriteHandle)
+pub fn new_partial<F>(cols: usize, key: usize, trigger: F) -> (SingleReadHandle, WriteHandle)
 where
     F: Fn(&DataType) + 'static + Send + Sync,
 {
@@ -23,7 +24,7 @@ fn new_inner(
     cols: usize,
     key: usize,
     trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
-) -> (ReadHandle, WriteHandle) {
+) -> (SingleReadHandle, WriteHandle) {
     let (r, w) = evmap::Options::default()
         .with_meta(-1)
         .with_hasher(FnvBuildHasher::default())
@@ -34,7 +35,7 @@ fn new_inner(
         key: key,
         cols: cols,
     };
-    let r = ReadHandle {
+    let r = SingleReadHandle {
         handle: r,
         trigger: trigger,
         key: key,
@@ -112,13 +113,13 @@ impl WriteHandle {
 }
 
 #[derive(Clone)]
-pub struct ReadHandle {
+pub struct SingleReadHandle {
     handle: evmap::ReadHandle<DataType, Arc<Vec<DataType>>, i64, FnvBuildHasher>,
     trigger: Option<Arc<Fn(&DataType) + Send + Sync>>,
     key: usize,
 }
 
-impl ReadHandle {
+impl SingleReadHandle {
     /// Find all entries that matched the given conditions.
     ///
     /// Returned records are passed to `then` before being returned.
@@ -174,6 +175,82 @@ impl ReadHandle {
 
     pub fn len(&self) -> usize {
         self.handle.len()
+    }
+}
+
+#[derive(Clone)]
+pub enum ReadHandle {
+    Sharded(ArrayVec<[Option<SingleReadHandle>; ::SHARDS]>),
+    Singleton(Option<SingleReadHandle>),
+}
+
+impl ReadHandle {
+    /// Find all entries that matched the given conditions.
+    ///
+    /// Returned records are passed to `then` before being returned.
+    ///
+    /// Note that not all writes will be included with this read -- only those that have been
+    /// swapped in by the writer.
+    ///
+    /// If `block` is set, this call will block if it encounters a hole in partially materialized
+    /// state.
+    pub fn find_and<F, T>(
+        &self,
+        key: &DataType,
+        then: F,
+        block: bool,
+    ) -> Result<(Option<T>, i64), ()>
+    where
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+    {
+        match *self {
+            ReadHandle::Sharded(ref shards) => {
+                shards[::shard_by(key, shards.len())]
+                    .as_ref()
+                    .unwrap()
+                    .find_and(key, then, block)
+            }
+            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().find_and(key, then, block),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn try_find_and<F, T>(&self, key: &DataType, then: F) -> Result<(Option<T>, i64), ()>
+    where
+        F: FnMut(&[Arc<Vec<DataType>>]) -> T,
+    {
+        match *self {
+            ReadHandle::Sharded(ref shards) => {
+                shards[::shard_by(key, shards.len())]
+                    .as_ref()
+                    .unwrap()
+                    .try_find_and(key, then)
+            }
+            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().try_find_and(key, then),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match *self {
+            ReadHandle::Sharded(ref shards) => {
+                shards.iter().map(|s| s.as_ref().unwrap().len()).sum()
+            }
+            ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().len(),
+        }
+    }
+
+    pub fn set_single_handle(&mut self, shard: Option<usize>, handle: SingleReadHandle) {
+        match (self, shard) {
+            (&mut ReadHandle::Singleton(ref mut srh), None) => {
+                *srh = Some(handle);
+            }
+            (&mut ReadHandle::Sharded(ref mut rhs), Some(shard)) => {
+                let srh = rhs.get_mut(shard).unwrap();
+                assert!(srh.is_none());
+                *srh = Some(handle)
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
