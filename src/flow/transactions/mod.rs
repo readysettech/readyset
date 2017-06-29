@@ -1,7 +1,6 @@
 use petgraph::graph::NodeIndex;
 use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc;
 
 use std::cmp::Ordering;
 
@@ -16,7 +15,7 @@ use checktable;
 
 enum BufferedTransaction {
     Transaction(NodeIndex, Box<Packet>),
-    MigrationStart(mpsc::SyncSender<()>),
+    MigrationStart,
     MigrationEnd(IngressFromBase, EgressForBase),
     Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
@@ -50,7 +49,7 @@ impl Eq for BufferEntry {}
 enum Bundle {
     Empty,
     Messages(usize, Vec<Box<Packet>>),
-    MigrationStart(mpsc::SyncSender<()>),
+    MigrationStart,
     MigrationEnd(IngressFromBase, EgressForBase),
     Replay(Box<Packet>),
     SeedReplay(Tag, Vec<DataType>, ReplayTransactionState),
@@ -162,7 +161,7 @@ impl DomainState {
                             }
                             Bundle::Messages(count, vec![m])
                         }
-                        box Packet::StartMigration { ack, .. } => Bundle::MigrationStart(ack),
+                        box Packet::StartMigration { .. } => Bundle::MigrationStart,
                         box Packet::CompleteMigration { .. } => {
                             let m = *m; // workaround for #16223
                             if let Packet::CompleteMigration {
@@ -190,7 +189,7 @@ impl DomainState {
                 box Packet::Transaction { .. } => {
                     BufferedTransaction::Transaction(base.unwrap(), m)
                 }
-                box Packet::StartMigration { ack, .. } => BufferedTransaction::MigrationStart(ack),
+                box Packet::StartMigration { .. } => BufferedTransaction::MigrationStart,
                 box Packet::CompleteMigration { .. } => {
                     let m = *m; // workaround for #16223
                     if let Packet::CompleteMigration {
@@ -245,8 +244,8 @@ impl DomainState {
                     self.next_transaction =
                         Bundle::Messages(self.ingress_from_base[base.index()], messages);
                 }
-                BufferedTransaction::MigrationStart(sender) => {
-                    self.next_transaction = Bundle::MigrationStart(sender)
+                BufferedTransaction::MigrationStart => {
+                    self.next_transaction = Bundle::MigrationStart
                 }
                 BufferedTransaction::MigrationEnd(ingress_from_base, egress_for_base) => {
                     self.next_transaction =
@@ -270,8 +269,7 @@ impl DomainState {
         }
 
         match mem::replace(&mut self.next_transaction, Bundle::Empty) {
-            Bundle::MigrationStart(channel) => {
-                drop(channel);
+            Bundle::MigrationStart => {
                 self.ts += 1;
                 self.update_next_transaction();
                 Event::StartMigration

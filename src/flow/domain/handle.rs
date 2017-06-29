@@ -5,12 +5,15 @@ use flow::domain;
 use flow::checktable;
 use flow::persistence;
 use petgraph::graph::NodeIndex;
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::cell;
 use std::thread;
 use slog::Logger;
+use flow::statistics::{DomainStats, NodeStats};
 
+#[derive(Debug)]
 pub enum WaitError {
     WrongReply(ControlReplyPacket),
     RecvError(mpsc::RecvError),
@@ -259,11 +262,8 @@ impl DomainHandle {
                     state: state.clone(),
                 }
             }
-            Packet::StateSizeProbe { ref node, ref ack } => {
-                box Packet::StateSizeProbe {
-                    node: node.clone(),
-                    ack: ack.clone(),
-                }
+            Packet::StateSizeProbe { ref node } => {
+                box Packet::StateSizeProbe { node: node.clone() }
             }
             Packet::SetupReplayPath {
                 ref tag,
@@ -271,7 +271,6 @@ impl DomainHandle {
                 ref path,
                 ref done_tx,
                 ref trigger,
-                ref ack,
             } => {
                 box Packet::SetupReplayPath {
                     tag: tag.clone(),
@@ -279,7 +278,6 @@ impl DomainHandle {
                     path: path.clone(),
                     done_tx: done_tx.clone(),
                     trigger: trigger.clone(),
-                    ack: ack.clone(),
                 }
             }
             Packet::RequestPartialReplay { ref tag, ref key } => {
@@ -297,24 +295,20 @@ impl DomainHandle {
             Packet::Ready {
                 ref node,
                 ref index,
-                ref ack,
             } => {
                 box Packet::Ready {
                     node: node.clone(),
                     index: index.clone(),
-                    ack: ack.clone(),
                 }
             }
             Packet::Quit => box Packet::Quit,
             Packet::StartMigration {
                 ref at,
                 ref prev_ts,
-                ref ack,
             } => {
                 box Packet::StartMigration {
                     at: at.clone(),
                     prev_ts: prev_ts.clone(),
-                    ack: ack.clone(),
                 }
             }
             Packet::CompleteMigration {
@@ -328,7 +322,7 @@ impl DomainHandle {
                     egress_for_base: egress_for_base.clone(),
                 }
             }
-            Packet::GetStatistics(..) => unimplemented!(),
+            Packet::GetStatistics => box Packet::GetStatistics,
             _ => unreachable!(),
         }
     }
@@ -374,7 +368,17 @@ impl DomainHandle {
         Ok(size)
     }
 
-    pub fn wait_for_statistics(&self) -> Result<usize, WaitError> {
-        unimplemented!()
+    pub fn wait_for_statistics(
+        &self,
+    ) -> Result<Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)>, WaitError> {
+        let mut stats = Vec::with_capacity(self.cr_rxs.len());
+        for rx in &self.cr_rxs {
+            match rx.recv() {
+                Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d,s)),
+                Ok(r) => return Err(WaitError::WrongReply(r)),
+                Err(e) => return Err(WaitError::RecvError(e)),
+            }
+        }
+        Ok(stats)
     }
 }

@@ -534,7 +534,9 @@ impl Domain {
         loop {
             match self.transaction_state.get_next_event() {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
-                transactions::Event::StartMigration => {}
+                transactions::Event::StartMigration => {
+                    self.control_reply_tx.as_ref().unwrap().send(ControlReplyPacket::Ack).unwrap();
+                }
                 transactions::Event::CompleteMigration => {}
                 transactions::Event::SeedReplay(tag, key, rts) => {
                     self.seed_replay(tag, &key[..], Some(rts))
@@ -631,21 +633,26 @@ impl Domain {
                         node,
                         field,
                         default,
-                        ack,
                     } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.add_column(&field);
                         n.get_base_mut()
                             .expect("told to add base column to non-base node")
                             .add_column(default);
-                        drop(ack);
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::Ack).unwrap();
                     }
-                    Packet::DropBaseColumn { node, column, ack } => {
+                    Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
-                        drop(ack);
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::Ack).unwrap();
                     }
                     Packet::UpdateEgress {
                         node,
@@ -677,12 +684,12 @@ impl Domain {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_reader_mut(|r| r.add_streamer(new_streamer).unwrap());
                     }
-                    Packet::StateSizeProbe { node, ack } => {
-                        if let Some(state) = self.state.get(&node) {
-                            ack.send(state.len()).unwrap();
-                        } else {
-                            drop(ack);
-                        }
+                    Packet::StateSizeProbe { node } => {
+                        let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::StateSize(size)).unwrap();
                     }
                     Packet::PrepareState { node, state } => {
                         use flow::payload::InitialState;
@@ -747,10 +754,12 @@ impl Domain {
                         path,
                         done_tx,
                         trigger,
-                        ack,
                     } => {
                         // let coordinator know that we've registered the tagged path
-                        drop(ack);
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::Ack).unwrap();
 
                         if done_tx.is_some() {
                             info!(self.log,
@@ -828,7 +837,7 @@ impl Domain {
                     Packet::Finish(tag, ni) => {
                         self.finish_replay(tag, ni);
                     }
-                    Packet::Ready { node, index, ack } => {
+                    Packet::Ready { node, index } => {
 
                         if let DomainMode::Forwarding = self.mode {
                         } else {
@@ -871,9 +880,12 @@ impl Domain {
                             }
                         }
 
-                        drop(ack);
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::Ack).unwrap();
                     }
-                    Packet::GetStatistics(sender) => {
+                    Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
                             total_time: self.total_time.num_nanoseconds(),
                             total_ptime: self.total_ptime.num_nanoseconds(),
@@ -903,7 +915,11 @@ impl Domain {
                             })
                             .collect();
 
-                        sender.send((domain_stats, node_stats)).unwrap();
+                        self.control_reply_tx
+                            .as_ref()
+                            .unwrap()
+                            .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
+                            .unwrap();
                     }
                     Packet::Captured => {
                         unreachable!("captured packets should never be sent around")

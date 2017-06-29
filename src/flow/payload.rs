@@ -144,14 +144,12 @@ pub enum Packet {
         node: LocalNodeIndex,
         field: String,
         default: DataType,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Drops an existing column from a `Base` node.
     DropBaseColumn {
         node: LocalNodeIndex,
         column: usize,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Update Egress node.
@@ -193,7 +191,6 @@ pub enum Packet {
     /// Probe for the number of records in the given node's state
     StateSizeProbe {
         node: LocalNodeIndex,
-        ack: mpsc::SyncSender<usize>,
     },
 
     /// Inform domain about a new replay path.
@@ -203,7 +200,6 @@ pub enum Packet {
         path: Vec<(LocalNodeIndex, Option<usize>)>,
         done_tx: Option<mpsc::SyncSender<()>>,
         trigger: TriggerEndpoint,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Ask domain (nicely) to replay a particular key.
@@ -217,7 +213,6 @@ pub enum Packet {
     Ready {
         node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Notification from Blender for domain to terminate
@@ -233,7 +228,6 @@ pub enum Packet {
     StartMigration {
         at: i64,
         prev_ts: i64,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Notify a domain about a completion timestamp for an ongoing migration.
@@ -249,15 +243,8 @@ pub enum Packet {
         egress_for_base: EgressForBase,
     },
 
-    /// Request that a domain send usage statistics on the given sender.
-    GetStatistics(
-        mpsc::SyncSender<
-            (
-                statistics::DomainStats,
-                HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
-            ),
-        >
-    ),
+    /// Request that a domain send usage statistics on the control reply channel.
+    GetStatistics,
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
@@ -466,6 +453,7 @@ impl fmt::Debug for Packet {
     }
 }
 
+#[derive(Debug)]
 pub enum ControlReplyPacket {
     Ack,
     StateSize(usize),

@@ -282,19 +282,21 @@ impl Blender {
         // TODO: request stats from domains in parallel.
         let domains = self.domains
             .iter_mut()
-            .map(|(di, s)| {
-                let (tx, rx) = mpsc::sync_channel(1);
-                s.send(box payload::Packet::GetStatistics(tx)).unwrap();
-
-                let (domain_stats, node_stats) = rx.recv().unwrap();
-                // FIXME: can get multiple responses from sharded domains
-                assert!(rx.recv().is_err());
-                let node_map = node_stats
+            .flat_map(|(di, s)| {
+                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.wait_for_statistics()
+                    .unwrap()
                     .into_iter()
-                    .map(|(ni, ns)| (ni.into(), ns))
-                    .collect();
+                    .enumerate()
+                    .map(move |(i, (domain_stats, node_stats))| {
+                        let node_map = node_stats
+                            .into_iter()
+                            .map(|(ni, ns)| (ni.into(), ns))
+                            .collect();
 
-                (*di, (domain_stats, node_map))
+                        ((di.clone(), i), (domain_stats, node_map))
+                    })
+
             })
             .collect();
 
@@ -904,42 +906,28 @@ impl<'a> Migration<'a> {
         );
 
         // Tell all base nodes about newly added columns
-        let acks: Vec<_> = self.columns
-            .into_iter()
-            .map(|(ni, change)| {
-                let (tx, rx) = mpsc::sync_channel(1);
-                let n = &mainline.ingredients[ni];
-                let m = match change {
-                    ColumnChange::Add(field, default) => {
-                        box payload::Packet::AddBaseColumn {
-                            node: *n.local_addr(),
-                            field: field,
-                            default: default,
-                            ack: tx,
-                        }
+        for (ni, change) in self.columns {
+            let n = &mainline.ingredients[ni];
+            let m = match change {
+                ColumnChange::Add(field, default) => {
+                    box payload::Packet::AddBaseColumn {
+                        node: *n.local_addr(),
+                        field: field,
+                        default: default,
                     }
-                    ColumnChange::Drop(column) => {
-                        box payload::Packet::DropBaseColumn {
-                            node: *n.local_addr(),
-                            column: column,
-                            ack: tx,
-                        }
+                }
+                ColumnChange::Drop(column) => {
+                    box payload::Packet::DropBaseColumn {
+                        node: *n.local_addr(),
+                        column: column,
                     }
-                };
+                }
+            };
 
-                mainline
-                    .domains
-                    .get_mut(&n.domain())
-                    .unwrap()
-                    .send(m)
-                    .unwrap();
-                rx
-            })
-            .collect();
-        // wait for all domains to ack. otherwise, we could have one domain request a replay from
-        // another before the source domain has heard about a new default column it needed to add.
-        for ack in acks {
-            ack.recv().is_err();
+            let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+
+            domain.send(m).unwrap();
+            domain.wait_for_ack().unwrap();
         }
 
         // Set up inter-domain connections

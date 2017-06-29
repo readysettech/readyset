@@ -374,21 +374,16 @@ pub fn initialize(
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |txs: &mut HashMap<_, domain::DomainHandle>, index_on: Vec<Vec<usize>>| {
-            let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+        let ready = |handles: &mut HashMap<_, domain::DomainHandle>, index_on: Vec<Vec<usize>>| {
             trace!(log, "readying node"; "node" => node.index());
-            txs.get_mut(&d)
-                .unwrap()
+            let domain = handles.get_mut(&d).unwrap();
+            domain
                 .send(box Packet::Ready {
                     node: addr,
                     index: index_on,
-                    ack: ack_tx,
                 })
                 .unwrap();
-            match ack_rx.recv() {
-                Err(mpsc::RecvError) => (),
-                _ => unreachable!(),
-            }
+            domain.wait_for_ack().unwrap();
             trace!(log, "node ready"; "node" => node.index());
         };
 
@@ -744,7 +739,6 @@ pub fn reconstruct(
                 .collect()
         };
 
-        let (wait_tx, wait_rx) = mpsc::sync_channel(segments.len());
         let (done_tx, done_rx) = mpsc::sync_channel(1);
         let mut main_done_tx = Some(done_tx);
 
@@ -773,7 +767,6 @@ pub fn reconstruct(
                 path: locals,
                 done_tx: None,
                 trigger: TriggerEndpoint::None,
-                ack: wait_tx.clone(),
             };
             if i == 0 {
                 // first domain also gets to know source node
@@ -841,18 +834,10 @@ pub fn reconstruct(
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());
-            blender
-                .domains
-                .get_mut(domain)
-                .unwrap()
-                .send(setup)
-                .unwrap();
+            let ctx = blender.domains.get_mut(domain).unwrap();
+            ctx.send(setup).unwrap();
+            ctx.wait_for_ack().unwrap();
         }
-
-        // wait for them all to have seen that message
-        drop(wait_tx);
-        let x = wait_rx.recv();
-        assert!(x.is_err());
         trace!(log, "all domains ready for replay");
 
         if !partial_ok {
@@ -1005,8 +990,8 @@ fn cost_fn<'a, T>(
                     // as they increase the cost
                     intermediates.push(n.is_selective());
                     // now walk to the parent.
-                    let mut ps = graph
-                        .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    let mut ps =
+                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
                     // of which there must be at least one
                     stateful = ps.next().expect("recursed all the way to source");
                     // there shouldn't ever be multiple, because neither join nor union
@@ -1015,16 +1000,12 @@ fn cost_fn<'a, T>(
                 }
 
                 // find the size of the state we would end up replaying
-                let (tx, rx) = mpsc::sync_channel(1);
                 let stateful = &graph[stateful];
-                txs.get_mut(&stateful.domain())
-                    .unwrap()
-                    .send(box Packet::StateSizeProbe {
-                        node: *stateful.local_addr(),
-                        ack: tx,
-                    })
+                let domain = txs.get_mut(&stateful.domain()).unwrap();
+                domain
+                    .send(box Packet::StateSizeProbe { node: *stateful.local_addr() })
                     .unwrap();
-                let mut size: usize = rx.into_iter().sum();
+                let mut size = domain.wait_for_state_size().unwrap();
 
                 // compute the total cost
                 // replay cost
