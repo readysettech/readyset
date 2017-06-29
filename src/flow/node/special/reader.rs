@@ -180,9 +180,8 @@ impl Reader {
                 state.update_ts(ts);
             }
 
-            // TODO: avoid swapping if writes are empty
-
-            if swap || (!m.is_regular() && state.is_partial()) {
+            if swap {
+                // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
         }
