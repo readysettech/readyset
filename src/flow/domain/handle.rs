@@ -283,14 +283,14 @@ impl DomainHandle {
                 ref tag,
                 ref source,
                 ref path,
-                ref done_tx,
+                notify_done,
                 ref trigger,
             } => {
                 box Packet::SetupReplayPath {
                     tag: tag.clone(),
                     source: source.clone(),
                     path: path.clone(),
-                    done_tx: done_tx.clone(),
+                    notify_done,
                     trigger: trigger.clone(),
                 }
             }

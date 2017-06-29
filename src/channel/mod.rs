@@ -81,6 +81,7 @@ impl<K: Eq + Hash + Clone, P> ChannelCoordinator<K, P> {
         self.inner.lock().unwrap().txs.get(key).cloned()
     }
 
+    #[ignore(unused)]
     pub fn get_input_tx(&self, key: &K) -> Option<ChannelSender<P>> {
         self.inner.lock().unwrap().input_txs.get(key).cloned()
     }

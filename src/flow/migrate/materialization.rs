@@ -15,7 +15,6 @@ use petgraph;
 use petgraph::graph::NodeIndex;
 
 use std::collections::{HashSet, HashMap};
-use std::sync::mpsc;
 
 use slog::Logger;
 
@@ -740,8 +739,7 @@ pub fn reconstruct(
                 .collect()
         };
 
-        let (done_tx, done_rx) = mpsc::sync_channel(1);
-        let mut main_done_tx = Some(done_tx);
+        let mut notify_source = None;
 
         // first, tell all the domains about the replay path
         let mut seen = HashSet::new();
@@ -766,7 +764,7 @@ pub fn reconstruct(
                 tag: tag,
                 source: None,
                 path: locals,
-                done_tx: None,
+                notify_done: false,
                 trigger: TriggerEndpoint::None,
             };
             if i == 0 {
@@ -800,9 +798,10 @@ pub fn reconstruct(
             } else {
                 if i == segments.len() - 1 {
                     // last domain should report when it's done if it is to be fully replayed
-                    if let box Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
-                        assert!(main_done_tx.is_some());
-                        *done_tx = main_done_tx.take();
+                    if let box Packet::SetupReplayPath { ref mut notify_done, .. } = setup {
+                        *notify_done = true;
+                        assert!(notify_source.is_none());
+                        notify_source = Some(domain);
                     } else {
                         unreachable!();
                     }
@@ -849,14 +848,20 @@ pub fn reconstruct(
                     from: *graph[segments[0].1[0].0].local_addr(),
                 })
                 .unwrap();
+        }
 
-            // and finally, wait for the last domain to finish the replay
+        if let Some(domain) = notify_source {
+            assert!(!partial_ok);
             trace!(log,
                    "waiting for done message from target";
                    "domain" => segments.last().unwrap().0.index()
             );
-            let x = done_rx.recv();
-            assert!(x.is_err());
+            blender
+                .domains
+                .get_mut(domain)
+                .unwrap()
+                .wait_for_ack()
+                .unwrap();
         }
     }
     domains_on_path

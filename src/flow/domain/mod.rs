@@ -70,7 +70,7 @@ enum TriggerEndpoint {
 struct ReplayPath {
     source: Option<LocalNodeIndex>,
     path: Vec<(LocalNodeIndex, Option<usize>)>,
-    done_tx: Option<mpsc::SyncSender<()>>,
+    notify_done: bool,
     trigger: TriggerEndpoint,
 }
 
@@ -760,7 +760,7 @@ impl Domain {
                         tag,
                         source,
                         path,
-                        done_tx,
+                        notify_done,
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
@@ -769,7 +769,7 @@ impl Domain {
                             .unwrap()
                             .send(ControlReplyPacket::Ack).unwrap();
 
-                        if done_tx.is_some() {
+                        if notify_done {
                             info!(self.log,
                                   "told about terminating replay path {:?}",
                                   path;
@@ -804,7 +804,7 @@ impl Domain {
                             ReplayPath {
                                 source,
                                 path,
-                                done_tx,
+                                notify_done,
                                 trigger,
                             },
                         );
@@ -1065,13 +1065,13 @@ impl Domain {
 
             let &mut ReplayPath {
                 ref path,
-                ref mut done_tx,
+                notify_done,
                 ref trigger,
                 ..
             } = self.replay_paths.get_mut(&tag).unwrap();
 
             match self.mode {
-                DomainMode::Forwarding if done_tx.is_some() => {
+                DomainMode::Forwarding if notify_done => {
                     // this is the first message we receive for this tagged replay path. only at
                     // this point should we start buffering messages for the target node. since the
                     // node is not yet marked ready, all previous messages for this node will
@@ -1118,7 +1118,7 @@ impl Domain {
             // state directly, even if it is otherwise suitable. Note that we need to check
             // `can_handle_directly` again here because it will have been changed for reader
             // nodes above, and this check only applies to non-reader nodes.
-            if can_handle_directly && done_tx.is_some() {
+            if can_handle_directly && notify_done {
                 if let box Packet::FullReplay { ref state, .. } = m {
                     let local_pkey = self.state[&path[0].0].keys();
                     if local_pkey != state.keys() {
@@ -1163,7 +1163,7 @@ impl Domain {
             let m = *m; // workaround for #16223
             match m {
                 Packet::FullReplay { tag, link, state } => {
-                    if can_handle_directly && done_tx.is_some() {
+                    if can_handle_directly && notify_done {
                         // oh boy, we're in luck! we're replaying into one of our nodes, and were
                         // just given the entire state. no need to process or anything, just move
                         // in the state and we're done.
@@ -1508,9 +1508,9 @@ impl Domain {
                         ReplayPieceContext::Regular { last } if last => {
                             debug!(self.log,
                                    "last batch processed";
-                                   "terminal" => done_tx.is_some()
+                                   "terminal" => notify_done
                             );
-                            if done_tx.is_some() {
+                            if notify_done {
                                 debug!(self.log, "last batch received"; "local" => dst.id());
                                 finished = Some((tag, dst, None));
                             }
@@ -1726,13 +1726,10 @@ impl Domain {
                 unreachable!();
             }
 
-            if let Some(done_tx) = self.replay_paths
-                .get_mut(&tag)
-                .and_then(|p| p.done_tx.take())
-            {
+            if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                drop(done_tx);
+                self.control_reply_tx.as_ref().unwrap().send(ControlReplyPacket::Ack).unwrap();
             } else {
                 unreachable!()
             }

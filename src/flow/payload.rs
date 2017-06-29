@@ -191,7 +191,7 @@ pub enum Packet {
         tag: Tag,
         source: Option<LocalNodeIndex>,
         path: Vec<(LocalNodeIndex, Option<usize>)>,
-        done_tx: Option<mpsc::SyncSender<()>>,
+        notify_done: bool,
         trigger: TriggerEndpoint,
     },
 
