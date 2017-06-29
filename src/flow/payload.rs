@@ -8,7 +8,6 @@ use flow::statistics;
 use flow::prelude::*;
 
 use std::fmt;
-use std::sync::mpsc;
 use std::collections::HashMap;
 
 use std::time;
@@ -48,7 +47,7 @@ pub enum InitialState {
         cols: usize,
         key: usize,
         tag: Tag,
-        trigger_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
+        trigger_domain: (domain::Index, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,

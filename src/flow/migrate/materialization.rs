@@ -620,6 +620,8 @@ pub fn reconstruct(
                     unreachable!(); // due to FIXME above
                 }
 
+                let num_shards = blender.domains[&last_domain.unwrap()].shards();
+
                 // since we're partially materializing a reader node,
                 // we need to give it a way to trigger replays.
                 InitialState::PartialGlobal {
@@ -627,7 +629,7 @@ pub fn reconstruct(
                     cols,
                     key: r.key().unwrap(),
                     tag: first_tag.unwrap(),
-                    trigger_txs: blender.domains[&last_domain.unwrap()].get_txs(),
+                    trigger_domain: (last_domain.unwrap(), num_shards)
                 }
             } else {
                 InitialState::Global {

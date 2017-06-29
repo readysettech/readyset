@@ -719,11 +719,19 @@ impl Domain {
                                 cols,
                                 key,
                                 tag,
-                                trigger_txs,
+                                trigger_domain: (trigger_domain, shards)
                             } => {
                                 use flow;
                                 use backlog;
-                                let txs = Mutex::new(trigger_txs);
+                                let txs = Mutex::new(
+                                    (0..shards)
+                                        .map(|shard| {
+                                            self.channel_coordinator
+                                                .get_tx(&(trigger_domain, shard))
+                                                .unwrap()
+                                        })
+                                        .collect::<Vec<_>>()
+                                );
                                 let (r_part, w_part) = backlog::new_partial(
                                     cols,
                                     key,
