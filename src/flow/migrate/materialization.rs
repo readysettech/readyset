@@ -9,6 +9,7 @@ use flow;
 use flow::keys;
 use flow::domain;
 use flow::prelude::*;
+use flow::payload::TriggerEndpoint;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -786,16 +787,12 @@ pub fn reconstruct(
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
                         // otherwise, should know how to trigger partial replay
-                        let (tx, rx) = mpsc::channel();
-                        blender
+                        let shards = blender
                             .domains
                             .get_mut(&segments[0].0)
                             .unwrap()
-                            .send(box Packet::RequestUnboundedTx(tx))
-                            .unwrap();
-                        let mut v: Vec<_> = rx.into_iter().collect();
-                        v.sort_by_key(|x| x.0);
-                        *trigger = TriggerEndpoint::End(v.into_iter().map(|x| x.1).collect());
+                            .shards();
+                        *trigger = TriggerEndpoint::End(segments[0].0.clone(), shards);
                     }
                 } else {
                     unreachable!();

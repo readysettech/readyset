@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
+use channel::ChannelSender;
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext, ControlReplyPacket};
 use flow::statistics;
@@ -57,6 +58,13 @@ enum DomainMode {
         buffered: VecDeque<Box<Packet>>,
         passes: usize,
     },
+}
+
+enum TriggerEndpoint {
+    None,
+    Start(Vec<usize>),
+    End(Vec<ChannelSender<Box<Packet>>>),
+    Local(Vec<usize>),
 }
 
 struct ReplayPath {
@@ -772,6 +780,25 @@ impl Domain {
                         } else {
                             info!(self.log, "told about replay path {:?}", path; "tag" => tag.id());
                         }
+
+                        use flow::payload;
+                        let trigger = match trigger {
+                            payload::TriggerEndpoint::None => TriggerEndpoint::None,
+                            payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
+                            payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
+                            payload::TriggerEndpoint::End(domain, shards) => {
+                                TriggerEndpoint::End(
+                                    (0..shards)
+                                        .map(|shard| {
+                                            self.channel_coordinator
+                                                .get_unbounded_tx(&(domain, shard))
+                                                .unwrap()
+                                        })
+                                        .collect(),
+                                )
+                            }
+                        };
+
                         self.replay_paths.insert(
                             tag,
                             ReplayPath {
@@ -923,10 +950,6 @@ impl Domain {
                     }
                     Packet::Captured => {
                         unreachable!("captured packets should never be sent around")
-                    }
-                    Packet::RequestUnboundedTx(_) => {
-                        //rustfmt
-                        unreachable!("Requests for unbounded tx channel are handled by event loop")
                     }
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
                     _ => unreachable!(),
@@ -1749,6 +1772,7 @@ impl Domain {
         mut self,
         rx: mpsc::Receiver<Box<Packet>>,
         input_rx: mpsc::Receiver<Box<Packet>>,
+        back_rx: mpsc::Receiver<Box<Packet>>,
         control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
     ) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
@@ -1757,7 +1781,6 @@ impl Domain {
             .name(format!("domain{}", name))
             .spawn(move || {
                 let (inject_tx, inject_rx) = mpsc::sync_channel(1);
-                let (back_tx, back_rx) = mpsc::channel();
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
@@ -1851,10 +1874,6 @@ impl Domain {
                     match packet.take().unwrap() {
                         Err(_) => break,
                         Ok(box Packet::Quit) => break,
-                        Ok(box Packet::RequestUnboundedTx(ack)) => {
-                            ack.send((self.shard.unwrap_or(0), back_tx.clone()))
-                                .unwrap();
-                        }
                         Ok(m) => {
                             if group_commit_queues.should_append(&m, &self.nodes) {
                                 if let Some(m) = group_commit_queues.append(

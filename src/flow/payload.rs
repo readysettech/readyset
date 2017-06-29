@@ -34,7 +34,7 @@ impl fmt::Debug for Link {
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<mpsc::Sender<Box<Packet>>>),
+    End(domain::Index, usize),
     Local(Vec<usize>),
 }
 
@@ -172,13 +172,6 @@ pub enum Packet {
         node: LocalNodeIndex,
         new_streamer: mpsc::Sender<Vec<node::StreamUpdate>>,
     },
-
-    /// Request a handle to an unbounded channel to this domain.
-    ///
-    /// We need these channels to send replay requests, as using the bounded channels could easily
-    /// result in a deadlock. Since the unbounded channel is only used for requests as a result of
-    /// processing, it is essentially self-clocking.
-    RequestUnboundedTx(mpsc::Sender<(usize, mpsc::Sender<Box<Packet>>)>),
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///

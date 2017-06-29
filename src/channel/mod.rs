@@ -46,6 +46,7 @@ impl<T> ChannelSender<T> {
 struct ChannelCoordinatorInner<K: Eq + Hash + Clone, P> {
     txs: HashMap<K, ChannelSender<P>>,
     input_txs: HashMap<K, ChannelSender<P>>,
+    unbounded_txs: HashMap<K, ChannelSender<P>>,
 }
 
 pub struct ChannelCoordinator<K: Eq + Hash + Clone, P> {
@@ -58,14 +59,22 @@ impl<K: Eq + Hash + Clone, P> ChannelCoordinator<K, P> {
             inner: Mutex::new(ChannelCoordinatorInner {
                 txs: HashMap::new(),
                 input_txs: HashMap::new(),
+                unbounded_txs: HashMap::new(),
             }),
         }
     }
 
-    pub fn insert_tx(&self, key: K, tx: ChannelSender<P>, input_tx: ChannelSender<P>) {
+    pub fn insert_tx(
+        &self,
+        key: K,
+        tx: ChannelSender<P>,
+        input_tx: ChannelSender<P>,
+        unbounded_tx: ChannelSender<P>,
+    ) {
         let mut inner = self.inner.lock().unwrap();
         inner.txs.insert(key.clone(), tx);
-        inner.input_txs.insert(key, input_tx);
+        inner.input_txs.insert(key.clone(), input_tx);
+        inner.unbounded_txs.insert(key, unbounded_tx);
     }
 
     pub fn get_tx(&self, key: &K) -> Option<ChannelSender<P>> {
@@ -74,6 +83,10 @@ impl<K: Eq + Hash + Clone, P> ChannelCoordinator<K, P> {
 
     pub fn get_input_tx(&self, key: &K) -> Option<ChannelSender<P>> {
         self.inner.lock().unwrap().input_txs.get(key).cloned()
+    }
+
+    pub fn get_unbounded_tx(&self, key: &K) -> Option<ChannelSender<P>> {
+        self.inner.lock().unwrap().unbounded_txs.get(key).cloned()
     }
 
     pub fn reset(&self) {

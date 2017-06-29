@@ -67,11 +67,18 @@ pub struct DomainHandle {
     txs: Vec<mpsc::SyncSender<Box<Packet>>>,
     in_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
     cr_rxs: Vec<mpsc::Receiver<ControlReplyPacket>>,
+    back_txs: Vec<mpsc::Sender<Box<Packet>>>,
 
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
-    rxs: Vec<(mpsc::Receiver<Box<Packet>>, mpsc::Receiver<Box<Packet>>)>,
-    cr_txs: Vec<mpsc::SyncSender<ControlReplyPacket>>,
+    boot_args: Vec<
+        (
+            mpsc::Receiver<Box<Packet>>,
+            mpsc::Receiver<Box<Packet>>,
+            mpsc::Receiver<Box<Packet>>,
+            mpsc::SyncSender<ControlReplyPacket>,
+        ),
+    >,
 
     // used during operation
     tx_buf: Option<Box<Packet>>,
@@ -81,20 +88,21 @@ impl DomainHandle {
     pub fn new(domain: domain::Index, sharded_by: Sharding) -> Self {
         let mut txs = Vec::new();
         let mut in_txs = Vec::new();
-        let mut rxs = Vec::new();
-        let mut cr_txs = Vec::new();
+        let mut back_txs = Vec::new();
         let mut cr_rxs = Vec::new();
+        let mut boot_args = Vec::new();
         {
             let mut add = || {
                 let (in_tx, in_rx) = mpsc::sync_channel(256);
                 let (tx, rx) = mpsc::sync_channel(1);
                 let (cr_tx, cr_rx) = mpsc::sync_channel(1);
+                let (back_tx, back_rx) = mpsc::channel();
 
                 txs.push(tx);
                 in_txs.push(in_tx);
-                rxs.push((rx, in_rx));
-                cr_txs.push(cr_tx);
+                back_txs.push(back_tx);
                 cr_rxs.push(cr_rx);
+                boot_args.push((rx, in_rx, back_rx, cr_tx));
             };
             add();
             match sharded_by {
@@ -114,12 +122,12 @@ impl DomainHandle {
         DomainHandle {
             txs,
             in_txs,
-            rxs,
+            back_txs,
+            cr_rxs,
             idx: domain,
             tx_buf: None,
             threads: Vec::new(),
-            cr_txs,
-            cr_rxs,
+            boot_args,
         }
     }
 
@@ -156,17 +164,24 @@ impl DomainHandle {
         channel_coordinator: &Arc<ChannelCoordinator>,
         ts: i64,
     ) {
-        for (i, (tx, in_tx)) in self.txs.iter().zip(self.in_txs.iter()).enumerate() {
+        for (i, ((tx, in_tx), back_tx)) in
+            self.txs
+                .iter()
+                .zip(self.in_txs.iter())
+                .zip(self.back_txs.iter())
+                .enumerate()
+        {
             channel_coordinator.insert_tx(
                 (self.idx, i),
                 ChannelSender::LocalSync(tx.clone()),
                 ChannelSender::LocalSync(in_tx.clone()),
+                ChannelSender::Local(back_tx.clone()),
             );
         }
 
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
-        let n = self.rxs.len();
-        for (i, ((rx, in_rx), cr_tx)) in self.rxs.drain(..).zip(self.cr_txs.drain(..)).enumerate() {
+        let n = self.boot_args.len();
+        for (i, (rx, in_rx, back_rx, cr_tx)) in self.boot_args.drain(..).enumerate() {
             let logger = if n == 1 {
                 log.new(o!("domain" => self.idx.index()))
             } else {
@@ -188,7 +203,7 @@ impl DomainHandle {
                 channel_coordinator.clone(),
                 ts,
             );
-            self.threads.push(domain.boot(rx, in_rx, cr_tx));
+            self.threads.push(domain.boot(rx, in_rx, back_rx, cr_tx));
         }
     }
 
@@ -252,7 +267,6 @@ impl DomainHandle {
                     new_streamer: new_streamer.clone(),
                 }
             }
-            Packet::RequestUnboundedTx(ref tx) => box Packet::RequestUnboundedTx(tx.clone()),
             Packet::PrepareState {
                 ref node,
                 ref state,
@@ -374,7 +388,7 @@ impl DomainHandle {
         let mut stats = Vec::with_capacity(self.cr_rxs.len());
         for rx in &self.cr_rxs {
             match rx.recv() {
-                Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d,s)),
+                Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d, s)),
                 Ok(r) => return Err(WaitError::WrongReply(r)),
                 Err(e) => return Err(WaitError::RecvError(e)),
             }
