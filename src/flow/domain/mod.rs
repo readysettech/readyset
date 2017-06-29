@@ -727,7 +727,7 @@ impl Domain {
                                     (0..shards)
                                         .map(|shard| {
                                             self.channel_coordinator
-                                                .get_tx(&(trigger_domain, shard))
+                                                .get_unbounded_tx(&(trigger_domain, shard))
                                                 .unwrap()
                                         })
                                         .collect::<Vec<_>>()
