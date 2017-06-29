@@ -27,18 +27,21 @@ pub struct TastingResult {
     pub results: Option<Vec<HashMap<String, BenchmarkResult<f64>>>>,
 }
 
-fn benchmark(workdir: &str,
-             cfg: &Benchmark,
-             previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>)
-             -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
+fn benchmark(
+    workdir: &str,
+    cfg: &Benchmark,
+    previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
+) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(workdir)
         .env("RUST_BACKTRACE", "1")
         .arg(&cfg.cmd)
         .args(cfg.args.as_slice());
 
-    let output = cmd.output()
-        .expect(&format!("Failed to execute benchmark '{}'!", cfg.name));
+    let output = cmd.output().expect(&format!(
+        "Failed to execute benchmark '{}'!",
+        cfg.name
+    ));
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();
@@ -63,9 +66,11 @@ fn benchmark(workdir: &str,
                     let val = match f64::from_str(&c) {
                         Ok(f) => f,
                         Err(_) => {
-                            println!("failed to parse value '{}' for {} into f64 number, ignoring",
-                                     c,
-                                     bm_name);
+                            println!(
+                                "failed to parse value '{}' for {} into f64 number, ignoring",
+                                c,
+                                bm_name
+                            );
                             continue;
                         }
                     };
@@ -120,14 +125,14 @@ fn build(workdir: &str) -> ExitStatus {
         .expect("Failed to execute 'cargo build'!")
 }
 
-pub fn taste_commit(ws: &Workspace,
-                    history: &mut HashMap<String,
-                                          HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
-                    push: &Push,
-                    commit: &Commit,
-                    def_improvement_threshold: f64,
-                    def_regression_threshold: f64)
-                    -> Result<(Option<Config>, TastingResult), String> {
+pub fn taste_commit(
+    ws: &Workspace,
+    history: &mut HashMap<String, HashMap<String, HashMap<String, BenchmarkResult<f64>>>>,
+    push: &Push,
+    commit: &Commit,
+    def_improvement_threshold: f64,
+    def_regression_threshold: f64,
+) -> Result<(Option<Config>, TastingResult), String> {
     println!("Tasting commit {}", commit.id);
     ws.checkout_commit(&commit.id)?;
 
@@ -144,37 +149,47 @@ pub fn taste_commit(ws: &Workspace,
     let build_success = update(&ws.path).success() && build(&ws.path).success();
     let test_success = test(&ws.path).success();
 
-    let cfg = match parse_config(Path::new(&format!("{}/taster.toml", ws.path)),
-                                 def_improvement_threshold,
-                                 def_regression_threshold) {
+    let cfg = match parse_config(
+        Path::new(&format!("{}/taster.toml", ws.path)),
+        def_improvement_threshold,
+        def_regression_threshold,
+    ) {
         Ok(c) => c,
         Err(e) => {
             match e.kind() {
                 io::ErrorKind::NotFound => {
-                    println!("Skipping commit {} which doesn't have a Taster config.",
-                             commit.id);
-                    return Ok((None,
-                               TastingResult {
-                                   branch: branch,
-                                   commit: commit.clone(),
-                                   build: build_success,
-                                   test: test_success,
-                                   bench: false,
-                                   results: None,
-                               }));
+                    println!(
+                        "Skipping commit {} which doesn't have a Taster config.",
+                        commit.id
+                    );
+                    return Ok((
+                        None,
+                        TastingResult {
+                            branch: branch,
+                            commit: commit.clone(),
+                            build: build_success,
+                            test: test_success,
+                            bench: false,
+                            results: None,
+                        },
+                    ));
                 }
                 io::ErrorKind::InvalidInput => {
-                    println!("Skipping commit {} which has an invalid Taster config.",
-                             commit.id);
-                    return Ok((None,
-                               TastingResult {
-                                   branch: branch,
-                                   commit: commit.clone(),
-                                   build: build_success,
-                                   test: test_success,
-                                   bench: false,
-                                   results: None,
-                               }));
+                    println!(
+                        "Skipping commit {} which has an invalid Taster config.",
+                        commit.id
+                    );
+                    return Ok((
+                        None,
+                        TastingResult {
+                            branch: branch,
+                            commit: commit.clone(),
+                            build: build_success,
+                            test: test_success,
+                            bench: false,
+                            results: None,
+                        },
+                    ));
                 }
                 _ => unimplemented!(),
             }
@@ -187,10 +202,10 @@ pub fn taste_commit(ws: &Workspace,
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                         let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
-                         branch_history.insert(b.name.clone(), new_result.1.clone());
-                         new_result
-                     })
+                    let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
+                    branch_history.insert(b.name.clone(), new_result.1.clone());
+                    new_result
+                })
                 .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
         None => {
@@ -203,7 +218,8 @@ pub fn taste_commit(ws: &Workspace,
     let bench_success = bench_out.iter().all(|x| x.0.success());
     let bench_results = bench_out.iter().map(|x| x.1.clone()).collect();
 
-    Ok((Some(cfg),
+    Ok((
+        Some(cfg),
         TastingResult {
             branch: branch,
             commit: commit.clone(),
@@ -211,7 +227,8 @@ pub fn taste_commit(ws: &Workspace,
             test: test_success,
             bench: bench_success,
             results: Some(bench_results),
-        }))
+        },
+    ))
 }
 
 fn test(workdir: &str) -> ExitStatus {

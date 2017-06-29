@@ -31,7 +31,8 @@ use std::env;
 /// just sit here looping forever we keep track of authentications we've
 /// attempted and we don't try the same ones again.
 pub fn with_authentication<T, F>(url: &str, cfg: &git2::Config, mut f: F) -> Result<T, git2::Error>
-    where F: FnMut(&mut git2::Credentials) -> Result<T, git2::Error>
+where
+    F: FnMut(&mut git2::Credentials) -> Result<T, git2::Error>,
 {
     let mut cred_helper = git2::CredentialHelper::new(url);
     cred_helper.config(cfg);
@@ -184,17 +185,23 @@ pub fn with_authentication<T, F>(url: &str, cfg: &git2::Config, mut f: F) -> Res
             .map(|s| format!("`{}`", s))
             .collect::<Vec<_>>()
             .join(", ");
-        msg.push_str(&format!("\nattempted ssh-agent authentication, but none of the usernames \
+        msg.push_str(&format!(
+            "\nattempted ssh-agent authentication, but none of the usernames \
                                {} succeeded",
-                              names));
+            names
+        ));
     }
     if let Some(failed_cred_helper) = cred_helper_bad {
         if failed_cred_helper {
-            msg.push_str("\nattempted to find username/password via git's `credential.helper` \
-                          support, but failed");
+            msg.push_str(
+                "\nattempted to find username/password via git's `credential.helper` \
+                          support, but failed",
+            );
         } else {
-            msg.push_str("\nattempted to find username/password via `credential.helper`, but \
-                          maybe the found credentials were incorrect");
+            msg.push_str(
+                "\nattempted to find username/password via `credential.helper`, but \
+                          maybe the found credentials were incorrect",
+            );
         }
     }
     Err(git2::Error::from_str(&msg))

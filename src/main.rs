@@ -55,77 +55,109 @@ pub fn main() {
     let args = App::new("taster")
         .version("0.0.1")
         .about("Tastes GitHub commits.")
-        .arg(Arg::with_name("listen_addr")
-                 .short("l")
-                 .long("listen_addr")
-                 .takes_value(true)
-                 .value_name("IP:PORT")
-                 .default_value("0.0.0.0:4567")
-                 .help("Listen address and port for webhook delivery"))
-        .arg(Arg::with_name("github_repo")
-                 .short("r")
-                 .long("github_repo")
-                 .takes_value(true)
-                 .required(true)
-                 .value_name("GH_REPO")
-                 .default_value("https://github.com/ms705/taster")
-                 .help("GitHub repository to taste"))
-        .arg(Arg::with_name("email_addr")
-                 .long("email_addr")
-                 .takes_value(true)
-                 .required(false)
-                 .help("Email address to send notifications to"))
-        .arg(Arg::with_name("default_regression_reporting_threshold")
-                 .long("default_regression_reporting_threshold")
-                 .takes_value(true)
-                 .default_value("0.1")
-                 .help("Relative performance threshold below which a result is considered a \
-                   regression that needs reporting (0.1 = +/-10%)."))
-        .arg(Arg::with_name("default_improvement_reporting_threshold")
-                 .long("default_improvement_reporting_threshold")
-                 .takes_value(true)
-                 .default_value("0.1")
-                 .help("Relative performance threshold above which a result is considered an \
-                   improvement that needs reporting (0.1 = +/-10%)."))
-        .arg(Arg::with_name("secret")
-                 .short("s")
-                 .long("secret")
-                 .takes_value(true)
-                 .required(false)
-                 .help("GitHub webhook secret"))
-        .arg(Arg::with_name("slack_hook_url")
-                 .long("slack_hook_url")
-                 .takes_value(true)
-                 .required(false)
-                 .help("Slack webhook URL to push notifications to"))
-        .arg(Arg::with_name("slack_channel")
-                 .long("slack_channel")
-                 .takes_value(true)
-                 .required(false)
-                 .default_value("#soup-test")
-                 .help("Slack channel for notifications"))
-        .arg(Arg::with_name("taste_commit")
-                 .long("taste_commit")
-                 .short("t")
-                 .takes_value(true)
-                 .required(false)
-                 .help("Do a one-off taste of a specific commit"))
-        .arg(Arg::with_name("taste_head_only")
-                 .long("taste_head_only")
-                 .required(false)
-                 .help("When multiple commits are pushed, taste the head commit only"))
-        .arg(Arg::with_name("verbose_notifications")
-                 .long("verbose_notifications")
-                 .required(false)
-                 .help("List all benchmarks in notifications even if the results have not changed \
-                   significantly"))
-        .arg(Arg::with_name("workdir")
-                 .short("w")
-                 .long("workdir")
-                 .takes_value(true)
-                 .required(true)
-                 .value_name("REPO_DIR")
-                 .help("Directory holding the workspace repo"))
+        .arg(
+            Arg::with_name("listen_addr")
+                .short("l")
+                .long("listen_addr")
+                .takes_value(true)
+                .value_name("IP:PORT")
+                .default_value("0.0.0.0:4567")
+                .help("Listen address and port for webhook delivery"),
+        )
+        .arg(
+            Arg::with_name("github_repo")
+                .short("r")
+                .long("github_repo")
+                .takes_value(true)
+                .required(true)
+                .value_name("GH_REPO")
+                .default_value("https://github.com/ms705/taster")
+                .help("GitHub repository to taste"),
+        )
+        .arg(
+            Arg::with_name("email_addr")
+                .long("email_addr")
+                .takes_value(true)
+                .required(false)
+                .help("Email address to send notifications to"),
+        )
+        .arg(
+            Arg::with_name("default_regression_reporting_threshold")
+                .long("default_regression_reporting_threshold")
+                .takes_value(true)
+                .default_value("0.1")
+                .help(
+                    "Relative performance threshold below which a result is considered a \
+                   regression that needs reporting (0.1 = +/-10%).",
+                ),
+        )
+        .arg(
+            Arg::with_name("default_improvement_reporting_threshold")
+                .long("default_improvement_reporting_threshold")
+                .takes_value(true)
+                .default_value("0.1")
+                .help(
+                    "Relative performance threshold above which a result is considered an \
+                   improvement that needs reporting (0.1 = +/-10%).",
+                ),
+        )
+        .arg(
+            Arg::with_name("secret")
+                .short("s")
+                .long("secret")
+                .takes_value(true)
+                .required(false)
+                .help("GitHub webhook secret"),
+        )
+        .arg(
+            Arg::with_name("slack_hook_url")
+                .long("slack_hook_url")
+                .takes_value(true)
+                .required(false)
+                .help("Slack webhook URL to push notifications to"),
+        )
+        .arg(
+            Arg::with_name("slack_channel")
+                .long("slack_channel")
+                .takes_value(true)
+                .required(false)
+                .default_value("#soup-test")
+                .help("Slack channel for notifications"),
+        )
+        .arg(
+            Arg::with_name("taste_commit")
+                .long("taste_commit")
+                .short("t")
+                .takes_value(true)
+                .required(false)
+                .help("Do a one-off taste of a specific commit"),
+        )
+        .arg(
+            Arg::with_name("taste_head_only")
+                .long("taste_head_only")
+                .required(false)
+                .help(
+                    "When multiple commits are pushed, taste the head commit only",
+                ),
+        )
+        .arg(
+            Arg::with_name("verbose_notifications")
+                .long("verbose_notifications")
+                .required(false)
+                .help(
+                    "List all benchmarks in notifications even if the results have not changed \
+                   significantly",
+                ),
+        )
+        .arg(
+            Arg::with_name("workdir")
+                .short("w")
+                .long("workdir")
+                .takes_value(true)
+                .required(true)
+                .value_name("REPO_DIR")
+                .help("Directory holding the workspace repo"),
+        )
         .after_help(TASTER_USAGE)
         .get_matches();
 
@@ -152,7 +184,12 @@ pub fn main() {
         None
     };
     let sn = if let Some(url) = slack_hook_url {
-        Some(slack::SlackNotifier::new(url, slack_channel.unwrap(), repo, verbose_notify))
+        Some(slack::SlackNotifier::new(
+            url,
+            slack_channel.unwrap(),
+            repo,
+            verbose_notify,
+        ))
     } else {
         None
     };
@@ -178,12 +215,14 @@ pub fn main() {
                     push_ref: None,
                     pusher: None,
                 };
-                let res = taste::taste_commit(&ws,
-                                              &mut history,
-                                              &push,
-                                              &push.head_commit,
-                                              improvement_threshold,
-                                              regression_threshold);
+                let res = taste::taste_commit(
+                    &ws,
+                    &mut history,
+                    &push,
+                    &push.head_commit,
+                    improvement_threshold,
+                    regression_threshold,
+                );
                 match res {
                     Err(e) => println!("ERROR: failed to taste{}: {}", cid, e),
                     Ok((cfg, tr)) => {
@@ -218,10 +257,12 @@ pub fn main() {
     {
         let branches = ws.branch_heads();
         for (b, c) in branches.iter() {
-            println!("tasting HEAD of {}: {} / {}",
-                     b,
-                     c.id(),
-                     c.message().unwrap());
+            println!(
+                "tasting HEAD of {}: {} / {}",
+                b,
+                c.id(),
+                c.message().unwrap()
+            );
             let hc = Commit {
                 id: c.id(),
                 msg: String::from(c.message().unwrap()),
@@ -233,12 +274,14 @@ pub fn main() {
                 push_ref: Some(b.clone()),
                 pusher: None,
             };
-            let res = taste::taste_commit(&ws,
-                                          &mut history,
-                                          &push,
-                                          &push.head_commit,
-                                          improvement_threshold,
-                                          regression_threshold);
+            let res = taste::taste_commit(
+                &ws,
+                &mut history,
+                &push,
+                &push.head_commit,
+                improvement_threshold,
+                regression_threshold,
+            );
             assert!(res.is_ok());
         }
     }
@@ -256,9 +299,11 @@ pub fn main() {
                 ref pusher,
                 ..
             } => {
-                println!("Handling {} commits pushed by {}",
-                         commits.len(),
-                         pusher.name);
+                println!(
+                    "Handling {} commits pushed by {}",
+                    commits.len(),
+                    pusher.name
+                );
 
                 // Data structures to represent info from webhook
                 let hc = Commit {
@@ -288,17 +333,21 @@ pub fn main() {
                     let mut history = hl.lock().unwrap();
                     // First taste the head commit
                     ws.fetch().unwrap();
-                    let head_res = taste::taste_commit(&ws,
-                                                       &mut history,
-                                                       &push,
-                                                       &push.head_commit,
-                                                       improvement_threshold,
-                                                       regression_threshold);
+                    let head_res = taste::taste_commit(
+                        &ws,
+                        &mut history,
+                        &push,
+                        &push.head_commit,
+                        improvement_threshold,
+                        regression_threshold,
+                    );
                     match head_res {
                         Err(e) => {
-                            println!("ERROR: failed to taste HEAD commit {}: {}",
-                                     head_commit.id,
-                                     e)
+                            println!(
+                                "ERROR: failed to taste HEAD commit {}: {}",
+                                head_commit.id,
+                                e
+                            )
                         }
                         Ok((cfg, tr)) => {
                             notify(cfg.as_ref(), &tr, &push);
@@ -315,24 +364,30 @@ pub fn main() {
                                         url: c.url.clone(),
                                     };
                                     // taste
-                                    let res = taste::taste_commit(&ws,
-                                                                  &mut history,
-                                                                  &push,
-                                                                  &cur_c,
-                                                                  improvement_threshold,
-                                                                  regression_threshold);
+                                    let res = taste::taste_commit(
+                                        &ws,
+                                        &mut history,
+                                        &push,
+                                        &cur_c,
+                                        improvement_threshold,
+                                        regression_threshold,
+                                    );
                                     match res {
                                         Err(e) => {
-                                            println!("ERROR: failed to taste commit {}: {}",
-                                                     c.id,
-                                                     e)
+                                            println!(
+                                                "ERROR: failed to taste commit {}: {}",
+                                                c.id,
+                                                e
+                                            )
                                         }
                                         Ok((cfg, tr)) => notify(cfg.as_ref(), &tr, &push),
                                     }
                                 }
                             } else if !commits.is_empty() {
-                                println!("Skipping {} remaining commits in push!",
-                                         commits.len() - 1);
+                                println!(
+                                    "Skipping {} remaining commits in push!",
+                                    commits.len() - 1
+                                );
                             }
                         }
                     }

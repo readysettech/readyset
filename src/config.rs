@@ -21,16 +21,22 @@ pub struct Config {
     pub slack_aliases: HashMap<String, String>,
 }
 
-pub fn parse_config(cfg: &Path,
-                    def_imp_threshold: f64,
-                    def_reg_threshold: f64)
-                    -> Result<Config, Error> {
+pub fn parse_config(
+    cfg: &Path,
+    def_imp_threshold: f64,
+    def_reg_threshold: f64,
+) -> Result<Config, Error> {
     let mut f = try!(fs::File::open(cfg));
     let mut buf = String::new();
     try!(f.read_to_string(&mut buf));
 
     let value = match toml::Parser::new(&buf).parse() {
-        None => return Err(Error::new(ErrorKind::InvalidInput, "failed to parse taster config!")),
+        None => {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "failed to parse taster config!",
+            ))
+        }
         Some(v) => v,
     };
 
@@ -72,12 +78,12 @@ pub fn parse_config(cfg: &Path,
         .iter()
         .filter(|t| t.0 == "slack-aliases")
         .flat_map(|t| {
-                      t.1
-                          .as_table()
-                          .unwrap()
-                          .iter()
-                          .map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap())))
-                  })
+            t.1
+                .as_table()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), String::from(v.as_str().unwrap())))
+        })
         .collect::<HashMap<_, _>>();
 
     // Benchmark definitions
@@ -88,7 +94,7 @@ pub fn parse_config(cfg: &Path,
         .collect();
 
     Ok(Config {
-           benchmarks: benchmarks,
-           slack_aliases: slack_aliases,
-       })
+        benchmarks: benchmarks,
+        slack_aliases: slack_aliases,
+    })
 }

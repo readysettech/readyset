@@ -31,9 +31,12 @@ impl Workspace {
     pub fn new(github_repo: &str, local_path: &Path) -> Workspace {
         // Make workdir if it doesn't exist
         if !local_path.is_dir() {
-            fs::create_dir_all(&local_path).expect(format!("Couldn't mkdir {}",
-                                                           local_path.display())
-                                                           .as_str());
+            fs::create_dir_all(&local_path).expect(
+                format!(
+                    "Couldn't mkdir {}",
+                    local_path.display()
+                ).as_str(),
+            );
         }
 
         let repo = match Repository::open(local_path.to_str().unwrap()) {
@@ -41,9 +44,11 @@ impl Workspace {
             Err(e) => {
                 if e.code() == ErrorCode::NotFound {
                     // Repo does not exist, so let's clone into the workdir
-                    println!("Cloning '{}' into local workspace at '{}'...",
-                             github_repo,
-                             local_path.to_str().unwrap());
+                    println!(
+                        "Cloning '{}' into local workspace at '{}'...",
+                        github_repo,
+                        local_path.to_str().unwrap()
+                    );
                     clone(github_repo, local_path).unwrap()
                 } else {
                     panic!(e);
@@ -67,13 +72,14 @@ impl Workspace {
             Err(e) => panic!("Couldn't get remote branches: {}", e.message()),
             Ok(br) => {
                 br.map(|b| {
-                             let branch = b.unwrap().0;
-                             (String::from(branch.name().as_ref().unwrap().unwrap()),
-                              self.repo
-                                  .find_commit(branch.get().target().unwrap())
-                                  .unwrap())
-                         })
-                    .collect()
+                    let branch = b.unwrap().0;
+                    (
+                        String::from(branch.name().as_ref().unwrap().unwrap()),
+                        self.repo
+                            .find_commit(branch.get().target().unwrap())
+                            .unwrap(),
+                    )
+                }).collect()
             }
         }
     }
@@ -86,8 +92,7 @@ impl Workspace {
             cb.credentials(f);
             let mut remote = try!(self.repo.remote_anonymous(&self.remote_url));
             let mut opts = FetchOptions::new();
-            opts.remote_callbacks(cb)
-                .download_tags(AutotagOption::All);
+            opts.remote_callbacks(cb).download_tags(AutotagOption::All);
 
             try!(remote.fetch(&[refspec], Some(&mut opts), None));
             Ok(())

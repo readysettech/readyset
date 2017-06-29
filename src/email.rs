@@ -21,11 +21,12 @@ impl EmailNotifier {
         }
     }
 
-    pub fn notify(&self,
-                  _cfg: Option<&Config>,
-                  _res: &TastingResult,
-                  push: &Push)
-                  -> Result<(), String> {
+    pub fn notify(
+        &self,
+        _cfg: Option<&Config>,
+        _res: &TastingResult,
+        push: &Push,
+    ) -> Result<(), String> {
         // Unfortunately, we have to construct the transport here, since hyper forces us to accept
         // &self rather than &mut self, so we can't store the mailer in the `EmailNotifier` struct
         let mut mailer = SmtpTransportBuilder::localhost().unwrap().build();

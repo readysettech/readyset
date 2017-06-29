@@ -20,16 +20,21 @@ impl SlackNotifier {
         }
     }
 
-    pub fn notify(&self,
-                  cfg: Option<&Config>,
-                  res: &TastingResult,
-                  push: &Push)
-                  -> Result<(), String> {
+    pub fn notify(
+        &self,
+        cfg: Option<&Config>,
+        res: &TastingResult,
+        push: &Push,
+    ) -> Result<(), String> {
         let mut text =
-            vec![Text("I've tasted _".into()),
-                 Text(format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into()),
-                 Link(SlackLink::new(&push.head_commit.url,
-                                     &format!("{}", push.head_commit.id)[0..6]))];
+            vec![
+                Text("I've tasted _".into()),
+                Text(format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into()),
+                Link(SlackLink::new(
+                    &push.head_commit.url,
+                    &format!("{}", push.head_commit.id)[0..6],
+                )),
+            ];
         match push.pusher {
             Some(ref p) => {
                 let alias = match cfg {
@@ -93,10 +98,12 @@ impl SlackNotifier {
         let mut attachments = Vec::new();
         let build_att = AttachmentBuilder::new("")
             .title(format!("It {}.", taste))
-            .text(format!("{} {} {}",
-                          check("Build", res.build),
-                          check("Tests", res.test),
-                          check("Benchmarks", res.bench)))
+            .text(format!(
+                "{} {} {}",
+                check("Build", res.build),
+                check("Tests", res.test),
+                check("Benchmarks", res.bench)
+            ))
             .color(color)
             .build()
             .unwrap();
@@ -131,10 +138,9 @@ impl SlackNotifier {
                             };
                             Field {
                                 title: k.clone(),
-                                value: SlackText::new(format!("{} {} ({:+.2}%)",
-                                                              icon,
-                                                              val.0,
-                                                              val.1 * 100.0)),
+                                value: SlackText::new(
+                                    format!("{} {} ({:+.2}%)", icon, val.0, val.1 * 100.0),
+                                ),
                                 short: Some(true),
                             }
                         })
