@@ -131,10 +131,6 @@ impl DomainHandle {
         }
     }
 
-    pub fn get_txs(&self) -> Vec<mpsc::SyncSender<Box<Packet>>> {
-        self.txs.clone()
-    }
-
     pub fn get_input_handle(&self) -> DomainInputHandle {
         DomainInputHandle(self.in_txs.clone())
     }
