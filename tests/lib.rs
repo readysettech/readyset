@@ -6,7 +6,7 @@ use std::sync::mpsc;
 
 use std::collections::HashMap;
 
-const SETTLE_TIME_MS: u64 = 750;
+const SETTLE_TIME_MS: u64 = 100;
 
 #[test]
 fn it_works_basic() {
@@ -1267,7 +1267,7 @@ fn do_full_vote_migration(old_puts_after: bool) {
     let mut muta = g.get_mutator(article);
     let mut mutv = g.get_mutator(vote);
 
-    let n = 1000i64;
+    let n = 250i64;
     let title: DataType = "foo".into();
     let raten: DataType = 5.into();
 
