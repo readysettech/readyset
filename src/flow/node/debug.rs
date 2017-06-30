@@ -58,16 +58,7 @@ impl Node {
                     None => String::from("none"),
                     Some(k) => format!("{}", k),
                 };
-                use flow::VIEW_READERS;
-                let size = match VIEW_READERS
-                    .lock()
-                    .unwrap()
-                    .get(&idx)
-                    .map(|state| state.len()) {
-                    None => String::from("empty"),
-                    Some(s) => format!("{} distinct keys", s),
-                };
-                write!(f, "{{ {} | (reader / key: {}) | {} }}", addr, key, size)
+                write!(f, "{{ {} | (reader / key: {}) }}", addr, key)
             }
             NodeType::Internal(ref i) => {
                 write!(f, "{{")?;

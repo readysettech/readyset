@@ -10,6 +10,7 @@ use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext
 use flow::statistics;
 use flow::transactions;
 use flow::persistence;
+use flow;
 use checktable;
 use slog::Logger;
 use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
@@ -115,6 +116,7 @@ pub struct Domain {
     concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
+    readers: flow::Readers,
     inject_tx: Option<mpsc::SyncSender<Box<Packet>>>,
     control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
@@ -133,6 +135,7 @@ impl Domain {
         shard: usize,
         nshards: usize,
         nodes: DomainNodes,
+        readers: &flow::Readers,
         persistence_parameters: persistence::Parameters,
         checktable: Arc<Mutex<checktable::CheckTable>>,
         channel_coordinator: Arc<ChannelCoordinator>,
@@ -158,6 +161,7 @@ impl Domain {
             reader_triggered: local::Map::new(),
             replay_paths: HashMap::new(),
 
+            readers: readers.clone(),
             inject_tx: None,
             control_reply_tx: None,
             channel_coordinator,
@@ -721,7 +725,6 @@ impl Domain {
                                 tag,
                                 trigger_domain: (trigger_domain, shards)
                             } => {
-                                use flow;
                                 use backlog;
                                 let txs = Mutex::new(
                                     (0..shards)
@@ -746,7 +749,7 @@ impl Domain {
                                             tag: tag,
                                         }).unwrap();
                                     });
-                                flow::VIEW_READERS
+                                self.readers
                                     .lock()
                                     .unwrap()
                                     .get_mut(&gid)
@@ -760,10 +763,9 @@ impl Domain {
                                 });
                             }
                             InitialState::Global { gid, cols, key } => {
-                                use flow;
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, key);
-                                flow::VIEW_READERS
+                                self.readers
                                     .lock()
                                     .unwrap()
                                     .get_mut(&gid)

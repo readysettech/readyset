@@ -12,9 +12,13 @@ pub struct Getter {
 }
 
 impl Getter {
-    pub(crate) fn new(node: NodeIndex, ingredients: &Graph) -> Option<Self> {
+    pub(crate) fn new(
+        node: NodeIndex,
+        readers: &flow::Readers,
+        ingredients: &Graph,
+    ) -> Option<Self> {
         {
-            let vr = flow::VIEW_READERS.lock().unwrap();
+            let vr = readers.lock().unwrap();
             vr.get(&node).cloned()
         }.map(move |rh| {
             let gen = ingredients[node]

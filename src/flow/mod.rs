@@ -44,10 +44,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
-lazy_static! {
-    static ref VIEW_READERS: Mutex<HashMap<NodeIndex, backlog::ReadHandle>> = Mutex::default();
-}
-
+type Readers = Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>;
 pub type Edge = bool; // should the edge be materialized?
 
 /// `Blender` is the core component of the alternate Soup implementation.
@@ -70,6 +67,8 @@ pub struct Blender {
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
+
+    readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
 
     log: slog::Logger,
 }
@@ -96,6 +95,8 @@ impl Default for Blender {
 
             domains: Default::default(),
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
+
+            readers: Arc::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -239,7 +240,7 @@ impl Blender {
     /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
     pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
         self.find_getter_for(node)
-            .and_then(|r| Getter::new(r, &self.ingredients))
+            .and_then(|r| Getter::new(r, &self.readers, &self.ingredients))
     }
 
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
@@ -891,6 +892,7 @@ impl<'a> Migration<'a> {
             d.boot(
                 &log,
                 &mut mainline.ingredients,
+                &mainline.readers,
                 nodes,
                 &mainline.persistence,
                 &mainline.checktable,

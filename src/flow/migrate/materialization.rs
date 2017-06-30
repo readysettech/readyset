@@ -405,7 +405,8 @@ pub fn initialize(
 
                     match blender.ingredients[node].sharded_by() {
                         Sharding::None => {
-                            flow::VIEW_READERS
+                            blender
+                                .readers
                                 .lock()
                                 .unwrap()
                                 .insert(node, ReadHandle::Singleton(None));
@@ -416,7 +417,8 @@ pub fn initialize(
                             for _ in 0..::SHARDS {
                                 shards.push(None);
                             }
-                            flow::VIEW_READERS
+                            blender
+                                .readers
                                 .lock()
                                 .unwrap()
                                 .insert(node, ReadHandle::Sharded(shards));
@@ -633,10 +635,11 @@ pub fn reconstruct(
     // mutable references to taken state.
     let s = graph[node]
         .with_reader(|r| {
-            // we need to make sure there's an entry in VIEW_READERS for this reader!
+            // we need to make sure there's an entry in readers for this reader!
             match graph[node].sharded_by() {
                 Sharding::None => {
-                    flow::VIEW_READERS
+                    blender
+                        .readers
                         .lock()
                         .unwrap()
                         .insert(node, ReadHandle::Singleton(None));
@@ -647,7 +650,8 @@ pub fn reconstruct(
                     for _ in 0..::SHARDS {
                         shards.push(None);
                     }
-                    flow::VIEW_READERS
+                    blender
+                        .readers
                         .lock()
                         .unwrap()
                         .insert(node, ReadHandle::Sharded(shards));

@@ -1,4 +1,5 @@
 use channel::ChannelSender;
+use flow;
 use flow::payload::ControlReplyPacket;
 use flow::prelude::*;
 use flow::domain;
@@ -154,6 +155,7 @@ impl DomainHandle {
         &mut self,
         log: &Logger,
         graph: &mut Graph,
+        readers: &flow::Readers,
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &persistence::Parameters,
         checktable: &Arc<Mutex<checktable::CheckTable>>,
@@ -194,6 +196,7 @@ impl DomainHandle {
                 i,
                 n,
                 nodes,
+                readers,
                 persistence_params.clone(),
                 checktable.clone(),
                 channel_coordinator.clone(),

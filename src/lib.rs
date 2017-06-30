@@ -360,9 +360,6 @@ extern crate vec_map;
 extern crate hurdles;
 extern crate arrayvec;
 
-#[macro_use]
-extern crate lazy_static;
-
 extern crate itertools;
 extern crate petgraph;
 extern crate regex;
