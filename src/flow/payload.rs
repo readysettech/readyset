@@ -1,5 +1,6 @@
 use petgraph;
 
+use channel;
 use checktable;
 use flow::domain;
 use flow::node;
@@ -7,7 +8,6 @@ use flow::statistics;
 use flow::prelude::*;
 
 use std::fmt;
-use std::sync::mpsc;
 use std::collections::HashMap;
 
 use std::time;
@@ -34,7 +34,7 @@ impl fmt::Debug for Link {
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<mpsc::Sender<Box<Packet>>>),
+    End(domain::Index, usize),
     Local(Vec<usize>),
 }
 
@@ -47,7 +47,7 @@ pub enum InitialState {
         cols: usize,
         key: usize,
         tag: Tag,
-        trigger_txs: Vec<mpsc::SyncSender<Box<Packet>>>,
+        trigger_domain: (domain::Index, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -68,7 +68,7 @@ pub enum ReplayPieceContext {
 #[derive(Clone)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
-    Pending(checktable::Token, mpsc::Sender<Result<i64, ()>>),
+    Pending(checktable::Token, channel::TransactionReplySender<Result<i64, ()>>),
     WillCommit,
 }
 
@@ -91,7 +91,7 @@ pub enum PacketEvent {
     ReachedReader,
 }
 
-pub type Tracer = Option<Vec<mpsc::Sender<(time::Instant, PacketEvent)>>>;
+pub type Tracer = Option<Vec<channel::TraceSender<(time::Instant, PacketEvent)>>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -144,20 +144,18 @@ pub enum Packet {
         node: LocalNodeIndex,
         field: String,
         default: DataType,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Drops an existing column from a `Base` node.
     DropBaseColumn {
         node: LocalNodeIndex,
         column: usize,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, (domain::Index, usize))>,
         new_tag: Option<(Tag, NodeIndex)>,
     },
 
@@ -166,21 +164,14 @@ pub enum Packet {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<mpsc::SyncSender<Box<Packet>>>),
+        new_txs: (LocalNodeIndex, Vec<(domain::Index, usize)>),
     },
 
     /// Add a streamer to an existing reader node.
     AddStreamer {
         node: LocalNodeIndex,
-        new_streamer: mpsc::Sender<Vec<node::StreamUpdate>>,
+        new_streamer: channel::StreamSender<Vec<node::StreamUpdate>>,
     },
-
-    /// Request a handle to an unbounded channel to this domain.
-    ///
-    /// We need these channels to send replay requests, as using the bounded channels could easily
-    /// result in a deadlock. Since the unbounded channel is only used for requests as a result of
-    /// processing, it is essentially self-clocking.
-    RequestUnboundedTx(mpsc::Sender<(usize, mpsc::Sender<Box<Packet>>)>),
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
@@ -193,7 +184,6 @@ pub enum Packet {
     /// Probe for the number of records in the given node's state
     StateSizeProbe {
         node: LocalNodeIndex,
-        ack: mpsc::SyncSender<usize>,
     },
 
     /// Inform domain about a new replay path.
@@ -201,9 +191,8 @@ pub enum Packet {
         tag: Tag,
         source: Option<LocalNodeIndex>,
         path: Vec<(LocalNodeIndex, Option<usize>)>,
-        done_tx: Option<mpsc::SyncSender<()>>,
+        notify_done: bool,
         trigger: TriggerEndpoint,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Ask domain (nicely) to replay a particular key.
@@ -217,7 +206,6 @@ pub enum Packet {
     Ready {
         node: LocalNodeIndex,
         index: Vec<Vec<usize>>,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Notification from Blender for domain to terminate
@@ -233,7 +221,6 @@ pub enum Packet {
     StartMigration {
         at: i64,
         prev_ts: i64,
-        ack: mpsc::SyncSender<()>,
     },
 
     /// Notify a domain about a completion timestamp for an ongoing migration.
@@ -249,15 +236,8 @@ pub enum Packet {
         egress_for_base: EgressForBase,
     },
 
-    /// Request that a domain send usage statistics on the given sender.
-    GetStatistics(
-        mpsc::SyncSender<
-            (
-                statistics::DomainStats,
-                HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
-            ),
-        >
-    ),
+    /// Request that a domain send usage statistics on the control reply channel.
+    GetStatistics,
 
     /// The packet was captured awaiting the receipt of other replays.
     Captured,
@@ -464,4 +444,11 @@ impl fmt::Debug for Packet {
             _ => write!(f, "Packet::Control"),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ControlReplyPacket {
+    Ack,
+    StateSize(usize),
+    Statistics(statistics::DomainStats, HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>),
 }

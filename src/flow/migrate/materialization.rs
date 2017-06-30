@@ -9,13 +9,13 @@ use flow;
 use flow::keys;
 use flow::domain;
 use flow::prelude::*;
+use flow::payload::TriggerEndpoint;
 use backlog::ReadHandle;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
 
 use std::collections::{HashSet, HashMap};
-use std::sync::mpsc;
 
 use slog::Logger;
 
@@ -375,21 +375,16 @@ pub fn initialize(
         // the change. this is important so that we don't ready a child in a different domain
         // before the parent has been readied. it's also important to avoid us returning before the
         // graph is actually fully operational.
-        let ready = |txs: &mut HashMap<_, domain::DomainHandle>, index_on: Vec<Vec<usize>>| {
-            let (ack_tx, ack_rx) = mpsc::sync_channel(0);
+        let ready = |handles: &mut HashMap<_, domain::DomainHandle>, index_on: Vec<Vec<usize>>| {
             trace!(log, "readying node"; "node" => node.index());
-            txs.get_mut(&d)
-                .unwrap()
+            let domain = handles.get_mut(&d).unwrap();
+            domain
                 .send(box Packet::Ready {
                     node: addr,
                     index: index_on,
-                    ack: ack_tx,
                 })
                 .unwrap();
-            match ack_rx.recv() {
-                Err(mpsc::RecvError) => (),
-                _ => unreachable!(),
-            }
+            domain.wait_for_ack().unwrap();
             trace!(log, "node ready"; "node" => node.index());
         };
 
@@ -667,6 +662,8 @@ pub fn reconstruct(
                     unreachable!(); // due to FIXME above
                 }
 
+                let num_shards = blender.domains[&last_domain.unwrap()].shards();
+
                 // since we're partially materializing a reader node,
                 // we need to give it a way to trigger replays.
                 InitialState::PartialGlobal {
@@ -674,7 +671,7 @@ pub fn reconstruct(
                     cols,
                     key: r.key().unwrap(),
                     tag: first_tag.unwrap(),
-                    trigger_txs: blender.domains[&last_domain.unwrap()].get_txs(),
+                    trigger_domain: (last_domain.unwrap(), num_shards)
                 }
             } else {
                 InitialState::Global {
@@ -786,9 +783,7 @@ pub fn reconstruct(
                 .collect()
         };
 
-        let (wait_tx, wait_rx) = mpsc::sync_channel(segments.len());
-        let (done_tx, done_rx) = mpsc::sync_channel(1);
-        let mut main_done_tx = Some(done_tx);
+        let mut notify_source = None;
 
         // first, tell all the domains about the replay path
         let mut seen = HashSet::new();
@@ -813,9 +808,8 @@ pub fn reconstruct(
                 tag: tag,
                 source: None,
                 path: locals,
-                done_tx: None,
+                notify_done: false,
                 trigger: TriggerEndpoint::None,
-                ack: wait_tx.clone(),
             };
             if i == 0 {
                 // first domain also gets to know source node
@@ -835,16 +829,12 @@ pub fn reconstruct(
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
                         // otherwise, should know how to trigger partial replay
-                        let (tx, rx) = mpsc::channel();
-                        blender
+                        let shards = blender
                             .domains
                             .get_mut(&segments[0].0)
                             .unwrap()
-                            .send(box Packet::RequestUnboundedTx(tx))
-                            .unwrap();
-                        let mut v: Vec<_> = rx.into_iter().collect();
-                        v.sort_by_key(|x| x.0);
-                        *trigger = TriggerEndpoint::End(v.into_iter().map(|x| x.1).collect());
+                            .shards();
+                        *trigger = TriggerEndpoint::End(segments[0].0.clone(), shards);
                     }
                 } else {
                     unreachable!();
@@ -852,9 +842,10 @@ pub fn reconstruct(
             } else {
                 if i == segments.len() - 1 {
                     // last domain should report when it's done if it is to be fully replayed
-                    if let box Packet::SetupReplayPath { ref mut done_tx, .. } = setup {
-                        assert!(main_done_tx.is_some());
-                        *done_tx = main_done_tx.take();
+                    if let box Packet::SetupReplayPath { ref mut notify_done, .. } = setup {
+                        *notify_done = true;
+                        assert!(notify_source.is_none());
+                        notify_source = Some(domain);
                     } else {
                         unreachable!();
                     }
@@ -883,18 +874,10 @@ pub fn reconstruct(
             }
 
             trace!(log, "telling domain about replay path"; "domain" => domain.index());
-            blender
-                .domains
-                .get_mut(domain)
-                .unwrap()
-                .send(setup)
-                .unwrap();
+            let ctx = blender.domains.get_mut(domain).unwrap();
+            ctx.send(setup).unwrap();
+            ctx.wait_for_ack().unwrap();
         }
-
-        // wait for them all to have seen that message
-        drop(wait_tx);
-        let x = wait_rx.recv();
-        assert!(x.is_err());
         trace!(log, "all domains ready for replay");
 
         if !partial_ok {
@@ -909,14 +892,20 @@ pub fn reconstruct(
                     from: *graph[segments[0].1[0].0].local_addr(),
                 })
                 .unwrap();
+        }
 
-            // and finally, wait for the last domain to finish the replay
+        if let Some(domain) = notify_source {
+            assert!(!partial_ok);
             trace!(log,
                    "waiting for done message from target";
                    "domain" => segments.last().unwrap().0.index()
             );
-            let x = done_rx.recv();
-            assert!(x.is_err());
+            blender
+                .domains
+                .get_mut(domain)
+                .unwrap()
+                .wait_for_ack()
+                .unwrap();
         }
     }
     domains_on_path
@@ -1047,8 +1036,8 @@ fn cost_fn<'a, T>(
                     // as they increase the cost
                     intermediates.push(n.is_selective());
                     // now walk to the parent.
-                    let mut ps = graph
-                        .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    let mut ps =
+                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
                     // of which there must be at least one
                     stateful = ps.next().expect("recursed all the way to source");
                     // there shouldn't ever be multiple, because neither join nor union
@@ -1057,16 +1046,12 @@ fn cost_fn<'a, T>(
                 }
 
                 // find the size of the state we would end up replaying
-                let (tx, rx) = mpsc::sync_channel(1);
                 let stateful = &graph[stateful];
-                txs.get_mut(&stateful.domain())
-                    .unwrap()
-                    .send(box Packet::StateSizeProbe {
-                        node: *stateful.local_addr(),
-                        ack: tx,
-                    })
+                let domain = txs.get_mut(&stateful.domain()).unwrap();
+                domain
+                    .send(box Packet::StateSizeProbe { node: *stateful.local_addr() })
                     .unwrap();
-                let mut size: usize = rx.into_iter().sum();
+                let mut size = domain.wait_for_state_size().unwrap();
 
                 // compute the total cost
                 // replay cost

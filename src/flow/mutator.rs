@@ -1,6 +1,7 @@
 use flow;
 use flow::prelude::*;
 use checktable;
+use channel::TransactionReplySender;
 
 use vec_map::VecMap;
 
@@ -19,12 +20,12 @@ pub enum MutatorError {
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    pub(crate) tx: flow::domain::DomainHandle,
+    pub(crate) tx: flow::domain::DomainInputHandle,
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
     pub(crate) tx_reply_channel: (
-        mpsc::Sender<Result<i64, ()>>,
+        TransactionReplySender<Result<i64, ()>>,
         mpsc::Receiver<Result<i64, ()>>,
     ),
     pub(crate) transactional: bool,
@@ -35,12 +36,15 @@ pub struct Mutator {
 
 impl Clone for Mutator {
     fn clone(&self) -> Self {
+        let reply_chan = mpsc::channel();
+        let reply_chan = (TransactionReplySender::from_local(reply_chan.0), reply_chan.1);
+
         Self {
             tx: self.tx.clone(),
             addr: self.addr.clone(),
             key: self.key.clone(),
             key_is_primary: self.key_is_primary.clone(),
-            tx_reply_channel: mpsc::channel(),
+            tx_reply_channel: reply_chan,
             transactional: self.transactional,
             dropped: self.dropped.clone(),
             tracer: None,
@@ -276,7 +280,7 @@ impl Mutator {
     /// graph.
     pub fn start_tracing(&mut self) -> mpsc::Receiver<(time::Instant, PacketEvent)> {
         let (tx, rx) = mpsc::channel();
-        self.tracer = Some(vec![tx]);
+        self.tracer = Some(vec![TransactionReplySender::from_local(tx)]);
         rx
     }
 

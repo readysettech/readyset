@@ -1,10 +1,10 @@
-use std::sync::mpsc;
 use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
+use channel::ChannelSender;
 
 pub struct Sharder {
-    txs: Vec<(LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+    txs: Vec<(LocalNodeIndex, ChannelSender<Box<Packet>>)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
@@ -41,7 +41,7 @@ impl Sharder {
     pub fn add_sharded_child(
         &mut self,
         dst: LocalNodeIndex,
-        txs: Vec<mpsc::SyncSender<Box<Packet>>>,
+        txs: Vec<ChannelSender<Box<Packet>>>,
     ) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?

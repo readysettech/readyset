@@ -1,4 +1,5 @@
 use backlog;
+use channel;
 use checktable;
 use ops::base::Base;
 
@@ -68,6 +69,7 @@ pub struct Blender {
     persistence: persistence::Parameters,
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
+    channel_coordinator: Arc<prelude::ChannelCoordinator>,
 
     log: slog::Logger,
 }
@@ -93,6 +95,7 @@ impl Default for Blender {
             persistence: persistence::Parameters::default(),
 
             domains: Default::default(),
+            channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -242,7 +245,7 @@ impl Blender {
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
         let node = &self.ingredients[base];
-        let tx = self.domains[&node.domain()].clone();
+        let tx = self.domains[&node.domain()].get_input_handle();
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 
@@ -259,6 +262,9 @@ impl Blender {
             is_primary = true;
         }
 
+        let reply_chan = mpsc::channel();
+        let reply_chan = (channel::TransactionReplySender::from_local(reply_chan.0), reply_chan.1);
+
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
@@ -267,7 +273,7 @@ impl Blender {
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            tx_reply_channel: mpsc::channel(),
+            tx_reply_channel: reply_chan,
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
             tracer: None,
@@ -280,19 +286,21 @@ impl Blender {
         // TODO: request stats from domains in parallel.
         let domains = self.domains
             .iter_mut()
-            .map(|(di, s)| {
-                let (tx, rx) = mpsc::sync_channel(1);
-                s.send(box payload::Packet::GetStatistics(tx)).unwrap();
-
-                let (domain_stats, node_stats) = rx.recv().unwrap();
-                // FIXME: can get multiple responses from sharded domains
-                assert!(rx.recv().is_err());
-                let node_map = node_stats
+            .flat_map(|(di, s)| {
+                s.send(box payload::Packet::GetStatistics).unwrap();
+                s.wait_for_statistics()
+                    .unwrap()
                     .into_iter()
-                    .map(|(ni, ns)| (ni.into(), ns))
-                    .collect();
+                    .enumerate()
+                    .map(move |(i, (domain_stats, node_stats))| {
+                        let node_map = node_stats
+                            .into_iter()
+                            .map(|(ni, ns)| (ni.into(), ns))
+                            .collect();
 
-                (*di, (domain_stats, node_map))
+                        ((di.clone(), i), (domain_stats, node_map))
+                    })
+
             })
             .collect();
 
@@ -612,7 +620,8 @@ impl<'a> Migration<'a> {
     /// slower than the system as a hole will accumulate a large buffer over time.
     pub fn stream(&mut self, n: prelude::NodeIndex) -> mpsc::Receiver<Vec<node::StreamUpdate>> {
         self.ensure_reader_for(n);
-        let (mut tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
+        let mut tx = channel::StreamSender::from_local(tx);
 
         // If the reader hasn't been incorporated into the graph yet, just add the streamer
         // directly.
@@ -883,8 +892,9 @@ impl<'a> Migration<'a> {
                 &log,
                 &mut mainline.ingredients,
                 nodes,
-                mainline.persistence.clone(),
-                mainline.checktable.clone(),
+                &mainline.persistence,
+                &mainline.checktable,
+                &mainline.channel_coordinator,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
@@ -901,42 +911,28 @@ impl<'a> Migration<'a> {
         );
 
         // Tell all base nodes about newly added columns
-        let acks: Vec<_> = self.columns
-            .into_iter()
-            .map(|(ni, change)| {
-                let (tx, rx) = mpsc::sync_channel(1);
-                let n = &mainline.ingredients[ni];
-                let m = match change {
-                    ColumnChange::Add(field, default) => {
-                        box payload::Packet::AddBaseColumn {
-                            node: *n.local_addr(),
-                            field: field,
-                            default: default,
-                            ack: tx,
-                        }
+        for (ni, change) in self.columns {
+            let n = &mainline.ingredients[ni];
+            let m = match change {
+                ColumnChange::Add(field, default) => {
+                    box payload::Packet::AddBaseColumn {
+                        node: *n.local_addr(),
+                        field: field,
+                        default: default,
                     }
-                    ColumnChange::Drop(column) => {
-                        box payload::Packet::DropBaseColumn {
-                            node: *n.local_addr(),
-                            column: column,
-                            ack: tx,
-                        }
+                }
+                ColumnChange::Drop(column) => {
+                    box payload::Packet::DropBaseColumn {
+                        node: *n.local_addr(),
+                        column: column,
                     }
-                };
+                }
+            };
 
-                mainline
-                    .domains
-                    .get_mut(&n.domain())
-                    .unwrap()
-                    .send(m)
-                    .unwrap();
-                rx
-            })
-            .collect();
-        // wait for all domains to ack. otherwise, we could have one domain request a replay from
-        // another before the source domain has heard about a new default column it needed to add.
-        for ack in acks {
-            ack.recv().is_err();
+            let domain = mainline.domains.get_mut(&n.domain()).unwrap();
+
+            domain.send(m).unwrap();
+            domain.wait_for_ack().unwrap();
         }
 
         // Set up inter-domain connections
@@ -967,6 +963,7 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
+        self.channel_coordinator.reset();
         for (_, mut d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));

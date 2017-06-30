@@ -275,9 +275,9 @@ pub fn connect(
                            "ingress" => node.index()
                     );
 
-                let mut txs = domains[&n.domain()].get_txs();
+                let shards = domains[&n.domain()].shards();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
-                if txs.len() != 1 && sender_node.sharded_by() != Sharding::None {
+                if shards != 1 && sender_node.sharded_by() != Sharding::None {
                     // we need to be a bit careful here in the particular case where we have a
                     // sharded egress that sends to another domain sharded by the same key.
                     // specifically, in that case we shouldn't have each shard of domain A send to
@@ -285,13 +285,13 @@ pub fn connect(
                     // note that we don't have to check the sharding of both src and dst here,
                     // because an egress implies that no shuffle was necessary, which again means
                     // that the sharding must be the same.
-                    for (i, tx) in txs.into_iter().enumerate() {
+                    for i in 0..shards {
                         domain
                             .send_to_shard(
                                 i,
                                 box Packet::UpdateEgress {
                                     node: *sender_node.local_addr(),
-                                    new_tx: Some((node.into(), *n.local_addr(), tx)),
+                                    new_tx: Some((node.into(), *n.local_addr(), (n.domain(), i))),
                                     new_tag: None,
                                 },
                             )
@@ -302,11 +302,11 @@ pub fn connect(
                     // sender_node.sharded_by() == Sharding::None. so, we have an unsharded egress
                     // sending to a sharded child. but that shouldn't be allowed -- such a node
                     // *must* be a Sharder.
-                    assert_eq!(txs.len(), 1);
+                    assert_eq!(shards, 1);
                     domain
                         .send(box Packet::UpdateEgress {
                             node: *sender_node.local_addr(),
-                            new_tx: Some((node.into(), *n.local_addr(), txs.remove(0))),
+                            new_tx: Some((node.into(), *n.local_addr(), (n.domain(), 0))),
                             new_tag: None,
                         })
                         .unwrap();
@@ -318,7 +318,8 @@ pub fn connect(
                            "ingress" => node.index()
                     );
 
-                let txs = domains[&n.domain()].get_txs();
+                let shards = domains[&n.domain()].shards();
+                let txs = (0..shards).map(|i| (n.domain(), i)).collect();
                 domains
                     .get_mut(&sender_node.domain())
                     .unwrap()

@@ -1,10 +1,10 @@
-use std::sync::mpsc;
 use std::collections::HashMap;
 use flow::prelude::*;
+use channel::ChannelSender;
 
 #[derive(Clone)]
 pub struct Egress {
-    txs: Vec<(NodeIndex, LocalNodeIndex, mpsc::SyncSender<Box<Packet>>)>,
+    txs: Vec<(NodeIndex, LocalNodeIndex, ChannelSender<Box<Packet>>)>,
     tags: HashMap<Tag, NodeIndex>,
 }
 
@@ -22,7 +22,7 @@ impl Egress {
         &mut self,
         dst_g: NodeIndex,
         dst_l: LocalNodeIndex,
-        tx: mpsc::SyncSender<Box<Packet>>,
+        tx: ChannelSender<Box<Packet>>,
     ) {
         self.txs.push((dst_g, dst_l, tx));
     }

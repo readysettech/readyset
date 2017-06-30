@@ -1,8 +1,8 @@
-use std::sync::mpsc;
+use backlog;
+use channel;
+use checktable;
 use flow::prelude::*;
 use hurdles::Barrier;
-use checktable;
-use backlog;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +31,7 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 pub struct Reader {
     writer: Option<backlog::WriteHandle>,
-    streamers: Option<Vec<mpsc::Sender<Vec<StreamUpdate>>>>,
+    streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
     state: Option<usize>,
     token_generator: Option<checktable::TokenGenerator>,
     for_node: NodeIndex,
@@ -99,8 +99,8 @@ impl Reader {
 
     pub fn add_streamer(
         &mut self,
-        new_streamer: mpsc::Sender<Vec<StreamUpdate>>,
-    ) -> Result<(), mpsc::Sender<Vec<StreamUpdate>>> {
+        new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
+    ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
         if let Some(ref mut streamers) = self.streamers {
             streamers.push(new_streamer);
             Ok(())

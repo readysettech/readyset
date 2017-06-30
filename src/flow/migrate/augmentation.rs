@@ -11,7 +11,6 @@ use flow::domain;
 use flow;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -31,15 +30,12 @@ pub fn inform(
         let log = log.new(o!("domain" => domain.index()));
         let ctx = blender.domains.get_mut(&domain).unwrap();
 
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-
         trace!(log, "informing domain of migration start");
         let _ = ctx.send(box Packet::StartMigration {
             at: ts,
             prev_ts: prevs[&domain],
-            ack: ready_tx,
         });
-        let _ = ready_rx.recv().is_err();
+        let _ = ctx.wait_for_ack();
         trace!(log, "domain ready for migration");
 
         let old_nodes: HashSet<_> = nodes

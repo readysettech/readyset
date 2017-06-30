@@ -15,7 +15,7 @@ pub use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
-pub use flow::payload::{Link, Packet, PacketEvent, Tracer, TriggerEndpoint, TransactionState};
+pub use flow::payload::{Link, Packet, PacketEvent, Tracer, TransactionState};
 pub use flow::migrate::materialization::Tag;
 pub use flow::migrate::sharding::Sharding;
 
@@ -27,3 +27,7 @@ pub type State = local::State<core::DataType>;
 pub type StateMap = local::Map<State>;
 pub use flow::domain::local::KeyType;
 pub use flow::domain::local::LookupResult;
+
+use channel;
+use flow::domain;
+pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize), Box<Packet>>;
