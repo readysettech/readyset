@@ -173,6 +173,7 @@ impl SingleReadHandle {
         self.handle.meta_get_and(key, &mut then).ok_or(())
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.handle.len()
     }
@@ -230,6 +231,7 @@ impl ReadHandle {
         }
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         match *self {
             ReadHandle::Sharded(ref shards) => {
