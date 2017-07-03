@@ -13,7 +13,6 @@ use std::cell;
 use std::thread;
 use slog::Logger;
 use flow::statistics::{DomainStats, NodeStats};
-use parking_lot_core::SpinWait;
 
 #[derive(Debug)]
 pub enum WaitError {
@@ -25,9 +24,13 @@ pub enum WaitError {
 pub struct DomainInputHandle(Vec<mpsc::SyncSender<Box<Packet>>>);
 
 impl DomainInputHandle {
-    fn shard(&self, p: &Packet, key: &[usize]) -> usize {
+    pub fn base_send(
+        &mut self,
+        p: Box<Packet>,
+        key: &[usize],
+    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
         if self.0.len() == 1 {
-            0
+            self.0[0].send(p)
         } else {
             if key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -37,52 +40,24 @@ impl DomainInputHandle {
                 unimplemented!();
             }
             let key_col = key[0];
-            let key = match p.data()[0] {
-                Record::Positive(ref r) |
-                Record::Negative(ref r) => &r[key_col],
-                Record::DeleteRequest(ref k) => &k[0],
-            };
-            if !p.data().iter().all(|r| match *r {
-                Record::Positive(ref r) |
-                Record::Negative(ref r) => &r[key_col] == key,
-                Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-            }) {
-                // batch with different keys to sharded base
-                unimplemented!();
-            }
-            ::shard_by(key, self.0.len())
-        }
-    }
-
-    pub fn base_send(
-        &mut self,
-        p: Box<Packet>,
-        key: &[usize],
-    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        let shard = self.shard(&*p, key);
-        self.0[shard].send(p)
-    }
-
-    pub fn base_send_spin(
-        &mut self,
-        mut p: Box<Packet>,
-        key: &[usize],
-    ) -> Result<(), mpsc::SendError<Box<Packet>>> {
-        let shard = self.shard(&*p, key);
-        let mut sw = SpinWait::new();
-        loop {
-            p = match self.0[shard].try_send(p) {
-                Ok(c) => break Ok(c),
-                Err(mpsc::TrySendError::Disconnected(p)) => break Err(mpsc::SendError(p)),
-                Err(mpsc::TrySendError::Full(p)) => {
-                    // queue still full -- spin
-                    if !sw.spin() {
-                        // we've been spinning for a while -- block instead
-                        break self.0[shard].send(p);
-                    }
-                    p
+            let shard = {
+                let key = match p.data()[0] {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col],
+                    Record::DeleteRequest(ref k) => &k[0],
+                };
+                if !p.data().iter().all(|r| match *r {
+                    Record::Positive(ref r) |
+                    Record::Negative(ref r) => &r[key_col] == key,
+                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
+                })
+                {
+                    // batch with different keys to sharded base
+                    unimplemented!();
                 }
-            }
+                ::shard_by(key, self.0.len())
+            };
+            self.0[shard].send(p)
         }
     }
 }

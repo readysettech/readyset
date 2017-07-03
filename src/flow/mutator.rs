@@ -146,7 +146,7 @@ impl Mutator {
             }
         };
 
-        self.tx.base_send_spin(m, &self.key[..]).unwrap();
+        self.tx.base_send(m, &self.key[..]).unwrap();
     }
 
     fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {

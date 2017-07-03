@@ -32,7 +32,6 @@ arccstr = "0.4.2"
 vec_map = "0.8.0"
 hurdles = "0.1.0"
 arrayvec = "0.3.23"
-parking_lot_core = "0.2.2"
 
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "38a973891d31ab935204231c8733a30162916e6e" }
 
