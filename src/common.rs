@@ -66,11 +66,13 @@ impl ToString for Literal {
             Literal::Integer(ref i) => format!("{}", i),
             Literal::String(ref s) => s.clone(),
             Literal::Blob(ref bv) => {
-                format!("{}",
-                        bv.iter()
-                            .map(|v| format!("{:x}", v))
-                            .collect::<Vec<String>>()
-                            .join(" "))
+                format!(
+                    "{}",
+                    bv.iter()
+                        .map(|v| format!("{:x}", v))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                )
             }
             Literal::CurrentTime => "CURRENT_TIME".to_string(),
             Literal::CurrentDate => "CURRENT_DATE".to_string(),
