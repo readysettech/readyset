@@ -26,15 +26,16 @@ impl SlackNotifier {
         res: &TastingResult,
         push: &Push,
     ) -> Result<(), String> {
-        let mut text =
-            vec![
-                Text("I've tasted _".into()),
-                Text(format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into()),
-                Link(SlackLink::new(
-                    &push.head_commit.url,
-                    &format!("{}", push.head_commit.id)[0..6],
-                )),
-            ];
+        let mut text = vec![
+            Text("I've tasted _".into()),
+            Text(
+                format!("\"{}\"_ (", push.head_commit.msg.lines().next().unwrap()).into(),
+            ),
+            Link(SlackLink::new(
+                &push.head_commit.url,
+                &format!("{}", push.head_commit.id)[0..6],
+            )),
+        ];
         match push.pusher {
             Some(ref p) => {
                 let alias = match cfg {

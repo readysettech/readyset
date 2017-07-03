@@ -38,10 +38,8 @@ fn benchmark(
         .arg(&cfg.cmd)
         .args(cfg.args.as_slice());
 
-    let output = cmd.output().expect(&format!(
-        "Failed to execute benchmark '{}'!",
-        cfg.name
-    ));
+    let output = cmd.output()
+        .expect(&format!("Failed to execute benchmark '{}'!", cfg.name));
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();

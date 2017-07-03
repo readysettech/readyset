@@ -187,7 +187,7 @@ where
             .join(", ");
         msg.push_str(&format!(
             "\nattempted ssh-agent authentication, but none of the usernames \
-                               {} succeeded",
+             {} succeeded",
             names
         ));
     }
@@ -195,12 +195,12 @@ where
         if failed_cred_helper {
             msg.push_str(
                 "\nattempted to find username/password via git's `credential.helper` \
-                          support, but failed",
+                 support, but failed",
             );
         } else {
             msg.push_str(
                 "\nattempted to find username/password via `credential.helper`, but \
-                          maybe the found credentials were incorrect",
+                 maybe the found credentials were incorrect",
             );
         }
     }

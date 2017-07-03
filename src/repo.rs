@@ -31,12 +31,8 @@ impl Workspace {
     pub fn new(github_repo: &str, local_path: &Path) -> Workspace {
         // Make workdir if it doesn't exist
         if !local_path.is_dir() {
-            fs::create_dir_all(&local_path).expect(
-                format!(
-                    "Couldn't mkdir {}",
-                    local_path.display()
-                ).as_str(),
-            );
+            fs::create_dir_all(&local_path)
+                .expect(format!("Couldn't mkdir {}", local_path.display()).as_str());
         }
 
         let repo = match Repository::open(local_path.to_str().unwrap()) {

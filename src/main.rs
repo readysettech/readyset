@@ -88,7 +88,7 @@ pub fn main() {
                 .default_value("0.1")
                 .help(
                     "Relative performance threshold below which a result is considered a \
-                   regression that needs reporting (0.1 = +/-10%).",
+                     regression that needs reporting (0.1 = +/-10%).",
                 ),
         )
         .arg(
@@ -98,7 +98,7 @@ pub fn main() {
                 .default_value("0.1")
                 .help(
                     "Relative performance threshold above which a result is considered an \
-                   improvement that needs reporting (0.1 = +/-10%).",
+                     improvement that needs reporting (0.1 = +/-10%).",
                 ),
         )
         .arg(
@@ -146,7 +146,7 @@ pub fn main() {
                 .required(false)
                 .help(
                     "List all benchmarks in notifications even if the results have not changed \
-                   significantly",
+                     significantly",
                 ),
         )
         .arg(
