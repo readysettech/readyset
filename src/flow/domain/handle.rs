@@ -94,7 +94,7 @@ impl DomainHandle {
         let mut boot_args = Vec::new();
         {
             let mut add = || {
-                let (in_tx, in_rx) = mpsc::sync_channel(256);
+                let (in_tx, in_rx) = mpsc::sync_channel(512);
                 let (tx, rx) = mpsc::sync_channel(1);
                 let (cr_tx, cr_rx) = mpsc::sync_channel(1);
                 let (back_tx, back_rx) = mpsc::channel();
