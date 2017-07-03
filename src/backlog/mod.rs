@@ -246,6 +246,13 @@ impl ReadHandle {
             (&mut ReadHandle::Singleton(ref mut srh), None) => {
                 *srh = Some(handle);
             }
+            (&mut ReadHandle::Sharded(ref mut rhs), None) => {
+                // when ::SHARDS == 1, sharded domains think they're unsharded
+                assert_eq!(rhs.len(), 1);
+                let srh = rhs.get_mut(0).unwrap();
+                assert!(srh.is_none());
+                *srh = Some(handle)
+            }
             (&mut ReadHandle::Sharded(ref mut rhs), Some(shard)) => {
                 let srh = rhs.get_mut(shard).unwrap();
                 assert!(srh.is_none());
