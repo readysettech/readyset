@@ -6,7 +6,8 @@ use std::time;
 use std::collections::hash_map::Entry;
 use channel::ChannelSender;
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext, ControlReplyPacket};
+use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
+                    ControlReplyPacket};
 use flow::statistics;
 use flow::transactions;
 use flow::persistence;
@@ -547,7 +548,11 @@ impl Domain {
             match self.transaction_state.get_next_event() {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
-                    self.control_reply_tx.as_ref().unwrap().send(ControlReplyPacket::Ack).unwrap();
+                    self.control_reply_tx
+                        .as_ref()
+                        .unwrap()
+                        .send(ControlReplyPacket::Ack)
+                        .unwrap();
                 }
                 transactions::Event::CompleteMigration => {}
                 transactions::Event::SeedReplay(tag, key, rts) => {
@@ -654,7 +659,8 @@ impl Domain {
                         self.control_reply_tx
                             .as_ref()
                             .unwrap()
-                            .send(ControlReplyPacket::Ack).unwrap();
+                            .send(ControlReplyPacket::Ack)
+                            .unwrap();
                     }
                     Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -664,7 +670,8 @@ impl Domain {
                         self.control_reply_tx
                             .as_ref()
                             .unwrap()
-                            .send(ControlReplyPacket::Ack).unwrap();
+                            .send(ControlReplyPacket::Ack)
+                            .unwrap();
                     }
                     Packet::UpdateEgress {
                         node,
@@ -685,12 +692,15 @@ impl Domain {
                         });
                     }
                     Packet::UpdateSharder { node, new_txs } => {
-                        let new_channels: Vec<_> = new_txs.1
+                        let new_channels: Vec<_> = new_txs
+                            .1
                             .iter()
                             .filter_map(|ntx| self.channel_coordinator.get_tx(ntx))
                             .collect();
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_sharder_mut(move |s| { s.add_sharded_child(new_txs.0, new_channels); });
+                        n.with_sharder_mut(
+                            move |s| { s.add_sharded_child(new_txs.0, new_channels); },
+                        );
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -701,7 +711,8 @@ impl Domain {
                         self.control_reply_tx
                             .as_ref()
                             .unwrap()
-                            .send(ControlReplyPacket::StateSize(size)).unwrap();
+                            .send(ControlReplyPacket::StateSize(size))
+                            .unwrap();
                     }
                     Packet::PrepareState { node, state } => {
                         use flow::payload::InitialState;
@@ -723,7 +734,7 @@ impl Domain {
                                 cols,
                                 key,
                                 tag,
-                                trigger_domain: (trigger_domain, shards)
+                                trigger_domain: (trigger_domain, shards),
                             } => {
                                 use backlog;
                                 let txs = Mutex::new(
@@ -733,7 +744,7 @@ impl Domain {
                                                 .get_unbounded_tx(&(trigger_domain, shard))
                                                 .unwrap()
                                         })
-                                        .collect::<Vec<_>>()
+                                        .collect::<Vec<_>>(),
                                 );
                                 let (r_part, w_part) =
                                     backlog::new_partial(cols, key, move |key| {
@@ -791,7 +802,8 @@ impl Domain {
                         self.control_reply_tx
                             .as_ref()
                             .unwrap()
-                            .send(ControlReplyPacket::Ack).unwrap();
+                            .send(ControlReplyPacket::Ack)
+                            .unwrap();
 
                         if notify_done {
                             info!(self.log,
@@ -934,7 +946,8 @@ impl Domain {
                         self.control_reply_tx
                             .as_ref()
                             .unwrap()
-                            .send(ControlReplyPacket::Ack).unwrap();
+                            .send(ControlReplyPacket::Ack)
+                            .unwrap();
                     }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
@@ -1757,7 +1770,11 @@ impl Domain {
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                self.control_reply_tx.as_ref().unwrap().send(ControlReplyPacket::Ack).unwrap();
+                self.control_reply_tx
+                    .as_ref()
+                    .unwrap()
+                    .send(ControlReplyPacket::Ack)
+                    .unwrap();
             } else {
                 unreachable!()
             }

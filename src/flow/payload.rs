@@ -147,10 +147,7 @@ pub enum Packet {
     },
 
     /// Drops an existing column from a `Base` node.
-    DropBaseColumn {
-        node: LocalNodeIndex,
-        column: usize,
-    },
+    DropBaseColumn { node: LocalNodeIndex, column: usize },
 
     /// Update Egress node.
     UpdateEgress {
@@ -182,9 +179,7 @@ pub enum Packet {
     },
 
     /// Probe for the number of records in the given node's state
-    StateSizeProbe {
-        node: LocalNodeIndex,
-    },
+    StateSizeProbe { node: LocalNodeIndex },
 
     /// Inform domain about a new replay path.
     SetupReplayPath {
@@ -218,10 +213,7 @@ pub enum Packet {
     ///
     /// This allows a migration to ensure all transactions happen strictly *before* or *after* a
     /// migration in timestamp order.
-    StartMigration {
-        at: i64,
-        prev_ts: i64,
-    },
+    StartMigration { at: i64, prev_ts: i64 },
 
     /// Notify a domain about a completion timestamp for an ongoing migration.
     ///

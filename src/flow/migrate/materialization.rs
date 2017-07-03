@@ -675,7 +675,7 @@ pub fn reconstruct(
                     cols,
                     key: r.key().unwrap(),
                     tag: first_tag.unwrap(),
-                    trigger_domain: (last_domain.unwrap(), num_shards)
+                    trigger_domain: (last_domain.unwrap(), num_shards),
                 }
             } else {
                 InitialState::Global {
@@ -833,11 +833,7 @@ pub fn reconstruct(
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
                         // otherwise, should know how to trigger partial replay
-                        let shards = blender
-                            .domains
-                            .get_mut(&segments[0].0)
-                            .unwrap()
-                            .shards();
+                        let shards = blender.domains.get_mut(&segments[0].0).unwrap().shards();
                         *trigger = TriggerEndpoint::End(segments[0].0.clone(), shards);
                     }
                 } else {
@@ -1040,8 +1036,8 @@ fn cost_fn<'a, T>(
                     // as they increase the cost
                     intermediates.push(n.is_selective());
                     // now walk to the parent.
-                    let mut ps =
-                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    let mut ps = graph
+                        .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
                     // of which there must be at least one
                     stateful = ps.next().expect("recursed all the way to source");
                     // there shouldn't ever be multiple, because neither join nor union

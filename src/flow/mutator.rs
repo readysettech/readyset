@@ -37,7 +37,10 @@ pub struct Mutator {
 impl Clone for Mutator {
     fn clone(&self) -> Self {
         let reply_chan = mpsc::channel();
-        let reply_chan = (TransactionReplySender::from_local(reply_chan.0), reply_chan.1);
+        let reply_chan = (
+            TransactionReplySender::from_local(reply_chan.0),
+            reply_chan.1,
+        );
 
         Self {
             tx: self.tx.clone(),
