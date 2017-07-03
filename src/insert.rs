@@ -73,13 +73,17 @@ mod tests {
         let qstring = "INSERT INTO users VALUES (42, \"test\");";
 
         let res = insertion(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   InsertStatement {
-                       table: Table::from("users"),
-                       fields: vec![(Column::from("0"), 42.into()),
-                                    (Column::from("1"), "test".into())],
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    (Column::from("0"), 42.into()),
+                    (Column::from("1"), "test".into()),
+                ],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -87,15 +91,19 @@ mod tests {
         let qstring = "INSERT INTO users VALUES (42, 'test', \"test\", CURRENT_TIMESTAMP);";
 
         let res = insertion(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   InsertStatement {
-                       table: Table::from("users"),
-                       fields: vec![(Column::from("0"), 42.into()),
-                                    (Column::from("1"), "test".into()),
-                                    (Column::from("2"), "test".into()),
-                                    (Column::from("3"), Literal::CurrentTimestamp)],
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    (Column::from("0"), 42.into()),
+                    (Column::from("1"), "test".into()),
+                    (Column::from("2"), "test".into()),
+                    (Column::from("3"), Literal::CurrentTimestamp),
+                ],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -103,12 +111,16 @@ mod tests {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\");";
 
         let res = insertion(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   InsertStatement {
-                       table: Table::from("users"),
-                       fields: vec![(Column::from("id"), 42.into()),
-                                    (Column::from("name"), "test".into())],
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    (Column::from("id"), 42.into()),
+                    (Column::from("name"), "test".into()),
+                ],
+                ..Default::default()
+            }
+        );
     }
 }

@@ -123,10 +123,11 @@ impl ColumnSpecification {
         }
     }
 
-    pub fn with_constraints(c: Column,
-                            t: SqlType,
-                            ccs: Vec<ColumnConstraint>)
-                            -> ColumnSpecification {
+    pub fn with_constraints(
+        c: Column,
+        t: SqlType,
+        ccs: Vec<ColumnConstraint>,
+    ) -> ColumnSpecification {
         ColumnSpecification {
             column: c,
             sql_type: t,
@@ -144,12 +145,14 @@ mod tests {
         let s = "table.col";
         let c = Column::from(s);
 
-        assert_eq!(c,
-                   Column {
-                       name: String::from("col"),
-                       alias: None,
-                       table: Some(String::from("table")),
-                       function: None,
-                   });
+        assert_eq!(
+            c,
+            Column {
+                name: String::from("col"),
+                alias: None,
+                table: Some(String::from("table")),
+                function: None,
+            }
+        );
     }
 }

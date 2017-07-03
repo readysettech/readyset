@@ -57,11 +57,13 @@ mod tests {
         assert!(res.is_ok());
 
         let expected = SqlQuery::Insert(InsertStatement {
-                                            table: Table::from("users"),
-                                            fields: vec![(Column::from("0"), 42.into()),
-                                                         (Column::from("1"), "test".into())],
-                                            ..Default::default()
-                                        });
+            table: Table::from("users"),
+            fields: vec![
+                (Column::from("0"), 42.into()),
+                (Column::from("1"), "test".into()),
+            ],
+            ..Default::default()
+        });
         let mut h0 = DefaultHasher::new();
         let mut h1 = DefaultHasher::new();
         res.unwrap().hash(&mut h0);

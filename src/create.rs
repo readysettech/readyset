@@ -391,9 +391,13 @@ mod tests {
         let qstring = "id bigint(20), name varchar(255),";
 
         let res = field_specification_list(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   vec![ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
-                        ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255))]);
+        assert_eq!(
+            res.unwrap().1,
+            vec![
+                ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
+            ]
+        );
     }
 
     #[test]
@@ -401,17 +405,18 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255));";
 
         let res = creation(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   CreateTableStatement {
-                       table: Table::from("users"),
-                       fields: vec![ColumnSpecification::new(Column::from("id"),
-                                                             SqlType::Bigint(20)),
-                                    ColumnSpecification::new(Column::from("name"),
-                                                             SqlType::Varchar(255)),
-                                    ColumnSpecification::new(Column::from("email"),
-                                                             SqlType::Varchar(255))],
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                ],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -419,24 +424,31 @@ mod tests {
         let qstring = "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
         let res = creation(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   CreateTableStatement {
-                       table: Table::from("user_newtalk"),
-                       fields: vec![
-                           ColumnSpecification::with_constraints(
-                               Column::from("user_id"),
-                               SqlType::Int(5),
-                               vec![ColumnConstraint::NotNull,
-                                    ColumnConstraint::DefaultValue(Literal::String(String::from("0")))]),
-                           ColumnSpecification::with_constraints(
-                               Column::from("user_ip"),
-                               SqlType::Varchar(40),
-                               vec![ColumnConstraint::NotNull,
-                                    ColumnConstraint::DefaultValue(
-                                        Literal::String(String::from("")))])
-                       ],
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("user_newtalk"),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        Column::from("user_id"),
+                        SqlType::Int(5),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),
+                        ],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        Column::from("user_ip"),
+                        SqlType::Varchar(40),
+                        vec![
+                            ColumnConstraint::NotNull,
+                            ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
+                        ],
+                    ),
+                ],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -446,36 +458,42 @@ mod tests {
                        PRIMARY KEY (id));";
 
         let res = creation(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   CreateTableStatement {
-                       table: Table::from("users"),
-                       fields: vec![ColumnSpecification::new(Column::from("id"),
-                                                             SqlType::Bigint(20)),
-                                    ColumnSpecification::new(Column::from("name"),
-                                                             SqlType::Varchar(255)),
-                                    ColumnSpecification::new(Column::from("email"),
-                                                             SqlType::Varchar(255))],
-                       keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                ],
+                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("id")])]),
+                ..Default::default()
+            }
+        );
 
         // named unique key
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        UNIQUE KEY id_k (id));";
 
         let res = creation(qstring.as_bytes());
-        assert_eq!(res.unwrap().1,
-                   CreateTableStatement {
-                       table: Table::from("users"),
-                       fields: vec![ColumnSpecification::new(Column::from("id"),
-                                                             SqlType::Bigint(20)),
-                                    ColumnSpecification::new(Column::from("name"),
-                                                             SqlType::Varchar(255)),
-                                    ColumnSpecification::new(Column::from("email"),
-                                                             SqlType::Varchar(255))],
-                       keys: Some(vec![TableKey::UniqueKey(Some(String::from("id_k")),
-                                                           vec![Column::from("id")])]),
-                       ..Default::default()
-                   });
+        assert_eq!(
+            res.unwrap().1,
+            CreateTableStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(255)),
+                ],
+                keys: Some(vec![
+                    TableKey::UniqueKey(
+                        Some(String::from("id_k")),
+                        vec![Column::from("id")],
+                    ),
+                ]),
+                ..Default::default()
+            }
+        );
     }
 }
