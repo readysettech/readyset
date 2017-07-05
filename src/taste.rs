@@ -65,15 +65,24 @@ fn benchmark(
     let output = run_benchmark(workdir, cfg, bench);
 
     // Write the output to a log file
-    let mut stored_output = File::create(&format!("{}-{}.log", commit_id, bench.name))
+    let mut stdout_file = File::create(&format!("{}-{}-stdout.log", commit_id, bench.name))
         .expect(&format!(
-            "Failed to create log file for benchmark '{}' at commit '{}'.",
+            "Failed to create stdout log file for benchmark '{}' at commit '{}'.",
             bench.name,
             commit_id
         ));
-    stored_output
+    stdout_file
         .write_all(output.stdout.as_slice())
-        .expect("Failed to write benchmark output to log file!");
+        .expect("Failed to write benchmark output to stdout log file!");
+    let mut stderr_file = File::create(&format!("{}-{}-stderr.log", commit_id, bench.name))
+        .expect(&format!(
+            "Failed to create stderr log file for benchmark '{}' at commit '{}'.",
+            bench.name,
+            commit_id
+        ));
+    stderr_file
+        .write_all(output.stderr.as_slice())
+        .expect("Failed to write benchmark output to stderr log file!");
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();
