@@ -89,9 +89,11 @@ pub enum PacketEvent {
     Process,
     /// The packet has reached some reader node.
     ReachedReader,
+    /// The packet has been merged with another, and will no-longer trigger events.
+    Merged(u64),
 }
 
-pub type Tracer = Option<(Vec<u64>, Option<channel::TraceSender<DebugEvent>>)>;
+pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -367,15 +369,14 @@ impl Packet {
 
     pub fn trace(&self, event: PacketEvent) {
         match *self {
-            Packet::Message { tracer: Some((ref tags, Some(ref sender))), .. } |
-            Packet::Transaction { tracer: Some((ref tags, Some(ref sender))), .. } => {
-                let instant = time::Instant::now();
-                for tag in tags {
-                    let _ = sender.send(DebugEvent {
-                        instant,
-                        event: DebugEventType::PacketEvent(event, *tag),
-                    });
-                }
+            Packet::Message { tracer: Some((tag, Some(ref sender))), .. } |
+            Packet::Transaction { tracer: Some((tag, Some(ref sender))), .. } => {
+                sender
+                    .send(DebugEvent {
+                        instant: time::Instant::now(),
+                        event: DebugEventType::PacketEvent(event, tag),
+                    })
+                    .unwrap();
             }
             _ => {}
         }

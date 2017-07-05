@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
 
+use flow::debug::DebugEventType;
 use flow::domain;
 use flow::prelude::*;
 use checktable;
@@ -283,14 +284,22 @@ impl GroupCommitQueueSet {
                     assert_eq!(merged_link, *link);
                     acc.append(data);
 
-                    if merged_tracer.is_some() && tracer.is_some() {
-                        merged_tracer
-                            .as_mut()
-                            .unwrap()
-                            .0
-                            .extend(tracer.take().unwrap().0);
-                    } else if tracer.is_some() {
-                        merged_tracer = tracer.take();
+                    match (&merged_tracer, tracer) {
+                        (&Some((mtag, _)), &mut Some((tag, Some(ref sender)))) => {
+                            sender
+                                .send(DebugEvent {
+                                    instant: time::Instant::now(),
+                                    event: DebugEventType::PacketEvent(
+                                        PacketEvent::Merged(mtag),
+                                        tag,
+                                    ),
+                                })
+                                .unwrap();
+                        }
+                        (_, tracer @ &mut Some(_)) => {
+                            merged_tracer = tracer.take();
+                        }
+                        _ => {}
                     }
                 }
                 _ => unreachable!(),

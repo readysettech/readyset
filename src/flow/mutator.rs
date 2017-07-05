@@ -280,7 +280,7 @@ impl Mutator {
     /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`
     /// is called. Any such events will be tagged with `tag`.
     pub fn start_tracing(&mut self, tag: u64) {
-        self.tracer = Some((vec![tag], None));
+        self.tracer = Some((tag, None));
     }
 
     /// Stop attaching the tracer to packets sent.
