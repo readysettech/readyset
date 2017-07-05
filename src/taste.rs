@@ -6,7 +6,7 @@ use repo::Workspace;
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Output};
 use std::str;
 
 /// `(val, percentage_change)`
@@ -27,19 +27,37 @@ pub struct TastingResult {
     pub results: Option<Vec<HashMap<String, BenchmarkResult<f64>>>>,
 }
 
+fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark) -> Output {
+    let mut cmd;
+
+    if cfg.version.is_none() || cfg.version.unwrap() < 2 {
+        // older taster configs assume an implied "cargo" prefix on each benchmark command
+        cmd = Command::new("cargo");
+        cmd.current_dir(workdir)
+            .env("RUST_BACKTRACE", "1")
+            .arg(&bench.cmd)
+            .args(bench.args.as_slice());
+    } else {
+        // from taster config version 2, we no longer assume an implicit "cargo" prefix on
+        // benchmark commands
+        cmd = Command::new(&bench.cmd);
+        cmd.current_dir(workdir)
+            .env("RUST_BACKTRACE", "1")
+            .args(bench.args.as_slice());
+    }
+
+    cmd.output()
+        .expect(&format!("Failed to execute benchmark '{}'!", bench.name))
+}
+
 fn benchmark(
     workdir: &str,
-    cfg: &Benchmark,
+    cfg: &Config,
+    bench: &Benchmark,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
-    let mut cmd = Command::new("cargo");
-    cmd.current_dir(workdir)
-        .env("RUST_BACKTRACE", "1")
-        .arg(&cfg.cmd)
-        .args(cfg.args.as_slice());
-
-    let output = cmd.output()
-        .expect(&format!("Failed to execute benchmark '{}'!", cfg.name));
+    // Run the benchmark and collect its output
+    let output = run_benchmark(workdir, cfg, bench);
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();
@@ -51,14 +69,14 @@ fn benchmark(
 
     // Success, so let's look for the results
     for l in lines {
-        for (i, regex) in cfg.result_expr.iter().enumerate() {
+        for (i, regex) in bench.result_expr.iter().enumerate() {
             for cap in regex.captures_iter(l) {
                 let (metric, value) = if cap.len() > 2 {
                     (String::from(cap.at(1).unwrap()), cap.at(2))
                 } else {
                     (format!("{}", i), cap.at(1))
                 };
-                let bm_name = format!("{}/{}", cfg.name, &metric);
+                let bm_name = format!("{}/{}", bench.name, &metric);
                 if let Some(c) = value {
                     use std::str::FromStr;
                     let val = match f64::from_str(&c) {
@@ -85,18 +103,18 @@ fn benchmark(
                                     }
                                 }
                             };
-                            let new_result = if cfg.lower_is_better {
-                                if val >= old_val * (1.0 + cfg.regression_threshold) {
+                            let new_result = if bench.lower_is_better {
+                                if val >= old_val * (1.0 + bench.regression_threshold) {
                                     BenchmarkResult::Regression(val, (val / old_val) - 1.0)
-                                } else if val < old_val * (1.0 - cfg.improvement_threshold) {
+                                } else if val < old_val * (1.0 - bench.improvement_threshold) {
                                     BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
                                 } else {
                                     BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
                                 }
                             } else {
-                                if val >= old_val * (1.0 + cfg.improvement_threshold) {
+                                if val >= old_val * (1.0 + bench.improvement_threshold) {
                                     BenchmarkResult::Improvement(val, (val / old_val) - 1.0)
-                                } else if val < old_val * (1.0 - cfg.regression_threshold) {
+                                } else if val < old_val * (1.0 - bench.regression_threshold) {
                                     BenchmarkResult::Regression(val, (val / old_val) - 1.0)
                                 } else {
                                     BenchmarkResult::Neutral(val, (val / old_val) - 1.0)
@@ -200,7 +218,7 @@ pub fn taste_commit(
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let new_result = benchmark(&ws.path, b, branch_history.get(&b.name));
+                    let new_result = benchmark(&ws.path, &cfg, b, branch_history.get(&b.name));
                     branch_history.insert(b.name.clone(), new_result.1.clone());
                     new_result
                 })
@@ -209,7 +227,7 @@ pub fn taste_commit(
         None => {
             cfg.benchmarks
                 .iter()
-                .map(|b| benchmark(&ws.path, b, None))
+                .map(|b| benchmark(&ws.path, &cfg, b, None))
                 .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
     };

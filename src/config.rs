@@ -19,6 +19,7 @@ pub struct Benchmark {
 pub struct Config {
     pub benchmarks: Vec<Benchmark>,
     pub slack_aliases: HashMap<String, String>,
+    pub version: Option<i64>,
 }
 
 pub fn parse_config(
@@ -86,15 +87,19 @@ pub fn parse_config(
         })
         .collect::<HashMap<_, _>>();
 
+    // Taster config version
+    let version = value["version"].as_integer();
+
     // Benchmark definitions
     let benchmarks = value
         .iter()
-        .filter(|t| t.0 != "slack-aliases")
+        .filter(|t| t.0 != "slack-aliases" && t.0 != "version")
         .map(|t| to_bench(t))
         .collect();
 
     Ok(Config {
         benchmarks: benchmarks,
         slack_aliases: slack_aliases,
+        version: version,
     })
 }
