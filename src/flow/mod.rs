@@ -32,7 +32,7 @@ mod mutator;
 mod getter;
 mod transactions;
 
-use self::prelude::Ingredient;
+use self::prelude::{Ingredient, DataType};
 
 pub use self::mutator::{Mutator, MutatorError};
 pub use self::getter::Getter;
@@ -158,6 +158,24 @@ impl Blender {
         self.log = log;
     }
 
+    /// Adds a new user universe to the Blender.
+    /// User universes automatically enforce security policies.
+    pub fn add_universe(&mut self, user_context: HashMap<String, DataType>) -> Migration {
+        info!(self.log, "adding a new user universe");
+        let miglog = self.log.new(o!());
+        Migration {
+            mainline: self,
+            added: Default::default(),
+            columns: Default::default(),
+            materialize: Default::default(),
+            readers: Default::default(),
+
+            start: time::Instant::now(),
+            log: miglog,
+            user_context: Some(user_context),
+        }
+    }
+
     /// Start setting up a new `Migration`.
     pub fn start_migration(&mut self) -> Migration {
         info!(self.log, "starting migration");
@@ -171,6 +189,7 @@ impl Blender {
 
             start: time::Instant::now(),
             log: miglog,
+            user_context: None,
         }
     }
 
@@ -376,6 +395,7 @@ pub struct Migration<'a> {
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
     materialize: HashSet<(NodeIndex, NodeIndex)>,
+    user_context: Option<HashMap<String, DataType>>,
 
     start: time::Instant,
     log: slog::Logger,
@@ -434,6 +454,11 @@ impl<'a> Migration<'a> {
         }
         // and tell the caller its id
         ni.into()
+    }
+
+    /// Returns the user context of this migration
+    pub fn user_context(&self) -> Option<HashMap<String, DataType>> {
+        self.user_context.clone()
     }
 
     /// Add a transactional base node to the graph

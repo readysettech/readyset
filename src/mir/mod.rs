@@ -13,7 +13,6 @@ use ops::grouped::extremum::Extremum as ExtremumKind;
 use ops::join::{Join, JoinType};
 use ops::latest::Latest;
 use ops::project::Project;
-use ops::security::filter::{FilterType};
 use sql::QueryFlowParts;
 
 pub mod reuse;
@@ -126,7 +125,8 @@ impl MirQuery {
                 } else {
                     child.borrow().ancestors.len()
                 };
-                assert!(in_edges >= 1);
+
+                assert!(in_edges >= 1, format!("{} has no incoming edges!", nd));
                 if in_edges == 1 {
                     // last edge removed
                     node_queue.push_back(child.clone());
@@ -408,7 +408,7 @@ impl MirNode {
             // exist if a column has been removed and re-added. We always use the latest column,
             // and assume that only one column of the same name ever exists at the same time.
             MirNodeType::Base { ref column_specs, .. } => {
-                match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+                match column_specs.iter().rposition(|cs| cs.0.column.name == *c.name) {
                     None => panic!("tried to look up non-existent column {:?}", c.name),
                     Some(id) => {
                         column_specs[id]
@@ -724,7 +724,10 @@ impl MirNode {
                             mig,
                         )
                     },
-                    MirNodeType::SecurityFilter { .. } => unimplemented!(),
+                    MirNodeType::SecurityFilter { ref conditions } => {
+                        let parent = self.ancestors[0].clone();
+                        make_security_node(&name, parent, self.columns.as_slice(), conditions, mig)
+                    },
                 };
 
                 // any new flow nodes have been instantiated by now, so we replace them with
@@ -997,6 +1000,13 @@ impl MirNodeType {
                     _ => false,
                 }
             }
+            // TODO(larat): reuse should probably take `context` into consideration
+            MirNodeType::SecurityFilter { conditions: ref our_conditions } => {
+                match *other {
+                    MirNodeType::SecurityFilter { ref conditions } => our_conditions == conditions,
+                    _ => false,
+                }
+            }
             _ => unimplemented!(),
         }
     }
@@ -1214,7 +1224,32 @@ impl Debug for MirNodeType {
                     .join(", ");
                 write!(f, "{} ⋃ {}", cols_left, cols_right)
             },
-            MirNodeType::SecurityFilter { .. } => unimplemented!(),
+            MirNodeType::SecurityFilter { ref conditions } => {
+                use regex::Regex;
+
+                let escape = |s: &str| {
+                    Regex::new("([<>])")
+                        .unwrap()
+                        .replace_all(s, "\\$1")
+                        .to_string()
+                };
+                write!(
+                    f,
+                    "secσ[{}]",
+                    conditions
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, ref e)| match e.as_ref() {
+                            Some(&(ref op, ref x)) => {
+                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
+                            }
+                            None => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice()
+                        .join(", ")
+                )
+            }
         }
     }
 }
@@ -1327,6 +1362,7 @@ fn make_base_node(
     }
 }
 
+
 fn make_union_node(
     name: &str,
     columns: &[Column],
@@ -1350,6 +1386,28 @@ fn make_union_node(
         String::from(name),
         column_names.as_slice(),
         ops::union::Union::new(emit_column_id),
+    );
+
+
+fn make_security_node(
+    name: &str,
+    parent: MirNodeRef,
+    columns: &[Column],
+    conditions: &Vec<Option<(Operator, DataType)>>,
+    mut mig: &mut Migration,
+) -> FlowNode {
+    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+
+    let context = match mig.user_context() {
+        Some(c) => c,
+        None => HashMap::new()
+    };
+
+    let node = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ops::security::filter::SecurityFilter::new(parent_na, conditions, context),
     );
 
     FlowNode::New(node)

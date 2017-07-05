@@ -11,6 +11,8 @@ use std::vec::Vec;
 
 use sql::query_signature::QuerySignature;
 
+pub const CONTEXT: &'static str = "UserContext";
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
     pub name: String,
@@ -339,15 +341,16 @@ fn classify_conditionals(
                 if let ConditionExpression::Base(ref r) = *ct.right.as_ref() {
                     match *r {
                         // right-hand side is field, so this must be a comma join
-                        ConditionBase::Field(ref fr) => {
+                        // or a security policy using UserContext
+                        ConditionBase::Field(ref rf) => {
                             // column/column comparison --> comma join
                             if let ConditionBase::Field(ref fl) = *l {
                                 if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
-                                    if let Ordering::Less = fr.table
+                                    if let Ordering::Less = rf.table
                                         .as_ref()
-                                        .cmp(&fl.table.as_ref())
+                                        .cmp(&lf.table.as_ref())
                                     {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
@@ -607,7 +610,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     }
 
                     let mut e = qg.edges
-                        .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
+                        .entry((lt_name, rt_name))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
                         QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),

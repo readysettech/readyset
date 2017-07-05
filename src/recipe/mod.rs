@@ -240,6 +240,7 @@ impl Recipe {
 
         // TODO(larat): this should be done over a delta of policies
         let policies_delta = self.policies.clone();
+        debug!(self.log, "Added {} policies", policies_delta.len());
         self.inc.as_mut().unwrap().add_policies(policies_delta);
 
         let (added, removed) = match self.prior {
@@ -255,6 +256,16 @@ impl Recipe {
             expressions_added: added.len(),
             expressions_removed: removed.len(),
         };
+
+        match mig.user_context() {
+            Some(c) => { 
+                info!(self.log, "Starting user universe {}", c.get("id").expect("context must have id"));
+                let qfp = self.inc.as_mut().unwrap().start_universe(c, mig)?;
+                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+            },
+            None => (),
+        };
+
 
         // upgrade schema version *before* applying changes, so that new queries are correctly
         // tagged with the new version. If this recipe was just created, there is no need to
@@ -450,6 +461,12 @@ impl Recipe {
 
         // return new recipe as replacement for self
         Ok(new)
+    }
+
+    /// Increments the version of a recipe. Returns the new version number.
+    pub fn next(&mut self) -> usize {
+        self.version+=1;
+        self.version
     }
 
     /// Returns the version number of this recipe.

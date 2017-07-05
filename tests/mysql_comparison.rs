@@ -331,6 +331,7 @@ fn check_query(
                         DataType::Text(_) |
                         DataType::TinyText(_) => v.into(),
                         DataType::Timestamp(_) => unimplemented!(),
+                        DataType::ContextKey(_) => unimplemented!(),
                     })
                     .collect()
             })

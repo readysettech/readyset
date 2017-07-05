@@ -12,7 +12,7 @@ impl StarExpansion for SqlQuery {
         let expand_table = |table_name: String| {
             write_schemas
                 .get(&table_name)
-                .unwrap()
+                .expect(&format!("table name `{}` does not exist", table_name))
                 .clone()
                 .into_iter()
                 .map(move |f| {

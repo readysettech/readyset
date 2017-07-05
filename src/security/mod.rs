@@ -18,16 +18,19 @@ impl Policy {
 
 		policies.iter()
 				.map(|p| {
-					let pred = sql_parser::parse_query(
-										format!("select * from {} {};", 
-											p["table"].as_str().unwrap(), 
-											p["predicate"].as_str().unwrap()
-										).as_str()
+					let table = p["table"].as_str().unwrap();
+					let pred = p["predicate"].as_str().unwrap();
+
+					let sq = sql_parser::parse_query(
+										&format!("select * from {} {};", 
+											table, 
+											pred
+										)
 								).unwrap();
 
 					Policy {
-						table: p["table"].to_string(),
-						predicate: pred,
+						table: table.to_string(),
+						predicate: sq,
 					}
 				})
 				.collect()
@@ -39,8 +42,8 @@ mod tests {
 
 	#[test]
 	fn it_parses() {
-		let policy_text = r#"[{ "table": "posts", "predicate": "WHERE posts.type = ?" },
-							  { "table": "posts", "predicate": "WHERE posts.author = ?" }]"#;
+		let policy_text = r#"[{ "table": "post", "predicate": "WHERE post.type = ?" },
+							  { "table": "post", "predicate": "WHERE post.author = ?" }]"#;
 
 		let policies = Policy::parse(policy_text);
 

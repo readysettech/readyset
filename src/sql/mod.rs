@@ -3,11 +3,12 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-mod reuse; 
+mod reuse;
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
 use mir::reuse as mir_reuse;
+use flow::core::DataType;
 use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
@@ -20,6 +21,11 @@ use slog;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
+
+use ops;
+
+use mir::FlowNode;
+
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
@@ -101,14 +107,33 @@ impl SqlIncorporator {
         self.enable_reuse = true;
     }
 
+    /// Starts a new user universe
+    pub fn start_universe(&mut self, context: HashMap<String, DataType>, mig: &mut Migration) -> Result<QueryFlowParts, String> {
+        let uid = context.get("id").expect("Context must have ID");
+        let name = format!("UserContext_{}", uid);
+        let mut s = String::new();
+        s.push_str(&format!("CREATE TABLE `{}` (", name));
+        for k in context.keys() {
+            s.push_str("\n");
+            s.push_str(&format!("`{}` text NOT NULL,", k));
+        }
+        s.push_str("\n");
+        s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
+
+        self.add_query(&s, Some(name), mig)
+    }
+
     /// Adds new security policies.
     /// Added policies are automatically incorporated into the flow graph when a new query is added.
     pub fn add_policies(&mut self, policies: HashMap<u64, Policy>) {
         for (pid, ref p) in policies.iter() {
-            let st = match p.predicate {
+            let q = self.rewrite_query(p.predicate.clone());
+
+            let st = match q {
                 SqlQuery::Select(ref s) => s,
                 _ => unreachable!(),
             };
+
 
             let qg = match to_query_graph(st) {
                 Ok(qg) => qg,
@@ -353,10 +378,14 @@ impl SqlIncorporator {
         qg: QueryGraph,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
+        let universe_id = match mig.user_context() {
+            Some(c) => Some(c.get("id").expect("universe must have an id").clone()),
+            None => None,
+        };
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg);
+            .named_query_to_mir(query_name, query, &qg, universe_id);
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -386,11 +415,6 @@ impl SqlIncorporator {
         qfp
     }
 
-    fn policies_for_query(&self, qp: &QueryGraph) -> Vec<Policy> {
-        // Select security policies over the tables used in the query
-        unimplemented!();
-    }
-
     fn extend_existing_query(
         &mut self,
         query_name: &str,
@@ -404,7 +428,7 @@ impl SqlIncorporator {
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg);
+            .named_query_to_mir(query_name, query, &qg, None);
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -447,20 +471,27 @@ impl SqlIncorporator {
         self.nodes_for_named_query(q, name, mig)
     }
 
+    /// Runs some standard rewrite passes on the query.
+    fn rewrite_query(&self, q: SqlQuery) -> SqlQuery {
+        use sql::passes::alias_removal::AliasRemoval;
+        use sql::passes::count_star_rewrite::CountStarRewrite;
+        use sql::passes::implied_tables::ImpliedTableExpansion;
+        use sql::passes::star_expansion::StarExpansion;
+        use sql::passes::negation_removal::NegationRemoval;
+
+        q.expand_table_aliases()
+            .remove_negation()
+            .expand_stars(&self.view_schemas)
+            .expand_implied_tables(&self.view_schemas)
+            .rewrite_count_star(&self.view_schemas)
+    }
+
     fn nodes_for_named_query(
         &mut self,
         q: SqlQuery,
         query_name: String,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        use self::query_utils::ReferredTables;
-        use sql::passes::alias_removal::AliasRemoval;
-        use sql::passes::count_star_rewrite::CountStarRewrite;
-        use sql::passes::implied_tables::ImpliedTableExpansion;
-        use sql::passes::star_expansion::StarExpansion;
-        use sql::passes::negation_removal::NegationRemoval;
-        use sql::passes::subqueries::SubQueries;
-
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         let mut fq = q.clone();
@@ -495,11 +526,23 @@ impl SqlIncorporator {
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        let q = fq.expand_table_aliases()
-            .remove_negation()
-            .expand_stars(&self.view_schemas)
-            .expand_implied_tables(&self.view_schemas)
-            .rewrite_count_star(&self.view_schemas);
+
+        let q = self.rewrite_query(fq);
+
+        // migration is adding a new security universe
+        // TODO(larat): improve reuse for universe queries
+        if mig.user_context().is_some() {
+            let qfp = match q {
+                SqlQuery::Select(ref sq) => {
+                    let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+                    self.add_query_via_mir(&query_name, sq, qg, mig)
+                }
+                ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
+                ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
+            };
+
+            return Ok(qfp)
+        }
 
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension

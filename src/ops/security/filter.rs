@@ -1,26 +1,20 @@
 use std::collections::HashMap;
 use ops::security::*;
+
 pub use nom_sql::Operator;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FilterType {
-	DataType(DataType),
-	Key(String)
-}
-
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityFilter {
-	filter: Vec<Option<(Operator, FilterType)>>,
+	filter: Vec<Option<(Operator, DataType)>>,
 	context: HashMap<String, DataType>,
 }
 
 impl SecurityFilter {
-	pub fn new(src: NodeIndex, filter: Vec<Option<(Operator, FilterType)>>, context: HashMap<String, DataType>) -> SecurityOperator<SecurityFilter> {
+	pub fn new(src: NodeIndex, filter: &[Option<(Operator, DataType)>], context: HashMap<String, DataType>) -> SecurityOperator<SecurityFilter> {
 		SecurityOperator::new(
 			src, 
 			SecurityFilter {
-				filter: filter,
+				filter: Vec::from(filter),
 				context: context,
 			})
 	}
@@ -28,7 +22,33 @@ impl SecurityFilter {
 
 impl SecurityOperation for SecurityFilter {
 	fn description(&self) -> String {
-		format!("Ω[{}]", "filter").into()
+        use regex::Regex;
+
+        let escape = |s: &str| {
+            Regex::new("([<>])")
+                .unwrap()
+                .replace_all(s, "\\$1")
+                .to_string()
+        };
+        format!(
+            "Ω[{}]",
+            self.filter
+                .iter()
+                .enumerate()
+                .filter_map(|(i, ref e)| match e.as_ref() {
+                    Some(&(ref op, ref x)) => {
+                        match *x {
+                            DataType::ContextKey(ref k) => Some(format!("f{} {} {}({:?})", i, escape(&format!("{}", op)), x, self.context.get(k))),
+                            _ => Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x)),
+                        }
+                        
+                    }
+                    None => None,
+                })
+                .collect::<Vec<_>>()
+                .as_slice()
+                .join(", ")
+        ).into()
 	}
 
 	fn on_input(
@@ -43,10 +63,11 @@ impl SecurityOperation for SecurityFilter {
 		rs.retain(|r| {
 			self.filter.iter().enumerate().all(|(i, fi)| {
 				let d = &r[i];
-				if let Some((ref op, ref ft)) = *fi {
-					let f = match *ft {
-						FilterType::DataType(ref dt) => dt,
-						FilterType::Key(ref key) => &self.context[key],
+				if let Some((ref op, ref dt)) = *fi {
+
+					let f = match *dt {
+                        DataType::ContextKey(ref key) => &self.context[key],
+						_ => dt,
 					};
 
 					match *op {
@@ -78,13 +99,13 @@ mod tests {
 
     fn setup(
         materialized: bool,
-        filters: Option<Vec<Option<(Operator, FilterType)>>>,
+        filters: Option<&[Option<(Operator, DataType)>]>,
     ) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
     	let a: DataType = "a".into();
     	let id: DataType = 1.into();
-    	let default_filter = vec![Some((Operator::Equal, FilterType::Key("userid".into()))), 
-						  		  Some((Operator::Equal, FilterType::DataType("a".into()))),
+    	let default_filter = &vec![Some((Operator::Equal, DataType::ContextKey("userid".into()))), 
+						  		  Some((Operator::Equal, "a".into())),
 						  		  None];
     	let mut context = HashMap::new();
     	context.insert("userid".into(), id);
@@ -105,7 +126,7 @@ mod tests {
 
     #[test]
     fn it_forwards_nofilter() {
-        let mut g = setup(false, Some(vec![None, None, None]));
+        let mut g = setup(false, Some(&vec![None, None, None]));
 
         let mut left: Vec<DataType>;
 
@@ -122,7 +143,7 @@ mod tests {
     #[test]
     fn it_forwards() {
     	let a: DataType = "a".into();
-        let mut g = setup(false, Some(vec![None, Some((Operator::Equal, FilterType::DataType("a".into()))), None]));
+        let mut g = setup(false, Some(&vec![None, Some((Operator::Equal, "a".into())), None]));
 
         let mut left: Vec<DataType>;
 
@@ -193,9 +214,9 @@ mod tests {
         let mut g = setup(
             false,
             Some(
-                vec![
-                    Some((Operator::LessOrEqual, FilterType::Key("userid".into()))),
-                    Some((Operator::NotEqual, FilterType::DataType("a".into()))),
+                &vec![
+                    Some((Operator::LessOrEqual, DataType::ContextKey("userid".into()))),
+                    Some((Operator::NotEqual, "a".into())),
                 ],
             ),
         );
