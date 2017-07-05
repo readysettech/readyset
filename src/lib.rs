@@ -402,6 +402,7 @@ pub use flow::{Blender, Migration, Getter, Mutator, MutatorError};
 pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
 pub use flow::node::StreamUpdate;
+pub use flow::debug::{DebugEvent, DebugEventType};
 pub use flow::domain::Index;
 pub use flow::payload::PacketEvent;
 pub use flow::persistence::Parameters as PersistenceParameters;

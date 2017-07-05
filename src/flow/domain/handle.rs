@@ -2,6 +2,7 @@ use channel::ChannelSender;
 use flow;
 use flow::payload::ControlReplyPacket;
 use flow::prelude::*;
+use flow::debug;
 use flow::domain;
 use flow::checktable;
 use flow::persistence;
@@ -50,8 +51,7 @@ impl DomainInputHandle {
                     Record::Positive(ref r) |
                     Record::Negative(ref r) => &r[key_col] == key,
                     Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                })
-                {
+                }) {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }
@@ -160,6 +160,7 @@ impl DomainHandle {
         persistence_params: &persistence::Parameters,
         checktable: &Arc<Mutex<checktable::CheckTable>>,
         channel_coordinator: &Arc<ChannelCoordinator>,
+        debug_tx: &Option<mpsc::Sender<debug::DebugEvent>>,
         ts: i64,
     ) {
         for (i, ((tx, in_tx), back_tx)) in
@@ -202,7 +203,8 @@ impl DomainHandle {
                 channel_coordinator.clone(),
                 ts,
             );
-            self.threads.push(domain.boot(rx, in_rx, back_rx, cr_tx));
+            self.threads
+                .push(domain.boot(rx, in_rx, back_rx, cr_tx, debug_tx.clone()));
         }
     }
 

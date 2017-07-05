@@ -28,6 +28,10 @@ pub type StateMap = local::Map<State>;
 pub use flow::domain::local::KeyType;
 pub use flow::domain::local::LookupResult;
 
+// channel related types
 use channel;
 use flow::domain;
 pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize), Box<Packet>>;
+
+// debug types
+pub use flow::debug::DebugEvent;

@@ -2,6 +2,7 @@ use petgraph;
 
 use channel;
 use checktable;
+use flow::debug::{DebugEvent, DebugEventType};
 use flow::domain;
 use flow::node;
 use flow::statistics;
@@ -9,7 +10,7 @@ use flow::prelude::*;
 
 use std::fmt;
 use std::collections::HashMap;
-
+use std::sync::mpsc;
 use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -79,7 +80,7 @@ pub struct ReplayTransactionState {
 }
 
 /// Different events that can occur as a packet is being processed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum PacketEvent {
     /// The packet has been pulled off the input channel.
     ExitInputChannel,
@@ -91,7 +92,7 @@ pub enum PacketEvent {
     ReachedReader,
 }
 
-pub type Tracer = Option<Vec<channel::TraceSender<(time::Instant, PacketEvent)>>>;
+pub type Tracer = Option<Vec<u64>>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -365,16 +366,21 @@ impl Packet {
         }
     }
 
-    pub fn trace(&self, event: PacketEvent) {
-        match *self {
-            Packet::Message { tracer: Some(ref senders), .. } |
-            Packet::Transaction { tracer: Some(ref senders), .. } => {
-                let msg = (time::Instant::now(), event);
-                for sender in senders {
-                    let _ = sender.send(msg.clone());
+    pub fn trace(&self, debug_channel: &Option<mpsc::Sender<DebugEvent>>, event: PacketEvent) {
+        if let Some(ref sender) = *debug_channel {
+            match *self {
+                Packet::Message { tracer: Some(ref tags), .. } |
+                Packet::Transaction { tracer: Some(ref tags), .. } => {
+                    let instant = time::Instant::now();
+                    for tag in tags {
+                        let _ = sender.send(DebugEvent {
+                            instant,
+                            event: DebugEventType::PacketEvent(event, *tag),
+                        });
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
 

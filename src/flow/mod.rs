@@ -17,6 +17,7 @@ use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
 pub mod core;
+pub mod debug;
 pub mod domain;
 pub mod hook;
 pub mod keys;
@@ -67,6 +68,7 @@ pub struct Blender {
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
+    debug_channel: Option<mpsc::Sender<debug::DebugEvent>>,
 
     readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
 
@@ -95,6 +97,7 @@ impl Default for Blender {
 
             domains: Default::default(),
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
+            debug_channel: None,
 
             readers: Arc::default(),
 
@@ -117,6 +120,14 @@ impl Blender {
     /// Disable sharding for all subsequent migrations
     pub fn disable_sharding(&mut self) {
         self.sharding_enabled = false;
+    }
+
+    /// Use a debug channel. This function may only be called once because the receiving end it
+    /// returned.
+    pub fn create_debug_channel(&mut self) -> mpsc::Receiver<debug::DebugEvent> {
+        let (tx, rx) = mpsc::channel();
+        self.debug_channel = Some(tx);
+        rx
     }
 
     /// Controls the persistence mode, and parameters related to persistence.
@@ -900,6 +911,7 @@ impl<'a> Migration<'a> {
                 &mainline.persistence,
                 &mainline.checktable,
                 &mainline.channel_coordinator,
+                &mainline.debug_channel.clone(),
                 start_ts,
             );
             mainline.domains.insert(domain, d);

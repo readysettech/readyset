@@ -54,7 +54,6 @@ impl<T> ChannelSender<T> {
 
 pub type TransactionReplySender<T> = ChannelSender<T>;
 pub type StreamSender<T> = ChannelSender<T>;
-pub type TraceSender<T> = ChannelSender<T>;
 
 struct ChannelCoordinatorInner<K: Eq + Hash + Clone, P> {
     txs: HashMap<K, ChannelSender<P>>,

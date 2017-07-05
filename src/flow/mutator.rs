@@ -7,7 +7,6 @@ use vec_map::VecMap;
 
 use std::sync::mpsc;
 use std::thread;
-use std::time;
 
 /// Indicates why a Mutator operation failed.
 #[derive(Serialize, Deserialize, Debug)]
@@ -278,13 +277,10 @@ impl Mutator {
         self.tx_send(m, t).map_err(|()|MutatorError::TransactionFailed)
     }
 
-    /// Attach a tracer to all packets sent until `stop_tracing` is called. The tracer will cause
-    /// events to be sent to the returned Receiver indicating the progress of the packet through the
-    /// graph.
-    pub fn start_tracing(&mut self) -> mpsc::Receiver<(time::Instant, PacketEvent)> {
-        let (tx, rx) = mpsc::channel();
-        self.tracer = Some(vec![TransactionReplySender::from_local(tx)]);
-        rx
+    /// Trace subsequent packets by sending events on the global debug channel until `stop_tracing`
+    /// is called. Any such events will be tagged with `tag`.
+    pub fn start_tracing(&mut self, tag: u64) {
+        self.tracer = Some(vec![tag]);
     }
 
     /// Stop attaching the tracer to packets sent.
