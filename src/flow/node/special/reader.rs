@@ -4,8 +4,6 @@ use checktable;
 use flow::prelude::*;
 use hurdles::Barrier;
 
-use std::sync::mpsc;
-
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StreamUpdate {
@@ -144,7 +142,6 @@ impl Reader {
     pub fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
-        debug_tx: &Option<mpsc::Sender<DebugEvent>>,
         swap: bool,
     ) {
         if let Some(ref mut state) = self.writer {
@@ -230,7 +227,7 @@ impl Reader {
 
         m.as_mut()
             .unwrap()
-            .trace(debug_tx, PacketEvent::ReachedReader);
+            .trace(PacketEvent::ReachedReader);
 
         if !self.streamers.as_ref().unwrap().is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx

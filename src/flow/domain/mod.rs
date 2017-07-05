@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
-use channel::ChannelSender;
+use channel::{TraceSender, ChannelSender};
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
                     ControlReplyPacket};
@@ -343,7 +343,6 @@ impl Domain {
         paths: &mut HashMap<Tag, ReplayPath>,
         process_times: &mut TimerSet<LocalNodeIndex, SimpleTracker, RealTime>,
         process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
-        debug_tx: &Option<mpsc::Sender<DebugEvent>>,
         enable_output: bool,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
 
@@ -371,7 +370,7 @@ impl Domain {
         process_times.start(me);
         process_ptimes.start(me);
         let mut m = Some(m);
-        n.process(&mut m, None, states, nodes, shard, debug_tx, true);
+        n.process(&mut m, None, states, nodes, shard, true);
         process_ptimes.stop();
         process_times.stop();
         drop(n);
@@ -427,7 +426,6 @@ impl Domain {
                     paths,
                     process_times,
                     process_ptimes,
-                    debug_tx,
                     enable_output,
                 ) {
                     use std::collections::hash_map::Entry;
@@ -470,7 +468,6 @@ impl Domain {
             &mut self.replay_paths,
             &mut self.process_times,
             &mut self.process_ptimes,
-            &self.debug_tx,
             enable_output,
         )
     }
@@ -542,7 +539,7 @@ impl Domain {
             let mut m = Some(m);
             self.nodes[&addr]
                 .borrow_mut()
-                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, &self.debug_tx, true);
+                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().nchildren(), 0);
@@ -617,8 +614,13 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, m: Box<Packet>) {
-        m.trace(&self.debug_tx, PacketEvent::Handle);
+    fn handle(&mut self, mut m: Box<Packet>) {
+        if let Some(&mut Some((_, ref mut tx @ None))) = m.tracer() {
+            *tx = self.debug_tx
+                .as_ref()
+                .map(|tx| TraceSender::from_local(tx.clone()));
+        };
+        m.trace(PacketEvent::Handle);
 
         match *m {
             Packet::Message { .. } => {
@@ -1196,7 +1198,6 @@ impl Domain {
                         &mut self.state,
                         &self.nodes,
                         self.shard,
-                        &self.debug_tx,
                         false,
                     );
                 }
@@ -1236,7 +1237,6 @@ impl Domain {
                                 &mut self.state,
                                 &self.nodes,
                                 self.shard,
-                                &self.debug_tx,
                                 false,
                             );
                             debug!(self.log, "bulk egress forward completed");
@@ -1434,7 +1434,6 @@ impl Domain {
                             &mut self.state,
                             &self.nodes,
                             self.shard,
-                            &self.debug_tx,
                             false,
                         );
 
@@ -1505,7 +1504,6 @@ impl Domain {
                                             &mut self.state,
                                             &self.nodes,
                                             self.shard,
-                                            &self.debug_tx,
                                             false,
                                         );
                                     }
@@ -1740,7 +1738,6 @@ impl Domain {
                         &mut self.replay_paths,
                         &mut self.process_times,
                         &mut self.process_ptimes,
-                        &self.debug_tx,
                         true,
                     );
                 } else {
@@ -1918,10 +1915,16 @@ impl Domain {
                         } else if id == back_rx_handle.id() {
                             back_rx_handle.recv()
                         } else if id == input_rx_handle.id() {
-                            let m = input_rx_handle.recv();
+                            let mut m = input_rx_handle.recv();
                             debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
-                            if let Ok(ref p) = m {
-                                p.trace(&self.debug_tx, PacketEvent::ExitInputChannel);
+                            if let Ok(ref mut p) = m {
+                                if let Some(&mut Some((_, ref mut tx))) = p.tracer() {
+                                    assert!(tx.is_none());
+                                    *tx = self.debug_tx
+                                        .as_ref()
+                                        .map(|tx| TraceSender::from_local(tx.clone()));
+                                };
+                                p.trace(PacketEvent::ExitInputChannel);
                             }
                             m
                         } else {

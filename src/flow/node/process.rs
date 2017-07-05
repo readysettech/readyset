@@ -2,8 +2,6 @@ use flow::prelude::*;
 use flow::node::NodeType;
 use flow::payload;
 
-use std::sync::mpsc;
-
 impl Node {
     pub fn process(
         &mut self,
@@ -12,10 +10,9 @@ impl Node {
         state: &mut StateMap,
         nodes: &DomainNodes,
         on_shard: Option<usize>,
-        debug_tx: &Option<mpsc::Sender<DebugEvent>>,
         swap: bool,
     ) -> Vec<Miss> {
-        m.as_mut().unwrap().trace(debug_tx, PacketEvent::Process);
+        m.as_mut().unwrap().trace(PacketEvent::Process);
 
         let addr = *self.local_addr();
         match self.inner {
@@ -28,7 +25,7 @@ impl Node {
                 misses
             }
             NodeType::Reader(ref mut r) => {
-                r.process(m, debug_tx, swap);
+                r.process(m, swap);
                 vec![]
             }
             NodeType::Hook(ref mut h) => {

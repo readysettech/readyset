@@ -287,7 +287,8 @@ impl GroupCommitQueueSet {
                         merged_tracer
                             .as_mut()
                             .unwrap()
-                            .extend(tracer.take().unwrap());
+                            .0
+                            .extend(tracer.take().unwrap().0);
                     } else if tracer.is_some() {
                         merged_tracer = tracer.take();
                     }

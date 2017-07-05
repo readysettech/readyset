@@ -10,7 +10,6 @@ use flow::prelude::*;
 
 use std::fmt;
 use std::collections::HashMap;
-use std::sync::mpsc;
 use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -92,7 +91,7 @@ pub enum PacketEvent {
     ReachedReader,
 }
 
-pub type Tracer = Option<Vec<u64>>;
+pub type Tracer = Option<(Vec<u64>, Option<channel::TraceSender<DebugEvent>>)>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
@@ -366,21 +365,19 @@ impl Packet {
         }
     }
 
-    pub fn trace(&self, debug_channel: &Option<mpsc::Sender<DebugEvent>>, event: PacketEvent) {
-        if let Some(ref sender) = *debug_channel {
-            match *self {
-                Packet::Message { tracer: Some(ref tags), .. } |
-                Packet::Transaction { tracer: Some(ref tags), .. } => {
-                    let instant = time::Instant::now();
-                    for tag in tags {
-                        let _ = sender.send(DebugEvent {
-                            instant,
-                            event: DebugEventType::PacketEvent(event, *tag),
-                        });
-                    }
+    pub fn trace(&self, event: PacketEvent) {
+        match *self {
+            Packet::Message { tracer: Some((ref tags, Some(ref sender))), .. } |
+            Packet::Transaction { tracer: Some((ref tags, Some(ref sender))), .. } => {
+                let instant = time::Instant::now();
+                for tag in tags {
+                    let _ = sender.send(DebugEvent {
+                        instant,
+                        event: DebugEventType::PacketEvent(event, *tag),
+                    });
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
 
