@@ -89,7 +89,7 @@ pub enum PacketEvent {
     Process,
     /// The packet has reached some reader node.
     ReachedReader,
-    /// The packet has been merged with another, and will no-longer trigger events.
+    /// The packet has been merged with another, and will no longer trigger events.
     Merged(u64),
 }
 

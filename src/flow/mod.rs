@@ -125,6 +125,7 @@ impl Blender {
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
     pub fn create_debug_channel(&mut self) -> mpsc::Receiver<debug::DebugEvent> {
+        assert!(self.debug_channel.is_none());
         let (tx, rx) = mpsc::channel();
         self.debug_channel = Some(tx);
         rx
@@ -911,7 +912,7 @@ impl<'a> Migration<'a> {
                 &mainline.persistence,
                 &mainline.checktable,
                 &mainline.channel_coordinator,
-                &mainline.debug_channel.clone(),
+                &mainline.debug_channel,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
