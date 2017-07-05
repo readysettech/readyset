@@ -4,7 +4,7 @@ version = "0.0.1"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 
 [dependencies]
-afterparty = { git = "https://github.com/ms705/afterparty", revision = "ec77c1f9dd5cae01a78f67ccadbb8a9a15484961" }
+afterparty = { git = "https://github.com/ms705/afterparty" }
 clap = "2.13"
 env_logger = "0.3"
 git2 = "0.6.4"
