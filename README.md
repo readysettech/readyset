@@ -9,16 +9,16 @@ Add a file called `taster.toml` to the root of your crate's GitHub repo, and
 configure benchmarks in it:
 
 ```
+version = 2  # current taster config version, for backwards compatibility
+
 [my-first-benchmark]
-# that's "cargo bench"
-command = "bench"
-args = ["--bench", "bench", "--", "--some-flag", "--another-flag=42"]
+command = "cargo"
+args = ["bench", "--bench", "bench", "--", "--some-flag", "--another-flag=42"]
 regexs = ["(throughput): ([0-9.]+) req/sec", "(latency): ([0-9.]+)ms"]
 
 [my-second-benchmark]
-# that's "cargo run"
-command = "run"
-args = ["--bin", "standalone_benchmark", "--", "--some-flag"]
+command = "cargo"
+args = ["run", "--bin", "standalone_benchmark", "--", "--some-flag"]
 regexs = ["(throughput): ([0-9.]+) req/sec", "(latency): ([0-9.]+)ms"]
 
 ```
