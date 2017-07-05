@@ -84,7 +84,10 @@ fn benchmark(
         .write_all(output.stderr.as_slice())
         .expect("Failed to write benchmark output to stderr log file!");
 
-    let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
+    let lines = str::from_utf8(output.stdout.as_slice())
+        .unwrap()
+        .lines()
+        .chain(str::from_utf8(output.stderr.as_slice()).unwrap().lines());
     let mut res = HashMap::new();
 
     // Don't try parsing the output if we didn't succeed
