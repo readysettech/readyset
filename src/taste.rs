@@ -1,5 +1,6 @@
 use config::{Benchmark, Config, parse_config};
 use Commit;
+use git2;
 use Push;
 use repo::Workspace;
 
@@ -54,10 +55,25 @@ fn benchmark(
     workdir: &str,
     cfg: &Config,
     bench: &Benchmark,
+    commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
+    use std::fs::File;
+    use std::io::Write;
+
     // Run the benchmark and collect its output
     let output = run_benchmark(workdir, cfg, bench);
+
+    // Write the output to a log file
+    let mut stored_output = File::create(&format!("{}-{}.log", commit_id, bench.name))
+        .expect(&format!(
+            "Failed to create log file for benchmark '{}' at commit '{}'.",
+            bench.name,
+            commit_id
+        ));
+    stored_output
+        .write_all(output.stdout.as_slice())
+        .expect("Failed to write benchmark output to log file!");
 
     let lines = str::from_utf8(output.stdout.as_slice()).unwrap().lines();
     let mut res = HashMap::new();
@@ -218,7 +234,8 @@ pub fn taste_commit(
             cfg.benchmarks
                 .iter()
                 .map(|b| {
-                    let new_result = benchmark(&ws.path, &cfg, b, branch_history.get(&b.name));
+                    let new_result =
+                        benchmark(&ws.path, &cfg, b, commit.id, branch_history.get(&b.name));
                     branch_history.insert(b.name.clone(), new_result.1.clone());
                     new_result
                 })
@@ -227,7 +244,7 @@ pub fn taste_commit(
         None => {
             cfg.benchmarks
                 .iter()
-                .map(|b| benchmark(&ws.path, &cfg, b, None))
+                .map(|b| benchmark(&ws.path, &cfg, b, commit.id, None))
                 .collect::<Vec<(ExitStatus, HashMap<String, BenchmarkResult<f64>>)>>()
         }
     };
