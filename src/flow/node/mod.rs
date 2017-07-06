@@ -16,7 +16,7 @@ pub use self::ntype::NodeType;
 
 mod debug;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: String,
     index: Option<IndexPair>,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use flow::prelude::*;
 use channel::ChannelSender;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Egress {
     txs: Vec<(NodeIndex, LocalNodeIndex, ChannelSender<Box<Packet>>)>,
     tags: HashMap<Tag, NodeIndex>,

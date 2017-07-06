@@ -29,13 +29,22 @@ impl From<Vec<DataType>> for StreamUpdate {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Reader {
+    #[serde(skip)]
     writer: Option<backlog::WriteHandle>,
+
+    #[serde(skip)]
     streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
-    state: Option<usize>,
+
+    #[serde(skip)]
     token_generator: Option<checktable::TokenGenerator>,
-    for_node: NodeIndex,
+
+    #[serde(skip)]
     barrier: Option<Barrier>,
+
+    for_node: NodeIndex,
+    state: Option<usize>,
 }
 
 impl Clone for Reader {

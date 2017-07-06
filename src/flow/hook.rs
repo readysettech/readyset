@@ -14,8 +14,10 @@ pub struct Memcache(memcached::Client);
 unsafe impl Send for Memcache {}
 
 /// A node that pushes updates to an external datastore. Currently only Memcached is supported.
+#[derive(Serialize, Deserialize)]
 pub struct Hook {
-    client: Memcache,
+    #[serde(skip)]
+    client: Option<Memcache>,
     key_columns: Vec<usize>,
     name: Value,
 
@@ -46,7 +48,7 @@ impl Hook {
         s.add_key(&key_columns[..], false);
 
         Ok(Self {
-            client: Memcache(client),
+            client: Some(Memcache(client)),
             key_columns: key_columns,
             name: Value::String(name),
             state: s,
@@ -109,7 +111,10 @@ impl Hook {
                     .collect(),
             ).to_string();
             let flags = 0xdeadbeef;
-            (self.client.0)
+            self.client
+                .as_mut()
+                .unwrap()
+                .0
                 .set(k.as_bytes(), v.as_bytes(), flags, 0)
                 .unwrap();
         }
@@ -119,7 +124,7 @@ impl Hook {
     pub fn get_row(&mut self, key: Vec<DataType>) -> MemCachedResult<(Vec<u8>, u32)> {
         let array = key.iter().map(DataType::to_json).collect();
         let k = Value::Array(vec![self.name.clone(), array]).to_string();
-        self.client.0.get(k.as_bytes())
+        self.client.as_mut().unwrap().0.get(k.as_bytes())
     }
 }
 

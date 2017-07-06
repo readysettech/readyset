@@ -30,7 +30,7 @@ impl fmt::Debug for Link {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
@@ -38,7 +38,7 @@ pub enum TriggerEndpoint {
     Local(Vec<usize>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum InitialState {
     PartialLocal(usize),
     IndexedLocal(Vec<Vec<usize>>),
@@ -65,7 +65,7 @@ pub enum ReplayPieceContext {
     Regular { last: bool },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
     Pending(checktable::Token, channel::TransactionReplySender<Result<i64, ()>>),
@@ -97,6 +97,7 @@ pub type Tracer = Option<(u64, Option<channel::TraceSender<DebugEvent>>)>;
 pub type IngressFromBase = HashMap<petgraph::graph::NodeIndex, usize>;
 pub type EgressForBase = HashMap<petgraph::graph::NodeIndex, Vec<LocalNodeIndex>>;
 
+#[derive(Serialize, Deserialize)]
 pub enum Packet {
     // Data messages
     //

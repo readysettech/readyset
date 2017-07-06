@@ -3,6 +3,7 @@ use flow::payload;
 use vec_map::VecMap;
 use channel::ChannelSender;
 
+#[derive(Serialize, Deserialize)]
 pub struct Sharder {
     txs: Vec<(LocalNodeIndex, ChannelSender<Box<Packet>>)>,
     sharded: VecMap<Box<Packet>>,

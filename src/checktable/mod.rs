@@ -15,7 +15,7 @@ use flow::prelude::*;
 use flow::payload::{IngressFromBase, EgressForBase};
 use flow::migrate::materialization::Tag as ReplayPath;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 enum Conflict {
     /// This conflict should trigger an abort if the given base table has seen a write after the
     /// given time.
@@ -28,7 +28,7 @@ enum Conflict {
 /// Tokens are used to perform transactions. Any transactional write will include a token indicating
 /// the universe of other writes that it could conflict with. A transaction's token is considered
 /// invalid (and will therefore cause it to abort) if any of the contained conflicts are triggered.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Token {
     conflicts: Vec<(i64, DataType, Vec<Conflict>)>,
 }

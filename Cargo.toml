@@ -18,7 +18,7 @@ generate_mysql_tests = ["default"]
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 itertools = "0.6.0"
-petgraph = "0.4.5"
+petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
 regex = "0.2.2"
 fnv = "1.0.5"
 serde = { version = "1.0.8", features = ["rc"] }
@@ -30,11 +30,11 @@ slog-term = "2.0.1"
 bus = "1.3.0"
 evmap = "0.6.4"
 arccstr = "0.4.2"
-vec_map = "0.8.0"
+vec_map = { version = "0.8.0", features = ["eders"] }
 hurdles = "0.1.0"
 arrayvec = "0.3.23"
 
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "38a973891d31ab935204231c8733a30162916e6e" }
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "38a973891d31ab935204231c8733a30162916e6e"}
 
 # for benchmarks
 # cli
