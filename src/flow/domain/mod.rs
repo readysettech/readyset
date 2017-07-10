@@ -119,8 +119,9 @@ pub struct Domain {
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     readers: flow::Readers,
+    inject: Option<Box<Packet>>,
+    chunked_replay_tx: Option<mpsc::SyncSender<Box<Packet>>>,
     debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
-    inject_tx: Option<mpsc::SyncSender<Box<Packet>>>,
     control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
@@ -165,8 +166,9 @@ impl Domain {
             replay_paths: HashMap::new(),
 
             readers: readers.clone(),
+            inject: None,
             debug_tx: None,
-            inject_tx: None,
+            chunked_replay_tx: None,
             control_reply_tx: None,
             channel_coordinator,
 
@@ -1286,7 +1288,7 @@ impl Domain {
 
                         let log = self.log.new(o!());
                         let nshards = self.nshards;
-                        let inject_tx = self.inject_tx.clone().unwrap();
+                        let chunked_replay_tx = self.chunked_replay_tx.clone().unwrap();
                         thread::Builder::new()
                             .name(format!(
                                 "replay{}.{}",
@@ -1329,7 +1331,7 @@ impl Domain {
                                     };
 
                                     trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                    if inject_tx.send(p).is_err() {
+                                    if chunked_replay_tx.send(p).is_err() {
                                         warn!(log, "replayer noticed domain shutdown");
                                         break;
                                     }
@@ -1632,68 +1634,12 @@ impl Domain {
             // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
             // this allows finish_replay to dispatch into the node by overriding replaying_to.
             self.not_ready.remove(&ni);
-            // NOTE: if this call ever blocks, we're in big trouble: handle_replay is called
-            // directly from the main loop of a domain, so if we block here, we're also blocking
-            // the loop that is supposed to drain the channel we're blocking on. luckily, in this
-            // particular case, we know that sending will not block, because:
-            //
-            //  - inject_tx has a buffer size of 1, so we will block if either inject_tx is
-            //    already full, or if there are other concurrent senders.
-            //  - there are no concurrent senders because:
-            //    - there are only two other places that send on inject_tx: in finish_replay, and in
-            //      state replay.
-            //    - finish_replay is not running, because it is only run from the main domain loop,
-            //      and that's currently executing us.
-            //    - no state replay can be sending, because:
-            //      - there is only one replay: this one
-            //      - that replay sent an entry with last: true (so we got finished.is_some)
-            //      - last: true is the *last* thing the replay thread sends
-            //  - inject_tx must be empty, because
-            //    - if the previous send was from the replay thread, it had last: true (otherwise we
-            //      wouldn't have finished.is_some), and we just recv'd that.
-            //    - if the last send was from finish_replay, it must have been recv'd by the time
-            //      this code runs. the reason for this is a bit more involved:
-            //      - we just received a Packet::Replay with last: true.
-            //      - at some point prior to this, finish_replay sent a Packet::Finish
-            //      - it turns out that there *must* have been a recv on the inject channel between
-            //        these two. by contradiction:
-            //        - assume no packet was received on inject between the two times
-            //        - if we are using local replay, we know the replay thread has finished,
-            //          since handle_replay must have seen last: true from it in order to trigger
-            //          finish_replay
-            //        - if we were being replayed to from another domain, the *previous* Replay we
-            //          received from it must have had last: true (again, to trigger finish_replay)
-            //        - thus, the Replay we are receiving *now* must be a part of the *next* replay
-            //        - we know finish_replay has not acknowledged the previous replay to the
-            //          parent domain:
-            //          - it does so only after receiving a Finish (from the inject channel), and
-            //            *not* emitting another Finish
-            //          - since it *did* emit a Finish, we know it did *not* ack last time
-            //          - by assumption, the Finish it emitted has not been received, so we also
-            //            know it hasn't run again
-            //        - since no replay message is sent after a last: true until the migration sees
-            //          the ack from finish_replay, we know the most recent replay must be the
-            //          last: true that triggered finish_replay.
-            //        - but this is a contradiction, since we just received a Packet::Replay
-            //
-            // phew.
-            // hopefully that made sense.
-            // this (informal) argument relies on there only being one active replay in the system
-            // at any given point in time, so we may need to revisit it for partial materialization
-            // (TODO)
-            match self.inject_tx
-                .as_mut()
-                .unwrap()
-                .try_send(box Packet::Finish(tag, ni)) {
-                Ok(_) => {}
-                Err(mpsc::TrySendError::Disconnected(_)) => {
-                    // can't happen, since we know the reader thread (us) is still running
-                    unreachable!();
-                }
-                Err(mpsc::TrySendError::Full(_)) => {
-                    unreachable!();
-                }
-            }
+            // NOTE: inject must be None because it is only set to Some in the main domain loop, it
+            // hasn't yet been set in the processing of the current packet, and it can't still be set
+            // from a previous iteration because then it would have been dealt with instead of the
+            // current packet.
+            assert!(self.inject.is_none());
+            self.inject = Some(box Packet::Finish(tag, ni));
         }
     }
 
@@ -1788,33 +1734,11 @@ impl Domain {
             }
         } else {
             // we're not done -- inject a request to continue handling buffered things
-            // NOTE: similarly to in handle_replay, if this call ever blocks, we're in big trouble:
-            // finish_replay is also called directly from the main loop of a domain, so if we block
-            // here, we're also blocking the loop that is supposed to drain the channel we're
-            // blocking on. the argument for why this won't block is very similar to for
-            // handle_replay. briefly:
-            //
-            //  - we know there's only one replay going on
-            //  - we know there are no more Replay packets for this replay, since one with last:
-            //    true must have been received for finish_replay to be triggered
-            //  - therefore we know that no replay thread is running
-            //  - since handle_replay will only send Packet::Finish once (when it receives last:
-            //    true), we also know that it will not send again until the replay is over
-            //  - the replay is over when we acknowedge the replay, which we haven't done yet
-            //    (otherwise we'd be hitting the if branch above).
-            match self.inject_tx
-                .as_mut()
-                .unwrap()
-                .try_send(box Packet::Finish(tag, node)) {
-                Ok(_) => {}
-                Err(mpsc::TrySendError::Disconnected(_)) => {
-                    // can't happen, since we know the reader thread (us) is still running
-                    unreachable!();
-                }
-                Err(mpsc::TrySendError::Full(_)) => {
-                    unreachable!();
-                }
-            }
+            // NOTE: similarly to in handle_replay, inject can never be Some before this function
+            // because it is called directly from handle, which is always called with inject being
+            // None.
+            assert!(self.inject.is_none());
+            self.inject = Some(box Packet::Finish(tag, node));
         }
     }
 
@@ -1835,19 +1759,19 @@ impl Domain {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
-                let (inject_tx, inject_rx) = mpsc::sync_channel(1);
+                let (chunked_replay_tx, chunked_replay_rx) = mpsc::sync_channel(2);
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
                 let mut rx_handle = sel.handle(&rx);
-                let mut inject_rx_handle = sel.handle(&inject_rx);
+                let mut chunked_replay_rx_handle = sel.handle(&chunked_replay_rx);
                 let mut back_rx_handle = sel.handle(&back_rx);
                 let mut input_rx_handle = sel.handle(&input_rx);
 
                 unsafe {
                     // select is currently not fair, but tries in order
-                    // first try inject, because it'll complete a replay
-                    inject_rx_handle.add();
+                    // first try chunked_replay, because it'll make progress on a replay
+                    chunked_replay_rx_handle.add();
                     // then see if there are outstanding replay requests
                     back_rx_handle.add();
                     // then see if there's new data from our ancestors
@@ -1857,7 +1781,7 @@ impl Domain {
                 }
 
                 self.debug_tx = debug_tx;
-                self.inject_tx = Some(inject_tx);
+                self.chunked_replay_tx = Some(chunked_replay_tx);
                 self.control_reply_tx = Some(control_reply_tx);
 
                 let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
@@ -1878,9 +1802,9 @@ impl Domain {
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
                     // and wakeups are expensive.
                     let start = time::Instant::now();
-                    while start.elapsed() < spin_duration {
-                        if let Ok(p) = inject_rx
-                            .try_recv()
+                    loop {
+                        if let Ok(p) = self.inject.take().ok_or(mpsc::TryRecvError::Empty)
+                            .or_else(|_| chunked_replay_rx.try_recv())
                             .or_else(|_| back_rx.try_recv())
                             .or_else(|_| rx.try_recv())
                             .or_else(|_| input_rx.try_recv())
@@ -1888,18 +1812,25 @@ impl Domain {
                             packet = Some(Ok(p));
                             break;
                         }
-                    }
 
-                    // If no packet was received and we were waiting until it was time for a flush,
-                    // then do the flush now.
-                    if packet.is_none() && duration_until_flush.is_some() {
-                        while let Some(m) = group_commit_queues.flush_if_necessary(
-                            &self.nodes,
-                            &self.transaction_state.get_checktable(),
-                        ) {
-                            self.handle(m);
+                        if start.elapsed() >= spin_duration {
+                            match duration_until_flush {
+                                Some(_) => {
+                                    // TODO: modify code below so that we can simply set packet to
+                                    // be m. This won't work currently because `should_append` only
+                                    // considers packet destination and thus the merged packet would
+                                    // get persisted again, and again, and again.
+                                    while let Some(m) = group_commit_queues.flush_if_necessary(
+                                        &self.nodes,
+                                        &self.transaction_state.get_checktable(),
+                                    ) {
+                                        self.handle(m);
+                                    }
+                                    continue;
+                                }
+                                None => break,
+                            }
                         }
-                        continue;
                     }
 
                     // Block until the next packet arrives.
@@ -1908,10 +1839,12 @@ impl Domain {
                         let id = sel.wait();
                         self.wait_time.stop();
 
-                        let p = if id == rx_handle.id() {
+                        let p = if self.inject.is_some() {
+                            Ok(self.inject.take().unwrap())
+                        } else if id == rx_handle.id() {
                             rx_handle.recv()
-                        } else if id == inject_rx_handle.id() {
-                            inject_rx_handle.recv()
+                        } else if id == chunked_replay_rx_handle.id() {
+                            chunked_replay_rx_handle.recv()
                         } else if id == back_rx_handle.id() {
                             back_rx_handle.recv()
                         } else if id == input_rx_handle.id() {
