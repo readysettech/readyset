@@ -1635,9 +1635,9 @@ impl Domain {
             // this allows finish_replay to dispatch into the node by overriding replaying_to.
             self.not_ready.remove(&ni);
             // NOTE: inject must be None because it is only set to Some in the main domain loop, it
-            // hasn't yet been set in the processing of the current packet, and it can't still be set
-            // from a previous iteration because then it would have been dealt with instead of the
-            // current packet.
+            // hasn't yet been set in the processing of the current packet, and it can't still be
+            // set from a previous iteration because then it would have been dealt with instead of
+            // the current packet.
             assert!(self.inject.is_none());
             self.inject = Some(box Packet::Finish(tag, ni));
         }
@@ -1793,84 +1793,86 @@ impl Domain {
                 self.total_time.start();
                 self.total_ptime.start();
                 let mut packet = None;
+                let mut input_packet = None;
                 loop {
-                    let duration_until_flush = group_commit_queues.duration_until_flush();
-                    let spin_duration = duration_until_flush
-                        .unwrap_or(time::Duration::from_millis(1));
-
                     // If a flush is needed at some point then spin waiting for packets until
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
                     // and wakeups are expensive.
+                    let duration_until_flush = group_commit_queues.duration_until_flush();
+                    let spin_duration = duration_until_flush
+                        .unwrap_or(time::Duration::from_millis(1));
                     let start = time::Instant::now();
                     loop {
-                        if let Ok(p) = self.inject.take().ok_or(mpsc::TryRecvError::Empty)
+                        if let Ok(p) = self.inject
+                            .take()
+                            .ok_or(mpsc::TryRecvError::Empty)
                             .or_else(|_| chunked_replay_rx.try_recv())
                             .or_else(|_| back_rx.try_recv())
                             .or_else(|_| rx.try_recv())
-                            .or_else(|_| input_rx.try_recv())
                         {
                             packet = Some(Ok(p));
                             break;
                         }
 
+                        if let Ok(p) = input_rx.try_recv() {
+                            input_packet = Some(Ok(p));
+                            break;
+                        }
+
                         if start.elapsed() >= spin_duration {
-                            match duration_until_flush {
-                                Some(_) => {
-                                    // TODO: modify code below so that we can simply set packet to
-                                    // be m. This won't work currently because `should_append` only
-                                    // considers packet destination and thus the merged packet would
-                                    // get persisted again, and again, and again.
-                                    while let Some(m) = group_commit_queues.flush_if_necessary(
-                                        &self.nodes,
-                                        &self.transaction_state.get_checktable(),
-                                    ) {
-                                        self.handle(m);
-                                    }
-                                    continue;
-                                }
-                                None => break,
-                            }
+                            packet = group_commit_queues
+                                .flush_if_necessary(
+                                    &self.nodes,
+                                    &self.transaction_state.get_checktable(),
+                                )
+                                .map(|m| Ok(m));
+                            break;
                         }
                     }
 
                     // Block until the next packet arrives.
-                    if packet.is_none() {
+                    if packet.is_none() && input_packet.is_none() {
                         self.wait_time.start();
                         let id = sel.wait();
                         self.wait_time.stop();
 
-                        let p = if self.inject.is_some() {
-                            Ok(self.inject.take().unwrap())
+                        if self.inject.is_some() {
+                            packet = Some(Ok(self.inject.take().unwrap()));
                         } else if id == rx_handle.id() {
-                            rx_handle.recv()
+                            packet = Some(rx_handle.recv());
                         } else if id == chunked_replay_rx_handle.id() {
-                            chunked_replay_rx_handle.recv()
+                            packet = Some(chunked_replay_rx_handle.recv());
                         } else if id == back_rx_handle.id() {
-                            back_rx_handle.recv()
+                            packet = Some(back_rx_handle.recv());
                         } else if id == input_rx_handle.id() {
-                            let mut m = input_rx_handle.recv();
-                            debug_assert!(m.is_err() || m.as_ref().unwrap().is_regular());
-                            if let Ok(ref mut p) = m {
-                                if let Some(&mut Some((_, ref mut tx))) = p.tracer() {
+                            input_packet = Some(input_rx_handle.recv());
+                        } else {
+                            unreachable!()
+                        };
+                    }
+
+                    // Process the packet that arrived.
+                    if let Some(packet) = packet.take() {
+                        assert!(input_packet.is_none());
+                        match packet {
+                            Err(_) => break,
+                            Ok(box Packet::Quit) => break,
+                            Ok(m) => self.handle(m),
+                        }
+                    } else {
+                        match input_packet.take().unwrap() {
+                            Err(_) => break,
+                            Ok(mut m @ box Packet::Message { .. }) |
+                            Ok(mut m @ box Packet::Transaction { .. }) => {
+                                debug_assert!(m.is_regular());
+                                if let Some(&mut Some((_, ref mut tx))) = m.tracer() {
                                     assert!(tx.is_none());
                                     *tx = self.debug_tx
                                         .as_ref()
                                         .map(|tx| TraceSender::from_local(tx.clone()));
                                 };
-                                p.trace(PacketEvent::ExitInputChannel);
-                            }
-                            m
-                        } else {
-                            unreachable!()
-                        };
-                        packet = Some(p);
-                    }
+                                m.trace(PacketEvent::ExitInputChannel);
 
-                    match packet.take().unwrap() {
-                        Err(_) => break,
-                        Ok(box Packet::Quit) => break,
-                        Ok(m) => {
-                            if group_commit_queues.should_append(&m, &self.nodes) {
                                 if let Some(m) = group_commit_queues.append(
                                     m,
                                     &self.nodes,
@@ -1878,9 +1880,8 @@ impl Domain {
                                 ) {
                                     self.handle(m)
                                 }
-                            } else {
-                                self.handle(m);
                             }
+                            Ok(_) => unreachable!(),
                         }
                     }
                 }
