@@ -616,12 +616,7 @@ impl Domain {
         }
     }
 
-    fn handle(&mut self, mut m: Box<Packet>) {
-        if let Some(&mut Some((_, ref mut tx @ None))) = m.tracer() {
-            *tx = self.debug_tx
-                .as_ref()
-                .map(|tx| TraceSender::from_local(tx.clone()));
-        };
+    fn handle(&mut self, m: Box<Packet>) {
         m.trace(PacketEvent::Handle);
 
         match *m {
@@ -1854,20 +1849,21 @@ impl Domain {
                         }
                     }
 
+                    // Initialize tracer if necessary.
+                    if let Some(Some(&mut Some((_, ref mut tx @ None)))) =
+                        packet.as_mut().map(|m| m.tracer())
+                    {
+                        *tx = self.debug_tx
+                            .as_ref()
+                            .map(|tx| TraceSender::from_local(tx.clone()));
+                    }
+
                     // If we received an input packet, place it into the relevant group commit
                     // queue, and possibly produce a merged packet.
                     if from_input {
-                        let mut m = packet.unwrap();
+                        let m = packet.unwrap();
                         debug_assert!(m.is_regular());
-
-                        if let Some(&mut Some((_, ref mut tx))) = m.tracer() {
-                            assert!(tx.is_none());
-                            *tx = self.debug_tx
-                                .as_ref()
-                                .map(|tx| TraceSender::from_local(tx.clone()));
-                        };
                         m.trace(PacketEvent::ExitInputChannel);
-
                         packet = group_commit_queues.append(m, &self.nodes);
                     }
 
