@@ -1792,9 +1792,10 @@ impl Domain {
 
                 self.total_time.start();
                 self.total_ptime.start();
-                let mut packet = None;
-                let mut input_packet = None;
                 loop {
+                    let mut packet;
+                    let mut from_input = false;
+
                     // If a flush is needed at some point then spin waiting for packets until
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
                     // and wakeups are expensive.
@@ -1810,78 +1811,74 @@ impl Domain {
                             .or_else(|_| back_rx.try_recv())
                             .or_else(|_| rx.try_recv())
                         {
-                            packet = Some(Ok(p));
+                            packet = Some(p);
                             break;
                         }
 
                         if let Ok(p) = input_rx.try_recv() {
-                            input_packet = Some(Ok(p));
+                            packet = Some(p);
+                            from_input = true;
                             break;
                         }
 
                         if start.elapsed() >= spin_duration {
-                            packet = group_commit_queues
-                                .flush_if_necessary(
-                                    &self.nodes,
-                                    &self.transaction_state.get_checktable(),
-                                )
-                                .map(|m| Ok(m));
+                            packet = group_commit_queues.flush_if_necessary(
+                                &self.nodes,
+                                &self.transaction_state.get_checktable(),
+                            );
                             break;
                         }
                     }
 
                     // Block until the next packet arrives.
-                    if packet.is_none() && input_packet.is_none() {
+                    if packet.is_none() {
                         self.wait_time.start();
                         let id = sel.wait();
                         self.wait_time.stop();
 
                         assert!(self.inject.is_none());
-                        if id == rx_handle.id() {
-                            packet = Some(rx_handle.recv());
+                        let p = if id == rx_handle.id() {
+                            rx_handle.recv()
                         } else if id == chunked_replay_rx_handle.id() {
-                            packet = Some(chunked_replay_rx_handle.recv());
+                            chunked_replay_rx_handle.recv()
                         } else if id == back_rx_handle.id() {
-                            packet = Some(back_rx_handle.recv());
+                            back_rx_handle.recv()
                         } else if id == input_rx_handle.id() {
-                            input_packet = Some(input_rx_handle.recv());
+                            from_input = true;
+                            input_rx_handle.recv()
                         } else {
                             unreachable!()
                         };
+
+                        match p {
+                            Ok(m) => packet = Some(m),
+                            Err(_) => return,
+                        }
                     }
 
-                    // Process the packet that arrived.
-                    if let Some(packet) = packet.take() {
-                        assert!(input_packet.is_none());
-                        match packet {
-                            Err(_) => break,
-                            Ok(box Packet::Quit) => break,
-                            Ok(m) => self.handle(m),
-                        }
-                    } else {
-                        match input_packet.take().unwrap() {
-                            Err(_) => break,
-                            Ok(mut m @ box Packet::Message { .. }) |
-                            Ok(mut m @ box Packet::Transaction { .. }) => {
-                                debug_assert!(m.is_regular());
-                                if let Some(&mut Some((_, ref mut tx))) = m.tracer() {
-                                    assert!(tx.is_none());
-                                    *tx = self.debug_tx
-                                        .as_ref()
-                                        .map(|tx| TraceSender::from_local(tx.clone()));
-                                };
-                                m.trace(PacketEvent::ExitInputChannel);
+                    // If we received an input packet, place it into the relevant group commit
+                    // queue, and possibly produce a merged packet.
+                    if from_input {
+                        let mut m = packet.unwrap();
+                        debug_assert!(m.is_regular());
 
-                                if let Some(m) = group_commit_queues.append(
-                                    m,
-                                    &self.nodes,
-                                    &self.transaction_state.get_checktable(),
-                                ) {
-                                    self.handle(m)
-                                }
-                            }
-                            Ok(_) => unreachable!(),
-                        }
+                        if let Some(&mut Some((_, ref mut tx))) = m.tracer() {
+                            assert!(tx.is_none());
+                            *tx = self.debug_tx
+                                .as_ref()
+                                .map(|tx| TraceSender::from_local(tx.clone()));
+                        };
+                        m.trace(PacketEvent::ExitInputChannel);
+
+                        packet = group_commit_queues
+                            .append(m, &self.nodes, &self.transaction_state.get_checktable());
+                    }
+
+                    // Process the packet.
+                    match packet {
+                        Some(box Packet::Quit) => return,
+                        Some(m) => self.handle(m),
+                        None => {}
                     }
                 }
             })
