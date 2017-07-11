@@ -331,9 +331,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // unreachable because SQL rewrite passes will have expanded these already
                     FieldExpression::All => unreachable!(),
                     FieldExpression::AllInTable(_) => unreachable!(),
-                    // XXX(malte): handle this case! requires either `Column` or
-                    // `QueryGraphNode.columns` to change to be able to represent literals.
-                    FieldExpression::Literal(_) => unimplemented!(),
+                    // No need to do anything for literals here, as they aren't associated with a
+                    // relation (and thus have no QGN)
+                    FieldExpression::Literal(_) => None,
                     FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
@@ -545,8 +545,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         match *field {
             FieldExpression::All |
             FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
-            // No need to do anything for literals here
-            FieldExpression::Literal(_) => (),
+            FieldExpression::Literal(ref l) => {
+                qg.columns.push(OutputColumn::Literal(LiteralColumn {
+                    name: String::from("literal"),
+                    table: None,
+                    value: l.clone(),
+                }));
+            },
             FieldExpression::Col(ref c) => {
                 match c.function {
                     None => (),  // we've already dealt with this column as part of some relation
@@ -561,6 +566,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         n.columns.push(c.clone());
                     }
                 }
+                qg.columns.push(OutputColumn::Data(c.clone()));
             }
         }
     }

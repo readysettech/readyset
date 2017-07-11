@@ -579,6 +579,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
+        use sql::query_graph::OutputColumn;
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
@@ -590,7 +591,7 @@ mod tests {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
-            c.hash(&mut hasher);
+            OutputColumn::Data((*c).clone()).hash(&mut hasher);
         }
         hasher.finish()
     }
