@@ -1788,6 +1788,7 @@ impl Domain {
                     self.index,
                     self.shard.unwrap_or(0),
                     &self.persistence_parameters,
+                    self.transaction_state.get_checktable().clone(),
                 );
 
                 self.total_time.start();
@@ -1822,10 +1823,7 @@ impl Domain {
                         }
 
                         if start.elapsed() >= spin_duration {
-                            packet = group_commit_queues.flush_if_necessary(
-                                &self.nodes,
-                                &self.transaction_state.get_checktable(),
-                            );
+                            packet = group_commit_queues.flush_if_necessary(&self.nodes);
                             break;
                         }
                     }
@@ -1870,8 +1868,7 @@ impl Domain {
                         };
                         m.trace(PacketEvent::ExitInputChannel);
 
-                        packet = group_commit_queues
-                            .append(m, &self.nodes, &self.transaction_state.get_checktable());
+                        packet = group_commit_queues.append(m, &self.nodes);
                     }
 
                     // Process the packet.

@@ -91,11 +91,18 @@ pub struct GroupCommitQueueSet {
     timeout: time::Duration,
     capacity: usize,
     durability_mode: DurabilityMode,
+
+    checktable: Arc<Mutex<checktable::CheckTable>>,
 }
 
 impl GroupCommitQueueSet {
     /// Create a new `GroupCommitQueue`.
-    pub fn new(domain_index: domain::Index, domain_shard: usize, params: &Parameters) -> Self {
+    pub fn new(
+        domain_index: domain::Index,
+        domain_shard: usize,
+        params: &Parameters,
+        checktable: Arc<Mutex<checktable::CheckTable>>,
+    ) -> Self {
         assert!(params.queue_capacity > 0);
 
         Self {
@@ -109,6 +116,7 @@ impl GroupCommitQueueSet {
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
             durability_mode: params.mode.clone(),
+            checktable,
         }
     }
 
@@ -151,7 +159,6 @@ impl GroupCommitQueueSet {
     pub fn flush_if_necessary(
         &mut self,
         nodes: &DomainNodes,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
     ) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
@@ -161,7 +168,7 @@ impl GroupCommitQueueSet {
             }
         }
 
-        needs_flush.and_then(|node| self.flush_internal(&node, nodes, checktable))
+        needs_flush.and_then(|node| self.flush_internal(&node, nodes))
     }
 
     /// Flush any pending packets for node to disk (if applicable), and return a merged packet.
@@ -169,7 +176,6 @@ impl GroupCommitQueueSet {
         &mut self,
         node: &LocalNodeIndex,
         nodes: &DomainNodes,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
     ) -> Option<Box<Packet>> {
         match self.durability_mode {
             DurabilityMode::DeleteOnExit |
@@ -203,7 +209,7 @@ impl GroupCommitQueueSet {
             &mut self.pending_packets[node],
             &mut self.commit_decisions,
             nodes,
-            checktable,
+            &self.checktable,
         )
     }
 
@@ -213,7 +219,6 @@ impl GroupCommitQueueSet {
         &mut self,
         p: Box<Packet>,
         nodes: &DomainNodes,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
     ) -> Option<Box<Packet>> {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
@@ -223,7 +228,7 @@ impl GroupCommitQueueSet {
 
         self.pending_packets[&node].push(p);
         if self.pending_packets[&node].len() >= self.capacity {
-            return self.flush_internal(&node, nodes, checktable);
+            return self.flush_internal(&node, nodes);
         } else if !self.wait_start.contains_key(&node) {
             self.wait_start.insert(node, time::Instant::now());
         }
