@@ -1759,7 +1759,7 @@ impl Domain {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
-                let (chunked_replay_tx, chunked_replay_rx) = mpsc::sync_channel(2);
+                let (chunked_replay_tx, chunked_replay_rx) = mpsc::sync_channel(1);
 
                 // construct select so we can receive on all channels at the same time
                 let sel = mpsc::Select::new();
@@ -1836,9 +1836,8 @@ impl Domain {
                         let id = sel.wait();
                         self.wait_time.stop();
 
-                        if self.inject.is_some() {
-                            packet = Some(Ok(self.inject.take().unwrap()));
-                        } else if id == rx_handle.id() {
+                        assert!(self.inject.is_none());
+                        if id == rx_handle.id() {
                             packet = Some(rx_handle.recv());
                         } else if id == chunked_replay_rx_handle.id() {
                             packet = Some(chunked_replay_rx_handle.recv());
