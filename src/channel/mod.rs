@@ -6,6 +6,10 @@ use std::sync::mpsc::{self, SendError};
 
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
+pub mod tcp;
+
+pub use channel::tcp::{TcpSender, TcpReceiver};
+
 #[derive(Debug)]
 pub enum ChannelSender<T> {
     Local(mpsc::Sender<T>),
