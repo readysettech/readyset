@@ -1,0 +1,9 @@
+[package]
+name = "channel"
+version = "0.1.0"
+authors = ["The Distributary Developers"]
+
+[dependencies]
+serde = { version = "1.0.8", features = ["rc"] }
+serde_derive = "1.0.8"
+bincode = "0.8.0"

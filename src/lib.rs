@@ -388,8 +388,9 @@ extern crate snowflake;
 extern crate chrono;
 extern crate time;
 
+extern crate channel;
+
 mod backlog;
-mod channel;
 mod checktable;
 mod flow;
 mod mir;

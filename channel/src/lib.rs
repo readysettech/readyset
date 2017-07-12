@@ -1,4 +1,7 @@
 
+extern crate serde;
+extern crate bincode;
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Mutex;
@@ -8,7 +11,7 @@ use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub mod tcp;
 
-pub use channel::tcp::{TcpSender, TcpReceiver};
+pub use tcp::{TcpSender, TcpReceiver};
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {
