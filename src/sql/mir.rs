@@ -8,7 +8,7 @@ use ops::join::JoinType;
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, TableKey, SqlQuery};
 use nom_sql::{SelectStatement, LimitClause, OrderClause};
-use sql::query_graph::{QueryGraph, QueryGraphEdge};
+use sql::query_graph::{QueryGraph, QueryGraphEdge, OutputColumn};
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -1203,14 +1203,27 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = sorted_rels.iter().fold(Vec::new(), |mut v, s| {
-                v.extend(qg.relations[*s].columns.iter());
-                v
-            });
+            let projected_columns: Vec<&Column> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Data(ref c) => Some(c),
+                    OutputColumn::Literal(_) => None,
+                })
+                .chain(qg.parameters())
+                .collect();
+            let projected_literals: Vec<(String, DataType)> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(ref lc) => Some(
+                        (lc.name.clone(), DataType::from(&lc.value)),
+                    ),
+                })
+                .collect();
 
             let ident = format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
             let leaf_project_node =
-                self.make_project_node(&ident, final_node, projected_columns, vec![]);
+                self.make_project_node(&ident, final_node, projected_columns, projected_literals);
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a

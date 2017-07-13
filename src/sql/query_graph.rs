@@ -1,13 +1,107 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinConstraint, JoinOperator, JoinRightSide, Operator};
+              JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
 use nom_sql::SelectStatement;
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::string::String;
 use std::vec::Vec;
 
 use sql::query_signature::QuerySignature;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct LiteralColumn {
+    pub name: String,
+    pub table: Option<String>,
+    pub value: Literal,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum OutputColumn {
+    Data(Column),
+    Literal(LiteralColumn),
+}
+
+impl Ord for OutputColumn {
+    fn cmp(&self, other: &OutputColumn) -> Ordering {
+        match *self {
+            OutputColumn::Data(Column {
+                ref name,
+                ref table,
+                ..
+            }) |
+            OutputColumn::Literal(LiteralColumn {
+                ref name,
+                ref table,
+                ..
+            }) => {
+                match *other {
+                    OutputColumn::Data(Column {
+                        name: ref other_name,
+                        table: ref other_table,
+                        ..
+                    }) |
+                    OutputColumn::Literal(LiteralColumn {
+                        name: ref other_name,
+                        table: ref other_table,
+                        ..
+                    }) => {
+                        if table.is_some() && other_table.is_some() {
+                            match table.cmp(&other_table) {
+                                Ordering::Equal => name.cmp(&other_name),
+                                x => x,
+                            }
+                        } else {
+                            name.cmp(&other_name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl PartialOrd for OutputColumn {
+    fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
+        match *self {
+            OutputColumn::Data(Column {
+                ref name,
+                ref table,
+                ..
+            }) |
+            OutputColumn::Literal(LiteralColumn {
+                ref name,
+                ref table,
+                ..
+            }) => {
+                match *other {
+                    OutputColumn::Data(Column {
+                        name: ref other_name,
+                        table: ref other_table,
+                        ..
+                    }) |
+                    OutputColumn::Literal(LiteralColumn {
+                        name: ref other_name,
+                        table: ref other_table,
+                        ..
+                    }) => {
+                        if table.is_some() && other_table.is_some() {
+                            match table.cmp(&other_table) {
+                                Ordering::Equal => Some(name.cmp(&other_name)),
+                                x => Some(x),
+                            }
+                        } else if table.is_none() && other_table.is_none() {
+                            Some(name.cmp(&other_name))
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
@@ -26,8 +120,13 @@ pub enum QueryGraphEdge {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraph {
+    /// Relations mentioned in the query.
     pub relations: HashMap<String, QueryGraphNode>,
+    /// Joins and GroupBys in the query.
     pub edges: HashMap<(String, String), QueryGraphEdge>,
+    /// Final set of projected columns in this query; may include literals in addition to the
+    /// columns reflected in individual relations' `QueryGraphNode` structures.
+    pub columns: Vec<OutputColumn>,
 }
 
 impl QueryGraph {
@@ -35,6 +134,7 @@ impl QueryGraph {
         QueryGraph {
             relations: HashMap::new(),
             edges: HashMap::new(),
+            columns: Vec::new(),
         }
     }
 
@@ -69,16 +169,12 @@ impl QueryGraph {
         // Collect attributes from predicates and projected columns
         let mut attrs = HashSet::<&Column>::new();
         let mut attrs_vec = Vec::<&Column>::new();
-        let mut proj_columns = Vec::<&Column>::new();
         for n in self.relations.values() {
             for p in &n.predicates {
                 for c in &p.contained_columns() {
                     attrs_vec.push(c);
                     attrs.insert(c);
                 }
-            }
-            for c in &n.columns {
-                proj_columns.push(c);
             }
         }
         for e in self.edges.values() {
@@ -107,7 +203,9 @@ impl QueryGraph {
             a.hash(&mut hasher);
         }
 
-        // Compute projected columns part of hash
+        let mut proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
+        // Compute projected columns part of hash. We sort here since the order in which columns
+        // appear does not matter for query graph equivalence.
         proj_columns.sort();
         for c in proj_columns {
             c.hash(&mut hasher);
@@ -232,9 +330,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // unreachable because SQL rewrite passes will have expanded these already
                     FieldExpression::All => unreachable!(),
                     FieldExpression::AllInTable(_) => unreachable!(),
-                    // XXX(malte): handle this case! requires either `Column` or
-                    // `QueryGraphNode.columns` to change to be able to represent literals.
-                    FieldExpression::Literal(_) => unimplemented!(),
+                    // No need to do anything for literals here, as they aren't associated with a
+                    // relation (and thus have no QGN)
+                    FieldExpression::Literal(_) => None,
                     FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
@@ -446,8 +544,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         match *field {
             FieldExpression::All |
             FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
-            // No need to do anything for literals here
-            FieldExpression::Literal(_) => (),
+            FieldExpression::Literal(ref l) => {
+                qg.columns.push(OutputColumn::Literal(LiteralColumn {
+                    name: String::from("literal"),
+                    table: None,
+                    value: l.clone(),
+                }));
+            },
             FieldExpression::Col(ref c) => {
                 match c.function {
                     None => (),  // we've already dealt with this column as part of some relation
@@ -462,6 +565,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                         n.columns.push(c.clone());
                     }
                 }
+                qg.columns.push(OutputColumn::Data(c.clone()));
             }
         }
     }

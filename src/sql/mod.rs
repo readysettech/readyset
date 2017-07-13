@@ -579,6 +579,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
+        use sql::query_graph::OutputColumn;
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
@@ -590,7 +591,7 @@ mod tests {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
-            c.hash(&mut hasher);
+            OutputColumn::Data((*c).clone()).hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -690,8 +691,8 @@ mod tests {
         );
         // leaf node
         let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
-        assert_eq!(new_leaf_view.fields(), &["title", "name"]);
-        assert_eq!(new_leaf_view.description(), format!("π[2, 4]"));
+        assert_eq!(new_leaf_view.fields(), &["name", "title"]);
+        assert_eq!(new_leaf_view.description(), format!("π[4, 2]"));
     }
 
     #[test]
@@ -1077,8 +1078,8 @@ mod tests {
                 &Column::from("votes.aid"),
             ],
             &[
-                &Column::from("articles.title"),
                 &Column::from("users.name"),
+                &Column::from("articles.title"),
                 &Column::from("votes.uid"),
             ],
         );
@@ -1086,7 +1087,7 @@ mod tests {
         // views
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
-        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
+        assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
 
     #[test]
@@ -1150,8 +1151,33 @@ mod tests {
         //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
-        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
+        assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
+
+    #[test]
+    fn it_incorporates_literal_projection() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig
+            ).is_ok()
+        );
+
+        let res = inc.add_query("SELECT users.name, 1 FROM users;", None, &mut mig);
+        assert!(res.is_ok());
+
+        // leaf view node
+        let edge = get_node(&inc, &mig, &res.unwrap().name);
+        assert_eq!(edge.fields(), &["name", "literal"]);
+        assert_eq!(edge.description(), format!("π[1, lit: 1]"));
+    }
+
 
     #[test]
     fn it_incorporates_finkelstein1982_naively() {
