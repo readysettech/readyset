@@ -1,6 +1,8 @@
-
-extern crate serde;
 extern crate bincode;
+extern crate bufstream;
+extern crate byteorder;
+extern crate mio;
+extern crate serde;
 
 use std::collections::HashMap;
 use std::hash::Hash;
