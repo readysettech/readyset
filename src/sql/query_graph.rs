@@ -169,7 +169,6 @@ impl QueryGraph {
         // Collect attributes from predicates and projected columns
         let mut attrs = HashSet::<&Column>::new();
         let mut attrs_vec = Vec::<&Column>::new();
-        let mut proj_columns = Vec::<&OutputColumn>::new();
         for n in self.relations.values() {
             for p in &n.predicates {
                 for c in &p.contained_columns() {
@@ -204,7 +203,7 @@ impl QueryGraph {
             a.hash(&mut hasher);
         }
 
-        proj_columns = self.columns.iter().collect();
+        let mut proj_columns: Vec<&OutputColumn> = self.columns.iter().collect();
         // Compute projected columns part of hash. We sort here since the order in which columns
         // appear does not matter for query graph equivalence.
         proj_columns.sort();
