@@ -1,13 +1,19 @@
+#![feature(custom_attribute)]
+
 extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
 extern crate mio;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde;
 
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
+use std::net::SocketAddr;
+use std::ops::{Deref, DerefMut};
 
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
@@ -61,60 +67,70 @@ impl<T> ChannelSender<T> {
     }
 }
 
+mod panic_serialize {
+    use serde::{Serializer, Deserializer};
+    pub fn serialize<S, T>(_t: &T, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        unreachable!()
+    }
+    pub fn deserialize<'de, D, T>(_deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        unreachable!()
+    }
+}
+
+/// A wrapper around TcpSender that appears to be Serializable, but panics if it is ever serialized.
+#[derive(Serialize, Deserialize)]
+pub struct STcpSender<T>(
+    #[serde(with = "panic_serialize")]
+    pub TcpSender<T>
+);
+
+impl<T> Deref for STcpSender<T> {
+    type Target = TcpSender<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T> DerefMut for STcpSender<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub type TraceSender<T> = ChannelSender<T>;
 pub type TransactionReplySender<T> = ChannelSender<T>;
 pub type StreamSender<T> = ChannelSender<T>;
 
-struct ChannelCoordinatorInner<K: Eq + Hash + Clone, P> {
-    txs: HashMap<K, ChannelSender<P>>,
-    input_txs: HashMap<K, ChannelSender<P>>,
-    unbounded_txs: HashMap<K, ChannelSender<P>>,
+struct ChannelCoordinatorInner<K: Eq + Hash + Clone> {
+    addrs: HashMap<K, SocketAddr>,
 }
 
-pub struct ChannelCoordinator<K: Eq + Hash + Clone, P> {
-    inner: Mutex<ChannelCoordinatorInner<K, P>>,
+pub struct ChannelCoordinator<K: Eq + Hash + Clone> {
+    inner: Mutex<ChannelCoordinatorInner<K>>,
 }
 
-impl<K: Eq + Hash + Clone, P> ChannelCoordinator<K, P> {
+impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
     pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(ChannelCoordinatorInner {
-                txs: HashMap::new(),
-                input_txs: HashMap::new(),
-                unbounded_txs: HashMap::new(),
-            }),
-        }
+        Self { inner: Mutex::new(ChannelCoordinatorInner { addrs: HashMap::new() }) }
     }
 
-    pub fn insert_tx(
-        &self,
-        key: K,
-        tx: ChannelSender<P>,
-        input_tx: ChannelSender<P>,
-        unbounded_tx: ChannelSender<P>,
-    ) {
+    pub fn insert_addr(&self, key: K, addr: SocketAddr) {
         let mut inner = self.inner.lock().unwrap();
-        inner.txs.insert(key.clone(), tx);
-        inner.input_txs.insert(key.clone(), input_tx);
-        inner.unbounded_txs.insert(key, unbounded_tx);
+        inner.addrs.insert(key, addr);
     }
 
-    pub fn get_tx(&self, key: &K) -> Option<ChannelSender<P>> {
-        self.inner.lock().unwrap().txs.get(key).cloned()
+    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+        let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
+        addr.and_then(|addr| TcpSender::connect(&addr, Some(16)).ok())
     }
 
-    #[allow(unused)]
-    pub fn get_input_tx(&self, key: &K) -> Option<ChannelSender<P>> {
-        self.inner.lock().unwrap().input_txs.get(key).cloned()
-    }
-
-    pub fn get_unbounded_tx(&self, key: &K) -> Option<ChannelSender<P>> {
-        self.inner.lock().unwrap().unbounded_txs.get(key).cloned()
-    }
-
-    pub fn reset(&self) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.txs.clear();
-        inner.input_txs.clear();
+    pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+        let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
+        addr.and_then(|addr| TcpSender::connect(&addr, None).ok())
     }
 }

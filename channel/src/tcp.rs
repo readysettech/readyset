@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 
 use bincode::{self, Infinite};
 use bufstream::BufStream;
-use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
+use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Serialize, Deserialize};
 
@@ -51,18 +51,24 @@ pub struct TcpSender<T> {
     phantom: PhantomData<T>,
 }
 impl<T: Serialize> TcpSender<T> {
-    pub fn new(stream: std::net::TcpStream, window: Option<u64>) -> Self {
-        Self {
+    pub fn new(mut stream: std::net::TcpStream, window: Option<u64>) -> Result<Self, io::Error> {
+        if let Some(window) = window {
+            assert!(window > 0);
+        }
+
+        stream.write_u64::<NetworkEndian>(window.unwrap_or(0))?;
+
+        Ok(Self {
             stream: BufStream::new(stream),
             window,
             unacked: 0,
             poisoned: false,
             phantom: PhantomData,
-        }
+        })
     }
 
-    pub fn connect(addr: SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
-        Ok(Self::new(std::net::TcpStream::connect(&addr)?, window))
+    pub fn connect(addr: &SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
+        Self::new(std::net::TcpStream::connect(addr)?, window)
     }
 
     /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
@@ -122,25 +128,24 @@ impl<T> TcpReceiver<T>
 where
     for<'de> T: Deserialize<'de>,
 {
-    pub fn new(stream: mio::net::TcpStream, window: Option<u64>) -> Self {
-        if let Some(w) = window {
-            assert!(w > 0);
-        }
+    pub fn new(mut stream: std::net::TcpStream) -> Result<Self, io::Error> {
+        let window = stream.read_u64::<NetworkEndian>()?;
+        let window = if window == 0 { None } else { Some(window) };
 
-        Self {
-            stream,
+        Ok(Self {
+            stream: mio::net::TcpStream::from_stream(stream)?,
             window,
             unacked: 0,
             buffer: vec![0; 1024],
             buffer_size: 0,
             poisoned: false,
             phantom: PhantomData,
-        }
+        })
     }
 
-    pub fn listen(addr: SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
-        let listener = mio::net::TcpListener::bind(&addr)?;
-        Ok(Self::new(listener.accept()?.0, window))
+    pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
+        let listener = std::net::TcpListener::bind(addr)?;
+        Self::new(listener.accept()?.0)
     }
 
     fn send_ack(&mut self) -> Result<(), io::Error> {
@@ -234,10 +239,10 @@ impl<T> Evented for TcpReceiver<T> {
     }
 }
 
-fn connect() -> (std::net::TcpStream, mio::net::TcpStream) {
+fn connect() -> (std::net::TcpStream, std::net::TcpStream) {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(&addr).unwrap();
-    let rx = mio::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
+    let rx = std::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
     let tx = listener.accept().unwrap().0;
 
     (tx, rx)
@@ -248,7 +253,9 @@ where
     for<'de> T: Deserialize<'de>,
 {
     let (tx, rx) = connect();
-    (TcpSender::new(tx, None), TcpReceiver::new(rx, None))
+    let tx = TcpSender::new(tx, None).unwrap();
+    let rx = TcpReceiver::new(rx).unwrap();
+    (tx, rx)
 }
 
 pub fn sync_channel<T: Serialize>(size: u64) -> (TcpSender<T>, TcpReceiver<T>)
@@ -256,34 +263,20 @@ where
     for<'de> T: Deserialize<'de>,
 {
     let (tx, rx) = connect();
-    (
-        TcpSender::new(tx, Some(size)),
-        TcpReceiver::new(rx, Some(size)),
-    )
+    let tx = TcpSender::new(tx, Some(size)).unwrap();
+    let rx = TcpReceiver::new(rx).unwrap();
+    (tx, rx)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::thread;
-    use std::net::SocketAddr;
     use mio::Events;
-    use std::net::TcpListener;
-
-    fn connect() -> (std::net::TcpStream, mio::net::TcpStream) {
-        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
-        let rx = mio::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
-        let tx = listener.accept().unwrap().0;
-
-        (tx, rx)
-    }
 
     #[test]
     fn unbounded() {
-        let (tx, rx) = connect();
-        let mut sender = TcpSender::<u32>::new(tx, None);
-        let mut receiver = TcpReceiver::<u32>::new(rx, None);
+        let (mut sender, mut receiver) = channel::<u32>();
 
         sender.send(12).unwrap();
         assert_eq!(receiver.recv().unwrap(), 12);
@@ -296,9 +289,7 @@ mod tests {
 
     #[test]
     fn bounded() {
-        let (tx, rx) = connect();
-        let mut sender = TcpSender::<u32>::new(tx, Some(2));
-        let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
+        let (mut sender, mut receiver) = sync_channel::<u32>(2);
 
         sender.send(12).unwrap();
         sender.send(65).unwrap();
@@ -311,9 +302,7 @@ mod tests {
 
     #[test]
     fn bounded_multithread() {
-        let (tx, rx) = connect();
-        let mut sender = TcpSender::<u32>::new(tx, Some(2));
-        let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
+        let (mut sender, mut receiver) = sync_channel::<u32>(2);
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -333,9 +322,7 @@ mod tests {
 
     #[test]
     fn poll() {
-        let (tx, rx) = connect();
-        let mut sender = TcpSender::<u32>::new(tx, Some(2));
-        let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
+        let (mut sender, mut receiver) = sync_channel::<u32>(2);
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -362,13 +349,8 @@ mod tests {
 
     #[test]
     fn poll2() {
-        let (tx, rx) = connect();
-        let _sender = TcpSender::<u32>::new(tx, None);
-        let receiver = TcpReceiver::<u32>::new(rx, None);
-
-        let (tx, rx) = connect();
-        let mut sender2 = TcpSender::<u32>::new(tx, None);
-        let mut receiver2 = TcpReceiver::<u32>::new(rx, None);
+        let (mut _sender, receiver) = channel::<u32>();
+        let (mut sender2, mut receiver2) = channel::<u32>();
 
         let t1 = thread::spawn(move || {
             let poll = Poll::new().unwrap();
@@ -391,13 +373,8 @@ mod tests {
 
     #[test]
     fn ping_pong() {
-        let (tx, rx) = connect();
-        let mut sender = TcpSender::<u32>::new(tx, Some(1));
-        let mut receiver = TcpReceiver::<u32>::new(rx, Some(1));
-
-        let (tx, rx) = connect();
-        let mut sender2 = TcpSender::<u32>::new(tx, Some(1));
-        let mut receiver2 = TcpReceiver::<u32>::new(rx, Some(1));
+        let (mut sender, mut receiver) = sync_channel::<u32>(1);
+        let (mut sender2, mut receiver2) = sync_channel::<u32>(1);
 
         let t1 = thread::spawn(move || {
             let poll = Poll::new().unwrap();
