@@ -218,50 +218,6 @@ impl<T> Evented for TcpReceiver<T> {
     }
 }
 
-// #[derive(Default)]
-// pub struct PollGroup {
-//     slots: Vec<PollFd>,
-//     next_index: usize,
-// }
-
-// impl PollGroup {
-//     pub fn new() -> Self {
-//         Self {
-//             slots: Vec::new(),
-//             next_index: 0,
-//         }
-//     }
-
-//     pub fn add<T: AsRawFd>(&mut self, t: &T) -> usize {
-//         self.slots.push(PollFd::new(
-//             t.as_raw_fd(),
-//             poll::POLLIN,
-//             EventFlags::empty(),
-//         ));
-//         self.slots.len() - 1
-//     }
-
-//     pub fn poll(&mut self) -> Result<usize, Error> {
-//         loop {
-//             poll::poll(&mut self.slots[..], -1)?;
-//             for i in 0..self.slots.len() {
-//                 let index = (self.next_index + i) % self.slots.len();
-//                 let revents = self.slots[index].revents().unwrap();
-
-//                 if revents.contains(poll::POLLIN) {
-//                     self.next_index = index + 1;
-//                     return Ok(index);
-//                 }
-
-//                 if revents.contains(poll::POLLNVAL) {
-//                     self.slots[index] =
-//                         PollFd::new(-1, EventFlags::empty(), EventFlags::empty());
-//                 }
-//             }
-//         }
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
