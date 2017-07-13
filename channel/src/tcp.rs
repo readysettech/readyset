@@ -3,6 +3,7 @@ use std;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::mem;
+use std::net::SocketAddr;
 
 use bincode::{self, Infinite};
 use bufstream::BufStream;
@@ -60,7 +61,17 @@ impl<T: Serialize> TcpSender<T> {
         }
     }
 
-    pub fn send(&mut self, t: &T) -> Result<(), Error> {
+    pub fn connect(addr: SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
+        Ok(Self::new(std::net::TcpStream::connect(&addr)?, window))
+    }
+
+    /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
+    /// conform to the same api as mpsc::Sender.
+    pub fn send(&mut self, t: T) -> Result<(), Error> {
+        self.send_ref(&t)
+    }
+
+    pub fn send_ref(&mut self, t: &T) -> Result<(), Error> {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
@@ -125,6 +136,11 @@ where
             poisoned: false,
             phantom: PhantomData,
         }
+    }
+
+    pub fn listen(addr: SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
+        let listener = mio::net::TcpListener::bind(&addr)?;
+        Ok(Self::new(listener.accept()?.0, window))
     }
 
     fn send_ack(&mut self) -> Result<(), io::Error> {
@@ -218,6 +234,34 @@ impl<T> Evented for TcpReceiver<T> {
     }
 }
 
+fn connect() -> (std::net::TcpStream, mio::net::TcpStream) {
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let listener = std::net::TcpListener::bind(&addr).unwrap();
+    let rx = mio::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
+    let tx = listener.accept().unwrap().0;
+
+    (tx, rx)
+}
+
+pub fn channel<T: Serialize>() -> (TcpSender<T>, TcpReceiver<T>)
+where
+    for<'de> T: Deserialize<'de>,
+{
+    let (tx, rx) = connect();
+    (TcpSender::new(tx, None), TcpReceiver::new(rx, None))
+}
+
+pub fn sync_channel<T: Serialize>(size: u64) -> (TcpSender<T>, TcpReceiver<T>)
+where
+    for<'de> T: Deserialize<'de>,
+{
+    let (tx, rx) = connect();
+    (
+        TcpSender::new(tx, Some(size)),
+        TcpReceiver::new(rx, Some(size)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,11 +285,11 @@ mod tests {
         let mut sender = TcpSender::<u32>::new(tx, None);
         let mut receiver = TcpReceiver::<u32>::new(rx, None);
 
-        sender.send(&12).unwrap();
+        sender.send(12).unwrap();
         assert_eq!(receiver.recv().unwrap(), 12);
 
-        sender.send(&65).unwrap();
-        sender.send(&13).unwrap();
+        sender.send(65).unwrap();
+        sender.send(13).unwrap();
         assert_eq!(receiver.recv().unwrap(), 65);
         assert_eq!(receiver.recv().unwrap(), 13);
     }
@@ -256,12 +300,12 @@ mod tests {
         let mut sender = TcpSender::<u32>::new(tx, Some(2));
         let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
 
-        sender.send(&12).unwrap();
-        sender.send(&65).unwrap();
+        sender.send(12).unwrap();
+        sender.send(65).unwrap();
         assert_eq!(receiver.recv().unwrap(), 12);
         assert_eq!(receiver.recv().unwrap(), 65);
 
-        sender.send(&13).unwrap();
+        sender.send(13).unwrap();
         assert_eq!(receiver.recv().unwrap(), 13);
     }
 
@@ -272,9 +316,9 @@ mod tests {
         let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
 
         let t1 = thread::spawn(move || {
-            sender.send(&12).unwrap();
-            sender.send(&65).unwrap();
-            sender.send(&13).unwrap();
+            sender.send(12).unwrap();
+            sender.send(65).unwrap();
+            sender.send(13).unwrap();
         });
 
         let t2 = thread::spawn(move || {
@@ -294,9 +338,9 @@ mod tests {
         let mut receiver = TcpReceiver::<u32>::new(rx, Some(2));
 
         let t1 = thread::spawn(move || {
-            sender.send(&12).unwrap();
-            sender.send(&65).unwrap();
-            sender.send(&13).unwrap();
+            sender.send(12).unwrap();
+            sender.send(65).unwrap();
+            sender.send(13).unwrap();
         });
 
         let t2 = thread::spawn(move || {
@@ -339,7 +383,7 @@ mod tests {
             assert_eq!(receiver2.recv().unwrap(), 13);
         });
 
-        let t2 = thread::spawn(move || { sender2.send(&13).unwrap(); });
+        let t2 = thread::spawn(move || { sender2.send(13).unwrap(); });
 
         t1.join().unwrap();
         t2.join().unwrap();
@@ -365,13 +409,13 @@ mod tests {
             assert_eq!(events.iter().next().unwrap().token(), Token(0));
             assert_eq!(receiver.recv().unwrap(), 15);
 
-            sender2.send(&12).unwrap();
+            sender2.send(12).unwrap();
 
             poll.poll(&mut events, None).unwrap();
             assert_eq!(events.iter().next().unwrap().token(), Token(0));
             assert_eq!(receiver.recv().unwrap(), 54);
 
-            sender2.send(&65).unwrap();
+            sender2.send(65).unwrap();
         });
 
         let t2 = thread::spawn(move || {
@@ -380,13 +424,13 @@ mod tests {
             poll.register(&receiver2, Token(0), Ready::readable(), PollOpt::level())
                 .unwrap();
 
-            sender.send(&15).unwrap();
+            sender.send(15).unwrap();
 
             poll.poll(&mut events, None).unwrap();
             assert_eq!(events.iter().next().unwrap().token(), Token(0));
             assert_eq!(receiver2.recv().unwrap(), 12);
 
-            sender.send(&54).unwrap();
+            sender.send(54).unwrap();
 
             poll.poll(&mut events, None).unwrap();
             assert_eq!(events.iter().next().unwrap().token(), Token(0));

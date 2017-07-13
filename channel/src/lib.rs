@@ -13,7 +13,7 @@ use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub mod tcp;
 
-pub use tcp::{TcpSender, TcpReceiver};
+pub use tcp::{channel, sync_channel, TcpSender, TcpReceiver};
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {
