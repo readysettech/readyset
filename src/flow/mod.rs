@@ -906,9 +906,9 @@ impl<'a> Migration<'a> {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let mut d =
-                domain::DomainHandle::new(domain, mainline.ingredients[nodes[0].0].sharded_by());
-            d.boot(
+            let d = domain::DomainHandle::new(
+                domain,
+                mainline.ingredients[nodes[0].0].sharded_by(),
                 &log,
                 &mut mainline.ingredients,
                 &mainline.readers,

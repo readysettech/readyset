@@ -42,13 +42,11 @@ impl DomainInputHandle {
             let key_col = key[0];
             let shard = {
                 let key = match p.data()[0] {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col],
+                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
                     Record::DeleteRequest(ref k) => &k[0],
                 };
                 if !p.data().iter().all(|r| match *r {
-                    Record::Positive(ref r) |
-                    Record::Negative(ref r) => &r[key_col] == key,
+                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col] == key,
                     Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
                 }) {
                     // batch with different keys to sharded base
@@ -64,50 +62,89 @@ impl DomainInputHandle {
 pub struct DomainHandle {
     idx: domain::Index,
 
-    addrs: Vec<SocketAddr>,
     cr_rxs: Vec<TcpReceiver<ControlReplyPacket>>,
     txs: Vec<TcpSender<Box<Packet>>>,
 
     // used during booting
     threads: Vec<thread::JoinHandle<()>>,
-    boot_args: Vec<mio::net::TcpListener>,
 }
 
 impl DomainHandle {
-    pub fn new(domain: domain::Index, sharded_by: Sharding) -> Self {
-        let mut addrs = Vec::new();
-        let mut boot_args = Vec::new();
-        {
-            let mut add = || {
-                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-                let addr = listener.local_addr().unwrap();
-                addrs.push(addr.clone());
-                boot_args.push(
-                    mio::net::TcpListener::from_listener(listener, &addr).unwrap(),
-                );
+    pub fn new(
+        idx: domain::Index,
+        sharded_by: Sharding,
+        log: &Logger,
+        graph: &mut Graph,
+        readers: &flow::Readers,
+        nodes: Vec<(NodeIndex, bool)>,
+        persistence_params: &persistence::Parameters,
+        checktable: &Arc<Mutex<checktable::CheckTable>>,
+        channel_coordinator: &Arc<ChannelCoordinator>,
+        debug_addr: &Option<SocketAddr>,
+        ts: i64,
+    ) -> Self {
+        // NOTE: warning to future self...
+        // the code currently relies on the fact that the domains that are sharded by the same key
+        // *also* have the same number of shards. if this no longer holds, we actually need to do a
+        // shuffle, otherwise writes will end up on the wrong shard. keep that in mind.
+        let num_shards = match sharded_by {
+            Sharding::None => 1,
+            _ => ::SHARDS,
+        };
+
+        let mut txs = Vec::new();
+        let mut cr_rxs = Vec::new();
+        let mut threads = Vec::new();
+        let mut nodes = Some(Self::build_descriptors(graph, nodes));
+        //let n = self.boot_args.len();
+
+        for i in 0..num_shards {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let listener = mio::net::TcpListener::from_listener(listener, &addr).unwrap();
+
+            channel_coordinator.insert_addr((idx, i), addr.clone());
+
+            let logger = if num_shards == 1 {
+                log.new(o!("domain" => idx.index()))
+            } else {
+                log.new(o!("domain" => format!("{}.{}", idx.index(), i)))
             };
-            add();
-            match sharded_by {
-                Sharding::None => {}
-                _ => {
-                    // NOTE: warning to future self
-                    // the code currently relies on the fact that the domains that are sharded by
-                    // the same key *also* have the same number of shards. if this no longer holds,
-                    // we actually need to do a shuffle, otherwise writes will end up on the wrong
-                    // shard. keep that in mind.
-                    for _ in 1..::SHARDS {
-                        add();
-                    }
-                }
-            }
+            let nodes = if i == num_shards - 1 {
+                nodes.take().unwrap()
+            } else {
+                nodes.clone().unwrap()
+            };
+            let domain = domain::Domain::new(
+                logger,
+                idx,
+                i,
+                num_shards,
+                nodes,
+                readers,
+                persistence_params.clone(),
+                checktable.clone(),
+                channel_coordinator.clone(),
+                ts,
+            );
+
+            let control_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            threads.push(domain.boot(
+                listener,
+                control_listener.local_addr().unwrap(),
+                debug_addr.clone(),
+            ));
+            cr_rxs.push(TcpReceiver::new(
+                mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap(),
+            ));
+            txs.push(channel_coordinator.get_tx(&(idx, i)).unwrap());
         }
+
         DomainHandle {
-            idx: domain,
-            threads: Vec::new(),
-            cr_rxs: Vec::new(),
-            txs: Vec::new(),
-            boot_args,
-            addrs,
+            idx,
+            threads,
+            cr_rxs,
+            txs,
         }
     }
 
@@ -125,7 +162,7 @@ impl DomainHandle {
     }
 
     pub fn shards(&self) -> usize {
-        self.addrs.len()
+        self.txs.len()
     }
 
     fn build_descriptors(graph: &mut Graph, nodes: Vec<(NodeIndex, bool)>) -> DomainNodes {
@@ -137,62 +174,6 @@ impl DomainHandle {
             })
             .map(|nd| (*nd.local_addr(), cell::RefCell::new(nd)))
             .collect()
-    }
-
-    pub fn boot(
-        &mut self,
-        log: &Logger,
-        graph: &mut Graph,
-        readers: &flow::Readers,
-        nodes: Vec<(NodeIndex, bool)>,
-        persistence_params: &persistence::Parameters,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
-        channel_coordinator: &Arc<ChannelCoordinator>,
-        debug_addr: &Option<SocketAddr>,
-        ts: i64,
-    ) {
-        for (i, addr) in self.addrs.iter().enumerate() {
-            channel_coordinator.insert_addr((self.idx, i), addr.clone());
-        }
-
-        let mut nodes = Some(Self::build_descriptors(graph, nodes));
-        let n = self.boot_args.len();
-        for (i, listener) in self.boot_args.drain(..).enumerate() {
-            let logger = if n == 1 {
-                log.new(o!("domain" => self.idx.index()))
-            } else {
-                log.new(o!("domain" => format!("{}.{}", self.idx.index(), i)))
-            };
-            let nodes = if i == n - 1 {
-                nodes.take().unwrap()
-            } else {
-                nodes.clone().unwrap()
-            };
-            let domain = domain::Domain::new(
-                logger,
-                self.idx,
-                i,
-                n,
-                nodes,
-                readers,
-                persistence_params.clone(),
-                checktable.clone(),
-                channel_coordinator.clone(),
-                ts,
-            );
-
-            let control_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            self.threads.push(domain.boot(
-                listener,
-                control_listener.local_addr().unwrap(),
-                debug_addr.clone(),
-            ));
-            self.cr_rxs.push(TcpReceiver::new(
-                mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap(),
-            ));
-            self.txs
-                .push(channel_coordinator.get_tx(&(self.idx, i)).unwrap());
-        }
     }
 
     pub fn wait(&mut self) {
