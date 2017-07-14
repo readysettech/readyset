@@ -443,7 +443,7 @@ impl fmt::Debug for Packet {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ControlReplyPacket {
     Ack,
     StateSize(usize),

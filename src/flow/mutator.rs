@@ -33,28 +33,6 @@ pub struct Mutator {
     pub(crate) expected_columns: usize,
 }
 
-impl Clone for Mutator {
-    fn clone(&self) -> Self {
-        let reply_chan = mpsc::channel();
-        let reply_chan = (
-            TransactionReplySender::from_local(reply_chan.0),
-            reply_chan.1,
-        );
-
-        Self {
-            tx: self.tx.clone(),
-            addr: self.addr.clone(),
-            key: self.key.clone(),
-            key_is_primary: self.key_is_primary.clone(),
-            tx_reply_channel: reply_chan,
-            transactional: self.transactional,
-            dropped: self.dropped.clone(),
-            tracer: None,
-            expected_columns: self.expected_columns,
-        }
-    }
-}
-
 impl Mutator {
     fn inject_dropped_cols(&self, rs: &mut Records) {
         let ndropped = self.dropped.len();

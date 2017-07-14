@@ -313,7 +313,6 @@
 //! propagating the `Update` since there are no descendant views.
 //!
 #![feature(optin_builtin_traits)]
-#![feature(mpsc_select)]
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
@@ -387,6 +386,7 @@ extern crate buf_redux;
 extern crate snowflake;
 extern crate chrono;
 extern crate time;
+extern crate mio;
 
 extern crate channel;
 

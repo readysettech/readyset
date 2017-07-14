@@ -31,7 +31,7 @@ pub use flow::domain::local::LookupResult;
 // channel related types
 use channel;
 use flow::domain;
-pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize), Box<Packet>>;
+pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize)>;
 
 // debug types
 pub use flow::debug::DebugEvent;

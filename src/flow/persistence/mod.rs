@@ -155,6 +155,17 @@ impl GroupCommitQueueSet {
         }
     }
 
+    /// Returns whether the given packet should be persisted.
+    pub fn should_append(&self, p: &Box<Packet>, nodes: &DomainNodes) -> bool {
+        match Self::packet_destination(p) {
+            Some(n) => {
+                let node = &nodes[&n].borrow();
+                node.is_internal() && node.get_base().is_some()
+            }
+            None => false,
+        }
+    }
+
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
     pub fn flush_if_necessary(
         &mut self,

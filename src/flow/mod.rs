@@ -5,11 +5,14 @@ use ops::base::Base;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::time;
 use std::fmt;
 use std::io;
+
+use mio::net::TcpListener;
 
 use slog;
 use petgraph;
@@ -68,7 +71,7 @@ pub struct Blender {
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
-    debug_channel: Option<mpsc::Sender<debug::DebugEvent>>,
+    debug_channel: Option<SocketAddr>,
 
     readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
 
@@ -124,11 +127,12 @@ impl Blender {
 
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
-    pub fn create_debug_channel(&mut self) -> mpsc::Receiver<debug::DebugEvent> {
+    pub fn create_debug_channel(&mut self) -> TcpListener {
         assert!(self.debug_channel.is_none());
-        let (tx, rx) = mpsc::channel();
-        self.debug_channel = Some(tx);
-        rx
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(&addr).unwrap();
+        self.debug_channel = Some(listener.local_addr().unwrap());
+        listener
     }
 
     /// Controls the persistence mode, and parameters related to persistence.
@@ -258,7 +262,7 @@ impl Blender {
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
         let node = &self.ingredients[base];
-        let tx = self.domains[&node.domain()].get_input_handle();
+        let tx = self.domains[&node.domain()].get_input_handle(&self.channel_coordinator);
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 
@@ -981,7 +985,6 @@ impl<'a> Migration<'a> {
 
 impl Drop for Blender {
     fn drop(&mut self) {
-        self.channel_coordinator.reset();
         for (_, mut d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));

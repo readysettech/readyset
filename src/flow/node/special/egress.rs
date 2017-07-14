@@ -1,11 +1,22 @@
 use std::collections::HashMap;
 use flow::prelude::*;
-use channel::ChannelSender;
+use channel::{TcpSender, STcpSender};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Egress {
-    txs: Vec<(NodeIndex, LocalNodeIndex, ChannelSender<Box<Packet>>)>,
+    txs: Vec<(NodeIndex, LocalNodeIndex, STcpSender<Box<Packet>>)>,
     tags: HashMap<Tag, NodeIndex>,
+}
+
+impl Clone for Egress {
+    fn clone(&self) -> Self {
+        assert!(self.txs.is_empty());
+
+        Self {
+            txs: Vec::new(),
+            tags: self.tags.clone(),
+        }
+    }
 }
 
 impl Default for Egress {
@@ -22,9 +33,9 @@ impl Egress {
         &mut self,
         dst_g: NodeIndex,
         dst_l: LocalNodeIndex,
-        tx: ChannelSender<Box<Packet>>,
+        tx: TcpSender<Box<Packet>>,
     ) {
-        self.txs.push((dst_g, dst_l, tx));
+        self.txs.push((dst_g, dst_l, STcpSender(tx)));
     }
 
     pub fn add_tag(&mut self, tag: Tag, dst: NodeIndex) {

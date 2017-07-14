@@ -1,19 +1,21 @@
 use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
-use channel::ChannelSender;
+use channel::{TcpSender, STcpSender};
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
-    txs: Vec<(LocalNodeIndex, ChannelSender<Box<Packet>>)>,
+    txs: Vec<(LocalNodeIndex, STcpSender<Box<Packet>>)>,
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
 
 impl Clone for Sharder {
     fn clone(&self) -> Self {
+        assert!(self.txs.is_empty());
+
         Sharder {
-            txs: self.txs.clone(),
+            txs: Vec::new(),
             sharded: Default::default(),
             shard_by: self.shard_by,
         }
@@ -39,11 +41,11 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ChannelSender<Box<Packet>>>) {
+    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<TcpSender<Box<Packet>>>) {
         assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
-            self.txs.push((dst, tx));
+            self.txs.push((dst, STcpSender(tx)));
         }
     }
 

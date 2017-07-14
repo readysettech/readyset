@@ -1,10 +1,14 @@
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
-use channel::{TraceSender, ChannelSender};
+
+use std::net::SocketAddr;
+use mio::{self, Events, Poll, PollOpt, Ready, Token};
+
+use channel::{TcpSender, TcpReceiver};
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
                     ControlReplyPacket};
@@ -66,7 +70,7 @@ enum DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Vec<usize>),
-    End(Vec<ChannelSender<Box<Packet>>>),
+    End(Vec<TcpSender<Box<Packet>>>),
     Local(Vec<usize>),
 }
 
@@ -118,11 +122,11 @@ pub struct Domain {
     concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
+    addr: Option<SocketAddr>,
     readers: flow::Readers,
     inject: Option<Box<Packet>>,
-    chunked_replay_tx: Option<mpsc::SyncSender<Box<Packet>>>,
-    debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
-    control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
+    debug_tx: Option<TcpSender<debug::DebugEvent>>,
+    control_reply_tx: Option<TcpSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -165,10 +169,10 @@ impl Domain {
             reader_triggered: local::Map::new(),
             replay_paths: HashMap::new(),
 
+            addr: None,
             readers: readers.clone(),
             inject: None,
             debug_tx: None,
-            chunked_replay_tx: None,
             control_reply_tx: None,
             channel_coordinator,
 
@@ -554,7 +558,7 @@ impl Domain {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
                     self.control_reply_tx
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .send(ControlReplyPacket::Ack)
                         .unwrap();
@@ -662,7 +666,7 @@ impl Domain {
                             .expect("told to add base column to non-base node")
                             .add_column(default);
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
@@ -673,7 +677,7 @@ impl Domain {
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
@@ -714,7 +718,7 @@ impl Domain {
                     Packet::StateSizeProbe { node } => {
                         let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::StateSize(size))
                             .unwrap();
@@ -805,7 +809,7 @@ impl Domain {
                     } => {
                         // let coordinator know that we've registered the tagged path
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
@@ -949,7 +953,7 @@ impl Domain {
                         }
 
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
@@ -985,7 +989,7 @@ impl Domain {
                             .collect();
 
                         self.control_reply_tx
-                            .as_ref()
+                            .as_mut()
                             .unwrap()
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
                             .unwrap();
@@ -1283,7 +1287,7 @@ impl Domain {
 
                         let log = self.log.new(o!());
                         let nshards = self.nshards;
-                        let chunked_replay_tx = self.chunked_replay_tx.clone().unwrap();
+                        let domain_addr = *self.addr.as_ref().unwrap();
                         thread::Builder::new()
                             .name(format!(
                                 "replay{}.{}",
@@ -1298,6 +1302,9 @@ impl Domain {
                             ))
                             .spawn(move || {
                                 use itertools::Itertools;
+
+                                let mut chunked_replay_tx = TcpSender::connect(&domain_addr, Some(1))
+                                    .unwrap();
 
                                 let start = time::Instant::now();
                                 debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -1720,7 +1727,7 @@ impl Domain {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
                 self.control_reply_tx
-                    .as_ref()
+                    .as_mut()
                     .unwrap()
                     .send(ControlReplyPacket::Ack)
                     .unwrap();
@@ -1739,11 +1746,14 @@ impl Domain {
 
     pub fn boot(
         mut self,
-        rx: mpsc::Receiver<Box<Packet>>,
-        input_rx: mpsc::Receiver<Box<Packet>>,
-        back_rx: mpsc::Receiver<Box<Packet>>,
-        control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
-        debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
+        listener: mio::net::TcpListener,
+        control_addr: SocketAddr,
+        debug_addr: Option<SocketAddr>,
+        // rx: mpsc::Receiver<Box<Packet>>,
+        // input_rx: mpsc::Receiver<Box<Packet>>,
+        // back_rx: mpsc::Receiver<Box<Packet>>,
+        // control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
+        // debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
     ) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
@@ -1754,30 +1764,9 @@ impl Domain {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
-                let (chunked_replay_tx, chunked_replay_rx) = mpsc::sync_channel(1);
-
-                // construct select so we can receive on all channels at the same time
-                let sel = mpsc::Select::new();
-                let mut rx_handle = sel.handle(&rx);
-                let mut chunked_replay_rx_handle = sel.handle(&chunked_replay_rx);
-                let mut back_rx_handle = sel.handle(&back_rx);
-                let mut input_rx_handle = sel.handle(&input_rx);
-
-                unsafe {
-                    // select is currently not fair, but tries in order
-                    // first try chunked_replay, because it'll make progress on a replay
-                    chunked_replay_rx_handle.add();
-                    // then see if there are outstanding replay requests
-                    back_rx_handle.add();
-                    // then see if there's new data from our ancestors
-                    rx_handle.add();
-                    // and *then* see if there's new base node input
-                    input_rx_handle.add();
-                }
-
-                self.debug_tx = debug_tx;
-                self.chunked_replay_tx = Some(chunked_replay_tx);
-                self.control_reply_tx = Some(control_reply_tx);
+                self.debug_tx = debug_addr.as_ref().map(|addr|TcpSender::connect(addr, None).unwrap());
+                self.control_reply_tx = Some(TcpSender::connect(&control_addr, None).unwrap());
+                self.addr = Some(listener.local_addr().unwrap());
 
                 let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
                     self.index,
@@ -1786,92 +1775,60 @@ impl Domain {
                     self.transaction_state.get_checktable().clone(),
                 );
 
+                let poll = Poll::new().unwrap();
+                let mut events = Events::with_capacity(1);
+                let mut channels: Vec<TcpReceiver<Box<Packet>>> = Vec::new();
+
+                const LISTENER: Token = Token(0);
+                const CHANNEL_OFFSET: usize = 1;
+                poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level())
+                    .unwrap();
+
                 self.total_time.start();
                 self.total_ptime.start();
                 loop {
-                    let mut packet;
-                    let mut from_input = false;
-
-                    // If a flush is needed at some point then spin waiting for packets until
-                    // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
-                    // and wakeups are expensive.
                     let duration_until_flush = group_commit_queues.duration_until_flush();
-                    let spin_duration = duration_until_flush
-                        .unwrap_or(time::Duration::from_millis(1));
-                    let start = time::Instant::now();
-                    loop {
-                        if let Ok(p) = self.inject
-                            .take()
-                            .ok_or(mpsc::TryRecvError::Empty)
-                            .or_else(|_| chunked_replay_rx.try_recv())
-                            .or_else(|_| back_rx.try_recv())
-                            .or_else(|_| rx.try_recv())
-                        {
-                            packet = Some(p);
-                            break;
+                    if poll.poll(&mut events, duration_until_flush).unwrap() == 0 {
+                        if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
+                            self.handle(m)
+                        }
+                        continue;
+                    };
+
+                    for event in events.iter() {
+                        if event.token() == LISTENER {
+                            if let Ok((stream, _addr)) = listener.accept() {
+                                poll.register(
+                                    &stream,
+                                    Token(channels.len() + CHANNEL_OFFSET),
+                                    Ready::readable(),
+                                    PollOpt::level(),
+                                ).unwrap();
+                                channels.push(TcpReceiver::new(stream));
+                            }
+                            continue;
                         }
 
-                        if let Ok(p) = input_rx.try_recv() {
-                            packet = Some(p);
-                            from_input = true;
-                            break;
+                        match channels[event.token().0 - CHANNEL_OFFSET].try_recv() {
+                            Ok(box Packet::Quit) => return,
+                            Ok(packet) => {
+                                // TODO: Initialize tracer here, and when flushing group commit
+                                // queue.
+
+                                if group_commit_queues.should_append(&packet, &self.nodes) {
+                                    debug_assert!(packet.is_regular());
+                                    packet.trace(PacketEvent::ExitInputChannel);
+                                    let merged_packet = group_commit_queues
+                                        .append(packet, &self.nodes);
+                                    if let Some(packet) = merged_packet {
+                                        self.handle(packet);
+                                    }
+                                } else {
+                                    self.handle(packet)
+                                }
+                            }
+                            Err(_) => continue,
                         }
-
-                        if start.elapsed() >= spin_duration {
-                            packet = group_commit_queues.flush_if_necessary(&self.nodes);
-                            break;
-                        }
-                    }
-
-                    // Block until the next packet arrives.
-                    if packet.is_none() {
-                        self.wait_time.start();
-                        let id = sel.wait();
-                        self.wait_time.stop();
-
-                        assert!(self.inject.is_none());
-                        let p = if id == rx_handle.id() {
-                            rx_handle.recv()
-                        } else if id == chunked_replay_rx_handle.id() {
-                            chunked_replay_rx_handle.recv()
-                        } else if id == back_rx_handle.id() {
-                            back_rx_handle.recv()
-                        } else if id == input_rx_handle.id() {
-                            from_input = true;
-                            input_rx_handle.recv()
-                        } else {
-                            unreachable!()
-                        };
-
-                        match p {
-                            Ok(m) => packet = Some(m),
-                            Err(_) => return,
-                        }
-                    }
-
-                    // Initialize tracer if necessary.
-                    if let Some(Some(&mut Some((_, ref mut tx @ None)))) =
-                        packet.as_mut().map(|m| m.tracer())
-                    {
-                        *tx = self.debug_tx
-                            .as_ref()
-                            .map(|tx| TraceSender::from_local(tx.clone()));
-                    }
-
-                    // If we received an input packet, place it into the relevant group commit
-                    // queue, and possibly produce a merged packet.
-                    if from_input {
-                        let m = packet.unwrap();
-                        debug_assert!(m.is_regular());
-                        m.trace(PacketEvent::ExitInputChannel);
-                        packet = group_commit_queues.append(m, &self.nodes);
-                    }
-
-                    // Process the packet.
-                    match packet {
-                        Some(box Packet::Quit) => return,
-                        Some(m) => self.handle(m),
-                        None => {}
                     }
                 }
             })
