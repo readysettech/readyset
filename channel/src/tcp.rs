@@ -1,13 +1,11 @@
-
 use std;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
-use std::mem;
 use std::net::SocketAddr;
 
 use bincode::{self, Infinite};
 use bufstream::BufStream;
-use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Serialize, Deserialize};
 
@@ -44,19 +42,19 @@ macro_rules! poisoning_try {
 
 pub struct TcpSender<T> {
     stream: BufStream<std::net::TcpStream>,
-    window: Option<u64>,
-    unacked: u64,
+    window: Option<u32>,
+    unacked: u32,
     poisoned: bool,
 
     phantom: PhantomData<T>,
 }
 impl<T: Serialize> TcpSender<T> {
-    pub fn new(mut stream: std::net::TcpStream, window: Option<u64>) -> Result<Self, io::Error> {
+    pub fn new(mut stream: std::net::TcpStream, window: Option<u32>) -> Result<Self, io::Error> {
         if let Some(window) = window {
             assert!(window > 0);
         }
 
-        stream.write_u64::<NetworkEndian>(window.unwrap_or(0))?;
+        stream.write_u32::<NetworkEndian>(window.unwrap_or(0))?;
 
         Ok(Self {
             stream: BufStream::new(stream),
@@ -67,7 +65,7 @@ impl<T: Serialize> TcpSender<T> {
         })
     }
 
-    pub fn connect(addr: &SocketAddr, window: Option<u64>) -> Result<Self, io::Error> {
+    pub fn connect(addr: &SocketAddr, window: Option<u32>) -> Result<Self, io::Error> {
         Self::new(std::net::TcpStream::connect(addr)?, window)
     }
 
@@ -82,13 +80,14 @@ impl<T: Serialize> TcpSender<T> {
             return Err(Error::Poisoned);
         }
 
-        if Some(self.unacked) == self.window {
-            let mut buf = [0u8];
-            poisoning_try!(self, self.stream.read_exact(&mut buf));
-            self.unacked = 0;
+        if let Some(window) = self.window {
+            if self.unacked == window {
+                let mut buf = [0u8];
+                poisoning_try!(self, self.stream.read_exact(&mut buf));
+                self.unacked = 0;
+            }
+            self.unacked += 1;
         }
-
-        self.unacked += 1;
 
         let size: u32 = bincode::serialized_size(t) as u32;
         poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
@@ -111,16 +110,46 @@ pub enum RecvError {
     DeserializationError,
 }
 
+#[derive(Default)]
+struct Buffer {
+    data: Vec<u8>,
+    size: usize,
+}
+
+impl Buffer {
+    pub fn fill_from<T: Read>(
+        &mut self,
+        stream: &mut T,
+        target_size: usize,
+    ) -> Result<(), io::Error> {
+        if self.data.len() < target_size {
+            self.data.resize(target_size, 0u8);
+        }
+
+        while self.size < target_size {
+            let n = stream.read(&mut self.data[self.size..target_size])?;
+            if n == 0 {
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            self.size += n;
+        }
+        Ok(())
+    }
+}
+
 pub struct TcpReceiver<T> {
     stream: mio::net::TcpStream,
-    window: Option<u64>,
-    unacked: u64,
+    unacked: u32,
     poisoned: bool,
 
+    // A value of zero for window makes the channel unbounded. None means that the window size is
+    // not yet known.
+    window: Option<u32>,
+    // Holds the bytes of the window size until it is known.
+    window_buf: Buffer,
+
     // Holds data from the stream that is not yet been handled.
-    buffer: Vec<u8>,
-    // Amount of data in `buffer` that is valid.
-    buffer_size: usize,
+    buffer: Buffer,
 
     phantom: PhantomData<T>,
 }
@@ -128,29 +157,34 @@ impl<T> TcpReceiver<T>
 where
     for<'de> T: Deserialize<'de>,
 {
-    pub fn new(mut stream: std::net::TcpStream) -> Result<Self, io::Error> {
-        let window = stream.read_u64::<NetworkEndian>()?;
-        let window = if window == 0 { None } else { Some(window) };
-
-        Ok(Self {
-            stream: mio::net::TcpStream::from_stream(stream)?,
-            window,
+    pub fn new(stream: mio::net::TcpStream) -> Self {
+        Self {
+            stream: stream,
             unacked: 0,
-            buffer: vec![0; 1024],
-            buffer_size: 0,
             poisoned: false,
+            window: None,
+            window_buf: Buffer {
+                data: vec![0u8; 4],
+                size: 0,
+            },
+            buffer: Buffer {
+                data: vec![0u8; 1024],
+                size: 0,
+            },
             phantom: PhantomData,
-        })
+        }
     }
 
     pub fn listen(addr: &SocketAddr) -> Result<Self, io::Error> {
-        let listener = std::net::TcpListener::bind(addr)?;
-        Self::new(listener.accept()?.0)
+        let listener = mio::net::TcpListener::bind(addr)?;
+        Ok(Self::new(listener.accept()?.0))
     }
 
     fn send_ack(&mut self) -> Result<(), io::Error> {
-        self.stream.write_all(&[0u8])?;
-        self.unacked = 0;
+        if self.unacked + 1 == *self.window.as_ref().unwrap() {
+            self.stream.write_all(&[0u8])?;
+            self.unacked = 0;
+        }
         Ok(())
     }
 
@@ -159,44 +193,41 @@ where
             return Err(TryRecvError::Disconnected);
         }
 
-        if Some(self.unacked + 1) == self.window {
-            if self.send_ack().is_err() {
-                return Err(TryRecvError::Empty);
-            }
+        if self.window.is_none() {
+            self.window_buf
+                .fill_from(&mut self.stream, 4)
+                .map_err(|_| TryRecvError::Empty)?;
+            self.window = Some(NetworkEndian::read_u32(&self.window_buf.data[0..4]));
         }
 
-        while self.buffer_size < mem::size_of::<u32>() {
-            match self.stream
-                .read(&mut self.buffer[self.buffer_size..mem::size_of::<u32>()]) {
-                Ok(n) => {
-                    self.buffer_size += n;
-                }
-                Err(_) => return Err(TryRecvError::Empty),
-            }
+        if self.send_ack().is_err() {
+            return Err(TryRecvError::Empty);
         }
 
-        let message_size: u32 = NetworkEndian::read_u32(&self.buffer[0..mem::size_of::<u32>()]);
-        let target_buffer_size = message_size as usize + mem::size_of::<u32>();
-        if self.buffer.len() < target_buffer_size {
-            self.buffer.resize(target_buffer_size, 0u8);
+        // Read header (which is just a u32 containing the message size).
+        self.buffer
+            .fill_from(&mut self.stream, 4)
+            .map_err(|_| TryRecvError::Empty)?;
+
+        // Read body
+        let message_size: u32 = NetworkEndian::read_u32(&self.buffer.data[0..4]);
+        let target_buffer_size = message_size as usize + 4;
+        self.buffer
+            .fill_from(&mut self.stream, target_buffer_size)
+            .map_err(|_| TryRecvError::Empty)?;
+
+        self.unacked = self.unacked.saturating_add(1);
+        if self.send_ack().is_err() {
+            return Err(TryRecvError::Empty);
         }
 
-        while self.buffer_size < target_buffer_size {
-            match self.stream
-                .read(&mut self.buffer[self.buffer_size..target_buffer_size]) {
-                Ok(n) => self.buffer_size += n,
-                Err(_) => return Err(TryRecvError::Empty),
-            }
-        }
-
-        self.unacked += 1;
-        match bincode::deserialize(&self.buffer[mem::size_of::<u32>()..target_buffer_size]) {
+        match bincode::deserialize(&self.buffer.data[4..target_buffer_size]) {
             Err(_) => {
                 self.poisoned = true;
                 Err(TryRecvError::DeserializationError)
             }
             Ok(t) => {
-                self.buffer_size = 0;
+                self.buffer.size = 0;
                 Ok(t)
             }
         }
@@ -239,10 +270,10 @@ impl<T> Evented for TcpReceiver<T> {
     }
 }
 
-fn connect() -> (std::net::TcpStream, std::net::TcpStream) {
+fn connect() -> (std::net::TcpStream, mio::net::TcpStream) {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = std::net::TcpListener::bind(&addr).unwrap();
-    let rx = std::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
+    let rx = mio::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
     let tx = listener.accept().unwrap().0;
 
     (tx, rx)
@@ -254,17 +285,17 @@ where
 {
     let (tx, rx) = connect();
     let tx = TcpSender::new(tx, None).unwrap();
-    let rx = TcpReceiver::new(rx).unwrap();
+    let rx = TcpReceiver::new(rx);
     (tx, rx)
 }
 
-pub fn sync_channel<T: Serialize>(size: u64) -> (TcpSender<T>, TcpReceiver<T>)
+pub fn sync_channel<T: Serialize>(size: u32) -> (TcpSender<T>, TcpReceiver<T>)
 where
     for<'de> T: Deserialize<'de>,
 {
     let (tx, rx) = connect();
     let tx = TcpSender::new(tx, Some(size)).unwrap();
-    let rx = TcpReceiver::new(rx).unwrap();
+    let rx = TcpReceiver::new(rx);
     (tx, rx)
 }
 
@@ -342,30 +373,6 @@ mod tests {
             assert_eq!(receiver.recv().unwrap(), 65);
             assert_eq!(receiver.recv().unwrap(), 13);
         });
-
-        t1.join().unwrap();
-        t2.join().unwrap();
-    }
-
-    #[test]
-    fn poll2() {
-        let (mut _sender, receiver) = channel::<u32>();
-        let (mut sender2, mut receiver2) = channel::<u32>();
-
-        let t1 = thread::spawn(move || {
-            let poll = Poll::new().unwrap();
-            let mut events = Events::with_capacity(128);
-            poll.register(&receiver, Token(0), Ready::readable(), PollOpt::level())
-                .unwrap();
-            poll.register(&receiver2, Token(1), Ready::readable(), PollOpt::level())
-                .unwrap();
-
-            poll.poll(&mut events, None).unwrap();
-            assert_eq!(events.iter().next().unwrap().token(), Token(1));
-            assert_eq!(receiver2.recv().unwrap(), 13);
-        });
-
-        let t2 = thread::spawn(move || { sender2.send(13).unwrap(); });
 
         t1.join().unwrap();
         t2.join().unwrap();

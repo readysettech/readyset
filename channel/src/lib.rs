@@ -124,13 +124,20 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         inner.addrs.insert(key, addr);
     }
 
-    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+    fn get_sized_tx<T: Serialize>(&self, key: &K, size: Option<u32>) -> Option<TcpSender<T>> {
         let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
-        addr.and_then(|addr| TcpSender::connect(&addr, Some(16)).ok())
+        addr.and_then(|addr| TcpSender::connect(&addr, size).ok())
+    }
+
+    pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+        self.get_sized_tx(key, None)
+    }
+
+    pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
+        self.get_sized_tx(key, None)
     }
 
     pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
-        let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
-        addr.and_then(|addr| TcpSender::connect(&addr, None).ok())
+        self.get_sized_tx(key, None)
     }
 }
