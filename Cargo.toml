@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["channel"]
+members = ["channel", "daemon"]
 
 [features]
 web = ["rustful"]
