@@ -1,12 +1,17 @@
+extern crate bincode;
 extern crate channel;
 #[macro_use]
 extern crate clap;
 extern crate hostname;
 #[macro_use]
+extern crate serde_derive;
+extern crate serde;
+#[macro_use]
 extern crate slog;
 extern crate slog_term;
 
 mod controller;
+mod protocol;
 mod worker;
 
 struct Config {
@@ -79,11 +84,11 @@ fn main() {
 
     match config.controller {
         None => {
-            let controller = controller::Controller::new(config.port, log);
+            let mut controller = controller::Controller::new(config.port, log);
             controller.listen()
         }
         Some(c) => {
-            let worker = worker::Worker::new(&c, log);
+            let mut worker = worker::Worker::new(&c, log);
             worker.connect()
         }
     }
