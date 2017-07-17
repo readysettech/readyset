@@ -88,7 +88,10 @@ pub fn parse_config(
         .collect::<HashMap<_, _>>();
 
     // Taster config version
-    let version = value["version"].as_integer();
+    let version = match value.get("version") {
+        None => None,
+        Some(v) => Some(v.as_integer().unwrap()),
+    };
 
     // Benchmark definitions
     let benchmarks = value
