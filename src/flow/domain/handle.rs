@@ -1,4 +1,5 @@
 use channel::{tcp, TcpSender, TcpReceiver};
+use channel::tcp::TryRecvError;
 
 use flow;
 use flow::checktable;
@@ -15,14 +16,14 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use mio;
+use mio::{self, Events, Poll, PollOpt, Ready, Token};
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 
 #[derive(Debug)]
 pub enum WaitError {
     WrongReply(ControlReplyPacket),
-    RecvError(tcp::RecvError),
+    TryRecvError(TryRecvError),
 }
 
 pub struct DomainInputHandle(Vec<TcpSender<Box<Packet>>>);
@@ -62,6 +63,8 @@ impl DomainInputHandle {
 pub struct DomainHandle {
     idx: domain::Index,
 
+    poll: Poll,
+    events: Events,
     cr_rxs: Vec<TcpReceiver<ControlReplyPacket>>,
     txs: Vec<TcpSender<Box<Packet>>>,
 
@@ -97,6 +100,9 @@ impl DomainHandle {
         let mut threads = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
         //let n = self.boot_args.len();
+
+        let poll = Poll::new().unwrap();
+        let events = Events::with_capacity(1);
 
         for i in 0..num_shards {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -134,9 +140,14 @@ impl DomainHandle {
                 control_listener.local_addr().unwrap(),
                 debug_addr.clone(),
             ));
-            cr_rxs.push(TcpReceiver::new(
-                mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap(),
-            ));
+
+            let stream =
+                mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
+            let cr_rx = TcpReceiver::new(stream);
+            poll.register(&cr_rx, Token(i), Ready::readable(), PollOpt::level())
+                .unwrap();
+
+            cr_rxs.push(cr_rx);
             txs.push(channel_coordinator.get_tx(&(idx, i)).unwrap());
         }
 
@@ -145,6 +156,8 @@ impl DomainHandle {
             threads,
             cr_rxs,
             txs,
+            poll,
+            events,
         }
     }
 
@@ -193,12 +206,22 @@ impl DomainHandle {
         self.txs[i].send(p)
     }
 
+    fn wait_for_next_reply(&mut self) -> Result<ControlReplyPacket, TryRecvError> {
+        loop {
+            assert_eq!(self.poll.poll(&mut self.events, None).unwrap(), 1);
+            match self.cr_rxs[self.events.get(0).unwrap().token().0].try_recv() {
+                Err(TryRecvError::Empty) => continue,
+                reply => return reply,
+            }
+        }
+    }
+
     pub fn wait_for_ack(&mut self) -> Result<(), WaitError> {
-        for rx in self.cr_rxs.iter_mut() {
-            match rx.recv() {
+        for _ in 0..self.cr_rxs.len() {
+            match self.wait_for_next_reply() {
                 Ok(ControlReplyPacket::Ack) => {}
                 Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+                Err(e) => return Err(WaitError::TryRecvError(e)),
             }
         }
         Ok(())
@@ -206,11 +229,11 @@ impl DomainHandle {
 
     pub fn wait_for_state_size(&mut self) -> Result<usize, WaitError> {
         let mut size = 0;
-        for rx in self.cr_rxs.iter_mut() {
-            match rx.recv() {
+        for _ in 0..self.cr_rxs.len() {
+            match self.wait_for_next_reply() {
                 Ok(ControlReplyPacket::StateSize(s)) => size += s,
                 Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+                Err(e) => return Err(WaitError::TryRecvError(e)),
             }
         }
         Ok(size)
@@ -220,11 +243,11 @@ impl DomainHandle {
         &mut self,
     ) -> Result<Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)>, WaitError> {
         let mut stats = Vec::with_capacity(self.cr_rxs.len());
-        for rx in self.cr_rxs.iter_mut() {
-            match rx.recv() {
+        for _ in 0..self.cr_rxs.len() {
+            match self.wait_for_next_reply() {
                 Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d, s)),
                 Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::RecvError(e)),
+                Err(e) => return Err(WaitError::TryRecvError(e)),
             }
         }
         Ok(stats)
