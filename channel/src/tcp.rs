@@ -218,6 +218,7 @@ where
 
         self.unacked = self.unacked.saturating_add(1);
         if self.send_ack().is_err() {
+            self.unacked = self.unacked.saturating_sub(1);
             return Err(TryRecvError::Empty);
         }
 
