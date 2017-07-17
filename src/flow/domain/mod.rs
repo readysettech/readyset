@@ -1787,6 +1787,11 @@ impl Domain {
                 self.total_time.start();
                 self.total_ptime.start();
                 loop {
+                    if let Some(packet) = self.inject.take() {
+                        self.handle(packet);
+                        continue;
+                    }
+
                     let duration_until_flush = group_commit_queues.duration_until_flush();
                     if poll.poll(&mut events, duration_until_flush).unwrap() == 0 {
                         if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
