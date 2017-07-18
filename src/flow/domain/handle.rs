@@ -208,7 +208,13 @@ impl DomainHandle {
 
     fn wait_for_next_reply(&mut self) -> Result<ControlReplyPacket, TryRecvError> {
         loop {
-            assert_eq!(self.poll.poll(&mut self.events, None).unwrap(), 1);
+            // TODO: handle broken connections here.
+            let n = self.poll.poll(&mut self.events, None).unwrap_or(0);
+            if n == 0 {
+                continue;
+            }
+
+            assert_eq!(n, 1);
             match self.cr_rxs[self.events.get(0).unwrap().token().0].try_recv() {
                 Err(TryRecvError::Empty) => continue,
                 reply => return reply,
