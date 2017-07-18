@@ -129,7 +129,7 @@ impl Buffer {
         while self.size < target_size {
             let n = stream.read(&mut self.data[self.size..target_size])?;
             if n == 0 {
-                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
             }
             self.size += n;
         }
@@ -194,9 +194,16 @@ where
         }
 
         if self.window.is_none() {
-            self.window_buf
-                .fill_from(&mut self.stream, 4)
-                .map_err(|_| TryRecvError::Empty)?;
+            match self.window_buf.fill_from(&mut self.stream, 4) {
+                Ok(()) => {},
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    return Err(TryRecvError::Empty)
+                }
+                _ => {
+                    self.poisoned = true;
+                    return Err(TryRecvError::Disconnected);
+                }
+            }
             self.window = Some(NetworkEndian::read_u32(&self.window_buf.data[0..4]));
         }
 
@@ -205,16 +212,27 @@ where
         }
 
         // Read header (which is just a u32 containing the message size).
-        self.buffer
-            .fill_from(&mut self.stream, 4)
-            .map_err(|_| TryRecvError::Empty)?;
+        match self.buffer.fill_from(&mut self.stream, 4) {
+            Ok(()) => {},
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
+            _ => {
+                self.poisoned = true;
+                return Err(TryRecvError::Disconnected);
+            }
+        }
+
 
         // Read body
         let message_size: u32 = NetworkEndian::read_u32(&self.buffer.data[0..4]);
         let target_buffer_size = message_size as usize + 4;
-        self.buffer
-            .fill_from(&mut self.stream, target_buffer_size)
-            .map_err(|_| TryRecvError::Empty)?;
+        match self.buffer.fill_from(&mut self.stream, target_buffer_size) {
+            Ok(()) => {},
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
+            _ => {
+                self.poisoned = true;
+                return Err(TryRecvError::Disconnected);
+            }
+        }
 
         self.unacked = self.unacked.saturating_add(1);
         if self.send_ack().is_err() {

@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use mio::{self, Events, Poll, PollOpt, Ready, Token};
 
 use channel::{TcpSender, TcpReceiver};
+use channel::tcp::TryRecvError;
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
                     ControlReplyPacket};
@@ -1777,7 +1778,7 @@ impl Domain {
 
                 let poll = Poll::new().unwrap();
                 let mut events = Events::with_capacity(1);
-                let mut channels: Vec<TcpReceiver<Box<Packet>>> = Vec::new();
+                let mut channels: Vec<Option<TcpReceiver<Box<Packet>>>> = Vec::new();
 
                 const LISTENER: Token = Token(0);
                 const CHANNEL_OFFSET: usize = 1;
@@ -1793,7 +1794,7 @@ impl Domain {
                     }
 
                     let duration_until_flush = group_commit_queues.duration_until_flush();
-                    if poll.poll(&mut events, duration_until_flush).unwrap() == 0 {
+                    if poll.poll(&mut events, duration_until_flush).unwrap_or(0) == 0 {
                         if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
                             self.handle(m)
                         }
@@ -1809,12 +1810,16 @@ impl Domain {
                                     Ready::readable(),
                                     PollOpt::level(),
                                 ).unwrap();
-                                channels.push(TcpReceiver::new(stream));
+                                channels.push(Some(TcpReceiver::new(stream)));
                             }
                             continue;
                         }
 
-                        match channels[event.token().0 - CHANNEL_OFFSET].try_recv() {
+                        let recv = channels[event.token().0 - CHANNEL_OFFSET]
+                            .as_mut()
+                            .unwrap()
+                            .try_recv();
+                        match recv {
                             Ok(box Packet::Quit) => return,
                             Ok(packet) => {
                                 // TODO: Initialize tracer here, and when flushing group commit
@@ -1832,7 +1837,12 @@ impl Domain {
                                     self.handle(packet)
                                 }
                             }
-                            Err(_) => continue,
+                            Err(TryRecvError::Disconnected) => {
+                                let channel = channels[event.token().0 - CHANNEL_OFFSET].take();
+                                let _ = poll.deregister(&channel.unwrap());
+                            }
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::DeserializationError) => unreachable!(),
                         }
                     }
                 }
