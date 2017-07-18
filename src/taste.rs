@@ -51,6 +51,30 @@ fn run_benchmark(workdir: &str, cfg: &Config, bench: &Benchmark) -> Output {
         .expect(&format!("Failed to execute benchmark '{}'!", bench.name))
 }
 
+fn write_output(output: &Output, commit_id: git2::Oid, name: &str) {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut stdout_file = File::create(&format!("{}-{}-stdout.log", commit_id, name))
+        .expect(&format!(
+            "Failed to create stdout log file for '{}' at commit '{}'.",
+            name,
+            commit_id
+        ));
+    stdout_file
+        .write_all(output.stdout.as_slice())
+        .expect("Failed to write output to stdout log file!");
+    let mut stderr_file = File::create(&format!("{}-{}-stderr.log", commit_id, name))
+        .expect(&format!(
+            "Failed to create stderr log file for '{}' at commit '{}'.",
+            name,
+            commit_id
+        ));
+    stderr_file
+        .write_all(output.stderr.as_slice())
+        .expect("Failed to write output to stderr log file!");
+}
+
 fn benchmark(
     workdir: &str,
     cfg: &Config,
@@ -58,31 +82,10 @@ fn benchmark(
     commit_id: git2::Oid,
     previous_result: Option<&HashMap<String, BenchmarkResult<f64>>>,
 ) -> (ExitStatus, HashMap<String, BenchmarkResult<f64>>) {
-    use std::fs::File;
-    use std::io::Write;
 
     // Run the benchmark and collect its output
     let output = run_benchmark(workdir, cfg, bench);
-
-    // Write the output to a log file
-    let mut stdout_file = File::create(&format!("{}-{}-stdout.log", commit_id, bench.name))
-        .expect(&format!(
-            "Failed to create stdout log file for benchmark '{}' at commit '{}'.",
-            bench.name,
-            commit_id
-        ));
-    stdout_file
-        .write_all(output.stdout.as_slice())
-        .expect("Failed to write benchmark output to stdout log file!");
-    let mut stderr_file = File::create(&format!("{}-{}-stderr.log", commit_id, bench.name))
-        .expect(&format!(
-            "Failed to create stderr log file for benchmark '{}' at commit '{}'.",
-            bench.name,
-            commit_id
-        ));
-    stderr_file
-        .write_all(output.stderr.as_slice())
-        .expect("Failed to write benchmark output to stderr log file!");
+    write_output(&output, commit_id, &bench.name);
 
     let lines = str::from_utf8(output.stdout.as_slice())
         .unwrap()
@@ -159,13 +162,13 @@ fn benchmark(
     (output.status, res)
 }
 
-fn build(workdir: &str) -> ExitStatus {
+fn build(workdir: &str) -> Output {
     Command::new("cargo")
         .current_dir(workdir)
         .arg("build")
         .arg("--release")
         .env("RUST_BACKTRACE", "1")
-        .status()
+        .output()
         .expect("Failed to execute 'cargo build'!")
 }
 
@@ -190,8 +193,11 @@ pub fn taste_commit(
         }
     };
 
-    let build_success = update(&ws.path).success() && build(&ws.path).success();
-    let test_success = test(&ws.path).success();
+    let build_output = build(&ws.path);
+    write_output(&build_output, commit.id, "build");
+    let build_success = update(&ws.path).success() && build_output.status.success();
+    let test_output = test(&ws.path);
+    write_output(&test_output, commit.id, "test");
 
     let cfg = match parse_config(
         Path::new(&format!("{}/taster.toml", ws.path)),
@@ -212,7 +218,7 @@ pub fn taste_commit(
                             branch: branch,
                             commit: commit.clone(),
                             build: build_success,
-                            test: test_success,
+                            test: test_output.status.success(),
                             bench: false,
                             results: None,
                         },
@@ -229,7 +235,7 @@ pub fn taste_commit(
                             branch: branch,
                             commit: commit.clone(),
                             build: build_success,
-                            test: test_success,
+                            test: test_output.status.success(),
                             bench: false,
                             results: None,
                         },
@@ -269,20 +275,20 @@ pub fn taste_commit(
             branch: branch,
             commit: commit.clone(),
             build: build_success,
-            test: test_success,
+            test: test_output.status.success(),
             bench: bench_success,
             results: Some(bench_results),
         },
     ))
 }
 
-fn test(workdir: &str) -> ExitStatus {
+fn test(workdir: &str) -> Output {
     Command::new("cargo")
         .current_dir(workdir)
         .arg("test")
         .env("RUST_BACKTRACE", "1")
         .env("RUST_TEST_THREADS", "1")
-        .status()
+        .output()
         .expect("Failed to execute 'cargo test'!")
 }
 
