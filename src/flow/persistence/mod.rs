@@ -10,11 +10,15 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 
 use flow::debug::DebugEventType;
 use flow::domain;
 use flow::prelude::*;
 use checktable;
+
+use channel::TcpSender;
 
 /// Indicates to what degree updates should be persisted.
 #[derive(Clone)]
@@ -86,6 +90,8 @@ pub struct GroupCommitQueueSet {
     /// allocation on the critical path.
     commit_decisions: Vec<bool>,
 
+    transaction_reply_txs: HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
+
     domain_index: domain::Index,
     domain_shard: usize,
     timeout: time::Duration,
@@ -116,6 +122,7 @@ impl GroupCommitQueueSet {
             timeout: params.flush_timeout,
             capacity: params.queue_capacity,
             durability_mode: params.mode.clone(),
+            transaction_reply_txs: HashMap::new(),
             checktable,
         }
     }
@@ -149,8 +156,9 @@ impl GroupCommitQueueSet {
     /// directed to otherwise.
     fn packet_destination(p: &Box<Packet>) -> Option<LocalNodeIndex> {
         match **p {
-            Packet::Message { ref link, .. } |
-            Packet::Transaction { ref link, .. } => Some(link.dst),
+            Packet::Message { ref link, .. } | Packet::Transaction { ref link, .. } => Some(
+                link.dst,
+            ),
             _ => None,
         }
     }
@@ -167,10 +175,7 @@ impl GroupCommitQueueSet {
     }
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
-    pub fn flush_if_necessary(
-        &mut self,
-        nodes: &DomainNodes,
-    ) -> Option<Box<Packet>> {
+    pub fn flush_if_necessary(&mut self, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.timeout {
@@ -189,8 +194,7 @@ impl GroupCommitQueueSet {
         nodes: &DomainNodes,
     ) -> Option<Box<Packet>> {
         match self.durability_mode {
-            DurabilityMode::DeleteOnExit |
-            DurabilityMode::Permanent => {
+            DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
                     let file = self.create_file(node);
                     self.files.insert(node.clone(), file);
@@ -221,16 +225,13 @@ impl GroupCommitQueueSet {
             &mut self.commit_decisions,
             nodes,
             &self.checktable,
+            &mut self.transaction_reply_txs,
         )
     }
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append<'a>(
-        &mut self,
-        p: Box<Packet>,
-        nodes: &DomainNodes,
-    ) -> Option<Box<Packet>> {
+    pub fn append<'a>(&mut self, p: Box<Packet>, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
@@ -267,8 +268,9 @@ impl GroupCommitQueueSet {
     {
         let mut packets = packets.peekable();
         let merged_link = match **packets.peek().as_mut().unwrap() {
-            box Packet::Message { ref link, .. } |
-            box Packet::Transaction { ref link, .. } => link.clone(),
+            box Packet::Message { ref link, .. } | box Packet::Transaction { ref link, .. } => {
+                link.clone()
+            }
             _ => unreachable!(),
         };
         let mut merged_tracer: Tracer = None;
@@ -338,7 +340,17 @@ impl GroupCommitQueueSet {
         commit_decisions: &mut Vec<bool>,
         nodes: &DomainNodes,
         checktable: &Arc<Mutex<checktable::CheckTable>>,
+        transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
+
+        let mut send_reply = |addr: SocketAddr, reply| {
+            transaction_reply_txs
+                .entry(addr.clone())
+                .or_insert_with(|| TcpSender::connect(&addr, None).unwrap())
+                .send(reply)
+                .unwrap()
+        };
+
         let base = if let box Packet::Transaction { ref link, .. } = packets[0] {
             nodes[&link.dst].borrow().global_addr()
         } else {
@@ -351,10 +363,11 @@ impl GroupCommitQueueSet {
                 checktable::TransactionResult::Aborted => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                            state: TransactionState::Pending(_, ref mut sender), ..
+                            state: TransactionState::Pending(_, ref mut addr),
+                            ..
                         },) = (packet,)
                         {
-                            sender.send(Err(())).unwrap();
+                            send_reply(addr.clone(), Err(()));
                         } else {
                             unreachable!();
                         }
@@ -370,13 +383,14 @@ impl GroupCommitQueueSet {
             .zip(commit_decisions.iter())
             .map(|(mut packet, committed)| {
                 if let box Packet::Transaction {
-                    state: TransactionState::Pending(_, ref mut sender), ..
+                    state: TransactionState::Pending(_, ref mut addr),
+                    ..
                 } = packet
                 {
                     if *committed {
-                        sender.send(Ok(ts)).unwrap();
+                        send_reply(addr.clone(), Ok(ts));
                     } else {
-                        sender.send(Err(())).unwrap();
+                        send_reply(addr.clone(), Err(()));
                     }
                 }
                 (packet, committed)
@@ -396,6 +410,7 @@ impl GroupCommitQueueSet {
         commit_decisions: &mut Vec<bool>,
         nodes: &DomainNodes,
         checktable: &Arc<Mutex<checktable::CheckTable>>,
+        transaction_reply_txs: &mut HashMap<SocketAddr, TcpSender<Result<i64, ()>>>,
     ) -> Option<Box<Packet>> {
         if packets.is_empty() {
             return None;
@@ -404,7 +419,13 @@ impl GroupCommitQueueSet {
         match packets[0] {
             box Packet::Message { .. } => Self::merge_committed_packets(packets.drain(..), None),
             box Packet::Transaction { .. } => {
-                Self::merge_transactional_packets(packets, commit_decisions, nodes, checktable)
+                Self::merge_transactional_packets(
+                    packets,
+                    commit_decisions,
+                    nodes,
+                    checktable,
+                    transaction_reply_txs,
+                )
             }
             _ => unreachable!(),
         }

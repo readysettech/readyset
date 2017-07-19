@@ -11,6 +11,7 @@ use flow::prelude::*;
 use std::fmt;
 use std::collections::HashMap;
 use std::time;
+use std::net::SocketAddr;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -68,7 +69,7 @@ pub enum ReplayPieceContext {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TransactionState {
     Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
-    Pending(checktable::Token, channel::TransactionReplySender<Result<i64, ()>>),
+    Pending(checktable::Token, SocketAddr),
     WillCommit,
 }
 

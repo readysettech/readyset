@@ -1,5 +1,7 @@
 use tcp::*;
 
+use std;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use mio::{Poll, Token, Events, Ready, PollOpt};
@@ -34,6 +36,12 @@ where
     T: Serialize,
     for<'de> T: Deserialize<'de>,
 {
+    pub fn new() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        Self::from_listener(TcpListener::from_listener(listener, &addr).unwrap())
+    }
+
     pub fn from_listener(listener: TcpListener) -> Self {
         let poll = Poll::new().unwrap();
         poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level())
@@ -60,6 +68,10 @@ where
             listener: None,
             channels: receivers.into_iter().map(|r| Some(r)).collect(),
         }
+    }
+
+    pub fn get_listener_addr(&self) -> Option<SocketAddr> {
+        self.listener.as_ref().and_then(|l| l.local_addr().ok())
     }
 
     /// Execute steps of the polling loop until process_event() returns `StopPolling`.

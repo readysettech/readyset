@@ -138,7 +138,7 @@ impl Buffer {
 }
 
 pub struct TcpReceiver<T> {
-    stream: mio::net::TcpStream,
+    pub(crate) stream: mio::net::TcpStream,
     unacked: u32,
     poisoned: bool,
 

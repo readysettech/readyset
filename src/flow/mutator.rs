@@ -1,12 +1,8 @@
 use flow;
 use flow::prelude::*;
 use checktable;
-use channel::TransactionReplySender;
 
 use vec_map::VecMap;
-
-use std::sync::mpsc;
-use std::thread;
 
 /// Indicates why a Mutator operation failed.
 #[derive(Serialize, Deserialize, Debug)]
@@ -19,14 +15,10 @@ pub enum MutatorError {
 
 /// A `Mutator` is used to perform reads and writes to base nodes.
 pub struct Mutator {
-    pub(crate) tx: flow::domain::DomainInputHandle,
+    pub(crate) domain_input_handle: flow::domain::DomainInputHandle,
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
-    pub(crate) tx_reply_channel: (
-        TransactionReplySender<Result<i64, ()>>,
-        mpsc::Receiver<Result<i64, ()>>,
-    ),
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
     pub(crate) tracer: Tracer,
@@ -44,8 +36,7 @@ impl Mutator {
 
                 // get a handle to the underlying data vector
                 let r = match *r {
-                    Record::Positive(ref mut r) |
-                    Record::Negative(ref mut r) => r,
+                    Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
                     _ => continue,
                 };
 
@@ -123,28 +114,25 @@ impl Mutator {
             }
         };
 
-        self.tx.base_send(m, &self.key[..]).unwrap();
+        self.domain_input_handle
+            .base_send(m, &self.key[..])
+            .unwrap();
     }
 
     fn tx_send(&mut self, mut rs: Records, t: checktable::Token) -> Result<i64, ()> {
         assert!(self.transactional);
 
         self.inject_dropped_cols(&mut rs);
-        let send = self.tx_reply_channel.0.clone();
         let m = box Packet::Transaction {
             link: Link::new(self.addr, self.addr),
             data: rs,
-            state: TransactionState::Pending(t, send),
+            state: TransactionState::Pending(t, self.domain_input_handle.tx_reply_addr()),
             tracer: self.tracer.clone(),
         };
-        self.tx.base_send(m, &self.key[..]).unwrap();
-        loop {
-            match self.tx_reply_channel.1.try_recv() {
-                Ok(r) => return r,
-                Err(mpsc::TryRecvError::Empty) => thread::yield_now(),
-                Err(mpsc::TryRecvError::Disconnected) => unreachable!(),
-            }
-        }
+        self.domain_input_handle
+            .base_send(m, &self.key[..])
+            .unwrap();
+        self.domain_input_handle.receive_transaction_result()
     }
 
     /// Perform a non-transactional write to the base node this Mutator was generated for.

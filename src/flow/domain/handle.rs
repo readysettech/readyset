@@ -25,12 +25,16 @@ pub enum WaitError {
     WrongReply(ControlReplyPacket),
 }
 
-pub struct DomainInputHandle(Vec<TcpSender<Box<Packet>>>);
+pub struct DomainInputHandle {
+    txs: Vec<TcpSender<Box<Packet>>>,
+    tx_reply: PollingLoop<Result<i64, ()>>,
+    tx_reply_addr: SocketAddr,
+}
 
 impl DomainInputHandle {
     pub fn base_send(&mut self, p: Box<Packet>, key: &[usize]) -> Result<(), tcp::Error> {
-        if self.0.len() == 1 {
-            self.0[0].send(p)
+        if self.txs.len() == 1 {
+            self.txs[0].send(p)
         } else {
             if key.is_empty() {
                 unreachable!("sharded base without a key?");
@@ -52,10 +56,27 @@ impl DomainInputHandle {
                     // batch with different keys to sharded base
                     unimplemented!();
                 }
-                ::shard_by(key, self.0.len())
+                ::shard_by(key, self.txs.len())
             };
-            self.0[shard].send(p)
+            self.txs[shard].send(p)
         }
+    }
+
+    pub fn receive_transaction_result(&mut self) -> Result<i64, ()> {
+        let mut result = Err(());
+        self.tx_reply.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Process(r) => {
+                result = r;
+                StopPolling
+            }
+            PollEvent::Timeout => unreachable!(),
+        });
+        result
+    }
+
+    pub fn tx_reply_addr(&self) -> SocketAddr {
+        self.tx_reply_addr.clone()
     }
 }
 
@@ -153,13 +174,18 @@ impl DomainHandle {
         &self,
         channel_coordinator: &Arc<ChannelCoordinator>,
     ) -> DomainInputHandle {
-        DomainInputHandle(
-            (0..self.shards())
+        let tx_reply = PollingLoop::new();
+        let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
+
+        DomainInputHandle {
+            txs: (0..self.shards())
                 .map(|i| {
                     channel_coordinator.get_input_tx(&(self.idx, i)).unwrap()
                 })
                 .collect(),
-        )
+            tx_reply,
+            tx_reply_addr,
+        }
     }
 
     pub fn shards(&self) -> usize {

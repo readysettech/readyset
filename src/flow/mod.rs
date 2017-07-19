@@ -262,7 +262,8 @@ impl Blender {
     /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
         let node = &self.ingredients[base];
-        let tx = self.domains[&node.domain()].get_input_handle(&self.channel_coordinator);
+        let domain_input_handle =
+            self.domains[&node.domain()].get_input_handle(&self.channel_coordinator);
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 
@@ -279,21 +280,14 @@ impl Blender {
             is_primary = true;
         }
 
-        let reply_chan = mpsc::channel();
-        let reply_chan = (
-            channel::TransactionReplySender::from_local(reply_chan.0),
-            reply_chan.1,
-        );
-
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
         Mutator {
-            tx: tx,
+            domain_input_handle,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
-            tx_reply_channel: reply_chan,
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
             tracer: None,
