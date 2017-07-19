@@ -18,6 +18,7 @@ use std::ops::{Deref, DerefMut};
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub mod tcp;
+pub mod poll;
 
 pub use tcp::{channel, sync_channel, TcpSender, TcpReceiver};
 

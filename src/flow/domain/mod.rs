@@ -6,10 +6,10 @@ use std::time;
 use std::collections::hash_map::Entry;
 
 use std::net::SocketAddr;
-use mio::{self, Events, Poll, PollOpt, Ready, Token};
+use mio;
 
-use channel::{TcpSender, TcpReceiver};
-use channel::tcp::TryRecvError;
+use channel::TcpSender;
+use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
 use flow::prelude::*;
 use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
                     ControlReplyPacket};
@@ -631,12 +631,14 @@ impl Domain {
             Packet::Transaction { .. } |
             Packet::StartMigration { .. } |
             Packet::CompleteMigration { .. } |
-            Packet::ReplayPiece { transaction_state: Some(_), .. } => {
+            Packet::ReplayPiece {
+                transaction_state: Some(_),
+                ..
+            } => {
                 self.transaction_state.handle(m);
                 self.process_transactions();
             }
-            Packet::ReplayPiece { .. } |
-            Packet::FullReplay { .. } => {
+            Packet::ReplayPiece { .. } | Packet::FullReplay { .. } => {
                 self.handle_replay(m);
             }
             consumed => {
@@ -860,8 +862,10 @@ impl Domain {
                             return;
                         }
 
-                        if let ReplayPath { trigger: TriggerEndpoint::End(..), .. } =
-                            self.replay_paths[&tag]
+                        if let ReplayPath {
+                            trigger: TriggerEndpoint::End(..),
+                            ..
+                        } = self.replay_paths[&tag]
                         {
                             // request came in from reader -- forward
                             self.request_partial_replay(tag, key);
@@ -1185,7 +1189,8 @@ impl Domain {
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
 
             if let box Packet::ReplayPiece {
-                context: ReplayPieceContext::Partial { ignore: true, .. }, ..
+                context: ReplayPieceContext::Partial { ignore: true, .. },
+                ..
             } = m
             {
                 let mut n = self.nodes[&path.last().unwrap().0].borrow_mut();
@@ -1304,8 +1309,8 @@ impl Domain {
                             .spawn(move || {
                                 use itertools::Itertools;
 
-                                let mut chunked_replay_tx = TcpSender::connect(&domain_addr, Some(1))
-                                    .unwrap();
+                                let mut chunked_replay_tx =
+                                    TcpSender::connect(&domain_addr, Some(1)).unwrap();
 
                                 let start = time::Instant::now();
                                 debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -1389,9 +1394,10 @@ impl Domain {
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         if !n.is_transactional() {
-                            if let Some(
-                                box Packet::ReplayPiece { ref mut transaction_state, .. },
-                            ) = m
+                            if let Some(box Packet::ReplayPiece {
+                                ref mut transaction_state,
+                                ..
+                            }) = m
                             {
                                 // Transactional replays that cross into non-transactional subgraphs
                                 // should stop being transactional. This is necessary to ensure that
@@ -1408,8 +1414,8 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = partial_key.is_some() &&
-                            (is_reader || self.waiting.contains_key(&ni));
+                        let target =
+                            partial_key.is_some() && (is_reader || self.waiting.contains_key(&ni));
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1765,7 +1771,9 @@ impl Domain {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
-                self.debug_tx = debug_addr.as_ref().map(|addr|TcpSender::connect(addr, None).unwrap());
+                self.debug_tx = debug_addr
+                    .as_ref()
+                    .map(|addr| TcpSender::connect(addr, None).unwrap());
                 self.control_reply_tx = Some(TcpSender::connect(&control_addr, None).unwrap());
                 self.addr = Some(listener.local_addr().unwrap());
 
@@ -1776,76 +1784,49 @@ impl Domain {
                     self.transaction_state.get_checktable().clone(),
                 );
 
-                let poll = Poll::new().unwrap();
-                let mut events = Events::with_capacity(1);
-                let mut channels: Vec<Option<TcpReceiver<Box<Packet>>>> = Vec::new();
-
-                const LISTENER: Token = Token(0);
-                const CHANNEL_OFFSET: usize = 1;
-                poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level())
-                    .unwrap();
-
                 self.total_time.start();
                 self.total_ptime.start();
-                loop {
-                    if let Some(packet) = self.inject.take() {
-                        self.handle(packet);
-                        continue;
-                    }
 
-                    let duration_until_flush = group_commit_queues.duration_until_flush();
-                    if poll.poll(&mut events, duration_until_flush).unwrap_or(0) == 0 {
+                let mut polling_loop = PollingLoop::<Box<Packet>>::new(listener);
+                polling_loop.run_polling_loop(|event| match event {
+                    PollEvent::ResumePolling(timeout) => {
+                        *timeout = group_commit_queues.duration_until_flush();
+                        KeepPolling
+                    }
+                    PollEvent::Process(packet) => {
+                        if let Packet::Quit = *packet {
+                            return StopPolling;
+                        }
+
+                        // TODO: Initialize tracer here, and when flushing group commit
+                        // queue.
+                        if group_commit_queues.should_append(&packet, &self.nodes) {
+                            debug_assert!(packet.is_regular());
+                            packet.trace(PacketEvent::ExitInputChannel);
+                            let merged_packet = group_commit_queues.append(packet, &self.nodes);
+                            if let Some(packet) = merged_packet {
+                                self.handle(packet);
+                            }
+                        } else {
+                            self.handle(packet);
+                        }
+
+                        while let Some(p) = self.inject.take() {
+                            self.handle(p);
+                        }
+
+                        KeepPolling
+                    }
+                    PollEvent::Timeout => {
                         if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
-                            self.handle(m)
-                        }
-                        continue;
-                    };
-
-                    for event in events.iter() {
-                        if event.token() == LISTENER {
-                            if let Ok((stream, _addr)) = listener.accept() {
-                                poll.register(
-                                    &stream,
-                                    Token(channels.len() + CHANNEL_OFFSET),
-                                    Ready::readable(),
-                                    PollOpt::level(),
-                                ).unwrap();
-                                channels.push(Some(TcpReceiver::new(stream)));
+                            self.handle(m);
+                            while let Some(p) = self.inject.take() {
+                                self.handle(p);
                             }
-                            continue;
                         }
-
-                        let recv = channels[event.token().0 - CHANNEL_OFFSET]
-                            .as_mut()
-                            .unwrap()
-                            .try_recv();
-                        match recv {
-                            Ok(box Packet::Quit) => return,
-                            Ok(packet) => {
-                                // TODO: Initialize tracer here, and when flushing group commit
-                                // queue.
-
-                                if group_commit_queues.should_append(&packet, &self.nodes) {
-                                    debug_assert!(packet.is_regular());
-                                    packet.trace(PacketEvent::ExitInputChannel);
-                                    let merged_packet = group_commit_queues
-                                        .append(packet, &self.nodes);
-                                    if let Some(packet) = merged_packet {
-                                        self.handle(packet);
-                                    }
-                                } else {
-                                    self.handle(packet)
-                                }
-                            }
-                            Err(TryRecvError::Disconnected) => {
-                                let channel = channels[event.token().0 - CHANNEL_OFFSET].take();
-                                let _ = poll.deregister(&channel.unwrap());
-                            }
-                            Err(TryRecvError::Empty) => {}
-                            Err(TryRecvError::DeserializationError) => unreachable!(),
-                        }
+                        KeepPolling
                     }
-                }
+                });
             })
             .unwrap()
     }
