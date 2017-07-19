@@ -25,7 +25,7 @@ pub use self::ProcessResult::*;
 pub struct PollingLoop<T> {
     poll: Poll,
     events: Events,
-    listener: TcpListener,
+    listener: Option<TcpListener>,
     channels: Vec<Option<TcpReceiver<T>>>,
 }
 
@@ -34,7 +34,7 @@ where
     T: Serialize,
     for<'de> T: Deserialize<'de>,
 {
-    pub fn new(listener: TcpListener) -> Self {
+    pub fn from_listener(listener: TcpListener) -> Self {
         let poll = Poll::new().unwrap();
         poll.register(&listener, LISTENER, Ready::readable(), PollOpt::level())
             .unwrap();
@@ -42,12 +42,32 @@ where
         Self {
             poll,
             events: Events::with_capacity(32),
-            listener,
+            listener: Some(listener),
             channels: Vec::new(),
         }
     }
 
+    pub fn from_receivers(receivers: Vec<TcpReceiver<T>>) -> Self {
+        let poll = Poll::new().unwrap();
+        for (i, r) in receivers.iter().enumerate() {
+            poll.register(r, Token(i + 1), Ready::readable(), PollOpt::level())
+                .unwrap();
+        }
 
+        Self {
+            poll,
+            events: Events::with_capacity(32),
+            listener: None,
+            channels: receivers.into_iter().map(|r| Some(r)).collect(),
+        }
+    }
+
+    /// Execute steps of the polling loop until process_event() returns `StopPolling`.
+    ///
+    /// Note that to prevent packet loss, if multiple packets are retrieved when polling a channel
+    /// then process_event will be called with each in turn. This will happen regardless of the
+    /// value returned by that function. However, once the queue has been drained, the polling loop
+    /// will stop if the return value from any of the packets was `StopPolling`
     pub fn run_polling_loop<F>(&mut self, mut process_event: F)
     where
         F: FnMut(PollEvent<T>) -> ProcessResult,
@@ -66,7 +86,7 @@ where
 
             for event in self.events.iter() {
                 if event.token() == LISTENER {
-                    if let Ok((stream, _addr)) = self.listener.accept() {
+                    if let Ok((stream, _addr)) = self.listener.as_mut().unwrap().accept() {
                         self.poll
                             .register(
                                 &stream,
@@ -80,6 +100,7 @@ where
                     continue;
                 }
 
+                let mut stop_polling = false;
                 loop {
                     let recv = self.channels[event.token().0 - CHANNEL_OFFSET]
                         .as_mut()
@@ -89,7 +110,7 @@ where
                     match recv {
                         Ok(message) => {
                             if let StopPolling = process_event(PollEvent::Process(message)) {
-                                return;
+                                stop_polling = true;
                             }
                         }
                         Err(TryRecvError::Disconnected) => {
@@ -100,6 +121,10 @@ where
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::DeserializationError) => unreachable!(),
                     }
+                }
+
+                if stop_polling {
+                    return;
                 }
             }
         }

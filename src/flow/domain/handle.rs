@@ -1,5 +1,5 @@
 use channel::{tcp, TcpSender, TcpReceiver};
-use channel::tcp::TryRecvError;
+use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
 
 use flow;
 use flow::checktable;
@@ -16,14 +16,13 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use mio::{self, Events, Poll, PollOpt, Ready, Token};
+use mio;
 use petgraph::graph::NodeIndex;
 use slog::Logger;
 
 #[derive(Debug)]
 pub enum WaitError {
     WrongReply(ControlReplyPacket),
-    TryRecvError(TryRecvError),
 }
 
 pub struct DomainInputHandle(Vec<TcpSender<Box<Packet>>>);
@@ -63,9 +62,7 @@ impl DomainInputHandle {
 pub struct DomainHandle {
     idx: domain::Index,
 
-    poll: Poll,
-    events: Events,
-    cr_rxs: Vec<TcpReceiver<ControlReplyPacket>>,
+    cr_poll: PollingLoop<ControlReplyPacket>,
     txs: Vec<TcpSender<Box<Packet>>>,
 
     // used during booting
@@ -99,10 +96,6 @@ impl DomainHandle {
         let mut cr_rxs = Vec::new();
         let mut threads = Vec::new();
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
-        //let n = self.boot_args.len();
-
-        let poll = Poll::new().unwrap();
-        let events = Events::with_capacity(1);
 
         for i in 0..num_shards {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -144,9 +137,6 @@ impl DomainHandle {
             let stream =
                 mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
             let cr_rx = TcpReceiver::new(stream);
-            poll.register(&cr_rx, Token(i), Ready::readable(), PollOpt::level())
-                .unwrap();
-
             cr_rxs.push(cr_rx);
             txs.push(channel_coordinator.get_tx(&(idx, i)).unwrap());
         }
@@ -154,10 +144,8 @@ impl DomainHandle {
         DomainHandle {
             idx,
             threads,
-            cr_rxs,
+            cr_poll: PollingLoop::from_receivers(cr_rxs),
             txs,
-            poll,
-            events,
         }
     }
 
@@ -206,28 +194,24 @@ impl DomainHandle {
         self.txs[i].send(p)
     }
 
-    fn wait_for_next_reply(&mut self) -> Result<ControlReplyPacket, TryRecvError> {
-        loop {
-            // TODO: handle broken connections here.
-            let n = self.poll.poll(&mut self.events, None).unwrap_or(0);
-            if n == 0 {
-                continue;
+    fn wait_for_next_reply(&mut self) -> ControlReplyPacket {
+        let mut reply = None;
+        self.cr_poll.run_polling_loop(|event| match event {
+            PollEvent::Process(packet) => {
+                reply = Some(packet);
+                StopPolling
             }
-
-            assert_eq!(n, 1);
-            match self.cr_rxs[self.events.get(0).unwrap().token().0].try_recv() {
-                Err(TryRecvError::Empty) => continue,
-                reply => return reply,
-            }
-        }
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Timeout => unreachable!(),
+        });
+        reply.unwrap()
     }
 
     pub fn wait_for_ack(&mut self) -> Result<(), WaitError> {
-        for _ in 0..self.cr_rxs.len() {
+        for _ in 0..self.shards() {
             match self.wait_for_next_reply() {
-                Ok(ControlReplyPacket::Ack) => {}
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::TryRecvError(e)),
+                ControlReplyPacket::Ack => {}
+                r => return Err(WaitError::WrongReply(r)),
             }
         }
         Ok(())
@@ -235,11 +219,10 @@ impl DomainHandle {
 
     pub fn wait_for_state_size(&mut self) -> Result<usize, WaitError> {
         let mut size = 0;
-        for _ in 0..self.cr_rxs.len() {
+        for _ in 0..self.shards() {
             match self.wait_for_next_reply() {
-                Ok(ControlReplyPacket::StateSize(s)) => size += s,
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::TryRecvError(e)),
+                ControlReplyPacket::StateSize(s) => size += s,
+                r => return Err(WaitError::WrongReply(r)),
             }
         }
         Ok(size)
@@ -248,12 +231,11 @@ impl DomainHandle {
     pub fn wait_for_statistics(
         &mut self,
     ) -> Result<Vec<(DomainStats, HashMap<NodeIndex, NodeStats>)>, WaitError> {
-        let mut stats = Vec::with_capacity(self.cr_rxs.len());
-        for _ in 0..self.cr_rxs.len() {
+        let mut stats = Vec::with_capacity(self.shards());
+        for _ in 0..self.shards() {
             match self.wait_for_next_reply() {
-                Ok(ControlReplyPacket::Statistics(d, s)) => stats.push((d, s)),
-                Ok(r) => return Err(WaitError::WrongReply(r)),
-                Err(e) => return Err(WaitError::TryRecvError(e)),
+                ControlReplyPacket::Statistics(d, s) => stats.push((d, s)),
+                r => return Err(WaitError::WrongReply(r)),
             }
         }
         Ok(stats)

@@ -1787,7 +1787,7 @@ impl Domain {
                 self.total_time.start();
                 self.total_ptime.start();
 
-                let mut polling_loop = PollingLoop::<Box<Packet>>::new(listener);
+                let mut polling_loop = PollingLoop::<Box<Packet>>::from_listener(listener);
                 polling_loop.run_polling_loop(|event| match event {
                     PollEvent::ResumePolling(timeout) => {
                         *timeout = group_commit_queues.duration_until_flush();
