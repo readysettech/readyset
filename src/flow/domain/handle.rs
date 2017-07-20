@@ -119,11 +119,6 @@ impl DomainHandle {
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
         for i in 0..num_shards {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let addr = listener.local_addr().unwrap();
-            let listener = mio::net::TcpListener::from_listener(listener, &addr).unwrap();
-
-            channel_coordinator.insert_addr((idx, i), addr.clone());
 
             let logger = if num_shards == 1 {
                 log.new(o!("domain" => idx.index()))
@@ -135,37 +130,52 @@ impl DomainHandle {
             } else {
                 nodes.clone().unwrap()
             };
-            let domain = domain::Domain::new(
-                logger,
-                idx,
-                i,
-                num_shards,
-                nodes,
-                readers,
-                persistence_params.clone(),
-                checktable.clone(),
-                channel_coordinator.clone(),
-                ts,
-            );
 
             let control_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let domain = domain::DomainBuilder {
+                index: idx,
+                shard: i,
+                nshards: num_shards,
+                nodes,
+                persistence_parameters: persistence_params.clone(),
+                ts,
+                control_addr: control_listener.local_addr().unwrap(),
+                debug_addr: debug_addr.clone(),
+            };
+
             threads.push(domain.boot(
-                listener,
-                control_listener.local_addr().unwrap(),
-                debug_addr.clone(),
+                logger,
+                readers.clone(),
+                channel_coordinator.clone(),
+                checktable.clone(),
             ));
 
             let stream =
                 mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
-            let cr_rx = TcpReceiver::new(stream);
-            cr_rxs.push(cr_rx);
-            txs.push(channel_coordinator.get_tx(&(idx, i)).unwrap());
+            cr_rxs.push(TcpReceiver::new(stream));
         }
+
+        let mut cr_poll = PollingLoop::from_receivers(cr_rxs);
+        cr_poll.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(_) => KeepPolling,
+            PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
+                channel_coordinator.insert_addr((idx, shard), addr.clone());
+                txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
+
+                if txs.len() == num_shards {
+                    StopPolling
+                } else {
+                    KeepPolling
+                }
+            }
+            PollEvent::Process(_) => unreachable!(),
+            PollEvent::Timeout => unreachable!(),
+        });
 
         DomainHandle {
             idx,
             threads,
-            cr_poll: PollingLoop::from_receivers(cr_rxs),
+            cr_poll,
             txs,
         }
     }

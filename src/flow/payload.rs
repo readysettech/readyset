@@ -449,4 +449,5 @@ pub enum ControlReplyPacket {
     Ack,
     StateSize(usize),
     Statistics(statistics::DomainStats, HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>),
+    Booted(usize, SocketAddr),
 }

@@ -21,7 +21,7 @@ use checktable;
 use channel::TcpSender;
 
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum DurabilityMode {
     /// Don't do any durability
     MemoryOnly,
@@ -32,7 +32,7 @@ pub enum DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Parameters {
     /// Number of elements to buffer before flushing.
     pub queue_capacity: usize,

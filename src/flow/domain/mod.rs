@@ -6,7 +6,6 @@ use std::time;
 use std::collections::hash_map::Entry;
 
 use std::net::SocketAddr;
-use mio;
 
 use channel::TcpSender;
 use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
@@ -101,6 +100,85 @@ struct Waiting {
     subscribed: Vec<HoleSubscription>,
 }
 
+/// Struct sent to a worker to start a domain.
+#[derive(Serialize, Deserialize)]
+pub struct DomainBuilder {
+    pub index: Index,
+    pub shard: usize,
+    pub nshards: usize,
+    pub nodes: DomainNodes,
+    pub persistence_parameters: persistence::Parameters,
+    pub ts: i64,
+    pub control_addr: SocketAddr,
+    pub debug_addr: Option<SocketAddr>,
+}
+
+impl DomainBuilder {
+    pub fn boot(
+        self,
+        log: Logger,
+        readers: flow::Readers,
+        channel_coordinator: Arc<ChannelCoordinator>,
+        checktable: Arc<Mutex<checktable::CheckTable>>,
+    ) -> thread::JoinHandle<()> {
+        // initially, all nodes are not ready
+        let not_ready = self.nodes
+            .values()
+            .map(|n| *n.borrow().local_addr())
+            .collect();
+
+        let shard = if self.nshards == 1 {
+            None
+        } else {
+            Some(self.shard)
+        };
+
+        let debug_tx = self.debug_addr
+            .as_ref()
+            .map(|addr| TcpSender::connect(addr, None).unwrap());
+        let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
+
+        // Create polling loop and tell the controller what port we are listening on.
+        let polling_loop = PollingLoop::<Box<Packet>>::new();
+        let addr = polling_loop.get_listener_addr().unwrap();
+        control_reply_tx
+            .send(ControlReplyPacket::Booted(shard.unwrap_or(0), addr.clone()))
+            .unwrap();
+
+        Domain {
+            index: self.index,
+            shard,
+            nshards: self.nshards,
+            transaction_state: transactions::DomainState::new(self.index, checktable, self.ts),
+            persistence_parameters: self.persistence_parameters,
+            nodes: self.nodes,
+            state: StateMap::default(),
+            log,
+            not_ready,
+            mode: DomainMode::Forwarding,
+            waiting: local::Map::new(),
+            reader_triggered: local::Map::new(),
+            replay_paths: HashMap::new(),
+
+            addr,
+            readers,
+            inject: None,
+            debug_tx,
+            control_reply_tx,
+            channel_coordinator,
+
+            concurrent_replays: 0,
+            replay_request_queue: Default::default(),
+
+            total_time: Timer::new(),
+            total_ptime: Timer::new(),
+            wait_time: Timer::new(),
+            process_times: TimerSet::new(),
+            process_ptimes: TimerSet::new(),
+        }.boot(polling_loop)
+    }
+}
+
 pub struct Domain {
     index: Index,
     shard: Option<usize>,
@@ -123,11 +201,11 @@ pub struct Domain {
     concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
-    addr: Option<SocketAddr>,
+    addr: SocketAddr,
     readers: flow::Readers,
     inject: Option<Box<Packet>>,
     debug_tx: Option<TcpSender<debug::DebugEvent>>,
-    control_reply_tx: Option<TcpSender<ControlReplyPacket>>,
+    control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -138,56 +216,6 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn new(
-        log: Logger,
-        index: Index,
-        shard: usize,
-        nshards: usize,
-        nodes: DomainNodes,
-        readers: &flow::Readers,
-        persistence_parameters: persistence::Parameters,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
-        channel_coordinator: Arc<ChannelCoordinator>,
-        ts: i64,
-    ) -> Self {
-        // initially, all nodes are not ready
-        let not_ready = nodes.values().map(|n| *n.borrow().local_addr()).collect();
-
-        let shard = if nshards == 1 { None } else { Some(shard) };
-
-        Domain {
-            index,
-            shard: shard,
-            nshards: nshards,
-            transaction_state: transactions::DomainState::new(index, checktable, ts),
-            persistence_parameters,
-            nodes,
-            state: StateMap::default(),
-            log,
-            not_ready,
-            mode: DomainMode::Forwarding,
-            waiting: local::Map::new(),
-            reader_triggered: local::Map::new(),
-            replay_paths: HashMap::new(),
-
-            addr: None,
-            readers: readers.clone(),
-            inject: None,
-            debug_tx: None,
-            control_reply_tx: None,
-            channel_coordinator,
-
-            concurrent_replays: 0,
-            replay_request_queue: Default::default(),
-
-            total_time: Timer::new(),
-            total_ptime: Timer::new(),
-            wait_time: Timer::new(),
-            process_times: TimerSet::new(),
-            process_ptimes: TimerSet::new(),
-        }
-    }
-
     fn on_replay_miss(&mut self, miss: LocalNodeIndex, key: Vec<DataType>, needed_for: Tag) {
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut already_filling = false;
@@ -332,8 +360,7 @@ impl Domain {
             TriggerEndpoint::Local(..) => {
                 // didn't count against our quote, so we're also not decementing
             }
-            TriggerEndpoint::Start(..) |
-            TriggerEndpoint::None => {
+            TriggerEndpoint::Start(..) | TriggerEndpoint::None => {
                 unreachable!();
             }
         }
@@ -398,8 +425,7 @@ impl Domain {
                 // Any message with a timestamp (ie part of a transaction) must flow through the
                 // entire graph, even if there are no updates associated with it.
             }
-            &box Packet::ReplayPiece { .. } |
-            &box Packet::FullReplay { .. } => {
+            &box Packet::ReplayPiece { .. } | &box Packet::FullReplay { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
             ref m => unreachable!("dispatch process got {:?}", m),
@@ -559,8 +585,6 @@ impl Domain {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
                     self.control_reply_tx
-                        .as_mut()
-                        .unwrap()
                         .send(ControlReplyPacket::Ack)
                         .unwrap();
                 }
@@ -668,22 +692,14 @@ impl Domain {
                         n.get_base_mut()
                             .expect("told to add base column to non-base node")
                             .add_column(default);
-                        self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
-                            .send(ControlReplyPacket::Ack)
-                            .unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
                     }
                     Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
-                        self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
-                            .send(ControlReplyPacket::Ack)
-                            .unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
                     }
                     Packet::UpdateEgress {
                         node,
@@ -721,8 +737,6 @@ impl Domain {
                     Packet::StateSizeProbe { node } => {
                         let size = self.state.get(&node).map(|state| state.len()).unwrap_or(0);
                         self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
                             .send(ControlReplyPacket::StateSize(size))
                             .unwrap();
                     }
@@ -812,8 +826,6 @@ impl Domain {
                     } => {
                         // let coordinator know that we've registered the tagged path
                         self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
 
@@ -958,8 +970,6 @@ impl Domain {
                         }
 
                         self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
                             .send(ControlReplyPacket::Ack)
                             .unwrap();
                     }
@@ -994,8 +1004,6 @@ impl Domain {
                             .collect();
 
                         self.control_reply_tx
-                            .as_mut()
-                            .unwrap()
                             .send(ControlReplyPacket::Statistics(domain_stats, node_stats))
                             .unwrap();
                     }
@@ -1293,7 +1301,7 @@ impl Domain {
 
                         let log = self.log.new(o!());
                         let nshards = self.nshards;
-                        let domain_addr = *self.addr.as_ref().unwrap();
+                        let domain_addr = self.addr;
                         thread::Builder::new()
                             .name(format!(
                                 "replay{}.{}",
@@ -1734,8 +1742,6 @@ impl Domain {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
                 self.control_reply_tx
-                    .as_mut()
-                    .unwrap()
                     .send(ControlReplyPacket::Ack)
                     .unwrap();
             } else {
@@ -1751,17 +1757,7 @@ impl Domain {
         }
     }
 
-    pub fn boot(
-        mut self,
-        listener: mio::net::TcpListener,
-        control_addr: SocketAddr,
-        debug_addr: Option<SocketAddr>,
-        // rx: mpsc::Receiver<Box<Packet>>,
-        // input_rx: mpsc::Receiver<Box<Packet>>,
-        // back_rx: mpsc::Receiver<Box<Packet>>,
-        // control_reply_tx: mpsc::SyncSender<ControlReplyPacket>,
-        // debug_tx: Option<mpsc::Sender<debug::DebugEvent>>,
-    ) -> thread::JoinHandle<()> {
+    pub fn boot(mut self, mut polling_loop: PollingLoop<Box<Packet>>) -> thread::JoinHandle<()> {
         info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
         let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
         let name = match self.shard {
@@ -1771,12 +1767,6 @@ impl Domain {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
-                self.debug_tx = debug_addr
-                    .as_ref()
-                    .map(|addr| TcpSender::connect(addr, None).unwrap());
-                self.control_reply_tx = Some(TcpSender::connect(&control_addr, None).unwrap());
-                self.addr = Some(listener.local_addr().unwrap());
-
                 let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
                     self.index,
                     self.shard.unwrap_or(0),
@@ -1784,10 +1774,9 @@ impl Domain {
                     self.transaction_state.get_checktable().clone(),
                 );
 
+                // Run polling loop.
                 self.total_time.start();
                 self.total_ptime.start();
-
-                let mut polling_loop = PollingLoop::<Box<Packet>>::from_listener(listener);
                 polling_loop.run_polling_loop(|event| match event {
                     PollEvent::ResumePolling(timeout) => {
                         *timeout = group_commit_queues.duration_until_flush();
