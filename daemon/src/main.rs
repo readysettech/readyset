@@ -3,6 +3,7 @@ extern crate channel;
 #[macro_use]
 extern crate clap;
 extern crate hostname;
+extern crate mio;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
@@ -13,6 +14,9 @@ extern crate slog_term;
 mod controller;
 mod protocol;
 mod worker;
+
+use std::thread;
+use std::time::Duration;
 
 struct Config {
     hostname: String,
@@ -88,8 +92,22 @@ fn main() {
             controller.listen()
         }
         Some(c) => {
-            let mut worker = worker::Worker::new(&c, log);
-            worker.connect()
+            let mut worker = worker::Worker::new(&c, log.clone());
+            for i in 0..3 {
+                match worker.connect() {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to connect to controller (attempt {}): {:?}",
+                            i,
+                            e
+                        )
+                    }
+                }
+
+                thread::sleep(Duration::from_millis(1000));
+            }
         }
     }
 }

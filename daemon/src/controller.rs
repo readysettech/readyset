@@ -1,4 +1,5 @@
 use bincode;
+use channel::poll::{PollEvent, PollingLoop};
 use slog::Logger;
 use std::net::{SocketAddr, TcpStream};
 
@@ -19,15 +20,25 @@ impl Controller {
 
     /// Listen for workers to connect
     pub fn listen(&mut self) {
-        use std::net::TcpListener;
+        use channel::poll::ProcessResult;
+        use mio::net::TcpListener;
+        use std::str::FromStr;
 
-        let listener = TcpListener::bind(&format!("0.0.0.0:{}", self.listen_port)).unwrap();
-        loop {
-            match listener.accept() {
-                Ok((mut socket, addr)) => self.handle_register(socket, addr),
-                Err(e) => error!(self.log, "worker failed to connect: {:?}", e),
+        let listener = TcpListener::bind(&SocketAddr::from_str(
+            &format!("0.0.0.0:{}", self.listen_port),
+        ).unwrap()).unwrap();
+
+        let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
+        pl.run_polling_loop(|e| {
+            match e {
+                PollEvent::Process(msg) => {
+                    info!(self.log, "Got {:?}", msg);
+                }
+                PollEvent::ResumePolling(_) => (),
+                PollEvent::Timeout => (),
             }
-        }
+            ProcessResult::KeepPolling
+        })
     }
 
     fn handle_register(&mut self, mut socket: TcpStream, remote_addr: SocketAddr) {

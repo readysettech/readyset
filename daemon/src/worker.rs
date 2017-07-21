@@ -1,7 +1,6 @@
-use bincode;
+use channel::{self, TcpReceiver, TcpSender};
 use slog::Logger;
-use std::io;
-use std::net::TcpStream;
+use std::net::SocketAddr;
 use std::time::{Instant, Duration};
 
 use protocol::CoordinationMessage;
@@ -9,7 +8,8 @@ use protocol::CoordinationMessage;
 pub struct Worker {
     controller_addr: String,
     log: Logger,
-    socket: Option<TcpStream>,
+    _receiver: Option<TcpReceiver<CoordinationMessage>>,
+    sender: Option<TcpSender<CoordinationMessage>>,
 }
 
 impl Worker {
@@ -17,36 +17,31 @@ impl Worker {
         Worker {
             controller_addr: String::from(controller),
             log: log,
-            socket: None,
+            _receiver: None,
+            sender: None,
         }
     }
 
     /// Connect to controller
-    pub fn connect(&mut self) {
-        let stream = TcpStream::connect(&self.controller_addr);
+    pub fn connect(&mut self) -> Result<(), channel::tcp::Error> {
+        use std::str::FromStr;
+
+        let stream =
+            TcpSender::connect(&SocketAddr::from_str(&self.controller_addr).unwrap(), None);
         match stream {
             Ok(s) => {
-                self.socket = Some(s);
+                self.sender = Some(s);
 
                 // say hello
-                self.register();
+                self.register()?;
 
                 // enter worker loop, wait for instructions
                 self.handle();
+
+                Ok(())
             }
-            Err(e) => error!(self.log, "worker failed to connect: {:?}", e),
+            Err(e) => Err(e.into()),
         }
-    }
-
-    fn write_serialized(&mut self, msg: CoordinationMessage) -> Result<(), io::Error> {
-        use std::io::Write;
-
-        let data: Vec<u8> = bincode::serialize(&msg, bincode::Infinite).unwrap();
-        match self.socket {
-            None => crit!(self.log, "not connected to controller!"),
-            Some(ref mut s) => s.write_all(&data)?,
-        }
-        Ok(())
     }
 
     fn handle(&mut self) {
@@ -64,13 +59,13 @@ impl Worker {
         }
     }
 
-    fn heartbeat(&mut self) -> Result<(), io::Error> {
+    fn heartbeat(&mut self) -> Result<(), channel::tcp::Error> {
         let msg = CoordinationMessage::Heartbeat;
-        self.write_serialized(msg)
+        self.sender.as_mut().unwrap().send(msg)
     }
 
-    fn register(&mut self) -> Result<(), io::Error> {
+    fn register(&mut self) -> Result<(), channel::tcp::Error> {
         let msg = CoordinationMessage::Register;
-        self.write_serialized(msg)
+        self.sender.as_mut().unwrap().send(msg)
     }
 }
