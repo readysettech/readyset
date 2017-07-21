@@ -12,12 +12,14 @@ use serde::{Serialize, Deserialize};
 const LISTENER: Token = Token(0);
 const CHANNEL_OFFSET: usize = 1;
 
+#[derive(Debug)]
 pub enum PollEvent<'a, T> {
     ResumePolling(&'a mut Option<Duration>),
     Process(T),
     Timeout,
 }
 
+#[derive(Debug)]
 pub enum ProcessResult {
     KeepPolling,
     StopPolling,
