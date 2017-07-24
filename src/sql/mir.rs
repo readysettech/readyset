@@ -1010,51 +1010,41 @@ impl SqlToMirConverter {
         rel: &str,
         base_node: &MirNodeRef,
         universe_id: DataType,
-        node_for_rel1: HashMap<&str, MirNodeRef>,
+        node_for_rel: HashMap<&str, MirNodeRef>,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
         let ucrel = format!("UserContext_{}", universe_id);
-        let mut node_for_rel = node_for_rel1.clone();
-        let mut security_nodes = Vec::new();
+
+        let mut local_node_for_rel = node_for_rel.clone();
+        let mut node_count = 0;
+
         let policies = match self.policies.get(&String::from(rel)) {
             Some(p) => p.clone(),
             // no policies associated with this base node
-            None => return security_nodes
+            None => return Vec::new()
         };
 
         debug!(self.log, "Found {} policies for table {}", policies.len(), rel);
 
         let mut prev_node = Some(base_node.clone());
 
-
         let mut base_nodes: Vec<MirNodeRef> = Vec::new();
         let mut join_nodes: Vec<MirNodeRef> = Vec::new();
         let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
         let mut joined_tables = HashSet::new();
-        // make security filters from policies predicates
+
         for (i, p) in policies.iter().enumerate() {
-            let qg = &p.1;
-            // TODO(larat): handle 'UniverseContext' stuff here
+            let mut qg = &p.1;
             let mut sorted_rels: Vec<&str> = qg.relations
                 .keys()
                 .map(String::as_str)
                 .collect();
 
-            sorted_rels.sort();
-
-            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                qg.edges.iter().collect();
-
-            // add relations present in policies
-            for rel in &sorted_rels {
-                // the node holding computed columns doesn't have a base
-                if *rel != "UserContext" {
-                    continue;
-                }
-
+            ll base nodes, except UserContext, should be present in local_node_for_rel
+            {
                 let latest_existing = self.current.get(&ucrel);
-                let base_for_rel = match latest_existing {
-                    None => panic!("Query refers to unknown base node \"{}\"", &ucrel),
+                let ucn = match latest_existing {
+
                     Some(v) => {
                         let existing = self.nodes.get(&(ucrel.clone(), *v));
                         match existing {
@@ -1070,8 +1060,9 @@ impl SqlToMirConverter {
                     }
                 };
 
-                base_nodes.push(base_for_rel.clone());
-                node_for_rel.insert(&ucrel, base_for_rel.clone());
+                base_nodes.push(ucn.clone());
+                local_node_for_rel.insert(&ucrel, ucn.clone());
+                node_count += 1;
             }
 
             // Sort the edges to ensure deterministic join order.
@@ -1092,9 +1083,9 @@ impl SqlToMirConverter {
                     // Edge represents a LEFT JOIN
                     QueryGraphEdge::LeftJoin(ref jps) => {
                         let (left_node, right_node) =
-                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &node_for_rel);
+                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &local_node_for_rel);
                         self.make_join_node(
-                            &format!("q_{:x}", qg.signature().hash),
+                            &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
                             jps,
                             left_node,
                             right_node,
@@ -1104,53 +1095,54 @@ impl SqlToMirConverter {
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
                         let (left_node, right_node) =
-                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &node_for_rel);
+                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &local_node_for_rel);
                         self.make_join_node(
-                            &format!("q_{:x}", qg.signature().hash),
+                            &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
                             jps,
                             left_node,
                             right_node,
                             JoinType::Inner,
                         )
                     }
-                    // Edge represents a GROUP BY, which we handle later
-                    QueryGraphEdge::GroupBy(_) => continue,
+                    _ => continue,
                 };
 
-                // bookkeeping (shared between both join types)
                 join_nodes.push(jn.clone());
                 prev_node = Some(jn);
 
-                // we've now joined both tables
                 joined_tables.insert(src);
                 joined_tables.insert(dst);
+                node_count += 1;
             }
 
             // handles filter nodes
             for rel in &sorted_rels {
                 let nr = self.handle_user_context(rel, &universe_id);
-                let qgn = &qg.relations.get(*rel).expect("relation does have a query graph node");
+                let qgn = qg.relations.get(*rel).expect("relation should have a query graph node.");
+
                 assert!(*rel != "computed_collumns");
+
+                // Skip empty predicates
                 if qgn.predicates.is_empty() {
                     continue
                 }
 
                 let new_nodes = self.make_security_filter(
-                    &format!("sp_{}_{}", nr, i),
-                    prev_node.expect("empty previous node!"),
+                    &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
+                    prev_node.expect("empty previous node"),
                     &qgn.predicates
                 );
 
-                prev_node = Some(new_nodes.iter().last().expect("No new nodes were created").clone());
+                prev_node = Some(new_nodes.iter().last().expect("no new nodes were created").clone());
                 filter_nodes.extend(new_nodes);
             }
         }
 
-        security_nodes.extend(base_nodes);
-        security_nodes.extend(join_nodes);
-        security_nodes.extend(filter_nodes);
-
-        security_nodes
+        base_nodes
+            .into_iter()
+            .chain(join_nodes.into_iter())
+            .chain(filter_nodes.into_iter())
+            .collect()
     }
 
     fn pick_join_columns(
@@ -1238,25 +1230,23 @@ impl SqlToMirConverter {
                 node_for_rel.insert(*rel, base_for_rel);
             }
 
-            // 0.1 Policies over base nodes
-            // TODO(larat): move security boundary downwards to later maximize reuse opportunities
+            // If this is creating a new user universe, create the appropriate security nodes
+            // for each base node relation.
             let mut policy_nodes: Vec<MirNodeRef> = Vec::new();
-            match universe_id {
-                Some(uid) => {
-                    for (rel, b) in &node_for_rel.clone() {
-                        let policies = self.make_security_nodes(*rel, &b, uid.clone(), node_for_rel.clone());
-                        debug!(self.log, "Created {} security nodes for table {}", policies.len(), *rel);
-                        policy_nodes.extend(policies.clone());
-                        match policies.last() {
-                            Some(n) => {
-                                debug!(self.log, "Last policy node is {:?}", n);
-                                node_for_rel.insert(*rel, n.clone());
-                            },
-                            None => (),
-                        };
+            if universe_id.is_some() {
+                let uid = universe_id.unwrap();
+                for (rel, b) in &node_for_rel.clone() {
+                    let policies = self.make_security_nodes(*rel, &b, uid.clone(), node_for_rel.clone());
+                    debug!(self.log, "Created {} security nodes for table {}", policies.len(), *rel);
+                    policy_nodes.extend(policies.clone());
+
+                    // Further nodes added should refer to the last node in base node's policy chain
+                    // instead of the base node itself.
+                    if !policies.is_empty() {
+                        let last_pol = policies.last().unwrap();
+                            node_for_rel.insert(*rel, last_pol.clone());
                     }
-                },
-                None => (),
+                }
             }
 
             // 1. Generate join nodes for the query. This starts out by joining two of the base
