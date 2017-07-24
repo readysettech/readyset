@@ -724,10 +724,6 @@ impl MirNode {
                             mig,
                         )
                     },
-                    MirNodeType::SecurityFilter { ref conditions } => {
-                        let parent = self.ancestors[0].clone();
-                        make_security_node(&name, parent, self.columns.as_slice(), conditions, mig)
-                    },
                 };
 
                 // any new flow nodes have been instantiated by now, so we replace them with
@@ -816,7 +812,6 @@ pub enum MirNodeType {
     Reuse { node: MirNodeRef },
     /// leaf (reader) node, keys
     Leaf { node: MirNodeRef, keys: Vec<Column> },
-    SecurityFilter { conditions: Vec<Option<(Operator, DataType)>> },
 }
 
 impl MirNodeType {
@@ -997,13 +992,6 @@ impl MirNodeType {
             MirNodeType::Leaf { keys: ref our_keys, .. } => {
                 match *other {
                     MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
-                    _ => false,
-                }
-            }
-            // TODO(larat): reuse should probably take `context` into consideration
-            MirNodeType::SecurityFilter { conditions: ref our_conditions } => {
-                match *other {
-                    MirNodeType::SecurityFilter { ref conditions } => our_conditions == conditions,
                     _ => false,
                 }
             }
@@ -1224,32 +1212,6 @@ impl Debug for MirNodeType {
                     .join(", ");
                 write!(f, "{} ⋃ {}", cols_left, cols_right)
             },
-            MirNodeType::SecurityFilter { ref conditions } => {
-                use regex::Regex;
-
-                let escape = |s: &str| {
-                    Regex::new("([<>])")
-                        .unwrap()
-                        .replace_all(s, "\\$1")
-                        .to_string()
-                };
-                write!(
-                    f,
-                    "secσ[{}]",
-                    conditions
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, ref e)| match e.as_ref() {
-                            Some(&(ref op, ref x)) => {
-                                Some(format!("f{} {} {}", i, escape(&format!("{}", op)), x))
-                            }
-                            None => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .as_slice()
-                        .join(", ")
-                )
-            }
         }
     }
 }
@@ -1362,7 +1324,6 @@ fn make_base_node(
     }
 }
 
-
 fn make_union_node(
     name: &str,
     columns: &[Column],
@@ -1387,31 +1348,6 @@ fn make_union_node(
         column_names.as_slice(),
         ops::union::Union::new(emit_column_id),
     );
-
-
-fn make_security_node(
-    name: &str,
-    parent: MirNodeRef,
-    columns: &[Column],
-    conditions: &Vec<Option<(Operator, DataType)>>,
-    mut mig: &mut Migration,
-) -> FlowNode {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
-
-    let context = match mig.user_context() {
-        Some(c) => c,
-        None => HashMap::new()
-    };
-
-    let node = mig.add_ingredient(
-        String::from(name),
-        column_names.as_slice(),
-        ops::security::filter::SecurityFilter::new(parent_na, conditions, context),
-    );
-
-    FlowNode::New(node)
-}
 
 fn make_filter_node(
     name: &str,

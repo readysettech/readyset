@@ -962,37 +962,6 @@ impl SqlToMirConverter {
         predicates_above_group_by_nodes
     }
 
-    fn make_security_filter(
-        &self,
-        name: &str,
-        parent: MirNodeRef,
-        predicates: &Vec<ConditionTree>,
-    ) -> Vec<MirNodeRef> {
-        let mut new_nodes = vec![];
-
-        let mut prev_node = parent;
-
-        for (i, cond) in predicates.iter().enumerate() {
-            let mut fields = prev_node.borrow().columns().iter().cloned().collect();
-
-            let filter = self.to_conditions(cond, &mut fields, &prev_node);
-            let f_name = format!("{}_f{}", name, i);
-
-            let n = MirNode::new(
-                &f_name,
-                self.schema_version,
-                fields,
-                MirNodeType::SecurityFilter { conditions: filter },
-                vec![prev_node.clone()],
-                vec![],
-            );
-            new_nodes.push(n.clone());
-            prev_node = n;
-        }
-
-        new_nodes
-    }
-
     fn handle_user_context(&self, t: &str, uid: &DataType) -> String {
         let nr = format!("UserContext_{}", uid);
         let r = match t {
@@ -1127,7 +1096,7 @@ impl SqlToMirConverter {
                     continue
                 }
 
-                let new_nodes = self.make_security_filter(
+                let new_nodes = self.make_filter_nodes(
                     &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
                     prev_node.expect("empty previous node"),
                     &qgn.predicates
