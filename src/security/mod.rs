@@ -38,8 +38,6 @@ impl Policy {
 }
 
 mod tests {
-	use super::*;
-
 	#[test]
 	fn it_parses() {
 		let policy_text = r#"[{ "table": "post", "predicate": "WHERE post.type = ?" },

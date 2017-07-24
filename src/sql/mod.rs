@@ -22,11 +22,6 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
-use ops;
-
-use mir::FlowNode;
-
-
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
 /// the query, and the leaf node that represents the query result (and off whom we've hung a
@@ -126,7 +121,7 @@ impl SqlIncorporator {
     /// Adds new security policies.
     /// Added policies are automatically incorporated into the flow graph when a new query is added.
     pub fn add_policies(&mut self, policies: HashMap<u64, Policy>) {
-        for (pid, ref p) in policies.iter() {
+        for (_, ref p) in policies.iter() {
             let q = self.rewrite_query(p.predicate.clone());
 
             let st = match q {
@@ -534,7 +529,7 @@ impl SqlIncorporator {
         if mig.user_context().is_some() {
             let qfp = match q {
                 SqlQuery::Select(ref sq) => {
-                    let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+                    let (qg, _) = self.consider_query_graph(&query_name, sq);
                     self.add_query_via_mir(&query_name, sq, qg, mig)
                 }
                 ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),

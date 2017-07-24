@@ -18,7 +18,6 @@ use sql::QueryFlowParts;
 pub mod reuse;
 mod rewrite;
 mod optimize;
-mod security;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -158,10 +157,6 @@ impl MirQuery {
     pub fn optimize_post_reuse(mut self) -> MirQuery {
         optimize::optimize_post_reuse(&mut self);
         self
-    }
-
-    pub fn apply_policies(mut self, policies: HashMap<String, MirNodeRef>) -> MirQuery {
-        security::apply_policies(self, policies)
     }
 }
 

@@ -138,13 +138,12 @@ impl Recipe {
                     None => Vec::default(),
                 };
 
-                let policies = ps.into_iter().enumerate()
-                .map(|(i, p)| {
-                    // TODO(larat): hash policy to get pid
-                    let pid: u64 = hash_query(&p.predicate);
-                    (pid, p)
-                })
-                .collect::<HashMap<u64, Policy>>();
+                let policies = ps.into_iter()
+                    .map(|p| {
+                        let pid: u64 = hash_query(&p.predicate);
+                        (pid, p)
+                    })
+                    .collect::<HashMap<u64, Policy>>();
 
                 r.policies = policies;
 

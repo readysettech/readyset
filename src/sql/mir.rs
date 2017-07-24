@@ -2,7 +2,7 @@ use flow::core::DataType;
 use flow::prelude::NodeIndex;
 use mir::{GroupedNodeType, MirNode, MirNodeType};
 // TODO(malte): remove if possible
-pub use mir::{FlowNode, MirNodeRef, MirQuery};
+pub use mir::{MirNodeRef, MirQuery};
 use security::{Policy};
 use ops::join::JoinType;
 
@@ -16,8 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 use std::vec::Vec;
-
-use std;
 
 fn target_columns_from_computed_column(computed_col: &Column) -> &Column {
     use nom_sql::FunctionExpression::*;
@@ -999,14 +997,14 @@ impl SqlToMirConverter {
         let mut security_nodes = Vec::new();
         let mut last_policy_nodes = Vec::new();
 
-        for (i, p) in policies.iter().enumerate() {
+        for p in policies.iter() {
             let mut prev_node = Some(base_node.clone());
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
             let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
             let mut joined_tables = HashSet::new();
 
-            let mut qg = &p.1;
+            let qg = &p.1;
             let mut sorted_rels: Vec<&str> = qg.relations
                 .keys()
                 .map(String::as_str)
@@ -1094,9 +1092,7 @@ impl SqlToMirConverter {
 
             // handles filter nodes
             for rel in &sorted_rels {
-                let nr = self.handle_user_context(rel, &universe_id);
                 let qgn = qg.relations.get(*rel).expect("relation should have a query graph node.");
-
                 assert!(*rel != "computed_collumns");
 
                 // Skip empty predicates
