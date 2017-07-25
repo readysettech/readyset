@@ -1,7 +1,6 @@
-use bincode;
 use channel::poll::{PollEvent, PollingLoop};
 use slog::Logger;
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 
 use protocol::CoordinationMessage;
 
