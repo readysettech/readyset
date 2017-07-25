@@ -69,6 +69,10 @@ impl<T: Serialize> TcpSender<T> {
         Self::new(std::net::TcpStream::connect(addr)?, window)
     }
 
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.get_ref().local_addr()
+    }
+
     /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
     /// conform to the same api as mpsc::Sender.
     pub fn send(&mut self, t: T) -> Result<(), Error> {
