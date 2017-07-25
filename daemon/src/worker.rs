@@ -56,17 +56,19 @@ impl Worker {
     /// the master that we're still live
     pub fn handle(&mut self) {
         loop {
-            match self.receiver.as_mut().unwrap().try_recv() {
-                Ok(msg) => info!(self.log, "received from controller: {:?}", msg),
-                Err(e) => {
-                    match e {
-                        TryRecvError::Disconnected => {
-                            error!(self.log, "controller disconnected!");
-                            return;
-                        }
-                        TryRecvError::Empty => (),
-                        TryRecvError::DeserializationError => {
-                            crit!(self.log, "failed to deserialize message from controller!");
+            if self.receiver.is_some() {
+                match self.receiver.as_mut().unwrap().try_recv() {
+                    Ok(msg) => info!(self.log, "received from controller: {:?}", msg),
+                    Err(e) => {
+                        match e {
+                            TryRecvError::Disconnected => {
+                                error!(self.log, "controller disconnected!");
+                                return;
+                            }
+                            TryRecvError::Empty => (),
+                            TryRecvError::DeserializationError => {
+                                crit!(self.log, "failed to deserialize message from controller!");
+                            }
                         }
                     }
                 }
