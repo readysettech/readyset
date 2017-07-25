@@ -7,11 +7,14 @@ use column::Column;
 use common::{binary_comparison_operator, column_identifier, integer_literal, string_literal,
              Literal, Operator};
 
+use select::{SelectStatement, nested_selection};
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ConditionBase {
     Field(Column),
     Literal(Literal),
     Placeholder,
+    NestedSelect(Box<SelectStatement>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -167,6 +170,14 @@ named!(predicate<&[u8], ConditionExpression>,
                     )
                 }
             )
+        |   chain!(
+                select: delimited!(tag!("("), nested_selection, tag!(")")),
+                || {
+                    ConditionExpression::Base(
+                        ConditionBase::NestedSelect(Box::new(select))
+                    )
+                }
+            )
     )
 );
 
@@ -174,7 +185,13 @@ named!(predicate<&[u8], ConditionExpression>,
 mod tests {
     use super::*;
     use column::Column;
-    use common::{Literal, Operator};
+    use common::{Literal, Operator, FieldExpression};
+
+    fn columns(cols: &[&str]) -> Vec<FieldExpression> {
+        cols.iter()
+            .map(|c| FieldExpression::Col(Column::from(*c)))
+            .collect()
+    }
 
     fn flat_condition_tree(
         op: Operator,
@@ -402,6 +419,36 @@ mod tests {
 
         let res = condition_expr(cond.as_bytes());
         assert_eq!(res.unwrap().1, complete);
+    }
+
+    #[test]
+    fn nested_select() {
+
+        use select::SelectStatement;
+        use table::Table;
+        use ConditionBase::*;
+        use std::default::Default;
+
+        let cond = "bar in (select col from foo)";
+
+        condition_expr(cond.as_bytes());
+        let res = condition_expr(cond.as_bytes());
+
+        let nested_select = Box::new(SelectStatement {
+            tables: vec![Table::from("foo")],
+            fields: columns(&["col"]),
+            ..Default::default()
+        });
+
+        let expected = flat_condition_tree(
+            Operator::In,
+            Field("bar".into()),
+            NestedSelect(nested_select),
+        );
+
+        println!("{:?}", res);
+        assert_eq!(res.unwrap().1, expected);
+
     }
 
 }
