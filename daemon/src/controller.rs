@@ -2,7 +2,7 @@ use channel::poll::{PollEvent, PollingLoop};
 use slog::Logger;
 use std::net::SocketAddr;
 
-use protocol::CoordinationMessage;
+use protocol::{CoordinationMessage, CoordinationPayload};
 
 pub struct Controller {
     listen_port: u16,
@@ -30,8 +30,9 @@ impl Controller {
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
         pl.run_polling_loop(|e| {
             match e {
-                PollEvent::Process(msg) => {
-                    info!(self.log, "Got {:?}", msg);
+                PollEvent::Process(ref msg) => {
+                    debug!(self.log, "Received {:?}", msg);
+                    self.handle(msg);
                 }
                 PollEvent::ResumePolling(_) => (),
                 PollEvent::Timeout => (),
@@ -40,18 +41,14 @@ impl Controller {
         })
     }
 
-    fn handle_register(&mut self, mut socket: TcpStream, remote_addr: SocketAddr) {
-        use std::io::Read;
-
-        info!(self.log, "new worker connected from: {:?}", remote_addr);
-
-        let mut buf = [0; 2000];
-        loop {
-            // XXX(malte): delimited reads
-            socket.read(&mut buf);
-            let msg: CoordinationMessage = bincode::deserialize(&buf).unwrap();
-            info!(self.log, "got {:#?}", msg);
+    fn handle(&mut self, msg: &CoordinationMessage) {
+        match msg.payload {
+            CoordinationPayload::Register => self.handle_register(msg),
+            _ => unimplemented!(),
         }
-        // XXX(malte): insert socket into epoll selector
+    }
+
+    fn handle_register(&mut self, msg: &CoordinationMessage) {
+        info!(self.log, "new worker registered from {:?}", msg.source);
     }
 }

@@ -93,17 +93,13 @@ fn main() {
         }
         Some(c) => {
             let mut worker = worker::Worker::new(&c, log.clone());
-            for i in 0..3 {
+            loop {
                 match worker.connect() {
-                    Ok(_) => (),
-                    Err(e) => {
-                        error!(
-                            log,
-                            "failed to connect to controller (attempt {}): {:?}",
-                            i,
-                            e
-                        )
+                    Ok(_) => {
+                        // enter worker loop, wait for instructions
+                        worker.handle()
                     }
+                    Err(e) => error!(log, "failed to connect to controller: {:?}", e),
                 }
 
                 thread::sleep(Duration::from_millis(1000));
