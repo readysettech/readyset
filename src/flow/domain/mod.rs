@@ -145,37 +145,51 @@ impl DomainBuilder {
             .send(ControlReplyPacket::Booted(shard.unwrap_or(0), addr.clone()))
             .unwrap();
 
-        Domain {
-            index: self.index,
-            shard,
-            nshards: self.nshards,
-            transaction_state: transactions::DomainState::new(self.index, checktable, self.ts),
-            persistence_parameters: self.persistence_parameters,
-            nodes: self.nodes,
-            state: StateMap::default(),
-            log,
-            not_ready,
-            mode: DomainMode::Forwarding,
-            waiting: local::Map::new(),
-            reader_triggered: local::Map::new(),
-            replay_paths: HashMap::new(),
+        info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
+        let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
+        let name = match shard {
+            Some(shard) => format!("domain{}.{}", name, shard),
+            None => format!("domain{}", name),
+        };
+        thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                Domain {
+                    index: self.index,
+                    shard,
+                    nshards: self.nshards,
+                    transaction_state: transactions::DomainState::new(
+                        self.index,
+                        checktable,
+                        self.ts,
+                    ),
+                    persistence_parameters: self.persistence_parameters,
+                    nodes: self.nodes,
+                    state: StateMap::default(),
+                    log,
+                    not_ready,
+                    mode: DomainMode::Forwarding,
+                    waiting: local::Map::new(),
+                    reader_triggered: local::Map::new(),
+                    replay_paths: HashMap::new(),
 
-            addr,
-            readers,
-            inject: None,
-            debug_tx,
-            control_reply_tx,
-            channel_coordinator,
+                    addr,
+                    readers,
+                    inject: None,
+                    debug_tx,
+                    control_reply_tx,
+                    channel_coordinator,
 
-            concurrent_replays: 0,
-            replay_request_queue: Default::default(),
+                    concurrent_replays: 0,
+                    replay_request_queue: Default::default(),
 
-            total_time: Timer::new(),
-            total_ptime: Timer::new(),
-            wait_time: Timer::new(),
-            process_times: TimerSet::new(),
-            process_ptimes: TimerSet::new(),
-        }.boot(polling_loop)
+                    total_time: Timer::new(),
+                    total_ptime: Timer::new(),
+                    wait_time: Timer::new(),
+                    process_times: TimerSet::new(),
+                    process_ptimes: TimerSet::new(),
+                }.run(polling_loop)
+            }).unwrap()
     }
 }
 
@@ -1757,66 +1771,55 @@ impl Domain {
         }
     }
 
-    pub fn boot(mut self, mut polling_loop: PollingLoop<Box<Packet>>) -> thread::JoinHandle<()> {
-        info!(self.log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
-        let name = match self.shard {
-            Some(shard) => format!("domain{}.{}", name, shard),
-            None => format!("domain{}", name),
-        };
-        thread::Builder::new()
-            .name(name)
-            .spawn(move || {
-                let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
-                    self.index,
-                    self.shard.unwrap_or(0),
-                    &self.persistence_parameters,
-                    self.transaction_state.get_checktable().clone(),
-                );
+    pub fn run(mut self, mut polling_loop: PollingLoop<Box<Packet>>) {
+        let mut group_commit_queues = persistence::GroupCommitQueueSet::new(
+            self.index,
+            self.shard.unwrap_or(0),
+            &self.persistence_parameters,
+            self.transaction_state.get_checktable().clone(),
+        );
 
-                // Run polling loop.
-                self.total_time.start();
-                self.total_ptime.start();
-                polling_loop.run_polling_loop(|event| match event {
-                    PollEvent::ResumePolling(timeout) => {
-                        *timeout = group_commit_queues.duration_until_flush();
-                        KeepPolling
+        // Run polling loop.
+        self.total_time.start();
+        self.total_ptime.start();
+        polling_loop.run_polling_loop(|event| match event {
+            PollEvent::ResumePolling(timeout) => {
+                *timeout = group_commit_queues.duration_until_flush();
+                KeepPolling
+            }
+            PollEvent::Process(packet) => {
+                if let Packet::Quit = *packet {
+                    return StopPolling;
+                }
+
+                // TODO: Initialize tracer here, and when flushing group commit
+                // queue.
+                if group_commit_queues.should_append(&packet, &self.nodes) {
+                    debug_assert!(packet.is_regular());
+                    packet.trace(PacketEvent::ExitInputChannel);
+                    let merged_packet = group_commit_queues.append(packet, &self.nodes);
+                    if let Some(packet) = merged_packet {
+                        self.handle(packet);
                     }
-                    PollEvent::Process(packet) => {
-                        if let Packet::Quit = *packet {
-                            return StopPolling;
-                        }
+                } else {
+                    self.handle(packet);
+                }
 
-                        // TODO: Initialize tracer here, and when flushing group commit
-                        // queue.
-                        if group_commit_queues.should_append(&packet, &self.nodes) {
-                            debug_assert!(packet.is_regular());
-                            packet.trace(PacketEvent::ExitInputChannel);
-                            let merged_packet = group_commit_queues.append(packet, &self.nodes);
-                            if let Some(packet) = merged_packet {
-                                self.handle(packet);
-                            }
-                        } else {
-                            self.handle(packet);
-                        }
+                while let Some(p) = self.inject.take() {
+                    self.handle(p);
+                }
 
-                        while let Some(p) = self.inject.take() {
-                            self.handle(p);
-                        }
-
-                        KeepPolling
+                KeepPolling
+            }
+            PollEvent::Timeout => {
+                if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
+                    self.handle(m);
+                    while let Some(p) = self.inject.take() {
+                        self.handle(p);
                     }
-                    PollEvent::Timeout => {
-                        if let Some(m) = group_commit_queues.flush_if_necessary(&self.nodes) {
-                            self.handle(m);
-                            while let Some(p) = self.inject.take() {
-                                self.handle(p);
-                            }
-                        }
-                        KeepPolling
-                    }
-                });
-            })
-            .unwrap()
+                }
+                KeepPolling
+            }
+        });
     }
 }
