@@ -219,8 +219,15 @@ named!(where_clause<&[u8], ConditionExpression>,
 );
 
 /// Parse rule for a SQL selection query.
-/// TODO(malte): support nested queries as selection targets
 named!(pub selection<&[u8], SelectStatement>,
+    chain!(
+        select: nested_selection ~
+        statement_terminator,
+        || { select }
+    )
+);
+
+named!(pub nested_selection<&[u8], SelectStatement>,
     chain!(
         caseless_tag!("select") ~
         multispace ~
@@ -234,7 +241,6 @@ named!(pub selection<&[u8], SelectStatement>,
         group_by: opt!(group_by_clause) ~
         order: opt!(order_clause) ~
         limit: opt!(limit_clause) ~
-        statement_terminator,
         || {
             SelectStatement {
                 tables: tables,
@@ -884,4 +890,114 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn nested_select() {
+        let qstr = "SELECT ol_i_id FROM orders, order_line WHERE orders.o_c_id \
+                    IN (SELECT o_c_id FROM orders, order_line WHERE orders.o_id = order_line.ol_o_id);";
+
+        let res = selection(qstr.as_bytes());
+        let inner_where_clause = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("orders.o_id")))),
+            right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
+            operator: Operator::Equal
+        });
+
+        let inner_select = SelectStatement {
+            tables: vec![Table::from("orders"), Table::from("order_line")],
+            fields: columns(&[
+                "o_c_id"
+            ]),
+            where_clause: Some(inner_where_clause),
+            ..Default::default()
+        };
+
+        let outer_where_clause = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
+            right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
+            operator: Operator::In,
+        });
+
+        let outer_select = SelectStatement {
+            tables: vec![Table::from("orders"), Table::from("order_line")],
+            fields: columns(&[
+                "ol_i_id"
+            ]),
+            where_clause: Some(outer_where_clause),
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, outer_select);
+
+    }
+
+    #[test]
+    fn recursive_nested_select() {
+        let qstr = "SELECT ol_i_id FROM orders, order_line WHERE orders.o_c_id \
+                    IN (SELECT o_c_id FROM orders, order_line \
+                    WHERE orders.o_id = order_line.ol_o_id \
+                    AND orders.o_id > (SELECT MAX(o_id) FROM orders));";
+
+        let res = selection(qstr.as_bytes());
+
+        let agg_expr = FunctionExpression::Max(Column::from("o_id"));
+        let recursive_select = SelectStatement {
+            tables: vec![Table::from("orders")],
+            fields: vec![
+                FieldExpression::Col(Column {
+                    name: String::from("max(o_id)"),
+                    alias: None,
+                    table: None,
+                    function: Some(Box::new(agg_expr)),
+                })
+            ],
+            ..Default::default()
+        };
+
+        let cop1 = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("orders.o_id")))),
+            right: Box::new(Base(Field(Column::from("order_line.ol_o_id")))),
+            operator: Operator::Equal
+        });
+
+        let cop2 = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("orders.o_id")))),
+            right: Box::new(Base(NestedSelect(Box::new(recursive_select)))),
+            operator: Operator::Greater,
+        });
+
+        let inner_where_clause = LogicalOp(ConditionTree {
+            left: Box::new(cop1),
+            right: Box::new(cop2),
+            operator: Operator::And,
+        });
+
+        let inner_select = SelectStatement {
+            tables: vec![Table::from("orders"), Table::from("order_line")],
+            fields: columns(&[
+                "o_c_id"
+            ]),
+            where_clause: Some(inner_where_clause),
+            ..Default::default()
+        };
+
+        let outer_where_clause = ComparisonOp(ConditionTree {
+            left: Box::new(Base(Field(Column::from("orders.o_c_id")))),
+            right: Box::new(Base(NestedSelect(Box::new(inner_select)))),
+            operator: Operator::In,
+        });
+
+        let outer_select = SelectStatement {
+            tables: vec![Table::from("orders"), Table::from("order_line")],
+            fields: columns(&[
+                "ol_i_id"
+            ]),
+            where_clause: Some(outer_where_clause),
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, outer_select);
+
+    }
+
 }

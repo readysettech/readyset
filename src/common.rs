@@ -94,6 +94,7 @@ pub enum Operator {
     GreaterOrEqual,
     Less,
     LessOrEqual,
+    In,
 }
 
 impl Display for Operator {
@@ -110,6 +111,7 @@ impl Display for Operator {
             Operator::GreaterOrEqual => ">=",
             Operator::Less => "<",
             Operator::LessOrEqual => "<=",
+            Operator::In => "in",
         };
         write!(f, "{}", op)
     }
@@ -371,6 +373,7 @@ named!(pub binary_comparison_operator<&[u8], Operator>,
          | map!(caseless_tag!("="), |_| Operator::Equal)
          | map!(caseless_tag!("<"), |_| Operator::Less)
          | map!(caseless_tag!(">"), |_| Operator::Greater)
+         | map!(caseless_tag!("in"), |_| Operator::In)
     )
 );
 
