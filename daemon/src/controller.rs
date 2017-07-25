@@ -1,12 +1,23 @@
 use channel::poll::{PollEvent, PollingLoop};
 use slog::Logger;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use protocol::{CoordinationMessage, CoordinationPayload};
 
+#[derive(Debug, Default)]
+pub struct WorkerStatus {
+    healthy: bool,
+    last_heartbeat: Option<Instant>,
+}
+
+#[derive(Debug)]
 pub struct Controller {
     listen_port: u16,
     log: Logger,
+
+    workers: HashMap<SocketAddr, WorkerStatus>,
 }
 
 impl Controller {
@@ -14,6 +25,7 @@ impl Controller {
         Controller {
             listen_port: port,
             log: log,
+            workers: HashMap::new(),
         }
     }
 
@@ -44,11 +56,22 @@ impl Controller {
     fn handle(&mut self, msg: &CoordinationMessage) {
         match msg.payload {
             CoordinationPayload::Register => self.handle_register(msg),
+            CoordinationPayload::Heartbeat => self.handle_heartbeat(msg),
             _ => unimplemented!(),
         }
     }
 
     fn handle_register(&mut self, msg: &CoordinationMessage) {
         info!(self.log, "new worker registered from {:?}", msg.source);
+        self.workers.insert(msg.source.clone(), WorkerStatus::default());
+    }
+
+    fn handle_heartbeat(&mut self, msg: &CoordinationMessage) {
+        match self.workers.get_mut(&msg.source) {
+            None => crit!(self.log, "got heartbeat for unknown worker {:?}", msg.source),
+            Some(ref mut ws) => {
+                ws.last_heartbeat = Some(Instant::now());
+            }
+        }
     }
 }
