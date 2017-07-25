@@ -317,6 +317,8 @@
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![deny(missing_docs)]
+#![feature(plugin, use_extern_macros)]
+#![plugin(tarpc_plugins)]
 
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
@@ -387,6 +389,10 @@ extern crate snowflake;
 extern crate chrono;
 extern crate time;
 extern crate mio;
+#[macro_use]
+extern crate tarpc;
+extern crate futures;
+extern crate tokio_core;
 
 extern crate channel;
 

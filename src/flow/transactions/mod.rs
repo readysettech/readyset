@@ -1,6 +1,6 @@
 use petgraph::graph::NodeIndex;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 
 use std::cmp::Ordering;
 
@@ -67,7 +67,7 @@ pub enum Event {
 pub struct DomainState {
     domain_index: domain::Index,
 
-    checktable: Arc<Mutex<checktable::CheckTable>>,
+    checktable: Rc<checktable::CheckTableClient>,
     buffer: BinaryHeap<BufferEntry>,
 
     next_transaction: Bundle,
@@ -86,18 +86,17 @@ pub struct DomainState {
 impl DomainState {
     pub fn new(
         domain_index: domain::Index,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
+        checktable: Rc<checktable::CheckTableClient>,
         ts: i64,
     ) -> Self {
-
         Self {
-            domain_index: domain_index,
-            checktable: checktable,
+            domain_index,
+            checktable,
             buffer: BinaryHeap::new(),
             next_transaction: Bundle::Empty,
             ingress_from_base: Vec::new(),
             egress_for_base: Default::default(),
-            ts: ts,
+            ts,
         }
     }
 
@@ -108,7 +107,8 @@ impl DomainState {
     fn buffer_transaction(&mut self, m: Box<Packet>) {
         let (ts, base, prev_ts) = match *m {
             Packet::Transaction {
-                state: TransactionState::Committed(ts, base, ref prevs), ..
+                state: TransactionState::Committed(ts, base, ref prevs),
+                ..
             } => {
                 if self.ts == ts - 1 {
                     (ts, Some(base), ts - 1)
@@ -125,7 +125,8 @@ impl DomainState {
             Packet::StartMigration { at, prev_ts, .. } => (at, None, prev_ts),
             Packet::CompleteMigration { at, .. } => (at, None, at - 1),
             Packet::ReplayPiece {
-                transaction_state: Some(ReplayTransactionState { ts, ref prevs }), ..
+                transaction_state: Some(ReplayTransactionState { ts, ref prevs }),
+                ..
             } => {
                 if self.ts == ts - 1 {
                     (ts, None, ts - 1)
@@ -149,8 +150,8 @@ impl DomainState {
                 Bundle::Empty => {
                     let bundle = match m {
                         box Packet::Transaction { .. } => {
-                            let count = base.map(|b| self.ingress_from_base[b.index()])
-                                .unwrap_or(1);
+                            let count =
+                                base.map(|b| self.ingress_from_base[b.index()]).unwrap_or(1);
                             if count == 0 {
                                 println!(
                                     "{:?} got transaction from base {:?}, which it shouldn't",
@@ -312,7 +313,7 @@ impl DomainState {
     }
 
     pub fn schedule_replay(&mut self, tag: Tag, key: Vec<DataType>) {
-        let (ts, prevs) = self.checktable.lock().unwrap().claim_replay_timestamp(&tag);
+        let (ts, prevs) = self.checktable.claim_replay_timestamp(tag.clone()).unwrap();
 
         let prev_ts = if self.ts == ts - 1 {
             ts - 1
@@ -349,7 +350,7 @@ impl DomainState {
         }
     }
 
-    pub fn get_checktable(&self) -> &Arc<Mutex<checktable::CheckTable>> {
-        &self.checktable
+    pub fn get_checktable(&self) -> Rc<checktable::CheckTableClient> {
+        self.checktable.clone()
     }
 }

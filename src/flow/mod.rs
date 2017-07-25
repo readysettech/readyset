@@ -19,6 +19,8 @@ use petgraph;
 use petgraph::visit::Bfs;
 use petgraph::graph::NodeIndex;
 
+use tarpc::sync::client::{self, ClientExt};
+
 pub mod core;
 pub mod debug;
 pub mod domain;
@@ -61,7 +63,8 @@ pub struct Blender {
     ingredients: petgraph::Graph<node::Node, Edge>,
     source: NodeIndex,
     ndomains: usize,
-    checktable: Arc<Mutex<checktable::CheckTable>>,
+    checktable: checktable::CheckTableClient,
+    checktable_addr: SocketAddr,
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
     sharding_enabled: bool,
@@ -87,11 +90,18 @@ impl Default for Blender {
             node::special::Source,
             true,
         ));
+
+        let checktable_addr = checktable::service::CheckTableServer::start();
+        let checktable =
+            checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
+                .unwrap();
+
         Blender {
             ingredients: g,
             source: source,
             ndomains: 0,
-            checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
+            checktable,
+            checktable_addr,
             partial: Default::default(),
             partial_enabled: true,
             sharding_enabled: true,
@@ -180,9 +190,11 @@ impl Blender {
 
     /// Get a boxed function which can be used to validate tokens.
     pub fn get_validator(&self) -> Box<Fn(&checktable::Token) -> bool> {
-        let checktable = self.checktable.clone();
+        let checktable =
+            checktable::CheckTableClient::connect(self.checktable_addr, client::Options::default())
+                .unwrap();
         Box::new(move |t: &checktable::Token| {
-            checktable.lock().unwrap().validate_token(t)
+            checktable.validate_token(t.clone()).unwrap()
         })
     }
 
@@ -604,9 +616,8 @@ impl<'a> Migration<'a> {
         let token_generator = checktable::TokenGenerator::new(coarse_parents, granular_parents);
         self.mainline
             .checktable
-            .lock()
-            .unwrap()
-            .track(&token_generator);
+            .track(token_generator.clone())
+            .unwrap();
 
         self.mainline.ingredients[ri]
             .with_reader_mut(|r| { r.set_token_generator(token_generator); });
@@ -887,7 +898,7 @@ impl<'a> Migration<'a> {
             domain_nodes,
         );
         let (start_ts, end_ts, prevs) =
-            mainline.checktable.lock().unwrap().perform_migration(&deps);
+            mainline.checktable.perform_migration(deps.clone()).unwrap();
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
@@ -908,7 +919,7 @@ impl<'a> Migration<'a> {
                 &mainline.readers,
                 nodes,
                 &mainline.persistence,
-                &mainline.checktable,
+                &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
                 start_ts,
@@ -967,9 +978,8 @@ impl<'a> Migration<'a> {
         // request timestamps until after the migration in finished.
         mainline
             .checktable
-            .lock()
-            .unwrap()
-            .add_replay_paths(domains_on_path);
+            .add_replay_paths(domains_on_path)
+            .unwrap();
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 

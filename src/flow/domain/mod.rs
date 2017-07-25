@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
+use std::rc::Rc;
 
 use std::net::SocketAddr;
 
@@ -20,6 +21,7 @@ use flow;
 use checktable;
 use slog::Logger;
 use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
+use tarpc::sync::client::{self, ClientExt};
 
 const BATCH_SIZE: usize = 256;
 
@@ -110,6 +112,7 @@ pub struct DomainBuilder {
     pub persistence_parameters: persistence::Parameters,
     pub ts: i64,
     pub control_addr: SocketAddr,
+    pub checktable_addr: SocketAddr,
     pub debug_addr: Option<SocketAddr>,
 }
 
@@ -119,7 +122,6 @@ impl DomainBuilder {
         log: Logger,
         readers: flow::Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
-        checktable: Arc<Mutex<checktable::CheckTable>>,
     ) -> thread::JoinHandle<()> {
         // initially, all nodes are not ready
         let not_ready = self.nodes
@@ -154,6 +156,13 @@ impl DomainBuilder {
         thread::Builder::new()
             .name(name)
             .spawn(move || {
+                let checktable = Rc::new(
+                    checktable::CheckTableClient::connect(
+                        self.checktable_addr,
+                        client::Options::default(),
+                    ).unwrap(),
+                );
+
                 Domain {
                     index: self.index,
                     shard,
@@ -189,7 +198,8 @@ impl DomainBuilder {
                     process_times: TimerSet::new(),
                     process_ptimes: TimerSet::new(),
                 }.run(polling_loop)
-            }).unwrap()
+            })
+            .unwrap()
     }
 }
 
@@ -598,9 +608,7 @@ impl Domain {
             match self.transaction_state.get_next_event() {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
-                    self.control_reply_tx
-                        .send(ControlReplyPacket::Ack)
-                        .unwrap();
+                    self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
                 }
                 transactions::Event::CompleteMigration => {}
                 transactions::Event::SeedReplay(tag, key, rts) => {
@@ -839,9 +847,7 @@ impl Domain {
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::Ack)
-                            .unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
 
                         if notify_done {
                             info!(self.log,
@@ -983,9 +989,7 @@ impl Domain {
                             }
                         }
 
-                        self.control_reply_tx
-                            .send(ControlReplyPacket::Ack)
-                            .unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
                     }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
@@ -1755,9 +1759,7 @@ impl Domain {
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                self.control_reply_tx
-                    .send(ControlReplyPacket::Ack)
-                    .unwrap();
+                self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
             } else {
                 unreachable!()
             }

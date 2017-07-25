@@ -2,7 +2,6 @@ use channel::{tcp, TcpSender, TcpReceiver};
 use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
 
 use flow;
-use flow::checktable;
 use flow::domain;
 use flow::payload::ControlReplyPacket;
 use flow::persistence;
@@ -13,7 +12,7 @@ use std;
 use std::cell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use mio;
@@ -99,7 +98,7 @@ impl DomainHandle {
         readers: &flow::Readers,
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &persistence::Parameters,
-        checktable: &Arc<Mutex<checktable::CheckTable>>,
+        checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
         ts: i64,
@@ -140,15 +139,13 @@ impl DomainHandle {
                 persistence_parameters: persistence_params.clone(),
                 ts,
                 control_addr: control_listener.local_addr().unwrap(),
+                checktable_addr: checktable_addr.clone(),
                 debug_addr: debug_addr.clone(),
             };
 
-            threads.push(domain.boot(
-                logger,
-                readers.clone(),
-                channel_coordinator.clone(),
-                checktable.clone(),
-            ));
+            threads.push(
+                domain.boot(logger, readers.clone(), channel_coordinator.clone()),
+            );
 
             let stream =
                 mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();
