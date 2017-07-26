@@ -39,7 +39,7 @@ where
     for<'de> T: Deserialize<'de>,
 {
     pub fn new() -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
         let addr = listener.local_addr().unwrap();
         Self::from_listener(TcpListener::from_listener(listener, &addr).unwrap())
     }
