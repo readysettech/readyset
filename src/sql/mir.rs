@@ -455,22 +455,34 @@ impl SqlToMirConverter {
     }
 
     fn make_union_node(
-        &mut self, 
+        &mut self,
         name: &str,
         ancestors: Vec<MirNodeRef>
     ) -> MirNodeRef {
         let mut emit: Vec<Vec<Column>> = Vec::new();
+        assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
-        let mut cols = Vec::new();
+        let ucols: Vec<Column> = ancestors.first().unwrap()
+                                    .borrow()
+                                    .columns()
+                                    .iter()
+                                    .cloned()
+                                    .collect();
+
+        assert!(ancestors
+                .iter()
+                .all(|a| a.borrow().columns().len() == ucols.len()),
+                "all ancestors columns must have the same size");
+
         for ancestor in ancestors.iter() {
-            cols = ancestor.borrow().columns().iter().cloned().collect();
+            let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
             emit.push(cols.clone());
         }
 
         MirNode::new(
             name,
             self.schema_version,
-            cols,
+            ucols,
             MirNodeType::Union { emit },
             ancestors.clone(),
             vec![],
