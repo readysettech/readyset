@@ -186,6 +186,10 @@ where
         Ok(Self::new(listener.accept()?.0))
     }
 
+    pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        self.stream.local_addr()
+    }
+
     fn send_ack(&mut self) -> Result<(), io::Error> {
         if self.unacked + 1 == *self.window.as_ref().unwrap() {
             let n = self.stream.write(&[0u8])?;
