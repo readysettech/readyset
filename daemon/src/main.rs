@@ -116,6 +116,7 @@ fn main() {
                     Err(e) => error!(log, "failed to connect to controller: {:?}", e),
                 }
 
+                // wait for a second in between connection attempts
                 thread::sleep(Duration::from_millis(1000));
             }
         }
