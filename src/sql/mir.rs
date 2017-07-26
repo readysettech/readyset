@@ -454,6 +454,29 @@ impl SqlToMirConverter {
         }
     }
 
+    fn make_union_node(
+        &mut self, 
+        name: &str,
+        ancestors: Vec<MirNodeRef>
+    ) -> MirNodeRef {
+        let mut emit: Vec<Vec<Column>> = Vec::new();
+
+        let mut cols = Vec::new();
+        for ancestor in ancestors.iter() {
+            cols = ancestor.borrow().columns().iter().cloned().collect();
+            emit.push(cols.clone());
+        }
+
+        MirNode::new(
+            name,
+            self.schema_version,
+            cols,
+            MirNodeType::Union { emit },
+            ancestors.clone(),
+            vec![],
+        )
+    }
+
     fn make_filter_nodes(
         &mut self,
         name: &str,
