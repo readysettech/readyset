@@ -1209,8 +1209,9 @@ impl Debug for MirNodeType {
                         .join(", ")
                     )
                     .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "{} ⋃ {}", cols_left, cols_right)
+                    .join(" ⋃ ");
+
+                write!(f, "{}", cols)
             },
         }
     }
@@ -1341,13 +1342,15 @@ fn make_union_node(
 
         let ni = n.borrow().flow_node_addr().unwrap();
         emit_column_id.insert(ni, emit_cols);
-
     }
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
         ops::union::Union::new(emit_column_id),
     );
+
+    FlowNode::New(node)
+}
 
 fn make_filter_node(
     name: &str,
