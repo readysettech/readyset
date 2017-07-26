@@ -23,6 +23,8 @@ struct Config {
     addr: String,
     port: u16,
     controller: Option<String>,
+    heartbeat_freq: u64,
+    healthcheck_freq: u64,
 }
 
 fn logger_pls() -> slog::Logger {
@@ -39,6 +41,20 @@ fn parse_args() -> Config {
     let matches = App::new("gulaschkanone")
         .version("0.0.1")
         .about("Delivers scalable Soup distribution.")
+        .arg(
+            Arg::with_name("heartbeat_frequency")
+                .takes_value(true)
+                .value_name("N")
+                .default_value("1000")
+                .help("Heartbeat every N milliseconds"),
+        )
+        .arg(
+            Arg::with_name("healthcheck_frequency")
+                .takes_value(true)
+                .value_name("N")
+                .default_value("10000")
+                .help("Check worker health every N milliseconds"),
+        )
         .arg(
             Arg::with_name("listen_addr")
                 .short("l")
@@ -80,6 +96,8 @@ fn parse_args() -> Config {
             Some("worker") => Some(String::from(matches.value_of("controller").unwrap())),
             _ => unreachable!(),
         },
+        heartbeat_freq: value_t_or_exit!(matches, "heartbeat_frequency", u64),
+        healthcheck_freq: value_t_or_exit!(matches, "healthcheck_frequency", u64),
     }
 }
 
@@ -102,11 +120,23 @@ fn main() {
 
     match config.controller {
         None => {
-            let mut controller = controller::Controller::new(&config.addr, config.port, log);
+            let mut controller = controller::Controller::new(
+                &config.addr,
+                config.port,
+                Duration::from_millis(config.heartbeat_freq),
+                Duration::from_millis(config.healthcheck_freq),
+                log,
+            );
             controller.listen()
         }
         Some(c) => {
-            let mut worker = worker::Worker::new(&c, &config.addr, config.port, log.clone());
+            let mut worker = worker::Worker::new(
+                &c,
+                &config.addr,
+                config.port,
+                Duration::from_millis(config.heartbeat_freq),
+                log.clone(),
+            );
             loop {
                 match worker.connect() {
                     Ok(_) => {

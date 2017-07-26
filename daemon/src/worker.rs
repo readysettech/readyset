@@ -21,7 +21,13 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(controller: &str, listen_addr: &str, port: u16, log: Logger) -> Worker {
+    pub fn new(
+        controller: &str,
+        listen_addr: &str,
+        port: u16,
+        heartbeat_every: Duration,
+        log: Logger,
+    ) -> Worker {
         Worker {
             log: log,
 
@@ -32,7 +38,7 @@ impl Worker {
             receiver: None,
             sender: None,
 
-            heartbeat_every: Duration::from_millis(1000),
+            heartbeat_every: heartbeat_every,
             last_heartbeat: None,
         }
     }

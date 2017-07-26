@@ -4,15 +4,24 @@ use slog::Logger;
 use std::io;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use protocol::{CoordinationMessage, CoordinationPayload};
 
-#[derive(Default)]
 pub struct WorkerStatus {
     healthy: bool,
-    last_heartbeat: Option<Instant>,
+    last_heartbeat: Instant,
     sender: Option<TcpSender<CoordinationMessage>>,
+}
+
+impl WorkerStatus {
+    pub fn new(sender: TcpSender<CoordinationMessage>) -> Self {
+        WorkerStatus {
+            healthy: true,
+            last_heartbeat: Instant::now(),
+            sender: Some(sender),
+        }
+    }
 }
 
 pub struct Controller {
@@ -22,15 +31,28 @@ pub struct Controller {
     log: Logger,
 
     workers: HashMap<SocketAddr, WorkerStatus>,
+
+    heartbeat_every: Duration,
+    healthcheck_every: Duration,
+    last_checked_workers: Instant,
 }
 
 impl Controller {
-    pub fn new(listen_addr: &str, port: u16, log: Logger) -> Controller {
+    pub fn new(
+        listen_addr: &str,
+        port: u16,
+        heartbeat_every: Duration,
+        healthcheck_every: Duration,
+        log: Logger,
+    ) -> Controller {
         Controller {
             listen_addr: String::from(listen_addr),
             listen_port: port,
             log: log,
             workers: HashMap::new(),
+            heartbeat_every: heartbeat_every,
+            healthcheck_every: healthcheck_every,
+            last_checked_workers: Instant::now(),
         }
     }
 
@@ -67,11 +89,26 @@ impl Controller {
                         Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
                     }
                 }
-                PollEvent::ResumePolling(_) => (),
+                PollEvent::ResumePolling(timeout) => *timeout = Some(self.healthcheck_every),
                 PollEvent::Timeout => (),
             }
+
+            self.check_worker_liveness();
+
             ProcessResult::KeepPolling
         })
+    }
+
+    fn check_worker_liveness(&mut self) {
+        if self.last_checked_workers.elapsed() > self.healthcheck_every {
+            for (addr, ws) in self.workers.iter_mut() {
+                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
+                    warn!(self.log, "worker at {:?} has failed!", addr);
+                    ws.healthy = false;
+                }
+            }
+            self.last_checked_workers = Instant::now();
+        }
     }
 
     fn handle(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
@@ -94,9 +131,7 @@ impl Controller {
             remote
         );
 
-        let mut ws = WorkerStatus::default();
-        ws.sender = Some(TcpSender::connect(remote, None)?);
-
+        let ws = WorkerStatus::new(TcpSender::connect(remote, None)?);
         self.workers.insert(msg.source.clone(), ws);
 
         Ok(())
@@ -112,7 +147,7 @@ impl Controller {
                 )
             }
             Some(ref mut ws) => {
-                ws.last_heartbeat = Some(Instant::now());
+                ws.last_heartbeat = Instant::now();
             }
         }
 
