@@ -1196,7 +1196,7 @@ impl Debug for MirNodeType {
             } => {
                 let cols = emit
                     .iter()
-                    .map(|c| 
+                    .map(|c|
                         c.iter()
                         .map(|e| e.name.clone())
                         .collect::<Vec<_>>()
@@ -1336,7 +1336,7 @@ fn make_union_node(
 
         let ni = n.borrow().flow_node_addr().unwrap();
         emit_column_id.insert(ni, emit_cols);
-        
+
     }
     let node = mig.add_ingredient(
         String::from(name),

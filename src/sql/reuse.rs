@@ -1,5 +1,6 @@
 use nom_sql::{ConditionBase, ConditionExpression, ConditionTree, Literal, Operator, Table};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
+use nom_sql::ConditionExpression::*;
 
 use std::str;
 use std::vec::Vec;
@@ -149,18 +150,28 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
         // by the new one
         for ep in &ex_qgn.predicates {
             let mut matched = false;
+            let ect = match *ep {
+                ComparisonOp(ref ct) | LogicalOp(ref ct) => ct,
+                _ => unreachable!(),
+            };
+
             for np in &new_qgn.predicates {
-                if np.left == ep.left {
-                    // trace!(log,
-                    //        "matching predicates --\nexisting: {:#?},\nnew: {:#?}",
-                    //        ep,
-                    //        np);
-                    if !predicate_implies(np, ep) {
-                        // trace!(log, "Failed: {:?} does not imply {:?}", np, ep);
-                        return None;
-                    } else {
-                        matched = true;
-                    }
+                match *np {
+                    ComparisonOp(ref ct) | LogicalOp(ref ct) => {
+                        if ct.left == ect.left {
+                            // trace!(log,
+                            //        "matching predicates --\nexisting: {:#?},\nnew: {:#?}",
+                            //        ep,
+                            //        np);
+                            if !predicate_implies(ct, ect) {
+                                // trace!(log, "Failed: {:?} does not imply {:?}", np, ep);
+                                return None;
+                            } else {
+                                matched = true;
+                            }
+                        }
+                    },
+                    _ => unreachable!()
                 }
             }
             if !matched {

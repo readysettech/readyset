@@ -1,6 +1,7 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
               JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
 use nom_sql::SelectStatement;
+use nom_sql::ConditionExpression::*;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -106,7 +107,7 @@ impl PartialOrd for OutputColumn {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
-    pub predicates: Vec<ConditionTree>,
+    pub predicates: Vec<ConditionExpression>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Column>,
 }
@@ -171,9 +172,14 @@ impl QueryGraph {
         let mut attrs_vec = Vec::<&Column>::new();
         for n in self.relations.values() {
             for p in &n.predicates {
-                for c in &p.contained_columns() {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
+                match *p {
+                    ComparisonOp(ref ct) | LogicalOp (ref ct) =>  {
+                        for c in &ct.contained_columns() {
+                            attrs_vec.push(c);
+                            attrs.insert(c);
+                        }
+                    },
+                    _ => unreachable!(),
                 }
             }
         }
@@ -227,7 +233,7 @@ impl QueryGraph {
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &ConditionExpression,
-    mut local: &mut HashMap<String, Vec<ConditionTree>>,
+    mut local: &mut HashMap<String, Vec<ConditionExpression>>,
     mut join: &mut Vec<ConditionTree>,
     mut global: &mut Vec<ConditionTree>,
     mut params: &mut Vec<Column>,
@@ -289,7 +295,7 @@ fn classify_conditionals(
                                 assert!(lf.table.is_some());
                                 let mut e =
                                     local.entry(lf.table.clone().unwrap()).or_insert(Vec::new());
-                                e.push(ct.clone());
+                                e.push(ce.clone());
                             }
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
@@ -318,7 +324,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     // a handy closure for making new relation nodes
     let new_node = |rel: String,
-                    preds: Vec<ConditionTree>,
+                    preds: Vec<ConditionExpression>,
                     st: &SelectStatement|
      -> QueryGraphNode {
         QueryGraphNode {

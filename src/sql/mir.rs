@@ -831,7 +831,7 @@ impl SqlToMirConverter {
 
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
         match *ce {
-            ComparisonOp(ref ct) => {
+            LogicalOp(ref ct) => {
                 let (left, right);
                 match ct.operator {
                     Operator::And => {
@@ -879,12 +879,12 @@ impl SqlToMirConverter {
                         );
 
                         pred_nodes.push(union);
-                    }
-                    _ => unreachable!()
+                    },
+                    _ => unreachable!("LogicalOp operator is {:?}", ct.operator)
                 }
             },
-            LogicalOp(ref ct) => {
-                // currently, we only support filter logical operations
+            ComparisonOp(ref ct) => {
+                // currently, we only support filter-like comparison operations, no nested-selections
                 pred_nodes = self.make_filter_nodes(
                     &format!("{}_p{}", name, nc),
                     parent,
@@ -1039,29 +1039,29 @@ impl SqlToMirConverter {
 
 
             // 2. Get columns used by each filter node.
-            let mut filter_columns = HashMap::new();
+            // let mut filter_columns = HashMap::new();
             let mut filter_nodes = Vec::new();
             let mut moved_filters = Vec::new();
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             sorted_rels.sort();
-            for rel in &sorted_rels {
-                if *rel == "computed_columns" {
-                    continue;
-                }
+            // for rel in &sorted_rels {
+            //     if *rel == "computed_columns" {
+            //         continue;
+            //     }
 
-                let qgn = &qg.relations[*rel];
-                for cond in &qgn.predicates {
-                    let col = match *cond.left.as_ref() {
-                        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                        _ => unimplemented!(),
-                    };
+            //     let qgn = &qg.relations[*rel];
+            //     for cond in &qgn.predicates {
+            //         let col = match *cond.left.as_ref() {
+            //             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            //             _ => unimplemented!(),
+            //         };
 
-                    filter_columns
-                        .entry(col)
-                        .or_insert(Vec::new())
-                        .push(rel.to_string());
-                }
-            }
+            //         filter_columns
+            //             .entry(col)
+            //             .or_insert(Vec::new())
+            //             .push(rel.to_string());
+            //     }
+            // }
 
             // 3. Add function and grouped nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
@@ -1101,32 +1101,32 @@ impl SqlToMirConverter {
                             let over_col = target_columns_from_computed_column(fn_col);
 
                             // Check if filter reordering is needed
-                            if filter_columns.contains_key(over_col) {
-                                let rels = filter_columns.get(over_col).unwrap();
-                                for rel in rels {
-                                    if !moved_filters.contains(rel) {
-                                        let qgn = &qg.relations[rel.as_str()];
-                                        let parent = match prev_node {
-                                            None => base_nodes[rel.as_str()].clone(),
-                                            Some(pn) => pn,
-                                        };
-                                        let fns = self.make_filter_nodes(
-                                            &format!(
-                                                "q_{:x}_n{}",
-                                                qg.signature().hash,
-                                                new_node_count
-                                            ),
-                                            parent,
-                                            &qgn.predicates,
-                                        );
-                                        assert!(fns.len() > 0);
-                                        new_node_count += fns.len();
-                                        prev_node = Some(fns.iter().last().unwrap().clone());
-                                        filter_nodes.extend(fns);
-                                        moved_filters.push(rel.to_string());
-                                    }
-                                }
-                            }
+                            // if filter_columns.contains_key(over_col) {
+                            //     let rels = filter_columns.get(over_col).unwrap();
+                            //     for rel in rels {
+                            //         if !moved_filters.contains(rel) {
+                            //             let qgn = &qg.relations[rel.as_str()];
+                            //             let parent = match prev_node {
+                            //                 None => base_nodes[rel.as_str()].clone(),
+                            //                 Some(pn) => pn,
+                            //             };
+                            //             let fns = self.make_filter_nodes(
+                            //                 &format!(
+                            //                     "q_{:x}_n{}",
+                            //                     qg.signature().hash,
+                            //                     new_node_count
+                            //                 ),
+                            //                 parent,
+                            //                 &qgn.predicates,
+                            //             );
+                            //             assert!(fns.len() > 0);
+                            //             new_node_count += fns.len();
+                            //             prev_node = Some(fns.iter().last().unwrap().clone());
+                            //             filter_nodes.extend(fns);
+                            //             moved_filters.push(rel.to_string());
+                            //         }
+                            //     }
+                            // }
 
                             let over_table = over_col.table.as_ref().unwrap().as_str();
                             // get any parameter columns that aren't also in the group-by
@@ -1173,32 +1173,32 @@ impl SqlToMirConverter {
                             let over_col = target_columns_from_computed_column(computed_col);
 
                             // Check if filter reordering is needed
-                            if filter_columns.contains_key(over_col) {
-                                let rels = filter_columns.get(over_col).unwrap();
-                                for rel in rels {
-                                    if !moved_filters.contains(rel) {
-                                        let qgn = &qg.relations[rel.as_str()];
-                                        let parent = match prev_node {
-                                            None => base_nodes[rel.as_str()].clone(),
-                                            Some(pn) => pn,
-                                        };
-                                        let fns = self.make_filter_nodes(
-                                            &format!(
-                                                "q_{:x}_n{}",
-                                                qg.signature().hash,
-                                                new_node_count
-                                            ),
-                                            parent,
-                                            &qgn.predicates,
-                                        );
-                                        assert!(fns.len() > 0);
-                                        new_node_count += fns.len();
-                                        prev_node = Some(fns.iter().last().unwrap().clone());
-                                        filter_nodes.extend(fns);
-                                        moved_filters.push(rel.to_string());
-                                    }
-                                }
-                            }
+                            // if filter_columns.contains_key(over_col) {
+                            //     let rels = filter_columns.get(over_col).unwrap();
+                            //     for rel in rels {
+                            //         if !moved_filters.contains(rel) {
+                            //             let qgn = &qg.relations[rel.as_str()];
+                            //             let parent = match prev_node {
+                            //                 None => base_nodes[rel.as_str()].clone(),
+                            //                 Some(pn) => pn,
+                            //             };
+                            //             let fns = self.make_filter_nodes(
+                            //                 &format!(
+                            //                     "q_{:x}_n{}",
+                            //                     qg.signature().hash,
+                            //                     new_node_count
+                            //                 ),
+                            //                 parent,
+                            //                 &qgn.predicates,
+                            //             );
+                            //             assert!(fns.len() > 0);
+                            //             new_node_count += fns.len();
+                            //             prev_node = Some(fns.iter().last().unwrap().clone());
+                            //             filter_nodes.extend(fns);
+                            //             moved_filters.push(rel.to_string());
+                            //         }
+                            //     }
+                            // }
 
                             let over_table = over_col.table.as_ref().unwrap().as_str();
 
@@ -1259,19 +1259,24 @@ impl SqlToMirConverter {
                     // projected columns) that are required as inputs to joins
                     if !qgn.predicates.is_empty() {
                         // add a filter chain for each query graph node's predicates
-                        let parent = match prev_node {
-                            None => base_nodes[rel.as_str()].clone(),
-                            Some(pn) => pn,
-                        };
-                        let fns = self.make_filter_nodes(
-                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                            parent,
-                            &qgn.predicates,
-                        );
-                        assert!(fns.len() > 0);
-                        new_node_count += fns.len();
-                        prev_node = Some(fns.iter().last().unwrap().clone());
-                        filter_nodes.extend(fns);
+                        for ref p in &qgn.predicates {
+                            let parent = match prev_node {
+                                None => base_nodes[rel.as_str()].clone(),
+                                Some(pn) => pn,
+                            };
+
+                            let fns = self.make_predicate_nodes(
+                                &format!("q_{:x}", qg.signature().hash),
+                                parent,
+                                p,
+                                filter_nodes.len(),
+                            );
+
+                            assert!(fns.len() > 0);
+                            new_node_count += fns.len();
+                            prev_node = Some(fns.iter().last().unwrap().clone());
+                            filter_nodes.extend(fns);
+                        }
                     }
                 }
             }
