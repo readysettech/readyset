@@ -995,22 +995,31 @@ impl SqlToMirConverter {
 
         debug!(self.log, "Found {} policies for table {}", policies.len(), rel);
 
-        let mut prev_node = Some(base_node.clone());
 
-        let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-        let mut join_nodes: Vec<MirNodeRef> = Vec::new();
-        let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
-        let mut joined_tables = HashSet::new();
+        let mut security_nodes = Vec::new();
+        let mut last_policy_nodes = Vec::new();
 
         for (i, p) in policies.iter().enumerate() {
+            let mut prev_node = Some(base_node.clone());
+            let mut base_nodes: Vec<MirNodeRef> = Vec::new();
+            let mut join_nodes: Vec<MirNodeRef> = Vec::new();
+            let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
+            let mut joined_tables = HashSet::new();
+
             let mut qg = &p.1;
             let mut sorted_rels: Vec<&str> = qg.relations
                 .keys()
                 .map(String::as_str)
                 .collect();
 
-            ll base nodes, except UserContext, should be present in local_node_for_rel
-            {
+            sorted_rels.sort();
+
+            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
+                qg.edges.iter().collect();
+
+            // all base nodes should be present in local_node_for_rel, except for UserContext
+            // if policy uses UserContext, add it to local_node_for_rel
+            if qg.relations.get("UserContext").is_some() {
                 let latest_existing = self.current.get(&ucrel);
                 let ucn = match latest_existing {
 
@@ -1031,7 +1040,6 @@ impl SqlToMirConverter {
 
                 base_nodes.push(ucn.clone());
                 local_node_for_rel.insert(&ucrel, ucn.clone());
-                node_count += 1;
             }
 
             // Sort the edges to ensure deterministic join order.
@@ -1105,13 +1113,29 @@ impl SqlToMirConverter {
                 prev_node = Some(new_nodes.iter().last().expect("no new nodes were created").clone());
                 filter_nodes.extend(new_nodes);
             }
+
+            let policy_nodes: Vec<_> = base_nodes
+                                .into_iter()
+                                .chain(join_nodes.into_iter())
+                                .chain(filter_nodes.into_iter())
+                                .collect();
+
+            assert!(policy_nodes.len() > 0, "no nodes where created for policy");
+
+            security_nodes.extend(policy_nodes.clone());
+            last_policy_nodes.push(policy_nodes.last().unwrap().clone())
         }
 
-        base_nodes
-            .into_iter()
-            .chain(join_nodes.into_iter())
-            .chain(filter_nodes.into_iter())
-            .collect()
+        if last_policy_nodes.len() > 1 {
+            let final_node = self.make_union_node(
+                &format!("sp_final_union"),
+                last_policy_nodes
+                );
+
+            security_nodes.push(final_node);
+        }
+
+        security_nodes
     }
 
     fn pick_join_columns(
