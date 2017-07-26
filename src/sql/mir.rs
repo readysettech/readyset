@@ -455,7 +455,7 @@ impl SqlToMirConverter {
     }
 
     fn make_union_node(
-        &mut self,
+        &self,
         name: &str,
         ancestors: Vec<MirNodeRef>
     ) -> MirNodeRef {
@@ -490,7 +490,7 @@ impl SqlToMirConverter {
     }
 
     fn make_filter_nodes(
-        &mut self,
+        &self,
         name: &str,
         parent: MirNodeRef,
         predicates: &Vec<ConditionTree>,
@@ -821,40 +821,81 @@ impl SqlToMirConverter {
     }
 
     fn make_predicate_nodes(
-        &self, 
+        &self,
+        name: &str,
+        parent: MirNodeRef,
         ce: &ConditionExpression,
+        nc: usize,
     ) -> Vec<MirNodeRef> {
         use nom_sql::ConditionExpression::*;
-        
+
+        let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
         match *ce {
-            ComparisonOp(ct) => {
-                let left = self.make_predicate_nodes(ct.left);
-                let right = self.make_predicate_nodes(ct.right);
-
+            ComparisonOp(ref ct) => {
+                let (left, right);
                 match ct.operator {
-                    And => {
-                        assert!(left.len() > 0, "expected nodes for predicate {:?}", ct.left);
-                        assert!(right.len() > 0, "expected nodes for predicate {:?}", ct.right);
+                    Operator::And => {
+                        left = self.make_predicate_nodes(
+                            name,
+                            parent.clone(),
+                            &*ct.left,
+                            nc
+                        );
 
-                        let last_left = left.last().unwrap();
-                        let first_right = right.first().unwrap();
+                        right = self.make_predicate_nodes(
+                            name,
+                            left.last().unwrap().clone(),
+                            &*ct.right,
+                            nc + left.len()
+                        );
 
-                        first_right.borrow_mut().add_ancestor(last_left);
-                        last_left.borrow_mut().add_child(first_right);
+                        pred_nodes.extend(left.clone());
+                        pred_nodes.extend(right.clone());
 
                     },
-                    Or => {
-                        // join by union node
+                    Operator::Or => {
+                        left = self.make_predicate_nodes(
+                            name,
+                            parent.clone(),
+                            &*ct.left,
+                            nc
+                        );
+
+                        right = self.make_predicate_nodes(
+                            name,
+                            parent.clone(),
+                            &*ct.right,
+                            nc + left.len()
+                        );
+
+                        pred_nodes.extend(left.clone());
+                        pred_nodes.extend(right.clone());
+
+                        let last_left = left.last().unwrap().clone();
+                        let last_right = right.last().unwrap().clone();
+                        let union = self.make_union_node(
+                            &format!("{}_p{}", name, nc + left.len() + right.len()),
+                            vec![last_left, last_right]
+                        );
+
+                        pred_nodes.push(union);
                     }
+                    _ => unreachable!()
                 }
-            }, 
-            LogicalOp(ct) => {
+            },
+            LogicalOp(ref ct) => {
                 // currently, we only support filter logical operations
-                self.make_filter_nodes(ct);
-            }, 
-            NegationOp(ct) => unreachable!("negation should have been removed earlier"), 
-            Base(cb) => unreachable!(""), 
+                pred_nodes = self.make_filter_nodes(
+                    &format!("{}_p{}", name, nc),
+                    parent,
+                    &vec![ct.clone()]
+                );
+            },
+            NegationOp(_) => unreachable!("negation should have been removed earlier"),
+            Base(_) => unreachable!("dangling base predicate"),
         }
+
+        pred_nodes
     }
 
     /// Returns list of nodes added
