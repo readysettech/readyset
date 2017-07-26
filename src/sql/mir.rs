@@ -808,6 +808,43 @@ impl SqlToMirConverter {
         )
     }
 
+    fn make_predicate_nodes(
+        &self, 
+        ce: &ConditionExpression,
+    ) -> Vec<MirNodeRef> {
+        use nom_sql::ConditionExpression::*;
+        
+        match *ce {
+            ComparisonOp(ct) => {
+                let left = self.make_predicate_nodes(ct.left);
+                let right = self.make_predicate_nodes(ct.right);
+
+                match ct.operator {
+                    And => {
+                        assert!(left.len() > 0, "expected nodes for predicate {:?}", ct.left);
+                        assert!(right.len() > 0, "expected nodes for predicate {:?}", ct.right);
+
+                        let last_left = left.last().unwrap();
+                        let first_right = right.first().unwrap();
+
+                        first_right.borrow_mut().add_ancestor(last_left);
+                        last_left.borrow_mut().add_child(first_right);
+
+                    },
+                    Or => {
+                        // join by union node
+                    }
+                }
+            }, 
+            LogicalOp(ct) => {
+                // currently, we only support filter logical operations
+                self.make_filter_nodes(ct);
+            }, 
+            NegationOp(ct) => unreachable!("negation should have been removed earlier"), 
+            Base(cb) => unreachable!(""), 
+        }
+    }
+
     /// Returns list of nodes added
     fn make_nodes_for_selection(
         &mut self,
