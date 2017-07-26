@@ -20,6 +20,7 @@ use std::time::Duration;
 
 struct Config {
     hostname: String,
+    addr: String,
     port: u16,
     controller: Option<String>,
 }
@@ -38,6 +39,12 @@ fn parse_args() -> Config {
     let matches = App::new("gulaschkanone")
         .version("0.0.1")
         .about("Delivers scalable Soup distribution.")
+        .arg(
+            Arg::with_name("listen_addr")
+                .short("l")
+                .default_value("0.0.0.0")
+                .help("Address to listen on."),
+        )
         .arg(
             Arg::with_name("port")
                 .short("p")
@@ -66,6 +73,7 @@ fn parse_args() -> Config {
             Some(hn) => hn,
             None => "unknown".to_string(),
         },
+        addr: String::from(matches.value_of("listen_addr").unwrap()),
         port: value_t_or_exit!(matches, "port", u16),
         controller: match matches.value_of("mode") {
             Some("controller") => None,
@@ -84,15 +92,21 @@ fn main() {
     } else {
         "controller"
     };
-    info!(log, "{} starting on {}", mode, config.hostname);
+    info!(
+        log,
+        "{} starting on {}:{}",
+        mode,
+        config.hostname,
+        config.port
+    );
 
     match config.controller {
         None => {
-            let mut controller = controller::Controller::new(config.port, log);
+            let mut controller = controller::Controller::new(&config.addr, config.port, log);
             controller.listen()
         }
         Some(c) => {
-            let mut worker = worker::Worker::new(&c, log.clone());
+            let mut worker = worker::Worker::new(&c, &config.addr, config.port, log.clone());
             loop {
                 match worker.connect() {
                     Ok(_) => {

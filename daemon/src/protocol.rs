@@ -8,7 +8,7 @@ pub struct CoordinationMessage {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum CoordinationPayload {
-    Register,
+    Register(SocketAddr),
     Deregister,
     Heartbeat,
     AssignDomain,

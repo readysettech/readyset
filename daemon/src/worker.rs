@@ -1,5 +1,5 @@
-use channel::{self, TcpReceiver, TcpSender};
-use channel::tcp::TryRecvError;
+use channel::{self, TcpSender};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::time::{Instant, Duration};
@@ -10,7 +10,9 @@ pub struct Worker {
     log: Logger,
 
     controller_addr: String,
-    receiver: Option<TcpReceiver<CoordinationMessage>>,
+    listen_addr: String,
+    listen_port: u16,
+    receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
 
     // liveness
@@ -19,11 +21,14 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(controller: &str, log: Logger) -> Worker {
+    pub fn new(controller: &str, listen_addr: &str, port: u16, log: Logger) -> Worker {
         Worker {
             log: log,
 
+            listen_addr: String::from(listen_addr),
+            listen_port: port,
             controller_addr: String::from(controller),
+
             receiver: None,
             sender: None,
 
@@ -34,7 +39,20 @@ impl Worker {
 
     /// Connect to controller
     pub fn connect(&mut self) -> Result<(), channel::tcp::Error> {
+        use mio::net::TcpListener;
         use std::str::FromStr;
+
+        let local_addr = match self.receiver {
+            Some(ref r) => r.get_listener_addr().unwrap(),
+            None => {
+                let listener = TcpListener::bind(&SocketAddr::from_str(
+                    &format!("{}:{}", self.listen_addr, self.listen_port),
+                ).unwrap()).unwrap();
+                let addr = listener.local_addr().unwrap();
+                self.receiver = Some(PollingLoop::from_listener(listener));
+                addr
+            }
+        };
 
         let stream =
             TcpSender::connect(&SocketAddr::from_str(&self.controller_addr).unwrap(), None);
@@ -44,7 +62,7 @@ impl Worker {
                 self.last_heartbeat = Some(Instant::now());
 
                 // say hello
-                self.register()?;
+                self.register(local_addr)?;
 
                 Ok(())
             }
@@ -52,36 +70,34 @@ impl Worker {
         }
     }
 
-    /// Main worker loop: waits for instructions from master, and occasionally heartbeats to tell
-    /// the master that we're still live
+    /// Main worker loop: waits for instructions from controller, and occasionally heartbeats to tell
+    /// the controller that we're still here
     pub fn handle(&mut self) {
-        loop {
-            if self.receiver.is_some() {
-                match self.receiver.as_mut().unwrap().try_recv() {
-                    Ok(msg) => info!(self.log, "received from controller: {:?}", msg),
-                    Err(e) => {
-                        match e {
-                            TryRecvError::Disconnected => {
-                                error!(self.log, "controller disconnected!");
-                                return;
-                            }
-                            TryRecvError::Empty => (),
-                            TryRecvError::DeserializationError => {
-                                crit!(self.log, "failed to deserialize message from controller!");
-                            }
-                        }
-                    }
+        // needed to make the borrow checker happy, replaced later
+        let mut receiver = self.receiver.take();
+
+        receiver.as_mut().unwrap().run_polling_loop(|e| {
+            match e {
+                PollEvent::ResumePolling(timeout) => {
+                    *timeout = Some(self.heartbeat_every);
+                    return ProcessResult::KeepPolling;
                 }
+                PollEvent::Process(ref msg) => {
+                    debug!(self.log, "Received {:?}", msg);
+                }
+                PollEvent::Timeout => (),
             }
 
             match self.heartbeat() {
-                Ok(_) => (),
+                Ok(_) => ProcessResult::KeepPolling,
                 Err(e) => {
                     error!(self.log, "failed to send heartbeat to controller: {:?}", e);
-                    return;
+                    ProcessResult::StopPolling
                 }
-            };
-        }
+            }
+        });
+
+        self.receiver = receiver;
     }
 
     fn wrap_payload(&self, pl: CoordinationPayload) -> CoordinationMessage {
@@ -110,8 +126,8 @@ impl Worker {
         Ok(())
     }
 
-    fn register(&mut self) -> Result<(), channel::tcp::Error> {
-        let msg = self.wrap_payload(CoordinationPayload::Register);
+    fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::Error> {
+        let msg = self.wrap_payload(CoordinationPayload::Register(listen_addr));
         self.sender.as_mut().unwrap().send(msg)
     }
 }
