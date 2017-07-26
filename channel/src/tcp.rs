@@ -186,8 +186,12 @@ where
 
     fn send_ack(&mut self) -> Result<(), io::Error> {
         if self.unacked + 1 == *self.window.as_ref().unwrap() {
-            self.stream.write_all(&[0u8])?;
+            let n = self.stream.write(&[0u8])?;
             self.unacked = 0;
+
+            if n == 0 {
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            }
         }
         Ok(())
     }
@@ -199,7 +203,7 @@ where
 
         if self.window.is_none() {
             match self.window_buf.fill_from(&mut self.stream, 4) {
-                Ok(()) => {},
+                Ok(()) => {}
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     return Err(TryRecvError::Empty)
                 }
@@ -211,13 +215,19 @@ where
             self.window = Some(NetworkEndian::read_u32(&self.window_buf.data[0..4]));
         }
 
-        if self.send_ack().is_err() {
-            return Err(TryRecvError::Empty);
+        match self.send_ack() {
+            Ok(()) => {}
+            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {},
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
+            _ => {
+                self.poisoned = true;
+                return Err(TryRecvError::Disconnected);
+            }
         }
 
         // Read header (which is just a u32 containing the message size).
         match self.buffer.fill_from(&mut self.stream, 4) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
             _ => {
                 self.poisoned = true;
@@ -230,7 +240,7 @@ where
         let message_size: u32 = NetworkEndian::read_u32(&self.buffer.data[0..4]);
         let target_buffer_size = message_size as usize + 4;
         match self.buffer.fill_from(&mut self.stream, target_buffer_size) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
             _ => {
                 self.poisoned = true;
