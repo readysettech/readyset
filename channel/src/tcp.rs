@@ -48,6 +48,7 @@ pub struct TcpSender<T> {
 
     phantom: PhantomData<T>,
 }
+
 impl<T: Serialize> TcpSender<T> {
     pub fn new(mut stream: std::net::TcpStream, window: Option<u32>) -> Result<Self, io::Error> {
         if let Some(window) = window {
@@ -157,6 +158,7 @@ pub struct TcpReceiver<T> {
 
     phantom: PhantomData<T>,
 }
+
 impl<T> TcpReceiver<T>
 where
     for<'de> T: Deserialize<'de>,
@@ -277,6 +279,7 @@ where
         }
     }
 }
+
 impl<T> Evented for TcpReceiver<T> {
     fn register(
         &self,
