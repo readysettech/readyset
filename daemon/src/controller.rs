@@ -1,5 +1,6 @@
 use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop};
+use distributary::Blender;
 use slog::Logger;
 use std::io;
 use std::collections::HashMap;
@@ -30,6 +31,7 @@ pub struct Controller {
 
     log: Logger,
 
+    blender: Blender,
     workers: HashMap<SocketAddr, WorkerStatus>,
 
     heartbeat_every: Duration,
@@ -49,6 +51,7 @@ impl Controller {
             listen_addr: String::from(listen_addr),
             listen_port: port,
             log: log,
+            blender: Blender::new(),
             workers: HashMap::new(),
             heartbeat_every: heartbeat_every,
             healthcheck_every: healthcheck_every,

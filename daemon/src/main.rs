@@ -2,6 +2,7 @@ extern crate bincode;
 extern crate channel;
 #[macro_use]
 extern crate clap;
+extern crate distributary;
 extern crate hostname;
 extern crate mio;
 #[macro_use]
@@ -15,6 +16,8 @@ mod controller;
 mod protocol;
 mod worker;
 
+use distributary::Recipe;
+use slog::Logger;
 use std::thread;
 use std::time::Duration;
 
@@ -25,6 +28,18 @@ struct Config {
     controller: Option<String>,
     heartbeat_freq: u64,
     healthcheck_freq: u64,
+    recipe: Option<Recipe>,
+}
+
+fn load_recipe(path: &str) -> Result<Recipe, String> {
+    use std::io::Read;
+    use std::fs::File;
+
+    let mut s = String::new();
+    let mut rf = File::open(path).unwrap();
+    rf.read_to_string(&mut s).unwrap();
+
+    Recipe::from_str(&s, None)
 }
 
 fn logger_pls() -> slog::Logger {
@@ -35,7 +50,7 @@ fn logger_pls() -> slog::Logger {
     Logger::root(Mutex::new(term_full()).fuse(), o!())
 }
 
-fn parse_args() -> Config {
+fn parse_args(log: &Logger) -> Config {
     use clap::{Arg, App};
 
     let matches = App::new("gulaschkanone")
@@ -91,7 +106,15 @@ fn parse_args() -> Config {
                 .default_value("9999")
                 .value_name("PORT")
                 .help("Port to listen on."),
+        )
+        .arg(
+            Arg::with_name("recipe")
+                .short("r")
+                .long("recipe")
+                .required_if("mode", "controller")
                 .takes_value(true)
+                .value_name("FILE")
+                .help("Recipe to use for Soup."),
         )
         .get_matches();
 
@@ -109,12 +132,24 @@ fn parse_args() -> Config {
         },
         heartbeat_freq: value_t_or_exit!(matches, "heartbeat_frequency", u64),
         healthcheck_freq: value_t_or_exit!(matches, "healthcheck_frequency", u64),
+        recipe: match matches.value_of("recipe") {
+            None => None,
+            Some(path) => {
+                match load_recipe(path) {
+                    Ok(r) => Some(r),
+                    Err(e) => {
+                        error!(log, "failed to load recipe '{}': {:?}", path, e);
+                        None
+                    }
+                }
+            }
+        },
     }
 }
 
 fn main() {
     let log = logger_pls();
-    let config = parse_args();
+    let config = parse_args(&log);
 
     let mode = if config.controller.is_some() {
         "worker"
