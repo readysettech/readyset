@@ -225,13 +225,13 @@ impl QueryGraph {
     }
 }
 
-// 1. Extract any predictates with placeholder parameters. We push these down to the edge
+// 1. Extract any predicates with placeholder parameters. We push these down to the edge
 //    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
 // 2. Extract local predicates
 // 3. Extract join predicates
 // 4. Collect remaining predicates as global predicates
-fn classify_conditionals(
+fn  classify_conditionals(
     ce: &ConditionExpression,
     mut local: &mut HashMap<String, Vec<ConditionExpression>>,
     mut join: &mut Vec<ConditionTree>,
@@ -240,24 +240,72 @@ fn classify_conditionals(
 ) {
     use std::cmp::Ordering;
 
+    // Handling OR and AND expressions requires some care as there are some corner cases.
+    //    a) we don't support OR expressions with predicates with placeholder parameters,
+    //       because these expressions are meaningless in the Soup context.
+    //    b) we don't support OR expressions with join predicates because they are weird and
+    //       too hard.
+    //    c) we don't support OR expressions between different tables (e.g table1.x = 1 OR
+    //       table2.y= 42). this is a global predicate according to finkelstein algorithm
+    //       and we don't support these yet.
+
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
             // conjunction, check both sides (which must be selection predicates or
             // atomatic selection predicates)
+            let mut new_params = Vec::new();
+            let mut new_join = Vec::new();
             classify_conditionals(
                 ct.left.as_ref(),
                 &mut local,
-                &mut join,
+                &mut new_join,
                 &mut global,
-                &mut params,
+                &mut new_params,
             );
             classify_conditionals(
                 ct.right.as_ref(),
                 &mut local,
-                &mut join,
+                &mut new_join,
                 &mut global,
-                &mut params,
+                &mut new_params,
             );
+
+
+            match ct.operator {
+                Operator::And => {
+                    for (_, ces) in local.iter_mut() {
+                        assert!(ces.len() <= 2, "can only combine less than 2 ConditionExpression's");
+                        if ces.len() == 2 {
+                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                                operator: Operator::And,
+                                left: Box::new(ces.first().unwrap().clone()),
+                                right: Box::new(ces.last().unwrap().clone()),
+                            });
+
+                            *ces = vec![new_ce];
+                        }
+                    }
+                },
+                Operator::Or => {
+                    assert!(new_join.is_empty(), "can't handle OR expressions between join predicates");
+                    assert!(new_params.is_empty(), "can't handle OR expressions between query parameter predicates");
+                    assert_eq!(local.keys().len(), 1, "can't handle OR expressions between different tables");
+                    for (_, ces) in local.iter_mut() {
+                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
+                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                            operator: Operator::Or,
+                            left: Box::new(ces.first().unwrap().clone()),
+                            right: Box::new(ces.last().unwrap().clone()),
+                        });
+
+                        *ces = vec![new_ce];
+                    }
+                }
+                _ => unreachable!()
+            }
+
+            join.extend(new_join);
+            params.extend(new_params);
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
