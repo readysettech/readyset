@@ -243,7 +243,6 @@ where
             }
         }
 
-
         // Read body
         let message_size: u32 = NetworkEndian::read_u32(&self.buffer.data[0..4]);
         let target_buffer_size = message_size as usize + 4;
