@@ -223,7 +223,9 @@ where
 
         match self.send_ack() {
             Ok(()) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {},
+            Err(ref e)
+                if e.kind() == io::ErrorKind::BrokenPipe ||
+                       e.kind() == io::ErrorKind::ConnectionReset => {}
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
             _ => {
                 self.poisoned = true;
@@ -255,9 +257,20 @@ where
         }
 
         self.unacked = self.unacked.saturating_add(1);
-        if self.send_ack().is_err() {
-            self.unacked = self.unacked.saturating_sub(1);
-            return Err(TryRecvError::Empty);
+        match self.send_ack() {
+            Ok(()) => {}
+            Err(ref e)
+                if e.kind() == io::ErrorKind::BrokenPipe ||
+                       e.kind() == io::ErrorKind::ConnectionReset => {}
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                self.unacked = self.unacked.saturating_sub(1);
+                return Err(TryRecvError::Empty);
+            }
+            Err(ref e) => {
+                self.poisoned = true;
+                println!("error: {:?}", e.kind());
+                return Err(TryRecvError::Disconnected);
+            }
         }
 
         match bincode::deserialize(&self.buffer.data[4..target_buffer_size]) {
