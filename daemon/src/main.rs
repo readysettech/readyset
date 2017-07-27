@@ -42,7 +42,17 @@ fn parse_args() -> Config {
         .version("0.0.1")
         .about("Delivers scalable Soup distribution.")
         .arg(
+            Arg::with_name("controller")
+                .short("c")
+                .long("controller")
+                .required_if("mode", "worker")
+                .takes_value(true)
+                .value_name("HOST-OR-IP:PORT")
+                .help("Network location of the controller to connect to."),
+        )
+        .arg(
             Arg::with_name("heartbeat_frequency")
+                .long("heartbeat-frequency")
                 .takes_value(true)
                 .value_name("N")
                 .default_value("1000")
@@ -50,6 +60,7 @@ fn parse_args() -> Config {
         )
         .arg(
             Arg::with_name("healthcheck_frequency")
+                .long("healthcheck-frequency")
                 .takes_value(true)
                 .value_name("N")
                 .default_value("10000")
@@ -58,29 +69,29 @@ fn parse_args() -> Config {
         .arg(
             Arg::with_name("listen_addr")
                 .short("l")
+                .long("listen")
                 .default_value("0.0.0.0")
+                .value_name("HOST-OR-IP")
                 .help("Address to listen on."),
-        )
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .default_value("9999")
-                .help("Port to listen on."),
         )
         .arg(
             Arg::with_name("mode")
                 .short("m")
+                .long("mode")
                 .required(true)
                 .possible_values(&["controller", "worker"])
                 .default_value("worker")
+                .value_name("MODE")
                 .help("Operational mode for this instance."),
         )
         .arg(
-            Arg::with_name("controller")
-                .short("c")
-                .required_if("mode", "worker")
+            Arg::with_name("port")
+                .short("p")
+                .long("port")
+                .default_value("9999")
+                .value_name("PORT")
+                .help("Port to listen on."),
                 .takes_value(true)
-                .help("Network location of the controller to connect to."),
         )
         .get_matches();
 
