@@ -7,6 +7,7 @@ mod reuse;
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
+use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
@@ -260,9 +261,10 @@ impl SqlIncorporator {
         leaf: MirNodeRef,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        // We want to hang the new leaf off the last non-leaf node of the query, so backtrack one
-        // step here.
-        let final_node_of_query = leaf.borrow().ancestors().iter().next().unwrap().clone();
+        // We want to hang the new leaf off the last non-leaf node of the query that has the
+        // columns we need, so backtrack here until we find this place. Typically, this unwinds
+        // only two steps, above the final projection.
+        let final_node_of_query = mir_reuse::rewind_until_columns_found(leaf, params).unwrap();
 
         let mut mir = self.mir_converter
             .add_leaf_below(final_node_of_query, query_name, params);
