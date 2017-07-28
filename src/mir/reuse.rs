@@ -9,7 +9,12 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Op
             return None;
         }
         // silly, but the borrow checker doesn't let us do this in a single line
-        let next = cur.borrow().ancestors().iter().next().unwrap().clone();
+        let next = cur.borrow()
+            .ancestors()
+            .iter()
+            .next()
+            .expect(&format!("{:?} has no ancestors", cur))
+            .clone();
         cur = next;
 
         let mut missing_any = false;
