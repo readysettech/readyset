@@ -148,10 +148,9 @@ impl DomainBuilder {
             .unwrap();
 
         info!(log, "booting domain"; "nodes" => self.nodes.iter().count());
-        let name: usize = self.nodes.values().next().unwrap().borrow().domain().into();
         let name = match shard {
-            Some(shard) => format!("domain{}.{}", name, shard),
-            None => format!("domain{}", name),
+            Some(shard) => format!("domain{}.{}", self.index.0, shard),
+            None => format!("domain{}", self.index.0),
         };
         thread::Builder::new()
             .name(name)
