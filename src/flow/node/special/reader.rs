@@ -2,7 +2,6 @@ use backlog;
 use channel;
 use checktable;
 use flow::prelude::*;
-use hurdles::Barrier;
 
 /// A StreamUpdate reflects the addition or deletion of a row from a reader node.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,9 +39,6 @@ pub struct Reader {
     #[serde(skip)]
     token_generator: Option<checktable::TokenGenerator>,
 
-    #[serde(skip)]
-    barrier: Option<Barrier>,
-
     for_node: NodeIndex,
     state: Option<usize>,
 }
@@ -62,7 +58,6 @@ impl Clone for Reader {
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
-            barrier: self.barrier.clone(),
         }
     }
 }
@@ -75,13 +70,10 @@ impl Reader {
             state: None,
             token_generator: None,
             for_node,
-            barrier: None,
         }
     }
 
-    pub fn shard(&mut self, n: usize) {
-        self.barrier = Some(Barrier::new(n));
-    }
+    pub fn shard(&mut self, _: usize) {}
 
     pub fn is_for(&self) -> NodeIndex {
         self.for_node
@@ -102,7 +94,6 @@ impl Reader {
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
-            barrier: self.barrier.take(),
         }
     }
 
@@ -148,11 +139,7 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
-    pub fn process(
-        &mut self,
-        m: &mut Option<Box<Packet>>,
-        swap: bool,
-    ) {
+    pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();
             // make sure we don't fill a partial materialization
@@ -211,22 +198,15 @@ impl Reader {
             } else {
                 state.add(m.data().iter().cloned());
             }
-            if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } = **m {
+            if let Packet::Transaction {
+                state: TransactionState::Committed(ts, ..),
+                ..
+            } = **m
+            {
                 state.update_ts(ts);
             }
 
             if swap {
-                if let Some(ref mut b) = self.barrier {
-                    if let Packet::Transaction { .. } = **m {
-                        // if the reader is sharded, we want to make sure *all* the shards are
-                        // about to expose this transaction timestamp. note that this will *block*
-                        // the current domain. that is *only* okay here because since *we* released
-                        // this transaction, the other shards must also have been sent a packet
-                        // with the same transaction timestamp, and thus are not waiting on us in
-                        // any way.
-                        b.wait();
-                    }
-                }
                 // TODO: avoid doing the pointer swap if we didn't modify anything (inc. ts)
                 state.swap();
             }
@@ -234,9 +214,7 @@ impl Reader {
 
         // TODO: don't send replays to streams?
 
-        m.as_mut()
-            .unwrap()
-            .trace(PacketEvent::ReachedReader);
+        m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
         if !self.streamers.as_ref().unwrap().is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
