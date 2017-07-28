@@ -363,7 +363,7 @@ impl DomainHandle {
     pub fn wait_for_ack(&self) -> Result<(), WaitError> {
         for rx in &self.cr_rxs {
             match rx.recv() {
-                Ok(ControlReplyPacket::Ack) => {}
+                Ok(ControlReplyPacket::Ack(_)) => {}
                 Ok(r) => return Err(WaitError::WrongReply(r)),
                 Err(e) => return Err(WaitError::RecvError(e)),
             }

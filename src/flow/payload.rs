@@ -1,5 +1,7 @@
 use petgraph;
 
+#[cfg(debug_assertions)]
+use backtrace::Backtrace;
 use channel;
 use checktable;
 use flow::debug::{DebugEvent, DebugEventType};
@@ -445,7 +447,22 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug)]
 pub enum ControlReplyPacket {
-    Ack,
+    #[cfg(debug_assertions)]
+    Ack(Backtrace),
+    #[cfg(not(debug_assertions))]
+    Ack(()),
     StateSize(usize),
     Statistics(statistics::DomainStats, HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>),
+}
+
+impl ControlReplyPacket {
+    #[cfg(debug_assertions)]
+    pub fn ack() -> ControlReplyPacket {
+        ControlReplyPacket::Ack(Backtrace::new())
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn ack() -> ControlReplyPacket {
+        ControlReplyPacket::Ack(())
+    }
 }
