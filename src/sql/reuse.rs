@@ -95,6 +95,54 @@ where
     }
 }
 
+/// Direct elimination for complex predicates with nested `and` and `or` expressions
+fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpression) -> bool {
+    match *ep {
+        LogicalOp(ref ect) => {
+            match *np {
+                LogicalOp(ref nct) => {
+                    if nct.operator == ect.operator {
+                        return (complex_predicate_implies(&*nct.left, &*ect.left) && complex_predicate_implies(&*nct.right, &*ect.right)) ||
+                                (complex_predicate_implies(&*nct.left, &*ect.right) && complex_predicate_implies(&*nct.right, &*ect.left));
+                    }
+                }
+                _ => (),
+            }
+
+            match ect.operator {
+                Operator::And => {
+                    complex_predicate_implies(np, &*ect.left) && complex_predicate_implies(np, &*ect.right)
+                }
+                Operator::Or => {
+                    complex_predicate_implies(np, &*ect.left) || complex_predicate_implies(np, &*ect.right)
+                }
+                _ => unreachable!()
+            }
+
+        },
+        ComparisonOp(ref ect) => {
+            match *np {
+                LogicalOp(ref nct) => {
+                    match nct.operator {
+                        Operator::And => {
+                            complex_predicate_implies(&*nct.left, ep) || complex_predicate_implies(&*nct.right, ep)
+                        }
+                        Operator::Or => {
+                            complex_predicate_implies(&*nct.left, ep) && complex_predicate_implies(&*nct.right, ep)
+                        }
+                        _ => unreachable!()
+                    }
+                }
+                ComparisonOp(ref nct) => {
+                    nct.left == ect.left && predicate_implies(nct, ect)
+                }
+                _ => unreachable!(),
+            }
+        },
+        _ => unreachable!(),
+    }
+}
+
 fn predicate_implies(np: &ConditionTree, ep: &ConditionTree) -> bool {
     // use Finkelstein-style direct elimination to check if this NQG predicate
     // implies the corresponding predicates in the EQG
@@ -150,28 +198,11 @@ pub fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Opt
         // by the new one
         for ep in &ex_qgn.predicates {
             let mut matched = false;
-            let ect = match *ep {
-                ComparisonOp(ref ct) | LogicalOp(ref ct) => ct,
-                _ => unreachable!(),
-            };
 
             for np in &new_qgn.predicates {
-                match *np {
-                    ComparisonOp(ref ct) | LogicalOp(ref ct) => {
-                        if ct.left == ect.left {
-                            // trace!(log,
-                            //        "matching predicates --\nexisting: {:#?},\nnew: {:#?}",
-                            //        ep,
-                            //        np);
-                            if !predicate_implies(ct, ect) {
-                                // trace!(log, "Failed: {:?} does not imply {:?}", np, ep);
-                                return None;
-                            } else {
-                                matched = true;
-                            }
-                        }
-                    },
-                    _ => unreachable!()
+                if complex_predicate_implies(np, ep) {
+                    matched = true;
+                    break
                 }
             }
             if !matched {
@@ -330,5 +361,174 @@ mod tests {
         assert!(!predicate_implies(&pb, &pa));
         assert!(!predicate_implies(&pa, &pc));
         assert!(predicate_implies(&pc, &pa));
+    }
+
+    #[test]
+    fn complex_predicate_implication_or() {
+        use nom_sql::ConditionExpression::*;
+        use nom_sql::ConditionBase::*;
+        use nom_sql::Literal;
+
+        let pa = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(20.into())))),
+        });
+        let pb = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(60.into())))),
+        });
+        let pc = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(10.into())))),
+        });
+        let pd = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(80.into())))),
+        });
+
+        // a < 20 or a > 80
+        let cp1 = LogicalOp(ConditionTree {
+            left: Box::new(pa.clone()),
+            right: Box::new(pb.clone()),
+            operator: Operator::Or
+        });
+
+        // a < 10 or a > 60
+        let cp2 = LogicalOp(ConditionTree {
+            left: Box::new(pc),
+            right: Box::new(pd),
+            operator: Operator::Or
+        });
+
+        // a < 80 or a > 20
+        let cp3 = LogicalOp(ConditionTree {
+            left: Box::new(pb),
+            right: Box::new(pa),
+            operator: Operator::Or
+        });
+
+
+        assert!(complex_predicate_implies(&cp2, &cp1));
+        assert!(!complex_predicate_implies(&cp1, &cp2));
+        assert!(complex_predicate_implies(&cp2, &cp3));
+        assert!(!complex_predicate_implies(&cp3, &cp2));
+    }
+
+    #[test]
+    fn complex_predicate_implication_and() {
+        use nom_sql::ConditionExpression::*;
+        use nom_sql::ConditionBase::*;
+        use nom_sql::Literal;
+        let pa = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(20.into())))),
+        });
+        let pb = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(60.into())))),
+        });
+        let pc = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(10.into())))),
+        });
+        let pd = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(80.into())))),
+        });
+
+        // a > 20 and a < 60
+        let cp1 = LogicalOp(ConditionTree {
+            left: Box::new(pa.clone()),
+            right: Box::new(pb.clone()),
+            operator: Operator::And
+        });
+
+        // a > 10 and a < 80
+        let cp2 = LogicalOp(ConditionTree {
+            left: Box::new(pc),
+            right: Box::new(pd),
+            operator: Operator::And
+        });
+
+        // a < 60 and a > 20
+        let cp3 = LogicalOp(ConditionTree {
+            left: Box::new(pb),
+            right: Box::new(pa),
+            operator: Operator::And
+        });
+
+
+        assert!(complex_predicate_implies(&cp1, &cp2));
+        assert!(!complex_predicate_implies(&cp2, &cp1));
+        assert!(complex_predicate_implies(&cp3, &cp2));
+        assert!(!complex_predicate_implies(&cp2, &cp3));
+    }
+
+    #[test]
+    fn complex_predicate_implication_superset_or() {
+        use nom_sql::ConditionExpression::*;
+        use nom_sql::ConditionBase::*;
+        use nom_sql::Literal;
+        let pa = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(20.into())))),
+        });
+        let pb = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(60.into())))),
+        });
+
+        // a < 20 or a > 60
+        let cp1 = LogicalOp(ConditionTree {
+            left: Box::new(pa.clone()),
+            right: Box::new(pb.clone()),
+            operator: Operator::Or
+        });
+
+
+        assert!(complex_predicate_implies(&pa, &cp1));
+        assert!(complex_predicate_implies(&pb, &cp1));
+        assert!(!complex_predicate_implies(&cp1, &pa));
+        assert!(!complex_predicate_implies(&cp1, &pb));
+    }
+
+    #[test]
+    fn complex_predicate_implication_subset_and() {
+        use nom_sql::ConditionExpression::*;
+        use nom_sql::ConditionBase::*;
+        use nom_sql::Literal;
+        let pa = ComparisonOp(ConditionTree {
+            operator: Operator::Greater,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(20.into())))),
+        });
+        let pb = ComparisonOp(ConditionTree {
+            operator: Operator::Less,
+            left: Box::new(Base(Field(Column::from("a")))),
+            right: Box::new(Base(Literal(Literal::Integer(60.into())))),
+        });
+
+        // a > 20 and a < 60
+        let cp1 = LogicalOp(ConditionTree {
+            left: Box::new(pa.clone()),
+            right: Box::new(pb.clone()),
+            operator: Operator::And
+        });
+
+
+        assert!(!complex_predicate_implies(&pa, &cp1));
+        assert!(!complex_predicate_implies(&pb, &cp1));
+        assert!(complex_predicate_implies(&cp1, &pa));
+        assert!(complex_predicate_implies(&cp1, &pb));
     }
 }

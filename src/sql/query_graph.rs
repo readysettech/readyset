@@ -252,7 +252,7 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
 // 2. Extract local predicates
 // 3. Extract join predicates
 // 4. Collect remaining predicates as global predicates
-fn  classify_conditionals(
+fn classify_conditionals(
     ce: &ConditionExpression,
     mut local: &mut HashMap<String, Vec<ConditionExpression>>,
     mut join: &mut Vec<ConditionTree>,
@@ -276,25 +276,25 @@ fn  classify_conditionals(
             // atomatic selection predicates)
             let mut new_params = Vec::new();
             let mut new_join = Vec::new();
+            let mut new_local = HashMap::new();
             classify_conditionals(
                 ct.left.as_ref(),
-                &mut local,
+                &mut new_local,
                 &mut new_join,
                 &mut global,
                 &mut new_params,
             );
             classify_conditionals(
                 ct.right.as_ref(),
-                &mut local,
+                &mut new_local,
                 &mut new_join,
                 &mut global,
                 &mut new_params,
             );
 
-
             match ct.operator {
                 Operator::And => {
-                    for (_, ces) in local.iter_mut() {
+                    for (t, ces) in new_local {
                         assert!(ces.len() <= 2, "can only combine less than 2 ConditionExpression's");
                         if ces.len() == 2 {
                             let new_ce = ConditionExpression::LogicalOp(ConditionTree {
@@ -303,15 +303,19 @@ fn  classify_conditionals(
                                 right: Box::new(ces.last().unwrap().clone()),
                             });
 
-                            *ces = vec![new_ce];
+                            let e = local.entry(t.to_string()).or_insert(Vec::new());
+                            e.push(new_ce);
+                        } else {
+                            let e = local.entry(t.to_string()).or_insert(Vec::new());
+                            e.extend(ces);
                         }
                     }
                 },
                 Operator::Or => {
                     assert!(new_join.is_empty(), "can't handle OR expressions between join predicates");
                     assert!(new_params.is_empty(), "can't handle OR expressions between query parameter predicates");
-                    assert_eq!(local.keys().len(), 1, "can't handle OR expressions between different tables");
-                    for (_, ces) in local.iter_mut() {
+                    assert_eq!(new_local.keys().len(), 1, "can't handle OR expressions between different tables");
+                    for (t, ces) in new_local {
                         assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
                             operator: Operator::Or,
@@ -319,7 +323,8 @@ fn  classify_conditionals(
                             right: Box::new(ces.last().unwrap().clone()),
                         });
 
-                        *ces = vec![new_ce];
+                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        e.push(new_ce);
                     }
                 }
                 _ => unreachable!()
