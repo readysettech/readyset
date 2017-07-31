@@ -298,6 +298,7 @@ fn classify_conditionals(
                                 params.push(lf.clone());
                             }
                         }
+                        ConditionBase::NestedSelect(_) => unimplemented!()
                     }
                 };
             };
