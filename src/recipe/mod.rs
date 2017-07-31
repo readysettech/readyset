@@ -237,11 +237,6 @@ impl Recipe {
                                  self.expressions.len(),
                                  self.aliases.len(); "version" => self.version);
 
-        // TODO(larat): this should be done over a delta of policies
-        let policies_delta = self.policies.clone();
-        debug!(self.log, "Added {} policies", policies_delta.len());
-        self.inc.as_mut().unwrap().add_policies(policies_delta);
-
         let (added, removed) = match self.prior {
             None => self.compute_delta(&Recipe::blank(None)),
             Some(ref pr) => {
@@ -257,7 +252,7 @@ impl Recipe {
         };
 
         match mig.user_context() {
-            Some(c) => { 
+            Some(c) => {
                 info!(self.log, "Starting user universe {}", c.get("id").expect("context must have id"));
                 let qfp = self.inc.as_mut().unwrap().start_universe(c, mig)?;
                 result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
@@ -309,7 +304,10 @@ impl Recipe {
             //unimplemented!()
         }
 
-        // TODO(larat): deal with adding policies
+        // TODO(larat): this should be done over a delta of policies
+        let policies_delta = self.policies.clone();
+        debug!(self.log, "Added {} policies", policies_delta.len());
+        self.inc.as_mut().unwrap().add_policies(policies_delta);
 
         Ok(result)
     }
