@@ -5,14 +5,16 @@ use slog::Logger;
 use std::io;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use api;
 use protocol::{CoordinationMessage, CoordinationPayload};
 
 pub struct WorkerStatus {
     healthy: bool,
     last_heartbeat: Instant,
-    sender: Option<TcpSender<CoordinationMessage>>,
+    sender: Option<Arc<Mutex<TcpSender<CoordinationMessage>>>>,
 }
 
 impl WorkerStatus {
@@ -20,7 +22,7 @@ impl WorkerStatus {
         WorkerStatus {
             healthy: true,
             last_heartbeat: Instant::now(),
-            sender: Some(sender),
+            sender: Some(Arc::new(Mutex::new(sender))),
         }
     }
 }
@@ -31,7 +33,7 @@ pub struct Controller {
 
     log: Logger,
 
-    blender: Blender,
+    blender: Arc<Mutex<Blender>>,
     workers: HashMap<SocketAddr, WorkerStatus>,
 
     heartbeat_every: Duration,
@@ -51,7 +53,7 @@ impl Controller {
             listen_addr: String::from(listen_addr),
             listen_port: port,
             log: log,
-            blender: Blender::new(),
+            blender: Arc::new(Mutex::new(Blender::new())),
             workers: HashMap::new(),
             heartbeat_every: heartbeat_every,
             healthcheck_every: healthcheck_every,
@@ -59,17 +61,32 @@ impl Controller {
         }
     }
 
+    /*fn assign_domain(&mut self) {
+        let mut ws = self.workers.get_mut(&msg.source).unwrap();
+        ws.sender
+            .as_mut()
+            .unwrap()
+            .send(CoordinationMessage {
+                source: local_addr,
+                payload: CoordinationPayload::AssignDomain,
+            })
+            .unwrap();
+    }*/
+
     /// Listen for workers to connect
     pub fn listen(&mut self) {
         use channel::poll::ProcessResult;
         use mio::net::TcpListener;
         use std::str::FromStr;
+        use std::thread;
 
         let listener = TcpListener::bind(&SocketAddr::from_str(
             &format!("{}:{}", self.listen_addr, self.listen_port),
         ).unwrap()).unwrap();
 
-        let local_addr = listener.local_addr().unwrap();
+        let tb = thread::Builder::new().name("api-srv".into());
+        let blender_arc = self.blender.clone();
+        let api_jh = tb.spawn(|| api::run(blender_arc).unwrap()).unwrap();
 
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
         pl.run_polling_loop(|e| {
@@ -77,18 +94,7 @@ impl Controller {
                 PollEvent::Process(ref msg) => {
                     debug!(self.log, "Received {:?}", msg);
                     match self.handle(msg) {
-                        Ok(_) => {
-                            // XXX(malte): don't always send AssignDomain; just for testing here
-                            let mut ws = self.workers.get_mut(&msg.source).unwrap();
-                            ws.sender
-                                .as_mut()
-                                .unwrap()
-                                .send(CoordinationMessage {
-                                    source: local_addr,
-                                    payload: CoordinationPayload::AssignDomain,
-                                })
-                                .unwrap();
-                        }
+                        Ok(_) => (),
                         Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),
                     }
                 }
@@ -99,7 +105,9 @@ impl Controller {
             self.check_worker_liveness();
 
             ProcessResult::KeepPolling
-        })
+        });
+
+        api_jh.join().unwrap();
     }
 
     fn check_worker_liveness(&mut self) {

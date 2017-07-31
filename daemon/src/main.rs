@@ -6,17 +6,21 @@ extern crate distributary;
 extern crate hostname;
 extern crate mio;
 #[macro_use]
+extern crate rustful;
+#[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate serde_json;
 extern crate serde;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
 
+mod api;
 mod controller;
 mod protocol;
 mod worker;
 
-use distributary::Recipe;
 use slog::Logger;
 use std::thread;
 use std::time::Duration;
@@ -28,18 +32,6 @@ struct Config {
     controller: Option<String>,
     heartbeat_freq: u64,
     healthcheck_freq: u64,
-    recipe: Option<Recipe>,
-}
-
-fn load_recipe(path: &str) -> Result<Recipe, String> {
-    use std::io::Read;
-    use std::fs::File;
-
-    let mut s = String::new();
-    let mut rf = File::open(path).unwrap();
-    rf.read_to_string(&mut s).unwrap();
-
-    Recipe::from_str(&s, None)
 }
 
 fn logger_pls() -> slog::Logger {
@@ -107,15 +99,6 @@ fn parse_args(log: &Logger) -> Config {
                 .value_name("PORT")
                 .help("Port to listen on."),
         )
-        .arg(
-            Arg::with_name("recipe")
-                .short("r")
-                .long("recipe")
-                .required_if("mode", "controller")
-                .takes_value(true)
-                .value_name("FILE")
-                .help("Recipe to use for Soup."),
-        )
         .get_matches();
 
     Config {
@@ -132,18 +115,6 @@ fn parse_args(log: &Logger) -> Config {
         },
         heartbeat_freq: value_t_or_exit!(matches, "heartbeat_frequency", u64),
         healthcheck_freq: value_t_or_exit!(matches, "healthcheck_frequency", u64),
-        recipe: match matches.value_of("recipe") {
-            None => None,
-            Some(path) => {
-                match load_recipe(path) {
-                    Ok(r) => Some(r),
-                    Err(e) => {
-                        error!(log, "failed to load recipe '{}': {:?}", path, e);
-                        None
-                    }
-                }
-            }
-        },
     }
 }
 
@@ -173,6 +144,7 @@ fn main() {
                 Duration::from_millis(config.healthcheck_freq),
                 log,
             );
+
             controller.listen()
         }
         Some(c) => {
