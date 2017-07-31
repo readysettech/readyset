@@ -489,36 +489,24 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_filter_nodes(
+    fn make_filter_node(
         &self,
         name: &str,
         parent: MirNodeRef,
-        predicates: &Vec<ConditionTree>,
-    ) -> Vec<MirNodeRef> {
-        let mut new_nodes = vec![];
+        cond: &ConditionTree,
+    ) -> MirNodeRef {
+        let mut fields = parent.borrow().columns().iter().cloned().collect();
 
-        let mut prev_node = parent;
+        let filter = self.to_conditions(cond, &mut fields, &parent);
 
-        for (i, cond) in predicates.iter().enumerate() {
-            let mut fields = prev_node.borrow().columns().iter().cloned().collect();
-
-            // TODO(malte): this doesn't handle OR or AND correctly: needs a nested loop
-            let filter = self.to_conditions(cond, &mut fields, &prev_node);
-            let f_name = format!("{}_f{}", name, i);
-
-            let n = MirNode::new(
-                &f_name,
-                self.schema_version,
-                fields,
-                MirNodeType::Filter { conditions: filter },
-                vec![prev_node.clone()],
-                vec![],
-            );
-            new_nodes.push(n.clone());
-            prev_node = n;
-        }
-
-        new_nodes
+        MirNode::new(
+            name,
+            self.schema_version,
+            fields,
+            MirNodeType::Filter { conditions: filter },
+            vec![parent.clone()],
+            vec![],
+        )
     }
 
     fn make_function_node(
@@ -868,16 +856,17 @@ impl SqlToMirConverter {
                             nc + left.len()
                         );
 
-                        pred_nodes.extend(left.clone());
-                        pred_nodes.extend(right.clone());
+                        debug!(self.log, "Creating union node for `or` predicate");
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
                         let union = self.make_union_node(
-                            &format!("{}{}_u", name, nc + left.len() + right.len()),
+                            &format!("{}_u", name),
                             vec![last_left, last_right]
                         );
 
+                        pred_nodes.extend(left.clone());
+                        pred_nodes.extend(right.clone());
                         pred_nodes.push(union);
                     },
                     _ => unreachable!("LogicalOp operator is {:?}", ct.operator)
@@ -885,11 +874,13 @@ impl SqlToMirConverter {
             },
             ComparisonOp(ref ct) => {
                 // currently, we only support filter-like comparison operations, no nested-selections
-                pred_nodes = self.make_filter_nodes(
-                    &format!("{}{}", name, nc),
+                let f = self.make_filter_node(
+                    &format!("{}_f{}", name, nc),
                     parent,
-                    &vec![ct.clone()]
+                    ct,
                 );
+
+                pred_nodes.push(f);
             },
             NegationOp(_) => unreachable!("negation should have been removed earlier"),
             Base(_) => unreachable!("dangling base predicate"),
@@ -938,10 +929,10 @@ impl SqlToMirConverter {
         for ce in ces {
             if !moved_predicates.contains(ce) {
                 let mpns = self.make_predicate_nodes(
-                    &format!("{}_mp", name),
+                    &format!("{}_mp{}", name, moved_pred_nodes.len()),
                     prev_node.clone(),
                     ce,
-                    moved_pred_nodes.len()
+                    0,
                 );
                 assert!(mpns.len() > 0);
                 prev_node = mpns.last().unwrap().clone();
@@ -1288,7 +1279,7 @@ impl SqlToMirConverter {
                 // projected columns) that are required as inputs to joins
                 if !qgn.predicates.is_empty() {
                     // add a predicate chain for each query graph node's predicates
-                    for ref p in &qgn.predicates {
+                    for (i, ref p) in qgn.predicates.iter().enumerate() {
                         if moved_predicates.contains(p) {
                             continue;
                         }
@@ -1299,10 +1290,10 @@ impl SqlToMirConverter {
                         };
 
                         let fns = self.make_predicate_nodes(
-                            &format!("q_{:x}_n{}_p", qg.signature().hash, new_node_count),
+                            &format!("q_{:x}_n{}_p{}", qg.signature().hash, new_node_count, i),
                             parent,
                             p,
-                            predicate_nodes.len(),
+                            0,
                         );
 
                         assert!(fns.len() > 0);
