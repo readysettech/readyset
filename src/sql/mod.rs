@@ -732,7 +732,7 @@ mod tests {
             &[&Column::from("users.name")],
         );
         // filter node
-        let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
+        let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_p0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
         assert_eq!(filter.description(), format!("σ[f0 = 42]"));
         // leaf view node

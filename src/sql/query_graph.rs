@@ -225,6 +225,27 @@ impl QueryGraph {
     }
 }
 
+/// Splits top level conjunctions into multiple predicates
+fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression> {
+    let mut new_ces = Vec::new();
+    for ce in ces {
+        match ce {
+            ConditionExpression::LogicalOp(ref ct) => {
+                match ct.operator {
+                    Operator::And => {
+                        new_ces.extend(split_conjunctions(vec![*ct.left.clone()]));
+                        new_ces.extend(split_conjunctions(vec![*ct.right.clone()]));
+                    },
+                    _ => { new_ces.push(ce.clone()); }
+                };
+            },
+            _ => { new_ces.push(ce.clone()); }
+        }
+    }
+
+    new_ces
+}
+
 // 1. Extract any predicates with placeholder parameters. We push these down to the edge
 //    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
@@ -539,6 +560,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             &mut global_predicates,
             &mut query_parameters,
         );
+
+        for (_, ces) in local_predicates.iter_mut() {
+            *ces = split_conjunctions(ces.clone());
+        }
 
         // 1. Add local predicates for each node that has them
         for (rel, preds) in local_predicates {

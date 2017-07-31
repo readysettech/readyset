@@ -1299,7 +1299,7 @@ impl SqlToMirConverter {
                         };
 
                         let fns = self.make_predicate_nodes(
-                            &format!("q_{:x}_p", qg.signature().hash),
+                            &format!("q_{:x}_n{}_p", qg.signature().hash, new_node_count),
                             parent,
                             p,
                             predicate_nodes.len(),
