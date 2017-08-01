@@ -31,6 +31,7 @@ pub mod migrate;
 pub mod node;
 pub mod payload;
 pub mod persistence;
+pub mod placement;
 pub mod prelude;
 pub mod statistics;
 
@@ -39,6 +40,7 @@ mod getter;
 mod transactions;
 
 use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
+use self::placement::DomainPlacementStrategy;
 
 pub use self::mutator::{Mutator, MutatorError};
 pub use self::getter::Getter;
@@ -919,6 +921,11 @@ impl<'a> Migration<'a> {
 
         info!(log, "migration claimed timestamp range"; "start" => start_ts, "end" => end_ts);
 
+        // take snapshow of workers that are currently around; for type and lifetime reasons, we
+        // have to copy the HashMap here, it seems.
+        let workers = mainline.workers.clone();
+        let mut placer = placement::RoundRobinPlacer::new(&workers);
+
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
         for domain in changed_domains {
@@ -927,8 +934,10 @@ impl<'a> Migration<'a> {
                 continue;
             }
 
-            // XXX(malte): always chooses the first worker
-            let worker = mainline.workers.iter().next().map(|ref t| t.1);
+            // TODO(malte): simple round-robin placement for the moment
+            let worker = placer
+                .place_domain(&domain)
+                .map(|wi| mainline.workers[&wi].clone());
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let d = domain::DomainHandle::new(
@@ -942,7 +951,7 @@ impl<'a> Migration<'a> {
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
-                worker,
+                worker.as_ref(),
                 start_ts,
             );
             mainline.domains.insert(domain, d);
