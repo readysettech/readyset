@@ -84,9 +84,14 @@ impl Controller {
             &format!("{}:{}", self.listen_addr, self.listen_port),
         ).unwrap()).unwrap();
 
+        // run the API server (to receive recipes)
         let tb = thread::Builder::new().name("api-srv".into());
         let blender_arc = self.blender.clone();
-        let api_jh = tb.spawn(|| api::run(blender_arc).unwrap()).unwrap();
+        let api_logger = self.log.clone();
+        let api_jh = match tb.spawn(|| api::run(blender_arc, api_logger).unwrap()) {
+            Ok(jh) => jh,
+            Err(e) => panic!("failed to spawn API server: {:?}", e),
+        };
 
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
         pl.run_polling_loop(|e| {

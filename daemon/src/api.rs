@@ -1,11 +1,12 @@
 use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
 use rustful::server::Listening;
 use rustful::server::Global;
+use slog::Logger;
 use std::sync::{Arc, Mutex};
 
 use distributary::{Blender, Recipe};
 
-pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
+pub fn run(soup: Arc<Mutex<Blender>>, log: Logger) -> HttpResult<Listening> {
     use rustful::header::ContentType;
 
     let mut router = TreeRouter::new();
@@ -25,7 +26,16 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                         let m: &Arc<Mutex<Blender>> = ctx.global.get().unwrap();
                         let mut b = m.lock().unwrap();
                         let mut mig = b.start_migration();
-                        r.activate(&mut mig, false).unwrap();
+                        match r.activate(&mut mig, false) {
+                            Ok(ar) => {
+                                info!(log, "successfully migrated to new recipe, {} new nodes",
+                                      ar.new_nodes.len());
+                                mig.commit();
+                            },
+                            Err(e) => {
+                                error!(log, "failed to apply new recipe: {:?}", e);
+                            },
+                        }
                     },
                     Err(_) => (),
                 }
