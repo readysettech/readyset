@@ -8,8 +8,6 @@ extern crate mio;
 #[macro_use]
 extern crate rustful;
 #[macro_use]
-extern crate serde_derive;
-#[macro_use]
 extern crate serde_json;
 extern crate serde;
 #[macro_use]
