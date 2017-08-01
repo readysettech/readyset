@@ -61,18 +61,6 @@ impl Controller {
         }
     }
 
-    /*fn assign_domain(&mut self) {
-        let mut ws = self.workers.get_mut(&msg.source).unwrap();
-        ws.sender
-            .as_mut()
-            .unwrap()
-            .send(CoordinationMessage {
-                source: local_addr,
-                payload: CoordinationPayload::AssignDomain,
-            })
-            .unwrap();
-    }*/
-
     /// Listen for workers to connect
     pub fn listen(&mut self) {
         use channel::poll::ProcessResult;
