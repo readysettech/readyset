@@ -13,7 +13,7 @@ use std;
 use std::cell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use mio;
@@ -102,7 +102,7 @@ impl DomainHandle {
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
-        worker: Option<&Arc<Mutex<TcpSender<CoordinationMessage>>>>,
+        worker: Option<&WorkerEndpoint>,
         ts: i64,
     ) -> Self {
         // NOTE: warning to future self...

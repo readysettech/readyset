@@ -38,8 +38,7 @@ mod mutator;
 mod getter;
 mod transactions;
 
-use self::coordination::CoordinationMessage;
-use self::prelude::Ingredient;
+use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
 
 pub use self::mutator::{Mutator, MutatorError};
 pub use self::getter::Getter;
@@ -79,7 +78,7 @@ pub struct Blender {
     debug_channel: Option<SocketAddr>,
 
     readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
-    workers: HashMap<SocketAddr, Arc<Mutex<channel::TcpSender<CoordinationMessage>>>>,
+    workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
 
     log: slog::Logger,
 }
@@ -140,11 +139,7 @@ impl Blender {
     }
 
     /// Adds another worker to host domains.
-    pub fn add_worker(
-        &mut self,
-        addr: SocketAddr,
-        sender: Arc<Mutex<channel::TcpSender<CoordinationMessage>>>,
-    ) {
+    pub fn add_worker(&mut self, addr: SocketAddr, sender: WorkerEndpoint) {
         if !self.workers.contains_key(&addr) {
             debug!(self.log, "added new worker {:?} to Blender", addr);
             self.workers.insert(addr, sender);

@@ -34,5 +34,12 @@ use flow::domain;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize)>;
 
+// distributed operation types
+use std::net;
+use std::sync::{Arc, Mutex};
+use flow::coordination::CoordinationMessage;
+pub type WorkerIdentifier = net::SocketAddr;
+pub type WorkerEndpoint = Arc<Mutex<channel::TcpSender<CoordinationMessage>>>;
+
 // debug types
 pub use flow::debug::DebugEvent;
