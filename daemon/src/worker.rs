@@ -3,8 +3,9 @@ use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::time::{Instant, Duration};
+use std::sync::Arc;
 
-use protocol::{CoordinationMessage, CoordinationPayload};
+use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload};
 
 pub struct Worker {
     log: Logger,
@@ -12,8 +13,10 @@ pub struct Worker {
     controller_addr: String,
     listen_addr: String,
     listen_port: u16,
+
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
+    channel_coordinator: Arc<ChannelCoordinator>,
 
     // liveness
     heartbeat_every: Duration,
@@ -37,6 +40,7 @@ impl Worker {
 
             receiver: None,
             sender: None,
+            channel_coordinator: Arc::new(ChannelCoordinator::new()),
 
             heartbeat_every: heartbeat_every,
             last_heartbeat: None,
@@ -88,8 +92,18 @@ impl Worker {
                     *timeout = Some(self.heartbeat_every);
                     return ProcessResult::KeepPolling;
                 }
-                PollEvent::Process(ref msg) => {
+                PollEvent::Process(msg) => {
                     debug!(self.log, "Received {:?}", msg);
+                    match msg.payload {
+                        CoordinationPayload::AssignDomain(d) => {
+                            d.boot(
+                                self.log.clone(),
+                                Arc::default(),
+                                self.channel_coordinator.clone(),
+                            );
+                        }
+                        _ => (),
+                    }
                 }
                 PollEvent::Timeout => (),
             }

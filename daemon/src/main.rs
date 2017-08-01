@@ -18,7 +18,6 @@ extern crate slog_term;
 
 mod api;
 mod controller;
-mod protocol;
 mod worker;
 
 use slog::Logger;

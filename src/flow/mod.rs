@@ -21,6 +21,7 @@ use petgraph::graph::NodeIndex;
 
 use tarpc::sync::client::{self, ClientExt};
 
+pub mod coordination;
 pub mod core;
 pub mod debug;
 pub mod domain;
@@ -37,6 +38,7 @@ mod mutator;
 mod getter;
 mod transactions;
 
+use self::coordination::CoordinationMessage;
 use self::prelude::Ingredient;
 
 pub use self::mutator::{Mutator, MutatorError};
@@ -77,6 +79,7 @@ pub struct Blender {
     debug_channel: Option<SocketAddr>,
 
     readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
+    workers: HashMap<SocketAddr, Arc<Mutex<channel::TcpSender<CoordinationMessage>>>>,
 
     log: slog::Logger,
 }
@@ -113,6 +116,7 @@ impl Default for Blender {
             debug_channel: None,
 
             readers: Arc::default(),
+            workers: HashMap::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -133,6 +137,24 @@ impl Blender {
     /// Disable sharding for all subsequent migrations
     pub fn disable_sharding(&mut self) {
         self.sharding_enabled = false;
+    }
+
+    /// Adds another worker to host domains.
+    pub fn add_worker(
+        &mut self,
+        addr: SocketAddr,
+        sender: Arc<Mutex<channel::TcpSender<CoordinationMessage>>>,
+    ) {
+        if !self.workers.contains_key(&addr) {
+            debug!(self.log, "added new worker {:?} to Blender", addr);
+            self.workers.insert(addr, sender);
+        } else {
+            warn!(
+                self.log,
+                "worker {:?} already exists; ignoring request to add it!",
+                addr
+            );
+        }
     }
 
     /// Use a debug channel. This function may only be called once because the receiving end it
@@ -910,6 +932,9 @@ impl<'a> Migration<'a> {
                 continue;
             }
 
+            // XXX(malte): always chooses the first worker
+            let worker = mainline.workers.iter().next().map(|ref t| t.1);
+
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let d = domain::DomainHandle::new(
                 domain,
@@ -922,6 +947,7 @@ impl<'a> Migration<'a> {
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
+                worker,
                 start_ts,
             );
             mainline.domains.insert(domain, d);

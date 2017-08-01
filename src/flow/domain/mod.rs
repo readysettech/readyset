@@ -103,7 +103,7 @@ struct Waiting {
 }
 
 /// Struct sent to a worker to start a domain.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DomainBuilder {
     pub index: Index,
     pub shard: usize,

@@ -3,6 +3,7 @@ use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
 
 use flow;
 use flow::domain;
+use flow::coordination::{CoordinationMessage, CoordinationPayload};
 use flow::payload::ControlReplyPacket;
 use flow::persistence;
 use flow::prelude::*;
@@ -12,7 +13,7 @@ use std;
 use std::cell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use mio;
@@ -101,6 +102,7 @@ impl DomainHandle {
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
+        worker: Option<&Arc<Mutex<TcpSender<CoordinationMessage>>>>,
         ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
@@ -143,9 +145,22 @@ impl DomainHandle {
                 debug_addr: debug_addr.clone(),
             };
 
-            threads.push(
-                domain.boot(logger, readers.clone(), channel_coordinator.clone()),
-            );
+            match worker {
+                Some(worker) => {
+                    // send domain to worker
+                    debug!(log, "sending domain to worker");
+                    let mut w = worker.lock().unwrap();
+                    w.send(CoordinationMessage {
+                        source: control_listener.local_addr().unwrap(), // XXX(malte): hack, fix this
+                        payload: CoordinationPayload::AssignDomain(domain),
+                    }).unwrap();
+                }
+                None => {
+                    threads.push(
+                        domain.boot(logger, readers.clone(), channel_coordinator.clone()),
+                    );
+                }
+            }
 
             let stream =
                 mio::net::TcpStream::from_stream(control_listener.accept().unwrap().0).unwrap();

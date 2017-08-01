@@ -1,0 +1,27 @@
+use std::net::SocketAddr;
+
+use flow::domain::DomainBuilder;
+
+/// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CoordinationMessage {
+    /// The worker's `SocketAddr` from which this message was sent.
+    pub source: SocketAddr,
+    /// Message payload.
+    pub payload: CoordinationPayload,
+}
+
+/// Coordination-layer message payloads.
+#[derive(Debug, Deserialize, Serialize)]
+pub enum CoordinationPayload {
+    /// Register a new worker at given `SocketAddr`.
+    Register(SocketAddr),
+    /// Worker going offline.
+    Deregister,
+    /// Worker is still alive.
+    Heartbeat,
+    /// Assign a new domain for a worker to run.
+    AssignDomain(DomainBuilder),
+    /// Remove a running domain from a worker.
+    RemoveDomain,
+}

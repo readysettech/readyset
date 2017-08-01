@@ -31,6 +31,7 @@ pub use flow::domain::local::LookupResult;
 // channel related types
 use channel;
 use flow::domain;
+/// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = channel::ChannelCoordinator<(domain::Index, usize)>;
 
 // debug types

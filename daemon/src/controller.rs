@@ -1,6 +1,6 @@
 use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop};
-use distributary::Blender;
+use distributary::{Blender, CoordinationMessage, CoordinationPayload};
 use slog::Logger;
 use std::io;
 use std::collections::HashMap;
@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use api;
-use protocol::{CoordinationMessage, CoordinationPayload};
 
 pub struct WorkerStatus {
     healthy: bool,
@@ -18,11 +17,11 @@ pub struct WorkerStatus {
 }
 
 impl WorkerStatus {
-    pub fn new(sender: TcpSender<CoordinationMessage>) -> Self {
+    pub fn new(sender: Arc<Mutex<TcpSender<CoordinationMessage>>>) -> Self {
         WorkerStatus {
             healthy: true,
             last_heartbeat: Instant::now(),
-            sender: Some(Arc::new(Mutex::new(sender))),
+            sender: Some(sender),
         }
     }
 }
@@ -49,11 +48,14 @@ impl Controller {
         healthcheck_every: Duration,
         log: Logger,
     ) -> Controller {
+        let mut blender = Blender::new();
+        blender.log_with(log.clone());
+
         Controller {
             listen_addr: String::from(listen_addr),
             listen_port: port,
             log: log,
-            blender: Arc::new(Mutex::new(Blender::new())),
+            blender: Arc::new(Mutex::new(blender)),
             workers: HashMap::new(),
             heartbeat_every: heartbeat_every,
             healthcheck_every: healthcheck_every,
@@ -135,8 +137,12 @@ impl Controller {
             remote
         );
 
-        let ws = WorkerStatus::new(TcpSender::connect(remote, None)?);
+        let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
+        let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
+
+        let mut b = self.blender.lock().unwrap();
+        b.add_worker(msg.source, sender);
 
         Ok(())
     }
