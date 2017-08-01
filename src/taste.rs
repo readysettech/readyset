@@ -193,11 +193,36 @@ pub fn taste_commit(
         }
     };
 
-    let build_output = build(&ws.path);
-    write_output(&build_output, commit.id, "build");
-    let build_success = update(&ws.path).success() && build_output.status.success();
+    let do_update = !Path::new(&format!("{}/Cargo.lock", ws.path)).exists();
+
+    let build_success = {
+        let update_success = if do_update {
+            println!("running 'cargo update'");
+            let update_output = update(&ws.path);
+            if !update_output.status.success() {
+                println!("update failed: output status is {:?}", update_output.status);
+            }
+            update_output.status.success()
+        } else {
+            // nothing to do, always succeeds
+            true
+        };
+
+        let build_output = build(&ws.path);
+        write_output(&build_output, commit.id, "build");
+        if !build_output.status.success() {
+            println!("build failed: output status is {:?}", build_output.status);
+        }
+
+        update_success && build_output.status.success()
+    };
+
     let test_output = test(&ws.path);
     write_output(&test_output, commit.id, "test");
+
+    if !test_output.status.success() {
+        println!("tests failed: output status is {:?}", test_output.status);
+    }
 
     let cfg = match parse_config(
         Path::new(&format!("{}/taster.toml", ws.path)),
@@ -292,10 +317,10 @@ fn test(workdir: &str) -> Output {
         .expect("Failed to execute 'cargo test'!")
 }
 
-fn update(workdir: &str) -> ExitStatus {
+fn update(workdir: &str) -> Output {
     Command::new("cargo")
         .current_dir(workdir)
         .arg("update")
-        .status()
+        .output()
         .expect("Failed to execute 'cargo update'!")
 }
