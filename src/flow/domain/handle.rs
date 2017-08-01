@@ -148,10 +148,17 @@ impl DomainHandle {
             match worker {
                 Some(worker) => {
                     // send domain to worker
-                    debug!(log, "sending domain to worker");
                     let mut w = worker.lock().unwrap();
+                    debug!(
+                        log,
+                        "sending domain {:?}.{} to worker {:?}",
+                        domain.index,
+                        domain.shard,
+                        w.local_addr()
+                    );
+                    let src = w.local_addr().unwrap();
                     w.send(CoordinationMessage {
-                        source: control_listener.local_addr().unwrap(), // XXX(malte): hack, fix this
+                        source: src,
                         payload: CoordinationPayload::AssignDomain(domain),
                     }).unwrap();
                 }
