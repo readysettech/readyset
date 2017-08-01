@@ -39,7 +39,7 @@ fn logger_pls() -> slog::Logger {
     Logger::root(Mutex::new(term_full()).fuse(), o!())
 }
 
-fn parse_args(log: &Logger) -> Config {
+fn parse_args(_log: &Logger) -> Config {
     use clap::{Arg, App};
 
     let matches = App::new("gulaschkanone")
