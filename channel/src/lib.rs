@@ -10,7 +10,7 @@ extern crate serde;
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
 use std::net::SocketAddr;
@@ -91,7 +91,7 @@ mod panic_serialize {
 #[derive(Serialize, Deserialize)]
 pub struct STcpSender<T>(
     #[serde(with = "panic_serialize")]
-    pub TcpSender<T>
+    pub TcpSender<T>,
 );
 
 impl<T> Deref for STcpSender<T> {
@@ -120,7 +120,11 @@ pub struct ChannelCoordinator<K: Eq + Hash + Clone> {
 
 impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(ChannelCoordinatorInner { addrs: HashMap::new() }) }
+        Self {
+            inner: Mutex::new(ChannelCoordinatorInner {
+                addrs: HashMap::new(),
+            }),
+        }
     }
 
     pub fn insert_addr(&self, key: K, addr: SocketAddr) {
@@ -143,6 +147,72 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
 
     pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
         self.get_sized_tx(key, None)
+    }
+}
+
+/// A wrapper around a writer that handles `Error::WouldBlock` when attempting to write.
+///
+/// Instead of return that error, it places the bytes into a buffer so that subsequent calls to
+/// `write()` can retry writing them.
+pub struct NonBlockingWriter<T> {
+    writer: T,
+    buffer: Vec<u8>,
+    cursor: usize,
+}
+
+impl<T: Write> NonBlockingWriter<T> {
+    pub fn new(writer: T) -> Self {
+        Self {
+            writer,
+            buffer: Vec::new(),
+            cursor: 0,
+        }
+    }
+
+    pub fn flush_to_inner(&mut self) -> io::Result<()> {
+        if self.buffer.len() > 0 {
+            while self.cursor < self.buffer.len() {
+                match self.writer.write(&self.buffer[self.cursor..])? {
+                    0 => return Err(io::Error::from(io::ErrorKind::BrokenPipe)),
+                    n => self.cursor += n,
+                }
+            }
+            self.buffer.clear();
+            self.cursor = 0;
+        }
+        Ok(())
+    }
+
+    pub fn get_ref(&self) -> &T {
+        &self.writer
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.writer
+    }
+}
+
+impl<T: Write> Write for NonBlockingWriter<T> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
+        match self.flush_to_inner() {
+            Ok(_) => Ok(buf.len()),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Ok(buf.len()),
+            Err(e) => {
+                let old_len = self.buffer.len() - buf.len();
+                self.buffer.truncate(old_len);
+                Err(e)
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_to_inner()?;
+        self.writer.flush()
+    }
+}
+impl<T: Read> Read for NonBlockingWriter<T> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.writer.read(buf)
     }
 }
 

@@ -9,7 +9,7 @@ use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Serialize, Deserialize};
 
-use super::{ReceiveError, DeserializeReceiver};
+use super::{ReceiveError, DeserializeReceiver, NonBlockingWriter};
 
 #[derive(Debug)]
 pub enum Error {
@@ -145,7 +145,7 @@ impl Buffer {
 }
 
 pub struct TcpReceiver<T> {
-    pub(crate) stream: mio::net::TcpStream,
+    pub(crate) stream: NonBlockingWriter<mio::net::TcpStream>,
     unacked: u32,
     poisoned: bool,
 
@@ -166,7 +166,7 @@ where
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
         Self {
-            stream: stream,
+            stream: NonBlockingWriter::new(stream),
             unacked: 0,
             poisoned: false,
             window: None,
@@ -185,19 +185,18 @@ where
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.stream.local_addr()
+        self.stream.get_ref().local_addr()
     }
 
-    fn send_ack(&mut self) -> Result<(), io::Error> {
-        if self.unacked + 1 == *self.window.as_ref().unwrap() {
-            let n = self.stream.write(&[0u8])?;
-            self.unacked = 0;
-
-            if n == 0 {
-                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-            }
+    fn send_ack(&mut self) {
+        match self.stream.write(&[0u8]) {
+            Ok(n) => assert_eq!(n, 1),
+            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+            Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => unreachable!(),
+            Err(_) => self.poisoned = true,
         }
-        Ok(())
+        self.unacked = 0;
     }
 
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
@@ -219,13 +218,13 @@ where
             self.window = Some(NetworkEndian::read_u32(&self.window_buf.data[0..4]));
         }
 
-        match self.send_ack() {
+        // Make sure that any previously issued ACKs are sent out on the wire.
+        match self.stream.flush() {
             Ok(()) => {}
-            Err(ref e)
-                if e.kind() == io::ErrorKind::BrokenPipe ||
-                       e.kind() == io::ErrorKind::ConnectionReset => {}
+            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+            Err(ref e) if e.kind() == io::ErrorKind::ConnectionReset => {}
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
-            _ => {
+            Err(_) => {
                 self.poisoned = true;
                 return Err(TryRecvError::Disconnected);
             }
@@ -234,19 +233,8 @@ where
         match self.deserialize_receiver.try_recv(&mut self.stream) {
             Ok(msg) => {
                 self.unacked = self.unacked.saturating_add(1);
-                match self.send_ack() {
-                    Ok(()) => {}
-                    Err(ref e)
-                        if e.kind() == io::ErrorKind::BrokenPipe ||
-                               e.kind() == io::ErrorKind::ConnectionReset => {}
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        self.unacked = self.unacked.saturating_sub(1);
-                        return Err(TryRecvError::Empty);
-                    }
-                    Err(_) => {
-                        self.poisoned = true;
-                        return Err(TryRecvError::Disconnected);
-                    }
+                if self.unacked == *self.window.as_ref().unwrap() {
+                    self.send_ack();
                 }
                 Ok(msg)
             }
@@ -283,7 +271,7 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.register(poll, token, interest, opts)
+        self.stream.get_ref().register(poll, token, interest, opts)
     }
 
     fn reregister(
@@ -293,11 +281,13 @@ impl<T> Evented for TcpReceiver<T> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.reregister(poll, token, interest, opts)
+        self.stream
+            .get_ref()
+            .reregister(poll, token, interest, opts)
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        self.stream.deregister(poll)
+        self.stream.get_ref().deregister(poll)
     }
 }
 
