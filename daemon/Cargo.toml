@@ -1,5 +1,5 @@
 [package]
-name = "daemon"
+name = "gulaschkanone"
 version = "0.0.1"
 authors = ["The Distributary Developers"]
 
@@ -21,6 +21,10 @@ version = "0.9.0"
 default-features = false
 features = ["rustc_json_body", "multipart"]
 
-[[bin]]
+[lib]
 name = "gulaschkanone"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gulaschkanoned"
 path = "src/main.rs"

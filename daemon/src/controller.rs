@@ -8,8 +8,6 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use api;
-
 pub struct WorkerStatus {
     healthy: bool,
     last_heartbeat: Instant,
@@ -63,25 +61,19 @@ impl Controller {
         }
     }
 
+    pub fn get_blender(&self) -> Arc<Mutex<Blender>> {
+        self.blender.clone()
+    }
+
     /// Listen for workers to connect
     pub fn listen(&mut self) {
         use channel::poll::ProcessResult;
         use mio::net::TcpListener;
         use std::str::FromStr;
-        use std::thread;
 
         let listener = TcpListener::bind(&SocketAddr::from_str(
             &format!("{}:{}", self.listen_addr, self.listen_port),
         ).unwrap()).unwrap();
-
-        // run the API server (to receive recipes)
-        let tb = thread::Builder::new().name("api-srv".into());
-        let blender_arc = self.blender.clone();
-        let api_logger = self.log.clone();
-        let api_jh = match tb.spawn(|| api::run(blender_arc, api_logger).unwrap()) {
-            Ok(jh) => jh,
-            Err(e) => panic!("failed to spawn API server: {:?}", e),
-        };
 
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
         pl.run_polling_loop(|e| {
@@ -101,8 +93,6 @@ impl Controller {
 
             ProcessResult::KeepPolling
         });
-
-        api_jh.join().unwrap();
     }
 
     fn check_worker_liveness(&mut self) {

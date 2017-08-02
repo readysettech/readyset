@@ -1,10 +1,7 @@
-extern crate bincode;
-extern crate channel;
 #[macro_use]
 extern crate clap;
 extern crate distributary;
 extern crate hostname;
-extern crate mio;
 #[macro_use]
 extern crate rustful;
 #[macro_use]
@@ -14,22 +11,15 @@ extern crate serde;
 extern crate slog;
 extern crate slog_term;
 
-mod api;
-mod controller;
-mod worker;
+extern crate gulaschkanone;
+
+use gulaschkanone::{Config, Controller, Worker};
 
 use slog::Logger;
 use std::thread;
 use std::time::Duration;
 
-struct Config {
-    hostname: String,
-    addr: String,
-    port: u16,
-    controller: Option<String>,
-    heartbeat_freq: u64,
-    healthcheck_freq: u64,
-}
+mod api;
 
 fn logger_pls() -> slog::Logger {
     use slog::Drain;
@@ -134,18 +124,27 @@ fn main() {
 
     match config.controller {
         None => {
-            let mut controller = controller::Controller::new(
+            let mut controller = Controller::new(
                 &config.addr,
                 config.port,
                 Duration::from_millis(config.heartbeat_freq),
                 Duration::from_millis(config.healthcheck_freq),
-                log,
+                log.clone(),
             );
 
-            controller.listen()
+            // run the API server (to receive recipes)
+            let tb = thread::Builder::new().name("api-srv".into());
+            let blender_arc = controller.get_blender();
+            let api_jh = match tb.spawn(|| api::run(blender_arc, log).unwrap()) {
+                Ok(jh) => jh,
+                Err(e) => panic!("failed to spawn API server: {:?}", e),
+            };
+
+            controller.listen();
+            api_jh.join().unwrap();
         }
         Some(c) => {
-            let mut worker = worker::Worker::new(
+            let mut worker = Worker::new(
                 &c,
                 &config.addr,
                 config.port,
