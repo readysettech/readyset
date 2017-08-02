@@ -28,3 +28,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "gulaschkanoned"
 path = "src/main.rs"
+
+[[example]]
+name = "distributed-vote"
