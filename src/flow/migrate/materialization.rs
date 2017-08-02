@@ -10,7 +10,6 @@ use flow::keys;
 use flow::domain;
 use flow::prelude::*;
 use flow::payload::TriggerEndpoint;
-use backlog::ReadHandle;
 
 use petgraph;
 use petgraph::graph::NodeIndex;
@@ -401,33 +400,9 @@ pub fn initialize(
             // we need to make sure the domain constructs reader backlog handles!
             let prep = blender.ingredients[node].with_reader(|r| {
                 r.key().map(|key| {
-                    use flow::payload::InitialState;
-
-                    match blender.ingredients[node].sharded_by() {
-                        Sharding::None => {
-                            blender
-                                .readers
-                                .lock()
-                                .unwrap()
-                                .insert(node, ReadHandle::Singleton(None));
-                        }
-                        _ => {
-                            use arrayvec::ArrayVec;
-                            let mut shards = ArrayVec::new();
-                            for _ in 0..::SHARDS {
-                                shards.push(None);
-                            }
-                            blender
-                                .readers
-                                .lock()
-                                .unwrap()
-                                .insert(node, ReadHandle::Sharded(shards));
-                        }
-                    }
-
                     box Packet::PrepareState {
                         node: addr,
-                        state: InitialState::Global {
+                        state: flow::payload::InitialState::Global {
                             cols: blender.ingredients[node].fields().len(),
                             key: key,
                             gid: node,
@@ -635,29 +610,6 @@ pub fn reconstruct(
     // mutable references to taken state.
     let s = graph[node]
         .with_reader(|r| {
-            // we need to make sure there's an entry in readers for this reader!
-            match graph[node].sharded_by() {
-                Sharding::None => {
-                    blender
-                        .readers
-                        .lock()
-                        .unwrap()
-                        .insert(node, ReadHandle::Singleton(None));
-                }
-                _ => {
-                    use arrayvec::ArrayVec;
-                    let mut shards = ArrayVec::new();
-                    for _ in 0..::SHARDS {
-                        shards.push(None);
-                    }
-                    blender
-                        .readers
-                        .lock()
-                        .unwrap()
-                        .insert(node, ReadHandle::Sharded(shards));
-                }
-            }
-
             if partial_ok {
                 // make sure Reader is actually prepared to receive state
                 assert!(r.is_materialized());

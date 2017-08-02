@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use std::net::SocketAddr;
 
+use backlog::ReadHandle;
 use channel::TcpSender;
 use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
 use flow::prelude::*;
@@ -810,8 +811,17 @@ impl Domain {
                                 self.readers
                                     .lock()
                                     .unwrap()
-                                    .get_mut(&gid)
-                                    .unwrap()
+                                    .entry(gid)
+                                    .or_insert_with(|| if self.nshards > 1 {
+                                        use arrayvec::ArrayVec;
+                                        let mut shards = ArrayVec::new();
+                                        for _ in 0..self.nshards {
+                                            shards.push(None);
+                                        }
+                                        ReadHandle::Sharded(shards)
+                                    } else {
+                                        ReadHandle::Singleton(None)
+                                    })
                                     .set_single_handle(self.shard, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
@@ -826,8 +836,17 @@ impl Domain {
                                 self.readers
                                     .lock()
                                     .unwrap()
-                                    .get_mut(&gid)
-                                    .unwrap()
+                                    .entry(gid)
+                                    .or_insert_with(|| if self.nshards > 1 {
+                                        use arrayvec::ArrayVec;
+                                        let mut shards = ArrayVec::new();
+                                        for _ in 0..self.nshards {
+                                            shards.push(None);
+                                        }
+                                        ReadHandle::Sharded(shards)
+                                    } else {
+                                        ReadHandle::Singleton(None)
+                                    })
                                     .set_single_handle(self.shard, r_part);
 
                                 let mut n = self.nodes[&node].borrow_mut();
