@@ -10,11 +10,14 @@ extern crate serde;
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::io::{self, Read};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, SendError};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
+use std::marker::PhantomData;
 
+use byteorder::{ByteOrder, NetworkEndian};
 use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub mod tcp;
@@ -140,5 +143,80 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
 
     pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
         self.get_sized_tx(key, None)
+    }
+}
+
+#[derive(Debug)]
+pub enum ReceiveError {
+    WouldBlock,
+    IoError(io::Error),
+    DeserializationError(bincode::Error),
+}
+
+impl From<io::Error> for ReceiveError {
+    fn from(error: io::Error) -> Self {
+        if error.kind() == io::ErrorKind::WouldBlock {
+            ReceiveError::WouldBlock
+        } else {
+            ReceiveError::IoError(error)
+        }
+    }
+}
+impl From<bincode::Error> for ReceiveError {
+    fn from(error: bincode::Error) -> Self {
+        ReceiveError::DeserializationError(error)
+    }
+}
+
+#[derive(Default)]
+pub struct DeserializeReceiver<T> {
+    buffer: Vec<u8>,
+    size: usize,
+    phantom: PhantomData<T>,
+}
+
+impl<T> DeserializeReceiver<T>
+where
+    for<'a> T: Deserialize<'a>,
+{
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+            size: 0,
+            phantom: PhantomData,
+        }
+    }
+
+    fn fill_from<R: Read>(
+        &mut self,
+        stream: &mut R,
+        target_size: usize,
+    ) -> Result<(), ReceiveError> {
+        if self.buffer.len() < target_size {
+            self.buffer.resize(target_size, 0u8);
+        }
+
+        while self.size < target_size {
+            let n = stream.read(&mut self.buffer[self.size..target_size])?;
+            if n == 0 {
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe).into());
+            }
+            self.size += n;
+        }
+        Ok(())
+    }
+
+    pub fn try_recv<R: Read>(&mut self, reader: &mut R) -> Result<T, ReceiveError> {
+        if self.size < 4 {
+            self.fill_from(reader, 5)?;
+        }
+
+        let message_size: u32 = NetworkEndian::read_u32(&self.buffer[0..4]);
+        let target_buffer_size = message_size as usize + 4;
+        self.fill_from(reader, target_buffer_size)?;
+
+        let message = bincode::deserialize(&self.buffer[4..target_buffer_size])?;
+        self.size = 0;
+        Ok(message)
     }
 }

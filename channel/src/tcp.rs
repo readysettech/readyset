@@ -9,6 +9,8 @@ use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
 use serde::{Serialize, Deserialize};
 
+use super::{ReceiveError, DeserializeReceiver};
+
 #[derive(Debug)]
 pub enum Error {
     BincodeError(bincode::Error),
@@ -153,8 +155,7 @@ pub struct TcpReceiver<T> {
     // Holds the bytes of the window size until it is known.
     window_buf: Buffer,
 
-    // Holds data from the stream that is not yet been handled.
-    buffer: Buffer,
+    deserialize_receiver: DeserializeReceiver<T>,
 
     phantom: PhantomData<T>,
 }
@@ -173,10 +174,7 @@ where
                 data: vec![0u8; 4],
                 size: 0,
             },
-            buffer: Buffer {
-                data: vec![0u8; 1024],
-                size: 0,
-            },
+            deserialize_receiver: DeserializeReceiver::new(),
             phantom: PhantomData,
         }
     }
@@ -233,54 +231,35 @@ where
             }
         }
 
-        // Read header (which is just a u32 containing the message size).
-        match self.buffer.fill_from(&mut self.stream, 4) {
-            Ok(()) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
-            _ => {
+        match self.deserialize_receiver.try_recv(&mut self.stream) {
+            Ok(msg) => {
+                self.unacked = self.unacked.saturating_add(1);
+                match self.send_ack() {
+                    Ok(()) => {}
+                    Err(ref e)
+                        if e.kind() == io::ErrorKind::BrokenPipe ||
+                               e.kind() == io::ErrorKind::ConnectionReset => {}
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        self.unacked = self.unacked.saturating_sub(1);
+                        return Err(TryRecvError::Empty);
+                    }
+                    Err(_) => {
+                        self.poisoned = true;
+                        return Err(TryRecvError::Disconnected);
+                    }
+                }
+                Ok(msg)
+            }
+            Err(ReceiveError::WouldBlock) => Err(TryRecvError::Empty),
+            Err(ReceiveError::IoError(_)) => {
                 self.poisoned = true;
-                return Err(TryRecvError::Disconnected);
+                Err(TryRecvError::Disconnected)
             }
-        }
-
-        // Read body
-        let message_size: u32 = NetworkEndian::read_u32(&self.buffer.data[0..4]);
-        let target_buffer_size = message_size as usize + 4;
-        match self.buffer.fill_from(&mut self.stream, target_buffer_size) {
-            Ok(()) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Err(TryRecvError::Empty),
-            _ => {
-                self.poisoned = true;
-                return Err(TryRecvError::Disconnected);
-            }
-        }
-
-        self.unacked = self.unacked.saturating_add(1);
-        match self.send_ack() {
-            Ok(()) => {}
-            Err(ref e)
-                if e.kind() == io::ErrorKind::BrokenPipe ||
-                       e.kind() == io::ErrorKind::ConnectionReset => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                self.unacked = self.unacked.saturating_sub(1);
-                return Err(TryRecvError::Empty);
-            }
-            Err(ref e) => {
-                self.poisoned = true;
-                println!("error: {:?}", e.kind());
-                return Err(TryRecvError::Disconnected);
-            }
-        }
-
-        match bincode::deserialize(&self.buffer.data[4..target_buffer_size]) {
-            Err(_) => {
+            Err(ReceiveError::DeserializationError(_)) => {
                 self.poisoned = true;
                 Err(TryRecvError::DeserializationError)
             }
-            Ok(t) => {
-                self.buffer.size = 0;
-                Ok(t)
-            }
+
         }
     }
 
