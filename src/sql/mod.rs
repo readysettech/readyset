@@ -433,11 +433,19 @@ impl SqlIncorporator {
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
         use sql::passes::negation_removal::NegationRemoval;
+        use sql::passes::subqueries::SubQueries;
+
+        // flattens out the query by replacing subqueries for references
+        // to existing views in the graph
+        let (fq, queries) = q.extract_and_replace_subqueries();
+        for (sqname, sq) in queries {
+            self.add_parsed_query(sq.clone(), Some(sqname), mig).expect("failed to add subquery");
+        }
 
         // first, check that all tables mentioned in the query exist.
         // This must happen before the rewrite passes are applied because some of them rely on
         // having the table schema available in `self.view_schemas`.
-        match q {
+        match fq {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
@@ -456,7 +464,7 @@ impl SqlIncorporator {
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        let q = q.expand_table_aliases()
+        let q = fq.expand_table_aliases()
             .remove_negation()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
@@ -549,12 +557,7 @@ impl<'a> ToFlowParts for &'a str {
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
-            Ok(q) => {
-                match name {
-                    Some(name) => inc.nodes_for_named_query(q, name, mig),
-                    None => inc.nodes_for_query(q, mig),
-                }
-            }
+            Ok(q) => inc.add_parsed_query(q, name, mig),
             Err(e) => Err(String::from(e)),
         }
     }
