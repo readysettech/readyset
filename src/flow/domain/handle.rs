@@ -32,7 +32,7 @@ pub struct DomainInputHandle {
 }
 
 impl DomainInputHandle {
-    pub fn base_send(&mut self, p: Box<Packet>, key: &[usize]) -> Result<(), tcp::Error> {
+    pub fn base_send(&mut self, p: Box<Packet>, key: &[usize]) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
             self.txs[0].send(p)
         } else {
@@ -238,14 +238,14 @@ impl DomainHandle {
         }
     }
 
-    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::Error> {
+    pub fn send(&mut self, p: Box<Packet>) -> Result<(), tcp::SendError> {
         for tx in self.txs.iter_mut() {
             tx.send_ref(&p)?;
         }
         Ok(())
     }
 
-    pub fn send_to_shard(&mut self, i: usize, p: Box<Packet>) -> Result<(), tcp::Error> {
+    pub fn send_to_shard(&mut self, i: usize, p: Box<Packet>) -> Result<(), tcp::SendError> {
         self.txs[i].send(p)
     }
 

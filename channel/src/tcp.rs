@@ -12,21 +12,21 @@ use serde::{Serialize, Deserialize};
 use super::{ReceiveError, DeserializeReceiver, NonBlockingWriter};
 
 #[derive(Debug)]
-pub enum Error {
+pub enum SendError {
     BincodeError(bincode::Error),
     IoError(io::Error),
     Poisoned,
 }
 
-impl From<bincode::Error> for Error {
+impl From<bincode::Error> for SendError {
     fn from(e: bincode::Error) -> Self {
-        Error::BincodeError(e)
+        SendError::BincodeError(e)
     }
 }
 
-impl From<io::Error> for Error {
+impl From<io::Error> for SendError {
     fn from(e: io::Error) -> Self {
-        Error::IoError(e)
+        SendError::IoError(e)
     }
 }
 
@@ -78,13 +78,13 @@ impl<T: Serialize> TcpSender<T> {
 
     /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
     /// conform to the same api as mpsc::Sender.
-    pub fn send(&mut self, t: T) -> Result<(), Error> {
+    pub fn send(&mut self, t: T) -> Result<(), SendError> {
         self.send_ref(&t)
     }
 
-    pub fn send_ref(&mut self, t: &T) -> Result<(), Error> {
+    pub fn send_ref(&mut self, t: &T) -> Result<(), SendError> {
         if self.poisoned {
-            return Err(Error::Poisoned);
+            return Err(SendError::Poisoned);
         }
 
         if let Some(window) = self.window {
