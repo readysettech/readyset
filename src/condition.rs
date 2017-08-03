@@ -64,6 +64,7 @@ named!(pub condition_expr<&[u8], ConditionExpression>,
        alt_complete!(
            chain!(
                left: and_expr ~
+               multispace? ~
                caseless_tag!("or") ~
                multispace ~
                right: condition_expr,
@@ -84,6 +85,7 @@ named!(pub and_expr<&[u8], ConditionExpression>,
        alt_complete!(
            chain!(
                left: parenthetical_expr ~
+               multispace? ~
                caseless_tag!("and") ~
                multispace ~
                right: and_expr,
@@ -423,7 +425,6 @@ mod tests {
 
     #[test]
     fn nested_select() {
-
         use select::SelectStatement;
         use table::Table;
         use ConditionBase::*;
@@ -431,7 +432,6 @@ mod tests {
 
         let cond = "bar in (select col from foo)";
 
-        condition_expr(cond.as_bytes());
         let res = condition_expr(cond.as_bytes());
 
         let nested_select = Box::new(SelectStatement {
@@ -446,7 +446,45 @@ mod tests {
             NestedSelect(nested_select),
         );
 
-        println!("{:?}", res);
+        assert_eq!(res.unwrap().1, expected);
+
+    }
+
+    #[test]
+    fn and_with_nested_select() {
+        use select::SelectStatement;
+        use table::Table;
+        use ConditionBase::*;
+        use std::default::Default;
+
+        let cond = "paperId in (select paperId from PaperConflict) and size > 0";
+
+        let res = condition_expr(cond.as_bytes());
+
+        let nested_select = Box::new(SelectStatement {
+            tables: vec![Table::from("PaperConflict")],
+            fields: columns(&["paperId"]),
+            ..Default::default()
+        });
+
+        let left = flat_condition_tree(
+            Operator::In,
+            Field("paperId".into()),
+            NestedSelect(nested_select)
+        );
+
+        let right = flat_condition_tree(
+            Operator::Greater,
+            Field("size".into()),
+            Literal(0.into()),
+        );
+
+        let expected = ConditionExpression::LogicalOp(ConditionTree {
+            left: Box::new(left),
+            right: Box::new(right),
+            operator: Operator::And
+        });
+
         assert_eq!(res.unwrap().1, expected);
 
     }
