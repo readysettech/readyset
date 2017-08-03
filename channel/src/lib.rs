@@ -22,6 +22,7 @@ use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub mod tcp;
 pub mod poll;
+pub mod rpc;
 
 pub use tcp::{channel, sync_channel, TcpSender, TcpReceiver};
 
@@ -167,6 +168,10 @@ impl<T: Write> NonBlockingWriter<T> {
             buffer: Vec::new(),
             cursor: 0,
         }
+    }
+
+    pub fn needs_flush(&self) -> bool {
+        self.buffer.len() != self.cursor
     }
 
     pub fn flush_to_inner(&mut self) -> io::Result<()> {
