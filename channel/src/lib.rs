@@ -139,11 +139,11 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
     }
 
     pub fn get_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
-        self.get_sized_tx(key, Some(16))
+        self.get_sized_tx(key, None)
     }
 
     pub fn get_input_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
-        self.get_sized_tx(key, Some(512))
+        self.get_sized_tx(key, None)
     }
 
     pub fn get_unbounded_tx<T: Serialize>(&self, key: &K) -> Option<TcpSender<T>> {
