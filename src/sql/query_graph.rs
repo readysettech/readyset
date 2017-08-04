@@ -295,7 +295,7 @@ fn classify_conditionals(
             match ct.operator {
                 Operator::And => {
                     for (t, ces) in new_local {
-                        assert!(ces.len() <= 2, "can only combine less than 2 ConditionExpression's");
+                        assert!(ces.len() <= 2, "can only combine two or fewer ConditionExpression's");
                         if ces.len() == 2 {
                             let new_ce = ConditionExpression::LogicalOp(ConditionTree {
                                 operator: Operator::And,

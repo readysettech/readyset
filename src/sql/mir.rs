@@ -889,59 +889,57 @@ impl SqlToMirConverter {
         pred_nodes
     }
 
-    /// Returns all collumns used in a set of predicates
-    fn cols_in_predicates(
+    /// Returns all collumns used in a predicate
+    fn predicate_columns(
         &self,
-        ces: Vec<ConditionExpression>
+        ce: ConditionExpression
     ) -> HashSet<Column> {
         use nom_sql::ConditionExpression::*;
 
         let mut cols = HashSet::new();
-        for ce in ces {
-            match ce {
-                LogicalOp(ct) | ComparisonOp(ct) => {
-                    cols.extend(self.cols_in_predicates(vec![*ct.left]));
-                    cols.extend(self.cols_in_predicates(vec![*ct.right]));
-                },
-                Base(ConditionBase::Field(c)) => {
-                    cols.insert(c);
-                },
-                NegationOp(_) => unreachable!("negations should have been eliminated"),
-                _ => (),
-            }
+        match ce {
+            LogicalOp(ct) | ComparisonOp(ct) => {
+                cols.extend(self.predicate_columns(*ct.left));
+                cols.extend(self.predicate_columns(*ct.right));
+            },
+            Base(ConditionBase::Field(c)) => {
+                cols.insert(c);
+            },
+            NegationOp(_) => unreachable!("negations should have been eliminated"),
+            _ => (),
         }
 
         cols
     }
 
-    fn reorder_predicates(
+    fn predicates_above_group_by<'a>(
         &mut self,
         name: &str,
-        pred_cols: &HashMap<Column, Vec<ConditionExpression>>,
+        column_to_predicates: &HashMap<Column, Vec<&'a ConditionExpression>>,
         over_col: Column,
         parent: MirNodeRef,
-        moved_predicates: &mut Vec<ConditionExpression>,
+        created_predicates: &mut Vec<&'a ConditionExpression>,
     ) -> Vec<MirNodeRef> {
-        let mut moved_pred_nodes = Vec::new();
+        let mut predicates_above_group_by_nodes = Vec::new();
         let mut prev_node = parent.clone();
 
-        let ces = pred_cols.get(&over_col).unwrap();
+        let ces = column_to_predicates.get(&over_col).unwrap();
         for ce in ces {
-            if !moved_predicates.contains(ce) {
+            if !created_predicates.contains(ce) {
                 let mpns = self.make_predicate_nodes(
-                    &format!("{}_mp{}", name, moved_pred_nodes.len()),
+                    &format!("{}_mp{}", name, predicates_above_group_by_nodes.len()),
                     prev_node.clone(),
                     ce,
                     0,
                 );
                 assert!(mpns.len() > 0);
                 prev_node = mpns.last().unwrap().clone();
-                moved_pred_nodes.extend(mpns);
-                moved_predicates.push(ce.clone());
+                predicates_above_group_by_nodes.extend(mpns);
+                created_predicates.push(ce);
             }
         }
 
-        moved_pred_nodes
+        predicates_above_group_by_nodes
     }
 
     /// Returns list of nodes added
@@ -1086,10 +1084,10 @@ impl SqlToMirConverter {
 
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut pred_cols = HashMap::new();
+            let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> = HashMap::new();
             let mut predicate_nodes = Vec::new();
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
-            let mut moved_predicates = Vec::new();
+            let mut created_predicates = Vec::new();
             sorted_rels.sort();
             for rel in &sorted_rels {
                 if *rel == "computed_columns" {
@@ -1097,19 +1095,21 @@ impl SqlToMirConverter {
                 }
 
                 let qgn = &qg.relations[*rel];
-                let cols = self.cols_in_predicates(qgn.predicates.clone());
+                for pred in &qgn.predicates {
+                    let cols = self.predicate_columns(pred.clone());
 
-                for col in cols {
-                    pred_cols
-                        .entry(col)
-                        .or_insert(Vec::new())
-                        .extend(qgn.predicates.clone());
+                    for col in cols {
+                        column_to_predicates
+                            .entry(col)
+                            .or_insert(Vec::new())
+                            .push(pred);
+                    }
                 }
             }
 
             // 3. Add function and grouped nodes
             let mut func_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut moved_pred_nodes = Vec::new();
+            let mut predicates_above_group_by_nodes = Vec::new();
             match qg.relations.get("computed_columns") {
                 None => (),
                 Some(computed_cols_cgn) => {
@@ -1127,26 +1127,26 @@ impl SqlToMirConverter {
                         let over_col = target_columns_from_computed_column(ccol);
                         let over_table = over_col.table.as_ref().unwrap().as_str();
 
-                        if pred_cols.contains_key(&over_col) {
+                        if column_to_predicates.contains_key(&over_col) {
                             let parent = match prev_node {
                                 Some(p) => p,
                                 None => base_nodes[over_table].clone()
                             };
 
-                            let new_mpns = self.reorder_predicates(
+                            let new_mpns = self.predicates_above_group_by(
                                     &format!(
                                         "q_{:x}_n{}",
                                         qg.signature().hash,
                                         new_node_count
                                     ),
-                                    &pred_cols,
+                                    &column_to_predicates,
                                     over_col.clone(),
                                     parent,
-                                    &mut moved_predicates);
+                                    &mut created_predicates);
 
-                            new_node_count += moved_pred_nodes.len();
+                            new_node_count += predicates_above_group_by_nodes.len();
                             prev_node = Some(new_mpns.last().unwrap().clone());
-                            moved_pred_nodes.extend(new_mpns);
+                            predicates_above_group_by_nodes.extend(new_mpns);
                         }
                     }
 
@@ -1280,7 +1280,7 @@ impl SqlToMirConverter {
                 if !qgn.predicates.is_empty() {
                     // add a predicate chain for each query graph node's predicates
                     for (i, ref p) in qgn.predicates.iter().enumerate() {
-                        if moved_predicates.contains(p) {
+                        if created_predicates.contains(p) {
                             continue;
                         }
 
@@ -1339,7 +1339,7 @@ impl SqlToMirConverter {
                 .into_iter()
                 .map(|(_, n)| n)
                 .chain(join_nodes.into_iter())
-                .chain(moved_pred_nodes.into_iter())
+                .chain(predicates_above_group_by_nodes.into_iter())
                 .chain(func_nodes.into_iter())
                 .chain(predicate_nodes.into_iter())
                 .collect();

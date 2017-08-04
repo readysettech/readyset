@@ -390,21 +390,21 @@ mod tests {
             right: Box::new(Base(Literal(Literal::Integer(80.into())))),
         });
 
-        // a < 20 or a > 80
+        // a < 20 or a > 60
         let cp1 = LogicalOp(ConditionTree {
             left: Box::new(pa.clone()),
             right: Box::new(pb.clone()),
             operator: Operator::Or
         });
 
-        // a < 10 or a > 60
+        // a < 10 or a > 80
         let cp2 = LogicalOp(ConditionTree {
             left: Box::new(pc),
             right: Box::new(pd),
             operator: Operator::Or
         });
 
-        // a < 80 or a > 20
+        // a > 60 or a < 20
         let cp3 = LogicalOp(ConditionTree {
             left: Box::new(pb),
             right: Box::new(pa),
