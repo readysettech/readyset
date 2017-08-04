@@ -342,7 +342,7 @@ fn classify_conditionals(
                         ConditionBase::Field(ref fr) => {
                             // column/column comparison --> comma join
                             if let ConditionBase::Field(ref fl) = *l {
-                                if ct.operator == Operator::Equal {
+                                if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
                                     if let Ordering::Less = fr.table
@@ -591,6 +591,21 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
+                    // If tables aren't already in the relations, add them.
+                    if !qg.relations.contains_key(&l.table.clone().unwrap()) {
+                        qg.relations.insert(
+                            l.table.clone().unwrap(),
+                            new_node(l.table.clone().unwrap(), Vec::new(), st),
+                        );
+                    }
+
+                    if !qg.relations.contains_key(&r.table.clone().unwrap()) {
+                        qg.relations.insert(
+                            r.table.clone().unwrap(),
+                            new_node(r.table.clone().unwrap(), Vec::new(), st),
+                        );
+                    }
+
                     let mut e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
