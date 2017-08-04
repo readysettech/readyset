@@ -1,6 +1,7 @@
 use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
               JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
 use nom_sql::SelectStatement;
+use nom_sql::ConditionExpression::*;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -106,7 +107,7 @@ impl PartialOrd for OutputColumn {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
-    pub predicates: Vec<ConditionTree>,
+    pub predicates: Vec<ConditionExpression>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Column>,
 }
@@ -171,9 +172,14 @@ impl QueryGraph {
         let mut attrs_vec = Vec::<&Column>::new();
         for n in self.relations.values() {
             for p in &n.predicates {
-                for c in &p.contained_columns() {
-                    attrs_vec.push(c);
-                    attrs.insert(c);
+                match *p {
+                    ComparisonOp(ref ct) | LogicalOp (ref ct) =>  {
+                        for c in &ct.contained_columns() {
+                            attrs_vec.push(c);
+                            attrs.insert(c);
+                        }
+                    },
+                    _ => unreachable!(),
                 }
             }
         }
@@ -219,7 +225,28 @@ impl QueryGraph {
     }
 }
 
-// 1. Extract any predictates with placeholder parameters. We push these down to the edge
+/// Splits top level conjunctions into multiple predicates
+fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression> {
+    let mut new_ces = Vec::new();
+    for ce in ces {
+        match ce {
+            ConditionExpression::LogicalOp(ref ct) => {
+                match ct.operator {
+                    Operator::And => {
+                        new_ces.extend(split_conjunctions(vec![*ct.left.clone()]));
+                        new_ces.extend(split_conjunctions(vec![*ct.right.clone()]));
+                    },
+                    _ => { new_ces.push(ce.clone()); }
+                };
+            },
+            _ => { new_ces.push(ce.clone()); }
+        }
+    }
+
+    new_ces
+}
+
+// 1. Extract any predicates with placeholder parameters. We push these down to the edge
 //    nodes, since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
 // 2. Extract local predicates
@@ -227,31 +254,84 @@ impl QueryGraph {
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &ConditionExpression,
-    mut local: &mut HashMap<String, Vec<ConditionTree>>,
+    mut local: &mut HashMap<String, Vec<ConditionExpression>>,
     mut join: &mut Vec<ConditionTree>,
     mut global: &mut Vec<ConditionTree>,
     mut params: &mut Vec<Column>,
 ) {
     use std::cmp::Ordering;
 
+    // Handling OR and AND expressions requires some care as there are some corner cases.
+    //    a) we don't support OR expressions with predicates with placeholder parameters,
+    //       because these expressions are meaningless in the Soup context.
+    //    b) we don't support OR expressions with join predicates because they are weird and
+    //       too hard.
+    //    c) we don't support OR expressions between different tables (e.g table1.x = 1 OR
+    //       table2.y= 42). this is a global predicate according to finkelstein algorithm
+    //       and we don't support these yet.
+
     match *ce {
         ConditionExpression::LogicalOp(ref ct) => {
             // conjunction, check both sides (which must be selection predicates or
             // atomatic selection predicates)
+            let mut new_params = Vec::new();
+            let mut new_join = Vec::new();
+            let mut new_local = HashMap::new();
             classify_conditionals(
                 ct.left.as_ref(),
-                &mut local,
-                &mut join,
+                &mut new_local,
+                &mut new_join,
                 &mut global,
-                &mut params,
+                &mut new_params,
             );
             classify_conditionals(
                 ct.right.as_ref(),
-                &mut local,
-                &mut join,
+                &mut new_local,
+                &mut new_join,
                 &mut global,
-                &mut params,
+                &mut new_params,
             );
+
+            match ct.operator {
+                Operator::And => {
+                    for (t, ces) in new_local {
+                        assert!(ces.len() <= 2, "can only combine two or fewer ConditionExpression's");
+                        if ces.len() == 2 {
+                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                                operator: Operator::And,
+                                left: Box::new(ces.first().unwrap().clone()),
+                                right: Box::new(ces.last().unwrap().clone()),
+                            });
+
+                            let e = local.entry(t.to_string()).or_insert(Vec::new());
+                            e.push(new_ce);
+                        } else {
+                            let e = local.entry(t.to_string()).or_insert(Vec::new());
+                            e.extend(ces);
+                        }
+                    }
+                },
+                Operator::Or => {
+                    assert!(new_join.is_empty(), "can't handle OR expressions between join predicates");
+                    assert!(new_params.is_empty(), "can't handle OR expressions between query parameter predicates");
+                    assert_eq!(new_local.keys().len(), 1, "can't handle OR expressions between different tables");
+                    for (t, ces) in new_local {
+                        assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
+                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                            operator: Operator::Or,
+                            left: Box::new(ces.first().unwrap().clone()),
+                            right: Box::new(ces.last().unwrap().clone()),
+                        });
+
+                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        e.push(new_ce);
+                    }
+                }
+                _ => unreachable!()
+            }
+
+            join.extend(new_join);
+            params.extend(new_params);
         }
         ConditionExpression::ComparisonOp(ref ct) => {
             // atomic selection predicate
@@ -289,7 +369,7 @@ fn classify_conditionals(
                                 assert!(lf.table.is_some());
                                 let mut e =
                                     local.entry(lf.table.clone().unwrap()).or_insert(Vec::new());
-                                e.push(ct.clone());
+                                e.push(ce.clone());
                             }
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
@@ -319,7 +399,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
 
     // a handy closure for making new relation nodes
     let new_node = |rel: String,
-                    preds: Vec<ConditionTree>,
+                    preds: Vec<ConditionExpression>,
                     st: &SelectStatement|
      -> QueryGraphNode {
         QueryGraphNode {
@@ -486,6 +566,10 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             &mut global_predicates,
             &mut query_parameters,
         );
+
+        for (_, ces) in local_predicates.iter_mut() {
+            *ces = split_conjunctions(ces.clone());
+        }
 
         // 1. Add local predicates for each node that has them
         for (rel, preds) in local_predicates {
