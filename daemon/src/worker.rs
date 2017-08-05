@@ -48,7 +48,7 @@ impl Worker {
     }
 
     /// Connect to controller
-    pub fn connect(&mut self) -> Result<(), channel::tcp::Error> {
+    pub fn connect(&mut self) -> Result<(), channel::tcp::SendError> {
         use mio::net::TcpListener;
         use std::str::FromStr;
 
@@ -131,7 +131,7 @@ impl Worker {
         }
     }
 
-    fn heartbeat(&mut self) -> Result<(), channel::tcp::Error> {
+    fn heartbeat(&mut self) -> Result<(), channel::tcp::SendError> {
         if self.last_heartbeat.is_some() &&
             self.last_heartbeat.as_ref().unwrap().elapsed() > self.heartbeat_every
         {
@@ -146,7 +146,7 @@ impl Worker {
         Ok(())
     }
 
-    fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::Error> {
+    fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::SendError> {
         let msg = self.wrap_payload(CoordinationPayload::Register(listen_addr));
         self.sender.as_mut().unwrap().send(msg)
     }
