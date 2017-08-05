@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::{Instant, Duration};
 use std::sync::Arc;
 
-use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload};
+use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder};
 
 pub struct Worker {
     log: Logger,
@@ -95,13 +95,7 @@ impl Worker {
                 PollEvent::Process(msg) => {
                     debug!(self.log, "Received {:?}", msg);
                     match msg.payload {
-                        CoordinationPayload::AssignDomain(d) => {
-                            d.boot(
-                                self.log.clone(),
-                                Arc::default(),
-                                self.channel_coordinator.clone(),
-                            );
-                        }
+                        CoordinationPayload::AssignDomain(d) => self.handle_domain_assign(d),
                         _ => (),
                     }
                 }
@@ -118,6 +112,15 @@ impl Worker {
         });
 
         self.receiver = receiver;
+    }
+
+    fn handle_domain_assign(&mut self, d: DomainBuilder) {
+        d.boot(
+            self.log.clone(),
+            // domains initialize their own readers
+            Arc::default(),
+            self.channel_coordinator.clone(),
+        );
     }
 
     fn wrap_payload(&self, pl: CoordinationPayload) -> CoordinationMessage {

@@ -106,18 +106,28 @@ struct Waiting {
 /// Struct sent to a worker to start a domain.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DomainBuilder {
+    /// The domain's index.
     pub index: Index,
+    /// The shard ID represented by this `DomainBuilder`.
     pub shard: usize,
+    /// The number of shards in the domain.
     pub nshards: usize,
+    /// The nodes in the domain.
     pub nodes: DomainNodes,
+    /// The domain's persistence setting.
     pub persistence_parameters: persistence::Parameters,
+    /// The starting timestamp.
     pub ts: i64,
+    /// The socket address at which this domain receives control messages.
     pub control_addr: SocketAddr,
+    /// The socket address over which this domain communicates with the checktable service.
     pub checktable_addr: SocketAddr,
+    /// The socket address for debug interactions with this domain.
     pub debug_addr: Option<SocketAddr>,
 }
 
 impl DomainBuilder {
+    /// Starts up the domain represented by this `DomainBuilder`.
     pub fn boot(
         self,
         log: Logger,

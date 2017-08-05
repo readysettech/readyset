@@ -410,7 +410,7 @@ pub use petgraph::graph::NodeIndex;
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
 pub use flow::node::StreamUpdate;
 pub use flow::debug::{DebugEvent, DebugEventType};
-pub use flow::domain::Index;
+pub use flow::domain::{DomainBuilder, Index};
 pub use flow::payload::PacketEvent;
 pub use flow::persistence::Parameters as PersistenceParameters;
 pub use flow::persistence::DurabilityMode;
