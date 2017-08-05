@@ -3,6 +3,7 @@ use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use slog::Logger;
 use std::net::SocketAddr;
 use std::time::{Instant, Duration};
+use std::thread::JoinHandle;
 use std::sync::Arc;
 
 use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder};
@@ -17,6 +18,7 @@ pub struct Worker {
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
     channel_coordinator: Arc<ChannelCoordinator>,
+    domain_threads: Vec<JoinHandle<()>>,
 
     // liveness
     heartbeat_every: Duration,
@@ -41,6 +43,7 @@ impl Worker {
             receiver: None,
             sender: None,
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
+            domain_threads: Vec::new(),
 
             heartbeat_every: heartbeat_every,
             last_heartbeat: None,
@@ -115,12 +118,13 @@ impl Worker {
     }
 
     fn handle_domain_assign(&mut self, d: DomainBuilder) {
-        d.boot(
+        let jh = d.boot(
             self.log.clone(),
             // domains initialize their own readers
             Arc::default(),
             self.channel_coordinator.clone(),
         );
+        self.domain_threads.push(jh);
     }
 
     fn wrap_payload(&self, pl: CoordinationPayload) -> CoordinationMessage {
@@ -152,5 +156,14 @@ impl Worker {
     fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::SendError> {
         let msg = self.wrap_payload(CoordinationPayload::Register(listen_addr));
         self.sender.as_mut().unwrap().send(msg)
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        // wait for all domains to exit
+        for t in self.domain_threads.drain(..) {
+            t.join().unwrap();
+        }
     }
 }
