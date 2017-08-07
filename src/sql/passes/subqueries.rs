@@ -1,106 +1,75 @@
-use nom_sql::{SqlQuery, ConditionExpression, ConditionBase};
+use nom_sql::{SqlQuery, ConditionExpression, ConditionBase, Column};
 use nom_sql::ConditionExpression::*;
-use nom_sql::ConditionBase::NestedSelect;
 
 pub trait SubQueries {
-    fn extract_and_replace_subqueries(self) -> (SqlQuery, Vec<(String, SqlQuery)>);
+    fn extract_subqueries<'a>(&'a mut self) -> Vec<&'a mut ConditionBase>;
 }
 
-fn extract_subqueries_from_condition(ce: ConditionExpression) -> (ConditionExpression, Vec<(String, SqlQuery)>) {
-    use nom_sql::FieldExpression;
-    use nom_sql::ConditionTree;
-    use nom_sql::Column;
+fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec<&'a mut ConditionBase> {
+    use nom_sql::ConditionBase::NestedSelect;
+    match *ce {
+        ComparisonOp(ref mut ct) | LogicalOp(ref mut ct) => {
+            let lb = extract_subqueries_from_condition(&mut *ct.left);
+            let rb = extract_subqueries_from_condition(&mut *ct.right);
 
-    let mut sqs = Vec::new();
-    match ce {
-        ComparisonOp(ref ct) => {
-            let (lfq, lqueries) = extract_subqueries_from_condition(*ct.left.clone());
-            let (rfq, rqueries) = extract_subqueries_from_condition(*ct.right.clone());
-
-            sqs.extend(lqueries);
-            sqs.extend(rqueries);
-
-            (ComparisonOp(ConditionTree {
-                left: Box::new(lfq),
-                right: Box::new(rfq),
-                operator: ct.operator.clone()
-            }),
-            sqs)
+            lb.into_iter()
+            .chain(rb.into_iter())
+            .collect()
         },
-        LogicalOp(ref ct) => {
-            let (lfq, lqueries) = extract_subqueries_from_condition(*ct.left.clone());
-            let (rfq, rqueries) = extract_subqueries_from_condition(*ct.right.clone());
-
-            sqs.extend(lqueries);
-            sqs.extend(rqueries);
-
-            (LogicalOp(ConditionTree {
-                left: Box::new(lfq),
-                right: Box::new(rfq),
-                operator: ct.operator.clone()
-            }),
-            sqs)
+        NegationOp(ref mut bce) => {
+            extract_subqueries_from_condition(&mut *bce)
         },
-        NegationOp(bce) => {
-            let (expr, queries) = extract_subqueries_from_condition(*bce);
-
-            sqs.extend(queries);
-
-            (NegationOp(Box::new(expr)), sqs)
-        },
-
-        Base(NestedSelect(ref bst)) => {
-            let sq = SqlQuery::Select(*bst.clone());
-            let qname = format!("q_{}", hash_query(&sq));
-            sqs.push((qname.clone(), sq));
-
-            let cols: Vec<Column> = bst.fields.iter().map(|fe| {
-                match *fe {
-                    FieldExpression::Col(ref c) => c.clone(),
-                    _ => unimplemented!()
-                }
-            }).collect();
-            assert_eq!(cols.len(), 1);
-
-            let col = cols.first().unwrap();
-            let new_col = Column {
-                name: col.name.clone(),
-                alias: col.alias.clone(),
-                table: Some(qname),
-                function: col.function.clone(),
-            };
-
-            (Base(ConditionBase::Field(new_col.clone())), sqs)
-        },
-        Base(cb) => (Base(cb), sqs)
+        Base(ref mut cb) => {
+            match *cb {
+                NestedSelect(_) => vec![cb],
+                _ => vec![]
+            }
+        }
     }
 }
 
-fn hash_query(q: &SqlQuery) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+pub fn field_with_table_name(name: String, column: Column) -> ConditionBase {
+    ConditionBase::Field(Column {
+        name: column.name.clone(),
+        alias: column.alias.clone(),
+        table: Some(name),
+        function: column.function.clone(),
+    })
+}
 
-    let mut h = DefaultHasher::new();
-    q.hash(&mut h);
-    h.finish()
+pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
+    use nom_sql::FieldExpression;
+    use nom_sql::ConditionBase::NestedSelect;
+    let (sq, column);
+    match *cond {
+        NestedSelect(ref bst) => {
+            sq = SqlQuery::Select(*bst.clone());
+            column = bst.fields.iter().map(|fe| {
+                match *fe {
+                    FieldExpression::Col(ref c) => c.clone(),
+                    _ => unreachable!()
+                }
+            }).nth(0).unwrap();
+        }
+        _ => unreachable!()
+    };
+
+    (sq, column)
 }
 
 impl SubQueries for SqlQuery {
-    fn extract_and_replace_subqueries(self) -> (SqlQuery, Vec<(String, SqlQuery)>) {
-        match self {
-            SqlQuery::Select(ref st) => {
-                if st.where_clause.is_some() {
-                    let ce = st.clone().where_clause.unwrap();
-                    let (new_ce, queries) = extract_subqueries_from_condition(ce);
-                    let mut new_st = st.clone();
-                    new_st.where_clause = Some(new_ce);
-                    return (SqlQuery::Select(new_st), queries);
+    fn extract_subqueries<'a>(&'a mut self) -> Vec<&'a mut ConditionBase> {
+        match *self {
+            SqlQuery::Select(ref mut st) => {
+                match st.where_clause {
+                    Some(ref mut ce) => { return extract_subqueries_from_condition(ce); },
+                    None => ()
                 }
             }
             _ => (),
         }
 
-        (self, Vec::new())
+        Vec::new()
     }
 }
 
@@ -116,7 +85,7 @@ mod tests {
         Box::new(Base(cb))
     }
     #[test]
-    fn it_extracts_and_replaces_subqueries() {
+    fn it_extracts_subqueries() {
         // select userid from role where type=1
         let sq = SelectStatement {
             tables: vec![Table::from("role")],
@@ -129,41 +98,30 @@ mod tests {
             ..Default::default()
         };
 
-        let sqname = format!("q_{}", hash_query(&SqlQuery::Select(sq.clone())));
+        let expected = NestedSelect(Box::new(sq.clone()));
 
         // select pid from post where author in (select userid from role where type=1)
-        let q = SelectStatement {
+        let st = SelectStatement {
             tables: vec![Table::from("post")],
             fields: vec![FieldExpression::Col(Column::from("pid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
                 operator: Operator::In,
                 left: wrap(Field(Column::from("author"))),
-                right: wrap(NestedSelect(Box::new(sq.clone())))
+                right: wrap(expected.clone()),
             })),
             ..Default::default()
         };
 
-        let expected = SqlQuery::Select(SelectStatement {
-            tables: vec![Table::from("post")],
-            fields: vec![FieldExpression::Col(Column::from("pid"))],
-            where_clause: Some(ComparisonOp(ConditionTree {
-                operator: Operator::In,
-                left: wrap(Field(Column::from("author"))),
-                right: wrap(Field(Column::from(format!("{}.userid", sqname).as_str())))
-            })),
-            ..Default::default()
-        });
+        let mut q = SqlQuery::Select(st);
+        let res = q.extract_subqueries();
 
-        let res = SqlQuery::Select(q).extract_and_replace_subqueries();
-
-        assert_eq!(res.0, expected);
-        assert_eq!(res.1, vec![(sqname, SqlQuery::Select(sq.clone()))]);
+        assert_eq!(res, vec![&expected]);
     }
 
     #[test]
     fn it_does_nothing_for_flat_queries() {
         // select userid from role where type=1
-        let q = SqlQuery::Select(SelectStatement {
+        let mut q = SqlQuery::Select(SelectStatement {
             tables: vec![Table::from("role")],
             fields: vec![FieldExpression::Col(Column::from("userid"))],
             where_clause: Some(ComparisonOp(ConditionTree {
@@ -174,12 +132,10 @@ mod tests {
             ..Default::default()
         });
 
-        let expected = q.clone();
+        let res = q.extract_subqueries();
+        let expected: Vec<&ConditionBase> = Vec::new();
 
-        let res = q.extract_and_replace_subqueries();
-
-        assert_eq!(res.0, expected);
-        assert_eq!(res.1, vec![]);
+        assert_eq!(res, expected);
     }
 
 
@@ -190,7 +146,7 @@ mod tests {
         //          where users.id = articles.author \
         //          and votes.aid = articles.aid;
 
-        let q = SqlQuery::Select(SelectStatement {
+        let mut q = SqlQuery::Select(SelectStatement {
             tables: vec![Table::from("articles"), Table::from("users"), Table::from("votes")],
             fields: vec![
                 FieldExpression::Col(Column::from("users.name")),
@@ -213,11 +169,10 @@ mod tests {
             ..Default::default()
         });
 
-        let expected = q.clone();
+        let expected: Vec<&ConditionBase> = Vec::new();
 
-        let res = q.extract_and_replace_subqueries();
+        let res = q.extract_subqueries();
 
-        assert_eq!(res.0, expected);
-        assert_eq!(res.1, vec![]);
+        assert_eq!(res, expected);
     }
 }

@@ -437,9 +437,14 @@ impl SqlIncorporator {
 
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
-        let (fq, queries) = q.extract_and_replace_subqueries();
-        for (sqname, sq) in queries {
-            self.add_parsed_query(sq.clone(), Some(sqname), mig).expect("failed to add subquery");
+        let mut fq = q.clone();
+        for mut cond_base in fq.extract_subqueries() {
+            use sql::passes::subqueries::query_from_condition_base;
+            use sql::passes::subqueries::field_with_table_name;
+            let (sq, column) = query_from_condition_base(&cond_base);
+
+            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
+            *cond_base = field_with_table_name(qfp.name.clone(), column);
         }
 
         // first, check that all tables mentioned in the query exist.
@@ -479,7 +484,7 @@ impl SqlIncorporator {
                     QueryGraphReuse::ExactMatch(mn) => {
                         let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                         QueryFlowParts {
-                            name: query_name.clone(),
+                            name: String::from(mn.borrow().name()),
                             new_nodes: vec![],
                             reused_nodes: vec![flow_node],
                             query_leaf: flow_node,
