@@ -480,27 +480,21 @@ impl SqlToMirConverter {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
-        let ucols: Vec<Column> = ancestors.first().unwrap()
-                                    .borrow()
-                                    .columns()
-                                    .iter()
-                                    .cloned()
-                                    .collect();
-
-        assert!(ancestors
-                .iter()
-                .all(|a| a.borrow().columns().len() == ucols.len()),
-                "all ancestors columns must have the same size");
+        let mut projected_columns: Vec<Column> = Vec::new();
 
         for ancestor in ancestors.iter() {
             let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
+            // TODO(larat): project the intersection of ancestor columns
+            if cols.len() > projected_columns.len() {
+                projected_columns = cols.clone();
+            }
             emit.push(cols.clone());
         }
 
         MirNode::new(
             name,
             self.schema_version,
-            ucols,
+            projected_columns,
             MirNodeType::Union { emit },
             ancestors.clone(),
             vec![],
@@ -1020,7 +1014,7 @@ impl SqlToMirConverter {
             if qg.relations.get("UserContext").is_some() {
                 let latest_existing = self.current.get(&ucrel);
                 let ucn = match latest_existing {
-
+                    None => panic!("Policy \"{:?}\" refers to unknown base node \"{}\"", p, ucrel),
                     Some(v) => {
                         let existing = self.nodes.get(&(ucrel.clone(), *v));
                         match existing {
@@ -1090,7 +1084,7 @@ impl SqlToMirConverter {
                 node_count += 1;
             }
 
-            // handles filter nodes
+            // handles predicate nodes
             for rel in &sorted_rels {
                 let qgn = qg.relations.get(*rel).expect("relation should have a query graph node.");
                 assert!(*rel != "computed_collumns");
@@ -1100,14 +1094,18 @@ impl SqlToMirConverter {
                     continue
                 }
 
-                let new_nodes = self.make_filter_nodes(
-                    &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                    prev_node.expect("empty previous node"),
-                    &qgn.predicates
-                );
+                for pred in &qgn.predicates {
+                    let new_nodes = self.make_predicate_nodes(
+                        &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
+                        prev_node.expect("empty previous node"),
+                        pred,
+                        0
+                    );
 
-                prev_node = Some(new_nodes.iter().last().expect("no new nodes were created").clone());
-                filter_nodes.extend(new_nodes);
+                    prev_node = Some(new_nodes.iter().last().expect("no new nodes were created").clone());
+                    filter_nodes.extend(new_nodes);
+                }
+
             }
 
             let policy_nodes: Vec<_> = base_nodes
@@ -1348,7 +1346,7 @@ impl SqlToMirConverter {
                         if column_to_predicates.contains_key(&over_col) {
                             let parent = match prev_node {
                                 Some(p) => p,
-                                None => base_nodes[over_table].clone()
+                                None => node_for_rel[over_table].clone()
                             };
 
                             let new_mpns = self.predicates_above_group_by(

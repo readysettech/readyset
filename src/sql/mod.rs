@@ -487,6 +487,9 @@ impl SqlIncorporator {
         query_name: String,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
+        use sql::passes::subqueries::SubQueries;
+        use sql::query_utils::ReferredTables;
+
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         let mut fq = q.clone();

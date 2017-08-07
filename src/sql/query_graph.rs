@@ -344,7 +344,7 @@ fn classify_conditionals(
                         // or a security policy using UserContext
                         ConditionBase::Field(ref rf) => {
                             // column/column comparison --> comma join
-                            if let ConditionBase::Field(ref fl) = *l {
+                            if let ConditionBase::Field(ref lf) = *l {
                                 if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
@@ -610,7 +610,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     }
 
                     let mut e = qg.edges
-                        .entry((lt_name, rt_name))
+                        .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
                         QueryGraphEdge::Join(ref mut preds) => preds.push(jp.clone()),
