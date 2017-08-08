@@ -381,7 +381,7 @@ fn classify_conditionals(
                                 params.push(lf.clone());
                             }
                         }
-                        ConditionBase::NestedSelect(_) => unimplemented!()
+                        ConditionBase::NestedSelect(_) => unreachable!("nested selections should have been removed")
                     }
                 };
             };

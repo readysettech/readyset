@@ -22,8 +22,8 @@ impl Policy {
 					let pred = p["predicate"].as_str().unwrap();
 
 					let sq = sql_parser::parse_query(
-										&format!("select * from {} {};", 
-											table, 
+										&format!("select * from {} {};",
+											table,
 											pred
 										)
 								).unwrap();
@@ -38,6 +38,8 @@ impl Policy {
 }
 
 mod tests {
+	use super::*;
+
 	#[test]
 	fn it_parses() {
 		let policy_text = r#"[{ "table": "post", "predicate": "WHERE post.type = ?" },
