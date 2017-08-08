@@ -1436,7 +1436,8 @@ fn live_writes() {
     jh.join().unwrap();
 
     // allow the system to catch up with the last writes
-    thread::sleep(Duration::from_millis(SETTLE_TIME_MS));
+    // N.B.: due to coarse-grained backpressure, this needs to be more than just SETTLE_TIME_MS
+    thread::sleep(Duration::from_millis(5 * SETTLE_TIME_MS));
 
     // check that all writes happened the right number of times
     for i in 0..ids {
