@@ -7,6 +7,7 @@ mod reuse;
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
+use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
@@ -260,9 +261,10 @@ impl SqlIncorporator {
         leaf: MirNodeRef,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        // We want to hang the new leaf off the last non-leaf node of the query, so backtrack one
-        // step here.
-        let final_node_of_query = leaf.borrow().ancestors().iter().next().unwrap().clone();
+        // We want to hang the new leaf off the last non-leaf node of the query that has the
+        // columns we need, so backtrack here until we find this place. Typically, this unwinds
+        // only two steps, above the final projection.
+        let final_node_of_query = mir_reuse::rewind_until_columns_found(leaf, params).unwrap();
 
         let mut mir = self.mir_converter
             .add_leaf_below(final_node_of_query, query_name, params);
@@ -579,6 +581,7 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
+        use sql::query_graph::OutputColumn;
         use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
 
@@ -590,7 +593,7 @@ mod tests {
             a.hash(&mut hasher);
         }
         for c in columns.iter() {
-            c.hash(&mut hasher);
+            OutputColumn::Data((*c).clone()).hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -690,8 +693,8 @@ mod tests {
         );
         // leaf node
         let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
-        assert_eq!(new_leaf_view.fields(), &["title", "name"]);
-        assert_eq!(new_leaf_view.description(), format!("π[2, 4]"));
+        assert_eq!(new_leaf_view.fields(), &["name", "title"]);
+        assert_eq!(new_leaf_view.description(), format!("π[4, 2]"));
     }
 
     #[test]
@@ -729,7 +732,7 @@ mod tests {
             &[&Column::from("users.name")],
         );
         // filter node
-        let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_f0", qid));
+        let filter = get_node(&inc, &mig, &format!("q_{:x}_n0_p0_f0", qid));
         assert_eq!(filter.fields(), &["id", "name"]);
         assert_eq!(filter.description(), format!("σ[f0 = 42]"));
         // leaf view node
@@ -1077,8 +1080,8 @@ mod tests {
                 &Column::from("votes.aid"),
             ],
             &[
-                &Column::from("articles.title"),
                 &Column::from("users.name"),
+                &Column::from("articles.title"),
                 &Column::from("votes.uid"),
             ],
         );
@@ -1086,7 +1089,7 @@ mod tests {
         // views
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
-        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
+        assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
 
     #[test]
@@ -1150,8 +1153,33 @@ mod tests {
         //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
-        assert_eq!(leaf_view.fields(), &["title", "name", "uid"]);
+        assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
+
+    #[test]
+    fn it_incorporates_literal_projection() {
+        // set up graph
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig
+            ).is_ok()
+        );
+
+        let res = inc.add_query("SELECT users.name, 1 FROM users;", None, &mut mig);
+        assert!(res.is_ok());
+
+        // leaf view node
+        let edge = get_node(&inc, &mig, &res.unwrap().name);
+        assert_eq!(edge.fields(), &["name", "literal"]);
+        assert_eq!(edge.description(), format!("π[1, lit: 1]"));
+    }
+
 
     #[test]
     fn it_incorporates_finkelstein1982_naively() {

@@ -265,7 +265,7 @@ impl DomainHandle {
     pub fn wait_for_ack(&mut self) -> Result<(), WaitError> {
         for _ in 0..self.shards() {
             match self.wait_for_next_reply() {
-                ControlReplyPacket::Ack => {}
+                ControlReplyPacket::Ack(_) => {}
                 r => return Err(WaitError::WrongReply(r)),
             }
         }

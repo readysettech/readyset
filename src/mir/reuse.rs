@@ -1,5 +1,33 @@
 use mir::{MirNode, MirNodeRef, MirNodeType, MirQuery};
+use nom_sql::Column;
 use slog;
+
+pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Option<MirNodeRef> {
+    let mut cur = leaf;
+    loop {
+        if cur.borrow().ancestors().len() > 1 {
+            return None;
+        }
+        // silly, but the borrow checker doesn't let us do this in a single line
+        let next = cur.borrow()
+            .ancestors()
+            .iter()
+            .next()
+            .expect(&format!("{:?} has no ancestors", cur))
+            .clone();
+        cur = next;
+
+        let mut missing_any = false;
+        for c in columns {
+            if !cur.borrow().columns().contains(c) {
+                missing_any = true;
+            }
+        }
+        if !missing_any {
+            return Some(cur.clone());
+        }
+    }
+}
 
 pub fn merge_mir_for_queries(
     log: &slog::Logger,

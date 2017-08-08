@@ -689,12 +689,15 @@ impl MirNode {
                                FlowNode::Existing(na) => FlowNode::Existing(na),
                         }
                     }
-                    MirNodeType::Union { .. } => {
-                        assert_eq!(self.ancestors.len(), 2);
-                        let _left = self.ancestors[0].clone();
-                        let _right = self.ancestors[1].clone();
-                        // XXX(malte): fix
-                        unimplemented!()
+                    MirNodeType::Union { ref emit } => {
+                        assert_eq!(self.ancestors.len(), emit.len());
+                        make_union_node(
+                            &name,
+                            self.columns.as_slice(),
+                            emit,
+                            self.ancestors(),
+                            mig,
+                        )
                     }
                     MirNodeType::TopK {
                         ref order,
@@ -788,12 +791,9 @@ pub enum MirNodeType {
         emit: Vec<Column>,
         literals: Vec<(String, DataType)>,
     },
-    /// emit columns left, emit columns right
-    // currently unused
-    #[allow(dead_code)]
+    /// emit columns
     Union {
-        emit_left: Vec<Column>,
-        emit_right: Vec<Column>,
+        emit: Vec<Vec<Column>>,
     },
     /// order function, group columns, k
     TopK {
@@ -1192,21 +1192,21 @@ impl Debug for MirNodeType {
             MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
             MirNodeType::TopK { ref order, ref k, .. } => write!(f, "TopK [k: {}, {:?}]", k, order),
             MirNodeType::Union {
-                ref emit_left,
-                ref emit_right,
+                ref emit,
             } => {
-                let cols_left = emit_left
+                let cols = emit
                     .iter()
-                    .map(|e| e.name.clone())
+                    .map(|c|
+                        c.iter()
+                        .map(|e| e.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                    )
                     .collect::<Vec<_>>()
-                    .join(", ");
-                let cols_right = emit_right
-                    .iter()
-                    .map(|e| e.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "{} ⋃ {}", cols_left, cols_right)
-            }
+                    .join(" ⋃ ");
+
+                write!(f, "{}", cols)
+            },
         }
     }
 }
@@ -1317,6 +1317,34 @@ fn make_base_node(
     } else {
         FlowNode::New(mig.add_ingredient(name, column_names.as_slice(), base))
     }
+}
+
+fn make_union_node(
+    name: &str,
+    columns: &[Column],
+    emit: &Vec<Vec<Column>>,
+    ancestors: &[MirNodeRef],
+    mut mig: &mut Migration,
+) -> FlowNode {
+    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
+    let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
+
+    for (i, n) in ancestors.clone().iter().enumerate() {
+        let emit_cols = emit[i].iter()
+            .map(|c| n.borrow().column_id_for_column(c))
+            .collect::<Vec<_>>();
+
+        let ni = n.borrow().flow_node_addr().unwrap();
+        emit_column_id.insert(ni, emit_cols);
+
+    }
+    let node = mig.add_ingredient(
+        String::from(name),
+        column_names.as_slice(),
+        ops::union::Union::new(emit_column_id),
+    );
+
+    FlowNode::New(node)
 }
 
 fn make_filter_node(

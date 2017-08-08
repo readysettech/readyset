@@ -350,6 +350,9 @@ fn shard_by(dt: &DataType, shards: usize) -> usize {
     }
 }
 
+#[cfg(debug_assertions)]
+extern crate backtrace;
+
 #[macro_use]
 extern crate slog;
 extern crate slog_term;

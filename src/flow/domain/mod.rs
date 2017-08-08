@@ -618,7 +618,7 @@ impl Domain {
             match self.transaction_state.get_next_event() {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
-                    self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                    self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
                 }
                 transactions::Event::CompleteMigration => {}
                 transactions::Event::SeedReplay(tag, key, rts) => {
@@ -724,14 +724,14 @@ impl Domain {
                         n.get_base_mut()
                             .expect("told to add base column to non-base node")
                             .add_column(default);
-                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
                     }
                     Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
-                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
                     }
                     Packet::UpdateEgress {
                         node,
@@ -875,7 +875,7 @@ impl Domain {
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
-                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
 
                         if notify_done {
                             info!(self.log,
@@ -1017,7 +1017,7 @@ impl Domain {
                             }
                         }
 
-                        self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
                     }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
@@ -1787,7 +1787,7 @@ impl Domain {
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                self.control_reply_tx.send(ControlReplyPacket::Ack).unwrap();
+                self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
             } else {
                 unreachable!()
             }
