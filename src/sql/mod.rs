@@ -433,11 +433,24 @@ impl SqlIncorporator {
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
         use sql::passes::negation_removal::NegationRemoval;
+        use sql::passes::subqueries::SubQueries;
+
+        // flattens out the query by replacing subqueries for references
+        // to existing views in the graph
+        let mut fq = q.clone();
+        for mut cond_base in fq.extract_subqueries() {
+            use sql::passes::subqueries::query_from_condition_base;
+            use sql::passes::subqueries::field_with_table_name;
+            let (sq, column) = query_from_condition_base(&cond_base);
+
+            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
+            *cond_base = field_with_table_name(qfp.name.clone(), column);
+        }
 
         // first, check that all tables mentioned in the query exist.
         // This must happen before the rewrite passes are applied because some of them rely on
         // having the table schema available in `self.view_schemas`.
-        match q {
+        match fq {
             // if we're just about to create the table, we don't need to check if it exists. If it
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
@@ -456,7 +469,7 @@ impl SqlIncorporator {
 
         // first run some standard rewrite passes on the query. This makes the later work easier,
         // as we no longer have to consider complications like aliases.
-        let q = q.expand_table_aliases()
+        let q = fq.expand_table_aliases()
             .remove_negation()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
@@ -471,7 +484,7 @@ impl SqlIncorporator {
                     QueryGraphReuse::ExactMatch(mn) => {
                         let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
                         QueryFlowParts {
-                            name: query_name.clone(),
+                            name: String::from(mn.borrow().name()),
                             new_nodes: vec![],
                             reused_nodes: vec![flow_node],
                             query_leaf: flow_node,
@@ -549,12 +562,7 @@ impl<'a> ToFlowParts for &'a str {
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
-            Ok(q) => {
-                match name {
-                    Some(name) => inc.nodes_for_named_query(q, name, mig),
-                    None => inc.nodes_for_query(q, mig),
-                }
-            }
+            Ok(q) => inc.add_parsed_query(q, name, mig),
             Err(e) => Err(String::from(e)),
         }
     }

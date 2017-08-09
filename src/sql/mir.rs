@@ -658,7 +658,7 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
         for p in jps.iter() {
             // equi-join only
-            assert_eq!(p.operator, Operator::Equal);
+            assert!(p.operator == Operator::Equal || p.operator == Operator::In );
             let l_col = match *p.left {
                 ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                 _ => unimplemented!(),

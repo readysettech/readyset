@@ -234,14 +234,22 @@ impl Recipe {
             let (n, q) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n, mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n.clone(), mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
             // for na in qfp.new_nodes.iter() {
             //     mig.assign_domain(na.clone(), d);
             // }
-            result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+
+            // If the user provided us with a query name, use that.
+            // If not, use the name internally used by the QFP.
+            let query_name = match n {
+                Some(name) => name,
+                None => qfp.name.clone()
+            };
+
+            result.new_nodes.insert(query_name, qfp.query_leaf);
         }
 
         // TODO(malte): deal with removal.
