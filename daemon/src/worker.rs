@@ -98,7 +98,9 @@ impl Worker {
                 PollEvent::Process(msg) => {
                     debug!(self.log, "Received {:?}", msg);
                     match msg.payload {
-                        CoordinationPayload::AssignDomain(d) => self.handle_domain_assign(d),
+                        CoordinationPayload::AssignDomain(d) => {
+                            self.handle_domain_assign(d).unwrap()
+                        }
                         _ => (),
                     }
                 }
@@ -117,14 +119,31 @@ impl Worker {
         self.receiver = receiver;
     }
 
-    fn handle_domain_assign(&mut self, d: DomainBuilder) {
-        let jh = d.boot(
+    fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
+        let idx = d.index;
+        let shard = d.shard;
+        let (jh, addr) = d.boot(
             self.log.clone(),
             // domains initialize their own readers
             Arc::default(),
             self.channel_coordinator.clone(),
         );
         self.domain_threads.push(jh);
+
+        let msg = self.wrap_payload(CoordinationPayload::DomainBooted((idx, shard), addr));
+        match self.sender.as_mut().unwrap().send(msg) {
+            Ok(_) => {
+                trace!(
+                    self.log,
+                    "informed controller that domain {}.{} is at {:?}",
+                    idx.index(),
+                    shard,
+                    addr
+                );
+                Ok(())
+            }
+            Err(e) => return Err(e),
+        }
     }
 
     fn wrap_payload(&self, pl: CoordinationPayload) -> CoordinationMessage {

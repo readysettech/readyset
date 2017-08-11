@@ -1,6 +1,7 @@
 use channel::tcp::TcpSender;
 use channel::poll::{PollEvent, PollingLoop};
 use distributary::{Blender, CoordinationMessage, CoordinationPayload};
+use distributary::Index as DomainIndex;
 use slog::Logger;
 use std::io;
 use std::collections::HashMap;
@@ -111,8 +112,37 @@ impl Controller {
         match msg.payload {
             CoordinationPayload::Register(ref remote) => self.handle_register(msg, remote),
             CoordinationPayload::Heartbeat => self.handle_heartbeat(msg),
+            CoordinationPayload::DomainBooted(ref domain, ref addr) => {
+                self.handle_domain_booted(msg, domain, addr)
+            }
             _ => unimplemented!(),
         }
+    }
+
+    fn handle_domain_booted(
+        &mut self,
+        msg: &CoordinationMessage,
+        domain: &(DomainIndex, usize),
+        addr: &SocketAddr,
+    ) -> Result<(), io::Error> {
+        use std::str::FromStr;
+
+        // rewrite message source to be from the controller
+        let mut fwd_msg = msg.clone();
+        fwd_msg.source =
+            SocketAddr::from_str(&format!("{}:{}", self.listen_addr, self.listen_port)).unwrap();
+
+        // notify ChannelCoordinators on other workers about this new domain
+        for (worker, mut status) in &mut self.workers {
+            if *worker == msg.source {
+                continue;
+            }
+            if status.healthy {
+                let mut s = status.sender.as_mut().unwrap().lock().unwrap();
+                s.send(fwd_msg.clone()).unwrap();
+            }
+        }
+        Ok(())
     }
 
     fn handle_register(

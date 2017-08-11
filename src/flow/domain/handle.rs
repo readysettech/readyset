@@ -170,9 +170,8 @@ impl DomainHandle {
                     }).unwrap();
                 }
                 None => {
-                    threads.push(
-                        domain.boot(logger, readers.clone(), channel_coordinator.clone()),
-                    );
+                    let (jh, _) = domain.boot(logger, readers.clone(), channel_coordinator.clone());
+                    threads.push(jh);
                 }
             }
 

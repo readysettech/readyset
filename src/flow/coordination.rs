@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
-use flow::domain::DomainBuilder;
+use flow::domain::{self, DomainBuilder};
 
 /// Coordination-layer message wrapper; adds a mandatory `source` field to each message.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CoordinationMessage {
     /// The worker's `SocketAddr` from which this message was sent.
     pub source: SocketAddr,
@@ -12,7 +12,7 @@ pub struct CoordinationMessage {
 }
 
 /// Coordination-layer message payloads.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CoordinationPayload {
     /// Register a new worker at given `SocketAddr`.
     Register(SocketAddr),
@@ -24,4 +24,6 @@ pub enum CoordinationPayload {
     AssignDomain(DomainBuilder),
     /// Remove a running domain from a worker.
     RemoveDomain,
+    /// Domain connectivity gossip.
+    DomainBooted((domain::Index, usize), SocketAddr),
 }

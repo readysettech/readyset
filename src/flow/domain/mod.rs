@@ -104,7 +104,7 @@ struct Waiting {
 }
 
 /// Struct sent to a worker to start a domain.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DomainBuilder {
     /// The domain's index.
     pub index: Index,
@@ -133,7 +133,7 @@ impl DomainBuilder {
         log: Logger,
         readers: flow::Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
-    ) -> thread::JoinHandle<()> {
+    ) -> (thread::JoinHandle<()>, SocketAddr) {
         // initially, all nodes are not ready
         let not_ready = self.nodes
             .values()
@@ -163,7 +163,8 @@ impl DomainBuilder {
             Some(shard) => format!("domain{}.{}", self.index.0, shard),
             None => format!("domain{}", self.index.0),
         };
-        thread::Builder::new()
+
+        let jh = thread::Builder::new()
             .name(name)
             .spawn(move || {
                 let checktable = Rc::new(
@@ -209,7 +210,8 @@ impl DomainBuilder {
                     process_ptimes: TimerSet::new(),
                 }.run(polling_loop)
             })
-            .unwrap()
+            .unwrap();
+        (jh, addr)
     }
 }
 
