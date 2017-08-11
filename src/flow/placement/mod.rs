@@ -5,7 +5,7 @@ use std::iter::{Cycle, Iterator};
 use flow::prelude::{WorkerEndpoint, WorkerIdentifier};
 use flow::domain;
 
-pub(crate) trait DomainPlacementStrategy<'a> {
+pub trait DomainPlacementStrategy<'a> {
     fn place_domain(&mut self, d: &domain::Index) -> Option<WorkerIdentifier>;
 }
 

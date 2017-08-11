@@ -6,6 +6,7 @@ use flow::domain;
 use flow::coordination::{CoordinationMessage, CoordinationPayload};
 use flow::payload::ControlReplyPacket;
 use flow::persistence;
+use flow::placement;
 use flow::prelude::*;
 use flow::statistics::{DomainStats, NodeStats};
 
@@ -102,7 +103,8 @@ impl DomainHandle {
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
-        worker: Option<&WorkerEndpoint>,
+        workers: &HashMap<WorkerIdentifier, WorkerEndpoint>,
+        placer: &mut placement::DomainPlacementStrategy,
         ts: i64,
     ) -> Self {
         // NOTE: warning to future self...
@@ -144,6 +146,11 @@ impl DomainHandle {
                 checktable_addr: checktable_addr.clone(),
                 debug_addr: debug_addr.clone(),
             };
+
+            // TODO(malte): simple round-robin placement for the moment
+            let worker = placer
+                .place_domain(&idx)
+                .map(|wi| workers[&wi].clone());
 
             match worker {
                 Some(worker) => {

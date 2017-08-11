@@ -40,7 +40,6 @@ mod getter;
 mod transactions;
 
 use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
-use self::placement::DomainPlacementStrategy;
 
 pub use self::mutator::{Mutator, MutatorError};
 pub use self::getter::Getter;
@@ -934,11 +933,6 @@ impl<'a> Migration<'a> {
                 continue;
             }
 
-            // TODO(malte): simple round-robin placement for the moment
-            let worker = placer
-                .place_domain(&domain)
-                .map(|wi| mainline.workers[&wi].clone());
-
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let d = domain::DomainHandle::new(
                 domain,
@@ -951,7 +945,8 @@ impl<'a> Migration<'a> {
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
-                worker.as_ref(),
+                &workers,
+                &mut placer,
                 start_ts,
             );
             mainline.domains.insert(domain, d);
