@@ -151,8 +151,8 @@ impl DomainHandle {
                     let mut w = worker.lock().unwrap();
                     debug!(
                         log,
-                        "sending domain {:?}.{} to worker {:?}",
-                        domain.index,
+                        "sending domain {}.{} to worker {:?}",
+                        domain.index.index(),
                         domain.shard,
                         w.local_addr()
                     );
