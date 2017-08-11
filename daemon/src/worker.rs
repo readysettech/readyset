@@ -7,6 +7,7 @@ use std::thread::JoinHandle;
 use std::sync::Arc;
 
 use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder};
+use distributary::Index as DomainIndex;
 
 pub struct Worker {
     log: Logger,
@@ -101,6 +102,9 @@ impl Worker {
                         CoordinationPayload::AssignDomain(d) => {
                             self.handle_domain_assign(d).unwrap()
                         }
+                        CoordinationPayload::DomainBooted(domain, addr) => {
+                            self.handle_domain_booted(domain, addr).unwrap()
+                        }
                         _ => (),
                     }
                 }
@@ -144,6 +148,15 @@ impl Worker {
             }
             Err(e) => return Err(e),
         }
+    }
+
+    fn handle_domain_booted(
+        &mut self,
+        (domain, shard): (DomainIndex, usize),
+        addr: SocketAddr,
+    ) -> Result<(), String> {
+        self.channel_coordinator.insert_addr((domain, shard), addr);
+        Ok(())
     }
 
     fn wrap_payload(&self, pl: CoordinationPayload) -> CoordinationMessage {
