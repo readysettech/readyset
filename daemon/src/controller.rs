@@ -80,7 +80,7 @@ impl Controller {
         pl.run_polling_loop(|e| {
             match e {
                 PollEvent::Process(ref msg) => {
-                    debug!(self.log, "Received {:?}", msg);
+                    trace!(self.log, "Received {:?}", msg);
                     match self.handle(msg) {
                         Ok(_) => (),
                         Err(e) => error!(self.log, "failed to handle message {:?}: {:?}", msg, e),

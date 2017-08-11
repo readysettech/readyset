@@ -96,7 +96,7 @@ impl Worker {
                     return ProcessResult::KeepPolling;
                 }
                 PollEvent::Process(msg) => {
-                    debug!(self.log, "Received {:?}", msg);
+                    trace!(self.log, "Received {:?}", msg);
                     match msg.payload {
                         CoordinationPayload::AssignDomain(d) => {
                             self.handle_domain_assign(d).unwrap()
