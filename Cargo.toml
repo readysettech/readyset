@@ -146,6 +146,11 @@ path = "benchmarks/hotsoup/extract_queries.rs"
 required-features = ["binaries"]
 
 [[bin]]
+name = "process_paper_queries"
+path = "benchmarks/hotsoup/process_paper_queries.rs"
+required-features = ["binaries"]
+
+[[bin]]
 name = "piazza"
 path = "benchmarks/piazza/piazza.rs"
 required-features = ["binaries"]
