@@ -225,6 +225,39 @@ impl Recipe {
         }
     }
 
+    /// Creates a new universe
+    pub fn create_universe(
+        &mut self,
+        mig: &mut Migration,
+    ) -> Result<ActivationResult, String> {
+        let mut result = ActivationResult {
+            new_nodes: HashMap::default(),
+            expressions_added: 0,
+            expressions_removed: 0,
+        };
+
+        let qfp = self.inc.as_mut().unwrap().start_universe(&self.policies, mig)?;
+        result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
+
+        for expr in self.expressions.values() {
+            let (n, q) = expr.clone();
+            // add the universe-specific query
+            // don't user query name to avoid conflict with global queries
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, None, mig)?;
+
+            // If the user provided us with a query name, use that.
+            // If not, use the name internally used by the QFP.
+            let query_name = match n {
+                Some(name) => name,
+                None => qfp.name.clone()
+            };
+
+            result.new_nodes.insert(query_name, qfp.query_leaf);
+        }
+
+        Ok(result)
+    }
+
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
     /// This causes all necessary changes to said graph to be applied; however, it is the caller's
     /// responsibility to call `mig.commit()` afterwards.
@@ -250,16 +283,6 @@ impl Recipe {
             expressions_added: added.len(),
             expressions_removed: removed.len(),
         };
-
-        match mig.user_context() {
-            Some(c) => {
-                info!(self.log, "Starting user universe {}", c.get("id").expect("context must have id"));
-                let qfp = self.inc.as_mut().unwrap().start_universe(c, mig)?;
-                result.new_nodes.insert(qfp.name.clone(), qfp.query_leaf);
-            },
-            None => (),
-        };
-
 
         // upgrade schema version *before* applying changes, so that new queries are correctly
         // tagged with the new version. If this recipe was just created, there is no need to
@@ -303,11 +326,6 @@ impl Recipe {
             error!(self.log, "Unhandled query removal of {:?}", qid; "version" => self.version);
             //unimplemented!()
         }
-
-        // TODO(larat): this should be done over a delta of policies
-        let policies_delta = self.policies.clone();
-        debug!(self.log, "Added {} policies", policies_delta.len());
-        self.inc.as_mut().unwrap().add_policies(policies_delta);
 
         Ok(result)
     }

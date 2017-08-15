@@ -52,7 +52,6 @@ pub struct SqlIncorporator {
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
-    policies: HashMap<u64, (Policy, QueryGraph)>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
@@ -71,7 +70,6 @@ impl Default for SqlIncorporator {
             view_schemas: HashMap::default(),
             transactional: false,
             enable_reuse: true,
-            policies: HashMap::default(),
         }
     }
 }
@@ -103,8 +101,17 @@ impl SqlIncorporator {
     }
 
     /// Starts a new user universe
-    pub fn start_universe(&mut self, context: HashMap<String, DataType>, mig: &mut Migration) -> Result<QueryFlowParts, String> {
-        let uid = context.get("id").expect("Context must have ID");
+    pub fn start_universe(
+        &mut self,
+        policies: &HashMap<u64, Policy>,
+        mig: &mut Migration,
+    ) -> Result<QueryFlowParts, String> {
+        // First, we need to create a UserContext base node.
+        let context = mig.user_context().expect("Migration must have user context");
+        let uid = context.get("id").expect("Context must have id");
+
+        info!(self.log, "Starting user universe {}", uid);
+
         let name = format!("UserContext_{}", uid);
         let mut s = String::new();
         s.push_str(&format!("CREATE TABLE `{}` (", name));
@@ -115,28 +122,31 @@ impl SqlIncorporator {
         s.push_str("\n");
         s.push_str(") ENGINE=MyISAM DEFAULT CHARSET=utf8;");
 
-        self.add_query(&s, Some(name), mig)
-    }
+        let res = self.add_query(&s, Some(name), mig);
 
-    /// Adds new security policies.
-    /// Added policies are automatically incorporated into the flow graph when a new query is added.
-    pub fn add_policies(&mut self, policies: HashMap<u64, Policy>) {
-        for (_, ref p) in policies.iter() {
-            let q = self.rewrite_query(p.predicate.clone());
+        // Then, we need to transform policies' predicates into QueryGraphs.
+        // We do this in a per-universe base, instead of once per policy,
+        // because predicates can have nested subqueries, which will trigger
+        // a view creation and these views might be unique to each universe
+        // e.g. if they reference UserContext.
 
-            let st = match q {
-                SqlQuery::Select(ref s) => s,
-                _ => unreachable!(),
+        // TODO(larat): move predicate transform here.
+        for (pid, policy) in policies {
+            let predicate = self.rewrite_query(policy.predicate.clone(), mig);
+            let st = match predicate {
+                SqlQuery::Select(ref st) => st,
+                _ => unreachable!()
             };
-
 
             let qg = match to_query_graph(st) {
                 Ok(qg) => qg,
                 Err(e) => panic!(e),
             };
 
-            self.mir_converter.add_policy(p, qg);
+            self.mir_converter.add_policy(&policy, qg);
         }
+
+        res
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -467,14 +477,55 @@ impl SqlIncorporator {
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(&self, q: SqlQuery) -> SqlQuery {
+    fn rewrite_query(&mut self, q: SqlQuery, mut mig: &mut Migration) -> SqlQuery {
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
         use sql::passes::star_expansion::StarExpansion;
         use sql::passes::negation_removal::NegationRemoval;
+        use sql::passes::subqueries::SubQueries;
+        use sql::query_utils::ReferredTables;
 
-        q.expand_table_aliases()
+        // First, flatten out the query by extracting subqueries, adding them as
+        // views in the graph, then replace any subqueries for references to
+        // existing views.
+        let mut fq = q.clone();
+        for mut cond_base in fq.extract_subqueries() {
+            use sql::passes::subqueries::query_from_condition_base;
+            use sql::passes::subqueries::field_with_table_name;
+            let (sq, column) = query_from_condition_base(&cond_base);
+
+            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
+            *cond_base = field_with_table_name(qfp.name.clone(), column);
+        }
+
+        // Check that all tables mentioned in the query exist.
+        // This must happen before the rewrite passes are applied because some of them rely on
+        // having the table schema available in `self.view_schemas`.
+        match fq {
+            // if we're just about to create the table, we don't need to check if it exists. If it
+            // does, we will amend or reuse it; if it does not, we create it.
+            SqlQuery::CreateTable(_) => (),
+            // other kinds of queries *do* require their referred tables to exist!
+            ref q @ SqlQuery::Select(_) |
+            ref q @ SqlQuery::Insert(_) => {
+                for t in &q.referred_tables() {
+                    if !self.view_schemas.contains_key(&t.name) {
+                        panic!("query refers to unknown table \"{}\"", t.name);
+                    }
+                }
+            }
+        }
+
+        // Get universe id for table alias expansion.
+        let uid = match mig.user_context() {
+            Some(ctx) => Some(ctx.get("id").unwrap().clone()),
+            None => None
+        };
+
+        // Run some standard rewrite passes on the query. This makes the later work easier,
+        // as we no longer have to consider complications like aliases.
+        fq.expand_table_aliases(uid)
             .remove_negation()
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)
@@ -487,45 +538,8 @@ impl SqlIncorporator {
         query_name: String,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
-        use sql::passes::subqueries::SubQueries;
-        use sql::query_utils::ReferredTables;
 
-        // flattens out the query by replacing subqueries for references
-        // to existing views in the graph
-        let mut fq = q.clone();
-        for mut cond_base in fq.extract_subqueries() {
-            use sql::passes::subqueries::query_from_condition_base;
-            use sql::passes::subqueries::field_with_table_name;
-            let (sq, column) = query_from_condition_base(&cond_base);
-
-            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
-            *cond_base = field_with_table_name(qfp.name.clone(), column);
-        }
-
-        // first, check that all tables mentioned in the query exist.
-        // This must happen before the rewrite passes are applied because some of them rely on
-        // having the table schema available in `self.view_schemas`.
-        match fq {
-            // if we're just about to create the table, we don't need to check if it exists. If it
-            // does, we will amend or reuse it; if it does not, we create it.
-            SqlQuery::CreateTable(_) => (),
-            // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::Select(_) |
-            ref q @ SqlQuery::Insert(_) => {
-                for t in &q.referred_tables() {
-                    if !self.view_schemas.contains_key(&t.name) {
-                        return Err(format!("query refers to unknown table \"{}\"", t.name));
-                    }
-                }
-            }
-        }
-
-        info!(self.log, "Processing query \"{}\"", query_name);
-
-        // first run some standard rewrite passes on the query. This makes the later work easier,
-        // as we no longer have to consider complications like aliases.
-
-        let q = self.rewrite_query(fq);
+        let q = self.rewrite_query(q, mig);
 
         // migration is adding a new security universe
         // TODO(larat): improve reuse for universe queries

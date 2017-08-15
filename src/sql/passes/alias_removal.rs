@@ -3,8 +3,10 @@ use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldEx
 
 use std::collections::HashMap;
 
+use flow::core::DataType;
+
 pub trait AliasRemoval {
-    fn expand_table_aliases(self) -> SqlQuery;
+    fn expand_table_aliases(self, universe_id: Option<DataType>) -> SqlQuery;
 }
 
 fn rewrite_conditional(
@@ -65,7 +67,7 @@ fn rewrite_conditional(
 }
 
 impl AliasRemoval for SqlQuery {
-    fn expand_table_aliases(self) -> SqlQuery {
+    fn expand_table_aliases(self, universe_id: Option<DataType>) -> SqlQuery {
         let mut table_aliases = HashMap::new();
 
         match self {
@@ -75,6 +77,12 @@ impl AliasRemoval for SqlQuery {
                     let mut add_alias = |alias: &str, name: &str| {
                         table_aliases.insert(alias.to_string(), name.to_string());
                     };
+
+                    // Add alias from `UserContext` to `UserContext_{:uid}`
+                    if universe_id.is_some() {
+                        add_alias("UserContext", &format!("UserContext_{}", universe_id.unwrap()));
+                    }
+
                     for t in &sq.tables {
                         match t.alias {
                             None => (),
