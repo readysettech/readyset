@@ -27,6 +27,8 @@ futures = { version ="0.1.14" }
 tokio-core = { version = "0.1.8" }
 # memcached hooks
 memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
+# mysql output comparison tests
+mysql = { version = "11.2.0" }
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 slog = "2.0.6"
