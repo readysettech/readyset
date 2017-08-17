@@ -134,6 +134,9 @@ impl Worker {
         );
         self.domain_threads.push(jh);
 
+        // need to register the domain with the local channel coordinator
+        self.channel_coordinator.insert_addr((idx, shard), addr);
+
         let msg = self.wrap_payload(CoordinationPayload::DomainBooted((idx, shard), addr));
         match self.sender.as_mut().unwrap().send(msg) {
             Ok(_) => {
