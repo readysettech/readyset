@@ -4,27 +4,29 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [workspace]
-members = ["channel", "daemon"]
+members = ["benchmarks", "channel", "daemon"]
 
 [features]
 web = ["rustful"]
-b_memcached = ["memcached-rs"]
-b_mysql = ["mysql"]
-b_mssql = ["futures", "futures-state-stream", "tiberius", "tokio-core"]
-b_netsoup = ["bincode", "net2", "bufstream"]
-b_hybrid = ["mysql", "memcached-rs"]
-default = ["web", "b_netsoup", "b_memcached", "b_mysql", "b_mssql", "b_hybrid"]
+default = ["web"]
 profiling = ["timekeeper/default"]
 binaries = ["default"]
 generate_mysql_tests = ["default"]
 
 [dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
+bincode = { version = "0.8.0" }
+bufstream = { version = "0.1.3" }
 chrono = { version = "0.4.0", features = ["serde"] }
 itertools = "0.6.0"
 petgraph = { git = "https://github.com/fintelia/petgraph", branch = "serde", features = ["serde"] }
 regex = "0.2.2"
 fnv = "1.0.5"
+# tarpc
+futures = { version ="0.1.14" }
+tokio-core = { version = "0.1.8" }
+# memcached hooks
+memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi" }
 serde = { version = "1.0.8", features = ["rc"] }
 serde_derive = "1.0.8"
 slog = "2.0.6"
@@ -41,29 +43,6 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 arrayvec = "0.3.23"
 
 nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "13744adf972e42741b5e7146db46e8ed7353a15d"}
-
-# for benchmarks
-# cli
-clap = "2.25.0"
-# distributions
-rand = "0.3.15"
-zipf = "0.2.0"
-# sampling
-hdrsample = "4.0.0"
-# mssql
-futures-state-stream = { version = "0.1", optional = true }
-tiberius = { git = "https://github.com/ms705/tiberius/", optional = true }
-# mysql
-mysql = { version = "11.2.0", optional = true }
-# memcached
-memcached-rs = { git = "https://github.com/jonhoo/memcached-rs.git", branch = "expose-multi", optional = true }
-# netsoup
-bincode = { version = "0.8.0", optional = true }
-net2 = { version = "0.2.29", optional = true }
-bufstream = { version = "0.1.3", optional = true }
-# futures
-futures = { version ="0.1.14", optional = true }
-tokio-core = { version = "0.1.8", optional = true }
 
 # durable log
 snowflake = "1.3.0"
@@ -115,49 +94,4 @@ required-features = ["binaries"]
 [[bin]]
 name = "web_sql"
 path = "src/web/sql_main.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "bank"
-path = "benchmarks/bank/bank.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "vote"
-path = "benchmarks/vote/vote.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "vote-server"
-path = "benchmarks/vote/vote-server.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "vote-client"
-path = "benchmarks/vote/vote-client.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "tpc_w"
-path = "benchmarks/tpc_w/tpc_w.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "hotsoup"
-path = "benchmarks/hotsoup/hotsoup.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "extract_hotcrp_queries"
-path = "benchmarks/hotsoup/extract_queries.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "piazza"
-path = "benchmarks/piazza/piazza.rs"
-required-features = ["binaries"]
-
-[[bin]]
-name = "vote-new-fraction"
-path = "benchmarks/vote/vote-new-fraction.rs"
 required-features = ["binaries"]
