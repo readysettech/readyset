@@ -5,7 +5,7 @@ use bincode;
 use bufstream::BufStream;
 use std::io::prelude::*;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use vec_map::VecMap;
 
@@ -54,7 +54,7 @@ pub fn make_server(soup: &flow::Blender) -> Server {
             )
         })
         .collect();
-    let outs = soup.outputs()
+    /*let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n)| {
             (
@@ -66,7 +66,8 @@ pub fn make_server(soup: &flow::Blender) -> Server {
                 ),
             )
         })
-        .collect();
+        .collect();*/
+    let outs = VecMap::new();
 
     Server {
         put: ins,
@@ -150,7 +151,7 @@ pub fn main(stream: TcpStream, mut s: Server) {
 /// Starts a server which allows read/write access to the Soup using a binary protocol.
 ///
 /// In particular, requests should all be of the form `types::Request`
-pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender, addr: T) {
+pub fn run<T: Into<::std::net::SocketAddr>>(soup: Arc<Mutex<flow::Blender>>, addr: T) {
     let listener = TcpListener::bind(addr.into()).unwrap();
 
     // Figure out what inputs and outputs to expose
@@ -158,7 +159,9 @@ pub fn run<T: Into<::std::net::SocketAddr>>(soup: flow::Blender, addr: T) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let s = make_server(&soup);
+                let g = soup.lock().unwrap();
+                println!("{}", g);
+                let s = make_server(&g);
                 thread::Builder::new()
                     .name(format!("rpc{}", i))
                     .spawn(move || {
