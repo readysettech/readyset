@@ -5,6 +5,7 @@ extern crate slog;
 extern crate slog_term;
 
 use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gulaschkanone::{Config, Controller};
@@ -23,15 +24,16 @@ fn main() {
 
     let log = distributary::logger_pls();
 
+    let blender = Arc::new(Mutex::new(Blender::new()));
+
     let mut controller = Controller::new(
+        blender.clone(),
         &config.addr,
         config.port,
         Duration::from_millis(config.heartbeat_freq),
         Duration::from_millis(config.healthcheck_freq),
         log.clone(),
     );
-
-    let blender = controller.get_blender();
 
     // run controller in the background
     let jh = thread::spawn(move || { controller.listen(); });

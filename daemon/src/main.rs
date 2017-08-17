@@ -13,10 +13,12 @@ extern crate slog_term;
 
 extern crate gulaschkanone;
 
+use distributary::Blender;
 use gulaschkanone::{Config, Controller, Worker};
 
 use slog::Logger;
 use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 mod api;
@@ -124,7 +126,10 @@ fn main() {
 
     match config.controller {
         None => {
+            let blender = Arc::new(Mutex::new(Blender::new()));
+
             let mut controller = Controller::new(
+                blender.clone(),
                 &config.addr,
                 config.port,
                 Duration::from_millis(config.heartbeat_freq),
@@ -134,8 +139,7 @@ fn main() {
 
             // run the API server (to receive recipes)
             let tb = thread::Builder::new().name("api-srv".into());
-            let blender_arc = controller.get_blender();
-            let api_jh = match tb.spawn(|| api::run(blender_arc, log).unwrap()) {
+            let api_jh = match tb.spawn(|| api::run(blender, log).unwrap()) {
                 Ok(jh) => jh,
                 Err(e) => panic!("failed to spawn API server: {:?}", e),
             };

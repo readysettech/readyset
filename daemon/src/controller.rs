@@ -41,20 +41,20 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(
+        blender: Arc<Mutex<Blender>>,
         listen_addr: &str,
         port: u16,
         heartbeat_every: Duration,
         healthcheck_every: Duration,
         log: Logger,
     ) -> Controller {
-        let mut blender = Blender::new();
-        blender.log_with(log.clone());
+        blender.lock().unwrap().log_with(log.clone());
 
         Controller {
             listen_addr: String::from(listen_addr),
             listen_port: port,
             log: log,
-            blender: Arc::new(Mutex::new(blender)),
+            blender: blender,
             workers: HashMap::new(),
             heartbeat_every: heartbeat_every,
             healthcheck_every: healthcheck_every,
