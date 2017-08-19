@@ -34,7 +34,7 @@ pub struct Reader {
     writer: Option<backlog::WriteHandle>,
 
     #[serde(skip)]
-    streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
+    streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
     #[serde(skip)]
     token_generator: Option<checktable::TokenGenerator>,
@@ -47,10 +47,7 @@ impl Clone for Reader {
     fn clone(&self) -> Self {
         assert!(self.writer.is_none());
         assert!(
-            self.streamers
-                .as_ref()
-                .map(|s| s.is_empty())
-                .unwrap_or(true)
+            self.streamers.is_empty()
         );
         Reader {
             writer: None,
@@ -66,7 +63,7 @@ impl Reader {
     pub fn new(for_node: NodeIndex) -> Self {
         Reader {
             writer: None,
-            streamers: Some(Vec::new()),
+            streamers: Vec::new(),
             state: None,
             token_generator: None,
             for_node,
@@ -88,9 +85,10 @@ impl Reader {
     }
 
     pub fn take(&mut self) -> Self {
+        use std::mem;
         Self {
             writer: self.writer.take(),
-            streamers: self.streamers.take(),
+            streamers: mem::replace(&mut self.streamers, Vec::new()),
             state: self.state.clone(),
             token_generator: self.token_generator.clone(),
             for_node: self.for_node,
@@ -101,12 +99,8 @@ impl Reader {
         &mut self,
         new_streamer: channel::StreamSender<Vec<StreamUpdate>>,
     ) -> Result<(), channel::StreamSender<Vec<StreamUpdate>>> {
-        if let Some(ref mut streamers) = self.streamers {
-            streamers.push(new_streamer);
-            Ok(())
-        } else {
-            Err(new_streamer)
-        }
+        self.streamers.push(new_streamer);
+        Ok(())
     }
 
     pub fn is_materialized(&self) -> bool {
@@ -193,7 +187,7 @@ impl Reader {
                 });
             }
 
-            if self.streamers.is_none() || self.streamers.as_ref().unwrap().is_empty() {
+            if self.streamers.is_empty() {
                 state.add(m.take_data());
             } else {
                 state.add(m.data().iter().cloned());
@@ -216,12 +210,12 @@ impl Reader {
 
         m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
-        if self.streamers.is_some() && !self.streamers.as_ref().unwrap().is_empty() {
+        if !self.streamers.is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
-            let mut left = self.streamers.as_ref().unwrap().len();
+            let mut left = self.streamers.len();
 
             // remove any channels where the receiver has hung up
-            self.streamers.as_mut().unwrap().retain(|tx| {
+            self.streamers.retain(|tx| {
                 left -= 1;
                 if left == 0 {
                     tx.send(data.take().unwrap().into_iter().map(|r| r.into()).collect())
