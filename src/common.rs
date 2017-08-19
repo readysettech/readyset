@@ -530,8 +530,8 @@ named!(pub value_list<&[u8], Vec<Literal> >,
        )
 );
 
-/// Parse a reference to a named table
-/// XXX(malte): add support for schema.table notation
+/// Parse a reference to a named table, with an optional alias
+/// TODO(malte): add support for schema.table notation
 named!(pub table_reference<&[u8], Table>,
     chain!(
         table: map_res!(sql_identifier, str::from_utf8) ~
