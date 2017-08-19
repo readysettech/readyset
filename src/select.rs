@@ -125,7 +125,7 @@ named!(join_clause<&[u8], JoinClause>,
                   }
               )
             | chain!(
-                  select: delimited!(tag!("("), selection, tag!(")")),
+                  select: delimited!(tag!("("), nested_selection, tag!(")")),
                   || {
                       JoinRightSide::NestedSelect(Box::new(select))
                   }
@@ -1000,4 +1000,40 @@ mod tests {
 
     }
 
+    #[test]
+    fn join_against_nested_select() {
+        let qstr = "SELECT o_id, ol_i_id FROM orders JOIN \
+                   (SELECT ol_i_id FROM order_line) \
+                   ON (orders.o_id = ol_i_id);";
+
+        let res = selection(qstr.as_bytes());
+
+        let inner_select = SelectStatement {
+            tables: vec![Table::from("order_line")],
+            fields: columns(&[
+                "ol_i_id"
+            ]),
+            ..Default::default()
+        };
+
+        let outer_select = SelectStatement {
+            tables: vec![Table::from("orders")],
+            fields: columns(&[
+                "o_id",
+                "ol_i_id"
+            ]),
+            join: vec![JoinClause {
+                operator: JoinOperator::Join,
+                right: JoinRightSide::NestedSelect(Box::new(inner_select)),
+                constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
+                    operator: Operator::Equal,
+                    left: Box::new(Base(Field(Column::from("orders.o_id")))),
+                    right: Box::new(Base(Field(Column::from("ol_i_id")))),
+                })),
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, outer_select);
+    }
 }
