@@ -35,7 +35,7 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 hurdles = "0.1.0"
 arrayvec = "0.3.23"
 
-nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "3e3b53a485563af02693738399a8649c7869b562"}
+nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "9ab38a88a065d70a10d3ef79b985737f6a7bc2ed"}
 
 # for benchmarks
 # cli
