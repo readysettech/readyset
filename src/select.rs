@@ -4,8 +4,8 @@ use std::str;
 
 use column::Column;
 use common::FieldExpression;
-use common::{field_definition_expr, field_list, unsigned_number, statement_terminator, table_list,
-             table_reference, column_identifier_no_alias};
+use common::{as_alias, field_definition_expr, field_list, unsigned_number, statement_terminator,
+             table_list, table_reference, column_identifier_no_alias};
 use condition::{condition_expr, ConditionExpression};
 use join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use table::Table;
@@ -125,9 +125,10 @@ named!(join_clause<&[u8], JoinClause>,
                   }
               )
             | chain!(
-                  select: delimited!(tag!("("), nested_selection, tag!(")")),
+                  select: delimited!(tag!("("), nested_selection, tag!(")")) ~
+                  alias: opt!(as_alias) ~
                   || {
-                      JoinRightSide::NestedSelect(Box::new(select))
+                      JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from))
                   }
               )
             | chain!(
@@ -1003,7 +1004,7 @@ mod tests {
     #[test]
     fn join_against_nested_select() {
         let qstr = "SELECT o_id, ol_i_id FROM orders JOIN \
-                   (SELECT ol_i_id FROM order_line) \
+                   (SELECT ol_i_id FROM order_line) AS inner \
                    ON (orders.o_id = ol_i_id);";
 
         let res = selection(qstr.as_bytes());
@@ -1024,7 +1025,7 @@ mod tests {
             ]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::NestedSelect(Box::new(inner_select)),
+                right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("inner".into())),
                 constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
                     operator: Operator::Equal,
                     left: Box::new(Base(Field(Column::from("orders.o_id")))),
