@@ -8,9 +8,12 @@ use table::Table;
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
+    /// A single table.
     Table(Table),
+    /// A comma-separated (and implicitly joined) sequence of tables.
     Tables(Vec<Table>),
     NestedSelect(Box<SelectStatement>),
+    /// A nested join clause.
     NestedJoin(Box<JoinClause>),
 }
 
