@@ -54,6 +54,11 @@ time = "0.1.37"
 
 channel = { path = "channel" }
 
+# Not needed directly, but we want to force the version used by our dependencies to have default
+# features. If this isn't here, then the features used for `num` will vary between subcrates,
+# triggering unnecessary recompiles.
+num = "0.1"
+
 [dev-dependencies]
 toml = "0.4.1"
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
