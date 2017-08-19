@@ -193,7 +193,7 @@ impl Reader {
                 });
             }
 
-            if self.streamers.as_ref().unwrap().is_empty() {
+            if self.streamers.is_none() || self.streamers.as_ref().unwrap().is_empty() {
                 state.add(m.take_data());
             } else {
                 state.add(m.data().iter().cloned());
@@ -216,7 +216,7 @@ impl Reader {
 
         m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
-        if !self.streamers.as_ref().unwrap().is_empty() {
+        if self.streamers.is_some() && !self.streamers.as_ref().unwrap().is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx
             let mut left = self.streamers.as_ref().unwrap().len();
 
