@@ -24,8 +24,12 @@ impl Node {
         let border = match self.sharded_by {
             Sharding::ByColumn(_) |
             Sharding::Random => "filled,dashed",
-            _ => "filled",
+            _ => {
+                if Self::is_security(self.name()) { "filled,rounded" }
+                else { "filled" }
+            },
         };
+
         write!(
             f,
             " [style=\"{}\", fillcolor={}, label=\"",
@@ -90,6 +94,14 @@ impl Node {
         }?;
 
         writeln!(f, "\"]")
+    }
+
+    fn is_security(name: &str) -> bool {
+        use regex::Regex;
+
+        let re = Regex::new(r"^sp_").unwrap();
+
+        re.is_match(name)
     }
 
     fn escape(s: &str) -> String {
