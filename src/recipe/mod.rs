@@ -243,7 +243,7 @@ impl Recipe {
             let (n, q) = expr.clone();
             // add the universe-specific query
             // don't user query name to avoid conflict with global queries
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, None, mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, None, true, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.
@@ -303,7 +303,7 @@ impl Recipe {
             let (n, q) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n.clone(), mig)?;
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n.clone(), false, mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();

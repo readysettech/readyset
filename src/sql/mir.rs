@@ -50,7 +50,7 @@ pub struct SqlToMirConverter {
     log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
-    policies: HashMap<String, Vec<(Policy, QueryGraph)>>,
+    policies: HashMap<(DataType, String), Vec<QueryGraph>>,
 }
 
 impl Default for SqlToMirConverter {
@@ -74,12 +74,17 @@ impl SqlToMirConverter {
         }
     }
 
-    pub fn add_policy(&mut self, p: &Policy, qg: QueryGraph) {
-        let key = p.table.clone();
-        match self.policies.entry(key) {
-            Entry::Vacant(e) => { e.insert(vec![(p.clone(), qg)]); } ,
-            Entry::Occupied(mut e) => { e.get_mut().push((p.clone(), qg)); },
-        }
+    /// Sets the policies for a given graph.
+    /// Policies are set upon universe creation and don't change.
+    pub fn add_policy(&mut self, universe_id: &DataType, policy: &Policy, qg: QueryGraph) {
+        match self.policies.entry((universe_id.clone(), policy.table.clone())) {
+            Entry::Occupied(mut e) => { e.get_mut().push(qg); },
+            Entry::Vacant(e) => { e.insert(vec![qg]); }
+        };
+    }
+
+    pub fn clear_policies(&mut self, universe_id: &DataType) {
+        self.policies.retain(|ref k, _| k.0 != *universe_id);
     }
 
     /// Converts a condition tree stored in the `ConditionExpr` returned by the SQL parser
@@ -954,18 +959,6 @@ impl SqlToMirConverter {
         predicates_above_group_by_nodes
     }
 
-    fn handle_user_context(&self, t: &str, uid: &DataType) -> String {
-        let nr = format!("UserContext_{}", uid);
-        let r = match t {
-            "UserContext" => {
-                nr
-            },
-            _ => String::from(t)
-        };
-
-        r
-    }
-
     fn make_security_nodes(
         &mut self,
         rel: &str,
@@ -974,31 +967,27 @@ impl SqlToMirConverter {
         node_for_rel: HashMap<&str, MirNodeRef>,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
-        let ucrel = format!("UserContext_{}", universe_id);
-
-        let mut local_node_for_rel = node_for_rel.clone();
-        let mut node_count = 0;
-
-        let policies = match self.policies.get(&String::from(rel)) {
+        let policies = match self.policies.get(&(universe_id.clone(), String::from(rel))) {
             Some(p) => p.clone(),
             // no policies associated with this base node
             None => return Vec::new()
         };
 
-        debug!(self.log, "Found {} policies for table {}", policies.len(), rel);
+        let mut node_count = 0;
+        let mut local_node_for_rel = node_for_rel.clone();
 
+        debug!(self.log, "Found {} policies for table {}", policies.len(), rel);
 
         let mut security_nodes = Vec::new();
         let mut last_policy_nodes = Vec::new();
 
-        for p in policies.iter() {
+        for qg in policies.iter() {
             let mut prev_node = Some(base_node.clone());
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
             let mut filter_nodes: Vec<MirNodeRef> = Vec::new();
             let mut joined_tables = HashSet::new();
 
-            let qg = &p.1;
             let mut sorted_rels: Vec<&str> = qg.relations
                 .keys()
                 .map(String::as_str)
@@ -1011,17 +1000,20 @@ impl SqlToMirConverter {
 
             // all base nodes should be present in local_node_for_rel, except for UserContext
             // if policy uses UserContext, add it to local_node_for_rel
-            if qg.relations.get("UserContext").is_some() {
-                let latest_existing = self.current.get(&ucrel);
-                let ucn = match latest_existing {
-                    None => panic!("Policy \"{:?}\" refers to unknown base node \"{}\"", p, ucrel),
+            for rel in &sorted_rels {
+                if *rel == "computed_columns" { continue; }
+                if local_node_for_rel.contains_key(*rel) { continue; }
+
+                let latest_existing = self.current.get(*rel);
+                let view_for_rel = match latest_existing {
+                    None => panic!("Policy refers to unknown view \"{}\"", rel),
                     Some(v) => {
-                        let existing = self.nodes.get(&(ucrel.clone(), *v));
+                        let existing = self.nodes.get(&(String::from(*rel), *v));
                         match existing {
                             None => {
                                 panic!(
                                     "Inconsistency: base node \"{}\" does not exist at v{}",
-                                    &ucrel,
+                                    *rel,
                                     v
                                 );
                             }
@@ -1030,8 +1022,8 @@ impl SqlToMirConverter {
                     }
                 };
 
-                base_nodes.push(ucn.clone());
-                local_node_for_rel.insert(&ucrel, ucn.clone());
+                local_node_for_rel.insert(*rel, view_for_rel.clone());
+                base_nodes.push(view_for_rel.clone());
             }
 
             // Sort the edges to ensure deterministic join order.
@@ -1046,13 +1038,11 @@ impl SqlToMirConverter {
 
             // handles joins against UserContext table
             for &(&(ref src, ref dst), edge) in &sorted_edges {
-                let nsrc = self.handle_user_context(src, &universe_id);
-                let ndst = self.handle_user_context(dst, &universe_id);
                 let jn = match *edge {
                     // Edge represents a LEFT JOIN
                     QueryGraphEdge::LeftJoin(ref jps) => {
                         let (left_node, right_node) =
-                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &local_node_for_rel);
+                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &local_node_for_rel);
                         self.make_join_node(
                             &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
                             jps,
@@ -1064,7 +1054,7 @@ impl SqlToMirConverter {
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
                         let (left_node, right_node) =
-                            self.pick_join_columns(&nsrc, &ndst, prev_node, &joined_tables, &local_node_for_rel);
+                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &local_node_for_rel);
                         self.make_join_node(
                             &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
                             jps,

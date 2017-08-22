@@ -108,7 +108,7 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, String> {
         // First, we need to create a UserContext base node.
         let context = mig.user_context().expect("Migration must have user context");
-        let uid = context.get("id").expect("Context must have id");
+        let uid = context.get("id").expect("Context must have id").clone();
 
         info!(self.log, "Starting user universe {}", uid);
 
@@ -130,20 +130,26 @@ impl SqlIncorporator {
         // a view creation and these views might be unique to each universe
         // e.g. if they reference UserContext.
 
-        // TODO(larat): move predicate transform here.
-        for (pid, policy) in policies {
-            let predicate = self.rewrite_query(policy.predicate.clone(), mig);
+        self.mir_converter.clear_policies(&uid);
+        for policy in policies.values() {
+            // Policies should have access to all the data in graph, because of that we set
+            // policy_enhanced to false, so any subviews also have access to all the data.
+            let predicate = self.rewrite_query(policy.predicate.clone(), false, mig);
             let st = match predicate {
                 SqlQuery::Select(ref st) => st,
                 _ => unreachable!()
             };
+
+            // TODO(larat): currently we only support policies with a single predicate. These can be
+            // represented as a query graph. This will change for more complex policies eg. column
+            // replacement and aggregation permission.
 
             let qg = match to_query_graph(st) {
                 Ok(qg) => qg,
                 Err(e) => panic!(e),
             };
 
-            self.mir_converter.add_policy(&policy, qg);
+            self.mir_converter.add_policy(&uid, policy, qg);
         }
 
         res
@@ -177,11 +183,12 @@ impl SqlIncorporator {
         &mut self,
         query: SqlQuery,
         name: Option<String>,
+        policy_enhanced: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         match name {
-            None => self.nodes_for_query(query, mig),
-            Some(n) => self.nodes_for_named_query(query, n, mig),
+            None => self.nodes_for_query(query, policy_enhanced, mig),
+            Some(n) => self.nodes_for_named_query(query, n, policy_enhanced, mig),
         }
     }
 
@@ -466,6 +473,7 @@ impl SqlIncorporator {
     fn nodes_for_query(
         &mut self,
         q: SqlQuery,
+        policy_enhanced: bool,
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         let name = match q {
@@ -473,11 +481,15 @@ impl SqlIncorporator {
             SqlQuery::Select(_) => format!("q_{}", self.num_queries),
             _ => panic!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
-        self.nodes_for_named_query(q, name, mig)
+        self.nodes_for_named_query(q, name, policy_enhanced, mig)
     }
 
     /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(&mut self, q: SqlQuery, mut mig: &mut Migration) -> SqlQuery {
+    fn rewrite_query(&mut self,
+        q: SqlQuery,
+        policy_enhanced: bool,
+        mut mig: &mut Migration
+    ) -> SqlQuery {
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
@@ -495,7 +507,7 @@ impl SqlIncorporator {
             use sql::passes::subqueries::field_with_table_name;
             let (sq, column) = query_from_condition_base(&cond_base);
 
-            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
+            let qfp = self.add_parsed_query(sq, None, policy_enhanced, mig).expect("failed to add subquery");
             *cond_base = field_with_table_name(qfp.name.clone(), column);
         }
 
@@ -536,56 +548,56 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
+        policy_enhanced: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
 
-        let q = self.rewrite_query(q, mig);
+        self.num_queries += 1;
+        let q = self.rewrite_query(q, policy_enhanced, mig);
 
         // migration is adding a new security universe
         // TODO(larat): improve reuse for universe queries
-        if mig.user_context().is_some() {
-            let qfp = match q {
+        let qfp = if policy_enhanced {
+            info!(self.log, "Adding policy-enhanced query {}", query_name);
+            match q {
                 SqlQuery::Select(ref sq) => {
                     let (qg, _) = self.consider_query_graph(&query_name, sq);
                     self.add_query_via_mir(&query_name, sq, qg, mig)
                 }
                 ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
                 ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
-            };
-
-            return Ok(qfp)
-        }
-
-        // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
-        // hold for reuse or extension
-        let qfp = match q {
-            SqlQuery::Select(ref sq) => {
-                let (qg, reuse) = self.consider_query_graph(&query_name, sq);
-                match reuse {
-                    QueryGraphReuse::ExactMatch(mn) => {
-                        let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
-                        QueryFlowParts {
-                            name: String::from(mn.borrow().name()),
-                            new_nodes: vec![],
-                            reused_nodes: vec![flow_node],
-                            query_leaf: flow_node,
-                        }
-                    }
-                    QueryGraphReuse::ExtendExisting(mq) => {
-                        self.extend_existing_query(&query_name, sq, qg, mq, mig)
-                    }
-                    QueryGraphReuse::ReaderOntoExisting(mn, params) => {
-                        self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
-                    }
-                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
-                }
             }
-            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
-            ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
+        } else {
+            // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
+            // hold for reuse or extension
+            match q {
+                SqlQuery::Select(ref sq) => {
+                    let (qg, reuse) = self.consider_query_graph(&query_name, sq);
+                    match reuse {
+                        QueryGraphReuse::ExactMatch(mn) => {
+                            let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
+                            QueryFlowParts {
+                                name: String::from(mn.borrow().name()),
+                                new_nodes: vec![],
+                                reused_nodes: vec![flow_node],
+                                query_leaf: flow_node,
+                            }
+                        }
+                        QueryGraphReuse::ExtendExisting(mq) => {
+                            self.extend_existing_query(&query_name, sq, qg, mq, mig)
+                        }
+                        QueryGraphReuse::ReaderOntoExisting(mn, params) => {
+                            self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
+                        }
+                        QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
+                    }
+                }
+                ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
+                ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
+            }
         };
 
         // record info about query
-        self.num_queries += 1;
         self.leaf_addresses
             .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
@@ -643,7 +655,7 @@ impl<'a> ToFlowParts for &'a str {
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
-            Ok(q) => inc.add_parsed_query(q, name, mig),
+            Ok(q) => inc.add_parsed_query(q, name, false, mig),
             Err(e) => Err(String::from(e)),
         }
     }
