@@ -3,7 +3,7 @@ use nom::{IResult, Err, ErrorKind, Needed};
 use std::str;
 
 named!(keyword_follow_char<&[u8], char>,
-       peek!(one_of!(" \n;(\t,="))
+       peek!(one_of!(" \n;()\t,="))
 );
 
 named!(keyword_a_to_c<&[u8], &[u8]>,
