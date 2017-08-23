@@ -12,7 +12,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
-use self::reuse::ReuseType;
+use self::reuse::{ReuseType, ReuseConfig};
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -212,22 +212,10 @@ impl SqlIncorporator {
             }
         }
 
-        let mut reuse_candidates = Vec::new();
-        for &(ref existing_qg, _) in self.query_graphs.values() {
-            // queries are different, but one might be a generalization of the other
-            if existing_qg
-                .signature()
-                .is_generalization_of(&qg.signature())
-            {
-                match reuse::check_compatibility(&qg, existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, existing_qg));
-                    }
-                    None => (),
-                }
-            }
-        }
+        let reuse_config = ReuseConfig::default();
+
+        let reuse_candidates = reuse_config.reuse_candidates(&qg, &self.query_graphs);
+
         if reuse_candidates.len() > 0 {
             info!(
                 self.log,
@@ -242,7 +230,7 @@ impl SqlIncorporator {
             );
 
             // TODO(malte): score reuse candidates
-            let choice = reuse::choose_best_option(reuse_candidates);
+            let choice = reuse_config.choose_best_option(reuse_candidates);
 
             match choice.0 {
                 ReuseType::DirectExtension => {
@@ -250,6 +238,15 @@ impl SqlIncorporator {
                     info!(
                         self.log,
                         "Can reuse by directly extending existing query {}",
+                        mir_query.name
+                    );
+                    return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
+                }
+                ReuseType::PrefixReuse => {
+                    let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
+                    info!(
+                        self.log,
+                        "Can reuse prefix from query {}",
                         mir_query.name
                     );
                     return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
