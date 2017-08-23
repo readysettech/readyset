@@ -111,33 +111,7 @@ named!(join_clause<&[u8], JoinClause>,
         multispace? ~
         op: join_operator ~
         multispace ~
-        right: alt_complete!(
-              chain!(
-                  table: table_reference,
-                  || {
-                      JoinRightSide::Table(table)
-                  }
-              )
-            | chain!(
-                  tables: delimited!(tag!("("), table_list, tag!(")")),
-                  || {
-                      JoinRightSide::Tables(tables)
-                  }
-              )
-            | chain!(
-                  select: delimited!(tag!("("), nested_selection, tag!(")")) ~
-                  alias: opt!(as_alias) ~
-                  || {
-                      JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from))
-                  }
-              )
-            | chain!(
-                  nested_join: delimited!(tag!("("), join_clause, tag!(")")),
-                  || {
-                      JoinRightSide::NestedJoin(Box::new(nested_join))
-                  }
-              )
-        ) ~
+        right: join_rhs ~
         multispace ~
         constraint: alt_complete!(
               chain!(
@@ -165,6 +139,43 @@ named!(join_clause<&[u8], JoinClause>,
             constraint: constraint,
         }
     }))
+);
+
+/// Different options for the right hand side of the join operator in a `join_clause`
+named!(join_rhs<&[u8], JoinRightSide>,
+    alt_complete!(
+          complete!(chain!(
+              select: delimited!(tag!("("), nested_selection, tag!(")")) ~
+              alias: as_alias,
+              || {
+                  JoinRightSide::NestedSelect(Box::new(select), Some(String::from(alias)))
+              }
+          ))
+        | complete!(chain!(
+              select: delimited!(tag!("("), nested_selection, tag!(")")),
+              || {
+                  JoinRightSide::NestedSelect(Box::new(select), None)
+              }
+          ))
+        | complete!(chain!(
+              nested_join: delimited!(tag!("("), join_clause, tag!(")")),
+              || {
+                  JoinRightSide::NestedJoin(Box::new(nested_join))
+              }
+          ))
+        | complete!(chain!(
+              table: table_reference,
+              || {
+                  JoinRightSide::Table(table)
+              }
+          ))
+        | complete!(chain!(
+              tables: delimited!(tag!("("), table_list, tag!(")")),
+              || {
+                  JoinRightSide::Tables(tables)
+              }
+          ))
+    )
 );
 
 /// Parse ORDER BY clause
@@ -1003,12 +1014,24 @@ mod tests {
 
     #[test]
     fn join_against_nested_select() {
-        let qstr = "SELECT o_id, ol_i_id FROM orders JOIN \
-                   (SELECT ol_i_id FROM order_line) AS inner \
-                   ON (orders.o_id = ol_i_id);";
+        let t0 = b"(SELECT ol_i_id FROM order_line)";
+        let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
-        let res = selection(qstr.as_bytes());
+        assert!(join_rhs(t0).is_done());
+        assert!(join_rhs(t1).is_done());
 
+        let t0 = b"JOIN (SELECT ol_i_id FROM order_line) ON (orders.o_id = ol_i_id)";
+        let t1 = b"JOIN (SELECT ol_i_id FROM order_line) AS ids ON (orders.o_id = ids.ol_i_id)";
+
+        assert!(join_clause(t0).is_done());
+        assert!(join_clause(t1).is_done());
+
+        let qstr_with_alias = "SELECT o_id, ol_i_id FROM orders JOIN \
+                               (SELECT ol_i_id FROM order_line) AS ids \
+                               ON (orders.o_id = ids.ol_i_id);";
+        let res = selection(qstr_with_alias.as_bytes());
+
+        // N.B.: Don't alias the inner select to `inner`, which is, well, a SQL keyword!
         let inner_select = SelectStatement {
             tables: vec![Table::from("order_line")],
             fields: columns(&[
@@ -1025,11 +1048,11 @@ mod tests {
             ]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("inner".into())),
+                right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("ids".into())),
                 constraint: JoinConstraint::On(ComparisonOp(ConditionTree {
                     operator: Operator::Equal,
                     left: Box::new(Base(Field(Column::from("orders.o_id")))),
-                    right: Box::new(Base(Field(Column::from("ol_i_id")))),
+                    right: Box::new(Base(Field(Column::from("ids.ol_i_id")))),
                 })),
             }],
             ..Default::default()
