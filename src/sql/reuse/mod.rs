@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 mod finkelstein;
 mod weak;
+mod all;
 mod helpers;
 
 #[derive(Clone, Debug)]
@@ -20,6 +21,7 @@ pub enum ReuseType {
 enum ReuseConfigType {
     Finkelstein,
     Weak,
+    All,
 }
 
 const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Finkelstein;
@@ -33,13 +35,7 @@ impl ReuseConfig {
         match self.config {
             ReuseConfigType::Finkelstein => finkelstein::Finkelstein::reuse_candidates(qg, query_graphs),
             ReuseConfigType::Weak => weak::Weak::reuse_candidates(qg, query_graphs),
-        }
-    }
-
-    pub fn choose_best_option<'a>(&self, options: Vec<(ReuseType, &'a QueryGraph)>) -> (ReuseType, &'a QueryGraph) {
-         match self.config {
-            ReuseConfigType::Finkelstein => finkelstein::Finkelstein::choose_best_option(options),
-            ReuseConfigType::Weak => weak::Weak::choose_best_option(options)
+            ReuseConfigType::All => all::All::reuse_candidates(qg, query_graphs),
         }
     }
 
@@ -47,6 +43,13 @@ impl ReuseConfig {
         match REUSE_CONFIG {
             ReuseConfigType::Finkelstein => ReuseConfig::finkelstein(),
             ReuseConfigType::Weak => ReuseConfig::weak(),
+            ReuseConfigType::All => ReuseConfig::all(),
+        }
+    }
+
+    pub fn all() -> ReuseConfig {
+        ReuseConfig {
+            config: ReuseConfigType::All,
         }
     }
 
@@ -65,6 +68,4 @@ impl ReuseConfig {
 
 pub trait ReuseConfiguration {
     fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>;
-
-    fn choose_best_option<'a>(options: Vec<(ReuseType, &'a QueryGraph)>) -> (ReuseType, &'a QueryGraph);
 }

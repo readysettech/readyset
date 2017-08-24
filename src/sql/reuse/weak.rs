@@ -47,39 +47,6 @@ impl ReuseConfiguration for Weak {
 
         reuse_candidates
     }
-
-    fn choose_best_option<'a>(options: Vec<(ReuseType, &'a QueryGraph)>) -> (ReuseType, &'a QueryGraph) {
-        let mut best_choice = None;
-        let mut best_score = 0;
-
-        for (o, qg) in options {
-            let mut score = 0;
-
-            // crude scoring: direct extension always preferrable over backjoins; reusing larger
-            // queries is also preferrable as they are likely to cover a larger fraction of the new
-            // query's nodes. Edges (group by, join) count for more than extra relations.
-            match o {
-                ReuseType::DirectExtension => {
-                    score += 2 * qg.relations.len() + 4 * qg.edges.len() + 1000;
-                }
-                ReuseType::PrefixReuse => {
-                    score += 2 * qg.relations.len() + 4 * qg.edges.len() + 500;
-                }
-                ReuseType::BackjoinRequired(_) => {
-                    score += qg.relations.len() + 3 * qg.edges.len();
-                }
-            }
-
-            if score > best_score {
-                best_score = score;
-                best_choice = Some((o, qg));
-            }
-        }
-
-        assert!(best_score > 0);
-
-        best_choice.unwrap()
-    }
 }
 
 impl Weak {
@@ -152,6 +119,7 @@ impl Weak {
 
         // Check that the new query's predicates imply the existing query's predicate.
         for (name, ex_qgn) in &existing_qg.relations {
+            // if !new_qg.relations.contains_key(name) { return Some(ReuseType::PrefixReuse); }
             let new_qgn = &new_qg.relations[name];
 
             // iterate over predicates and ensure that each matching one on the existing QG is implied

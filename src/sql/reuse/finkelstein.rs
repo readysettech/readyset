@@ -26,9 +26,17 @@ impl ReuseConfiguration for Finkelstein {
             }
         }
 
-        reuse_candidates
+        if reuse_candidates.len() > 0 {
+            vec![Self::choose_best_option(reuse_candidates)]
+        }
+        else {
+            reuse_candidates
+        }
     }
 
+}
+
+impl Finkelstein {
     fn choose_best_option<'a>(options: Vec<(ReuseType, &'a QueryGraph)>) -> (ReuseType, &'a QueryGraph) {
         let mut best_choice = None;
         let mut best_score = 0;
@@ -59,9 +67,7 @@ impl ReuseConfiguration for Finkelstein {
 
         best_choice.unwrap()
     }
-}
 
-impl Finkelstein {
     fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
