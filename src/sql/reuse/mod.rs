@@ -6,8 +6,8 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 mod finkelstein;
-mod weak;
-mod all;
+mod relaxed;
+mod full;
 mod helpers;
 
 #[derive(Clone, Debug)]
@@ -20,8 +20,8 @@ pub enum ReuseType {
 
 enum ReuseConfigType {
     Finkelstein,
-    Weak,
-    All,
+    Relaxed,
+    Full,
 }
 
 const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Finkelstein;
@@ -34,22 +34,22 @@ impl ReuseConfig {
     pub fn reuse_candidates<'a>(&self, qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)> {
         match self.config {
             ReuseConfigType::Finkelstein => finkelstein::Finkelstein::reuse_candidates(qg, query_graphs),
-            ReuseConfigType::Weak => weak::Weak::reuse_candidates(qg, query_graphs),
-            ReuseConfigType::All => all::All::reuse_candidates(qg, query_graphs),
+            ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs),
+            ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
         }
     }
 
     pub fn default() -> ReuseConfig {
         match REUSE_CONFIG {
             ReuseConfigType::Finkelstein => ReuseConfig::finkelstein(),
-            ReuseConfigType::Weak => ReuseConfig::weak(),
-            ReuseConfigType::All => ReuseConfig::all(),
+            ReuseConfigType::Relaxed => ReuseConfig::relaxed(),
+            ReuseConfigType::Full => ReuseConfig::full(),
         }
     }
 
-    pub fn all() -> ReuseConfig {
+    pub fn full() -> ReuseConfig {
         ReuseConfig {
-            config: ReuseConfigType::All,
+            config: ReuseConfigType::Full,
         }
     }
 
@@ -59,9 +59,9 @@ impl ReuseConfig {
         }
     }
 
-    pub fn weak() -> ReuseConfig {
+    pub fn relaxed() -> ReuseConfig {
         ReuseConfig {
-            config: ReuseConfigType::Weak,
+            config: ReuseConfigType::Relaxed,
         }
     }
 }

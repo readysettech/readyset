@@ -7,7 +7,7 @@ use std::vec::Vec;
 use std::collections::HashMap;
 
 
-/// Implementation of reuse algorithm with weaker constraints than Finkelstein.
+/// Implementation of reuse algorithm with Relaxeder constraints than Finkelstein.
 /// While Finkelstein checks if queries are compatible for direct extension,
 /// this algorithm considers the possibility of reuse of internal views.
 /// For example, given the queries:
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// Finkelstein reuse would be conditional on the order the queries are added,
 /// since 1) is a direct extension of 2), but not the other way around.
 ///
-/// This weak version of the reuse algorithm considers cases where a query might
+/// This relaxed version of the reuse algorithm considers cases where a query might
 /// reuse just a prefix of another. First, it checks if the queries perform the
 /// same joins, then it checks predicate implication and at last, checks group
 /// by compatibility.
@@ -25,9 +25,9 @@ use std::collections::HashMap;
 /// is a direct extension of the other. However, if not all, but at least one
 /// check passes, then the algorithm returns that the queries have a prefix in
 /// common.
-pub struct Weak;
+pub struct Relaxed;
 
-impl ReuseConfiguration for Weak {
+impl ReuseConfiguration for Relaxed {
     fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>{
         let mut reuse_candidates = Vec::new();
         for &(ref existing_qg, _) in query_graphs.values() {
@@ -49,7 +49,7 @@ impl ReuseConfiguration for Weak {
     }
 }
 
-impl Weak {
+impl Relaxed {
     fn check_compatibility(new_qg: &QueryGraph, existing_qg: &QueryGraph) -> Option<ReuseType> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
@@ -119,7 +119,7 @@ impl Weak {
 
         // Check that the new query's predicates imply the existing query's predicate.
         for (name, ex_qgn) in &existing_qg.relations {
-            // if !new_qg.relations.contains_key(name) { return Some(ReuseType::PrefixReuse); }
+            if !new_qg.relations.contains_key(name) { return Some(ReuseType::PrefixReuse); }
             let new_qgn = &new_qg.relations[name];
 
             // iterate over predicates and ensure that each matching one on the existing QG is implied

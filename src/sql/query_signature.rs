@@ -58,7 +58,7 @@ impl<'a> QuerySignature<'a> {
 
         // to be a generalization, we must have
         // 1) either the same relations as in `other`, or a subset of them
-        if !self.relations.is_subset(&other.relations) {
+        if self.relations.is_disjoint(&other.relations) {
             return false;
         }
 

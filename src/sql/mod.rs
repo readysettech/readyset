@@ -12,7 +12,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
-use self::reuse::{ReuseType, ReuseConfig};
+use self::reuse::ReuseConfig;
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -35,7 +35,7 @@ pub struct QueryFlowParts {
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
-    ExtendExisting(MirQuery),
+    ExtendExisting(Vec<MirQuery>),
     ReaderOntoExisting(MirNodeRef, Vec<Column>),
     None,
 }
