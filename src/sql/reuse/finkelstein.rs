@@ -8,6 +8,11 @@ use std::collections::HashMap;
 
 pub struct Finkelstein;
 
+/// Finkelstein reuse algorithm.
+/// This algorithm checks if any existing query graphs are generalizations
+/// of the query graph of the new query being added.
+/// For Soup's purpose this algorithm is sometimes too strict as it only
+/// considers reuse of final materializations, not intermediate ones.
 impl ReuseConfiguration for Finkelstein {
     fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>{
         let mut reuse_candidates = Vec::new();
@@ -154,7 +159,7 @@ impl Finkelstein {
             }
         }
 
-        // we don't need to check projected columsn to reuse a prefix of the query
+        // we don't need to check projected columns to reuse a prefix of the query
         return Some(ReuseType::DirectExtension);
 
         // 5. Consider projected columns

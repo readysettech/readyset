@@ -372,9 +372,9 @@ impl SqlIncorporator {
         // compare to existing query MIR and reuse prefix
         let mut reused_mir = new_opt_mir.clone();
         let mut num_reused_nodes = 0;
-        for extend_mir in reuse_mirs {
+        for m in reuse_mirs {
             let res =
-                merge_mir_for_queries(&self.log, &reused_mir, &extend_mir);
+                merge_mir_for_queries(&self.log, &reused_mir, &m);
             reused_mir = res.0.clone();
             if res.1 > num_reused_nodes { num_reused_nodes = res.1; }
         }
