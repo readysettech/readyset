@@ -524,6 +524,15 @@ impl<'a> Migration<'a> {
         self.user_context.clone()
     }
 
+    /// Returns the universe of this migration.
+    /// If not specified, assumes `global` universe.
+    pub fn universe(&self) -> DataType {
+        match self.user_context {
+            Some(ref c) => c.get("id").expect("universe must have an id").clone(),
+            None => "global".into(),
+        }
+    }
+
     /// Add a transactional base node to the graph
     pub fn add_transactional_base<S1, FS, S2>(
         &mut self,

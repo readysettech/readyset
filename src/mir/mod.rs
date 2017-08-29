@@ -990,7 +990,13 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            _ => unimplemented!(),
+            MirNodeType::Union { emit: ref our_emit } => {
+                match *other {
+                    MirNodeType::Union { ref emit } => emit == our_emit,
+                    _ => false,
+                }
+            }
+            _ => unimplemented!("Can't reuse node {:?}", self),
         }
     }
 }

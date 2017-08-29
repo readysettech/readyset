@@ -51,7 +51,8 @@ pub struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
-    query_graphs: HashMap<u64, (QueryGraph, MirQuery)>,
+    query_graphs: HashMap<u64, QueryGraph>,
+    mir_queries: HashMap<(u64, DataType), MirQuery>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
@@ -66,6 +67,7 @@ impl Default for SqlIncorporator {
             leaf_addresses: HashMap::default(),
             num_queries: 0,
             query_graphs: HashMap::default(),
+            mir_queries: HashMap::default(),
             schema_version: 0,
             view_schemas: HashMap::default(),
             transactional: false,
@@ -205,6 +207,7 @@ impl SqlIncorporator {
     fn consider_query_graph(
         &mut self,
         query_name: &str,
+        universe: DataType,
         st: &SelectStatement,
     ) -> (QueryGraph, QueryGraphReuse) {
         debug!(self.log, "Making QG for \"{}\"", query_name);
@@ -222,12 +225,13 @@ impl SqlIncorporator {
             return (qg, QueryGraphReuse::None);
         }
 
-        // Do we already have this exact query or a subset of it?
+        // Do we already have this exact query or a subset of it in the same universe?
         // TODO(malte): make this an O(1) lookup by QG signature
         let qg_hash = qg.signature().hash;
-        match self.query_graphs.get(&qg_hash) {
+        match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
-            Some(&(ref existing_qg, ref mir_query)) => {
+            Some(ref mir_query) => {
+                let existing_qg = self.query_graphs.get(&qg_hash).expect("query graph should be present");
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
                 if existing_qg.signature() == qg.signature() &&
@@ -259,13 +263,19 @@ impl SqlIncorporator {
             }
         }
 
+        // now look for reuse candidates within the query's universe
         let mut reuse_candidates = Vec::new();
-        for &(ref existing_qg, _) in self.query_graphs.values() {
+        for (existing_qg_hash, existing_qg) in self.query_graphs.iter() {
+            if !self.mir_queries.contains_key(&(*existing_qg_hash, universe.clone())) { continue }
             // queries are different, but one might be a generalization of the other
             if existing_qg
                 .signature()
                 .is_generalization_of(&qg.signature())
             {
+                trace!(
+                    self.log,
+                    "Checking query check_compatibility"
+                );
                 match reuse::check_compatibility(&qg, existing_qg) {
                     Some(reuse) => {
                         // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
@@ -308,6 +318,8 @@ impl SqlIncorporator {
         } else {
             info!(self.log, "No reuse opportunity, adding fresh query");
         }
+
+        // TODO(larat): still possible to look for reuse opportunities in global universe
 
         (qg, QueryGraphReuse::None)
     }
@@ -390,14 +402,11 @@ impl SqlIncorporator {
         qg: QueryGraph,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        let universe_id = match mig.user_context() {
-            Some(c) => Some(c.get("id").expect("universe must have an id").clone()),
-            None => None,
-        };
+        let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, universe_id);
+            .named_query_to_mir(query_name, query, &qg, universe.clone());
 
         trace!(self.log, "Unoptimized MIR: {}", mir);
 
@@ -422,7 +431,9 @@ impl SqlIncorporator {
         self.view_schemas.insert(String::from(query_name), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs.insert(qg.signature().hash, (qg, mir));
+        let qg_hash = qg.signature().hash;
+        self.query_graphs.insert(qg_hash, qg);
+        self.mir_queries.insert((qg_hash, universe), mir);
 
         qfp
     }
@@ -436,11 +447,11 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use super::mir::reuse::merge_mir_for_queries;
-
+        let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let new_query_mir = self.mir_converter
-            .named_query_to_mir(query_name, query, &qg, None);
+            .named_query_to_mir(query_name, query, &qg, universe.clone());
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
@@ -464,8 +475,9 @@ impl SqlIncorporator {
         );
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node
-        self.query_graphs
-            .insert(qg.signature().hash, (qg, post_reuse_opt_mir));
+        let qg_hash = qg.signature().hash;
+        self.query_graphs.insert(qg_hash, qg);
+        self.mir_queries.insert((qg_hash, universe), post_reuse_opt_mir);
 
         qfp
     }
@@ -555,46 +567,33 @@ impl SqlIncorporator {
         self.num_queries += 1;
         let q = self.rewrite_query(q, policy_enhanced, mig);
 
-        // migration is adding a new security universe
-        // TODO(larat): improve reuse for universe queries
-        let qfp = if policy_enhanced {
-            info!(self.log, "Adding policy-enhanced query {}", query_name);
-            match q {
-                SqlQuery::Select(ref sq) => {
-                    let (qg, _) = self.consider_query_graph(&query_name, sq);
-                    self.add_query_via_mir(&query_name, sq, qg, mig)
-                }
-                ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
-                ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
-            }
-        } else {
-            // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
-            // hold for reuse or extension
-            match q {
-                SqlQuery::Select(ref sq) => {
-                    let (qg, reuse) = self.consider_query_graph(&query_name, sq);
-                    match reuse {
-                        QueryGraphReuse::ExactMatch(mn) => {
-                            let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
-                            QueryFlowParts {
-                                name: String::from(mn.borrow().name()),
-                                new_nodes: vec![],
-                                reused_nodes: vec![flow_node],
-                                query_leaf: flow_node,
-                            }
+        // TODO(larat): extend existing should handle policy nodes
+        // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
+        // hold for reuse or extension
+        let qfp = match q {
+            SqlQuery::Select(ref sq) => {
+                let (qg, reuse) = self.consider_query_graph(&query_name, mig.universe(), sq);
+                match reuse {
+                    QueryGraphReuse::ExactMatch(mn) => {
+                        let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
+                        QueryFlowParts {
+                            name: String::from(mn.borrow().name()),
+                            new_nodes: vec![],
+                            reused_nodes: vec![flow_node],
+                            query_leaf: flow_node,
                         }
-                        QueryGraphReuse::ExtendExisting(mq) => {
-                            self.extend_existing_query(&query_name, sq, qg, mq, mig)
-                        }
-                        QueryGraphReuse::ReaderOntoExisting(mn, params) => {
-                            self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
-                        }
-                        QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                     }
+                    QueryGraphReuse::ExtendExisting(mq) => {
+                        self.extend_existing_query(&query_name, sq, qg, mq, mig)
+                    }
+                    QueryGraphReuse::ReaderOntoExisting(mn, params) => {
+                        self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
+                    }
+                    QueryGraphReuse::None => self.add_query_via_mir(&query_name, sq, qg, mig),
                 }
-                ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
-                ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
             }
+            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig),
+            ref q @ _ => panic!("unhandled query type in recipe: {:?}", q),
         };
 
         // record info about query

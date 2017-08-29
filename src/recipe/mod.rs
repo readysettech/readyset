@@ -243,7 +243,12 @@ impl Recipe {
             let (n, q) = expr.clone();
             // add the universe-specific query
             // don't user query name to avoid conflict with global queries
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, None, true, mig)?;
+            let new_name = match n {
+                Some(ref name) => Some(format!("{}_u{}", name, mig.universe())),
+                None => None,
+            };
+
+            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, new_name, true, mig)?;
 
             // If the user provided us with a query name, use that.
             // If not, use the name internally used by the QFP.

@@ -235,9 +235,9 @@ impl SqlToMirConverter {
         name: &str,
         sq: &SelectStatement,
         qg: &QueryGraph,
-        universe_id: Option<DataType>,
+        universe: DataType,
     ) -> MirQuery {
-        let nodes = self.make_nodes_for_selection(&name, sq, qg, universe_id);
+        let nodes = self.make_nodes_for_selection(&name, sq, qg, universe);
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for (i, mn) in nodes.into_iter().enumerate() {
@@ -1162,7 +1162,7 @@ impl SqlToMirConverter {
         name: &str,
         st: &SelectStatement,
         qg: &QueryGraph,
-        universe_id: Option<DataType>,
+        universe: DataType,
     ) -> Vec<MirNodeRef> {
         use std::cmp::Ordering;
         use std::collections::HashMap;
@@ -1210,10 +1210,9 @@ impl SqlToMirConverter {
             // If this is creating a new user universe, create the appropriate security nodes
             // for each base node relation.
             let mut policy_nodes: Vec<MirNodeRef> = Vec::new();
-            if universe_id.is_some() {
-                let uid = universe_id.unwrap();
+            if universe != "global".into() {
                 for (rel, b) in &node_for_rel.clone() {
-                    let policies = self.make_security_nodes(*rel, &b, uid.clone(), node_for_rel.clone());
+                    let policies = self.make_security_nodes(*rel, &b, universe.clone(), node_for_rel.clone());
                     debug!(self.log, "Created {} security nodes for table {}", policies.len(), *rel);
                     policy_nodes.extend(policies.clone());
 
