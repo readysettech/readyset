@@ -1156,15 +1156,14 @@ mod tests {
                 &Column::from("votes.uid"),
             ],
         );
-        // XXX(malte): non-deterministic join ordering below
-        let _join1_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
+        let join1_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
         // articles join votes
-        //assert_eq!(join1_view.fields(),
-        //           &["aid", "title", "author", "id", "name"]);
-        let _join2_view = get_node(&inc, &mig, &format!("q_{:x}_n1", qid));
+        assert_eq!(join1_view.fields(),
+                   &["aid", "title", "author", "id", "name"]);
+        let join2_view = get_node(&inc, &mig, &format!("q_{:x}_n1", qid));
         // join1_view join users
-        //assert_eq!(join2_view.fields(),
-        //           &["aid", "title", "author", "aid", "uid", "id", "name"]);
+        assert_eq!(join2_view.fields(),
+                   &["aid", "title", "author", "id", "name", "aid", "uid"]);
         // leaf view
         let leaf_view = get_node(&inc, &mig, "q_3");
         assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
