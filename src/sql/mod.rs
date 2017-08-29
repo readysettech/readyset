@@ -229,7 +229,6 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            // TODO(malte): score reuse candidates
             let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
             .map(|c| {
                 self.query_graphs[&c.1.signature().hash].1.clone()
@@ -375,7 +374,7 @@ impl SqlIncorporator {
         for m in reuse_mirs {
             let res =
                 merge_mir_for_queries(&self.log, &reused_mir, &m);
-            reused_mir = res.0.clone();
+            reused_mir = res.0;
             if res.1 > num_reused_nodes { num_reused_nodes = res.1; }
         }
 

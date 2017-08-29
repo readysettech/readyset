@@ -61,6 +61,15 @@ impl Relaxed {
 
         // Check if the queries are join compatible -- if the new query
         // performs a superset of the joins in the existing query.
+
+        // TODO 1: this currently only checks that the joins use the same
+        // tables. some possible improvements are:
+        // 1) relaxing to fail only on non-disjoint join sets
+        // 2) constraining to also check implication of join predicates
+
+        // TODO 2: malte's suggestion of possibly reuse LeftJoin as a
+        // plain Join by simply adding a filter that discards rows with
+        // NULLs in the right side columns
         for (srcdst, ex_qge) in &existing_qg.edges {
             match *ex_qge {
                 QueryGraphEdge::Join(_) => {
@@ -141,7 +150,9 @@ impl Relaxed {
             }
         }
 
-        // we don't need to check projected columns to reuse a prefix of the query
+        // projected columns don't influence the reuse opportunities in this case, since
+        // we are only trying to reuse the query partially, not completely extending it.
+
         return Some(ReuseType::DirectExtension);
     }
 }

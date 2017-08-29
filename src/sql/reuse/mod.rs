@@ -24,6 +24,7 @@ enum ReuseConfigType {
     Full,
 }
 
+// TODO(larat): make this a dynamic option
 const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Finkelstein;
 
 pub struct ReuseConfig {
