@@ -441,6 +441,11 @@ impl SqlIncorporator {
         use sql::passes::negation_removal::NegationRemoval;
         use sql::passes::subqueries::SubQueries;
 
+        // need to increment here so that each subquery has a unique name.
+        // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
+        // so we will end up incrementing this for every subquery.
+        self.num_queries += 1;
+
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         let mut fq = q.clone();
@@ -510,7 +515,6 @@ impl SqlIncorporator {
         };
 
         // record info about query
-        self.num_queries += 1;
         self.leaf_addresses
             .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
