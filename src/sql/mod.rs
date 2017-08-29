@@ -12,7 +12,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
-use self::reuse::ReuseType;
+use self::reuse::ReuseConfig;
 use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
@@ -35,7 +35,7 @@ pub struct QueryFlowParts {
 #[derive(Clone, Debug)]
 enum QueryGraphReuse {
     ExactMatch(MirNodeRef),
-    ExtendExisting(MirQuery),
+    ExtendExisting(Vec<MirQuery>),
     ReaderOntoExisting(MirNodeRef, Vec<Column>),
     None,
 }
@@ -212,22 +212,10 @@ impl SqlIncorporator {
             }
         }
 
-        let mut reuse_candidates = Vec::new();
-        for &(ref existing_qg, _) in self.query_graphs.values() {
-            // queries are different, but one might be a generalization of the other
-            if existing_qg
-                .signature()
-                .is_generalization_of(&qg.signature())
-            {
-                match reuse::check_compatibility(&qg, existing_qg) {
-                    Some(reuse) => {
-                        // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
-                        reuse_candidates.push((reuse, existing_qg));
-                    }
-                    None => (),
-                }
-            }
-        }
+        let reuse_config = ReuseConfig::default();
+
+        let reuse_candidates = reuse_config.reuse_candidates(&qg, &self.query_graphs);
+
         if reuse_candidates.len() > 0 {
             info!(
                 self.log,
@@ -241,23 +229,13 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            // TODO(malte): score reuse candidates
-            let choice = reuse::choose_best_option(reuse_candidates);
+            let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
+            .map(|c| {
+                self.query_graphs[&c.1.signature().hash].1.clone()
+            })
+            .collect();
 
-            match choice.0 {
-                ReuseType::DirectExtension => {
-                    let ref mir_query = self.query_graphs[&choice.1.signature().hash].1;
-                    info!(
-                        self.log,
-                        "Can reuse by directly extending existing query {}",
-                        mir_query.name
-                    );
-                    return (qg, QueryGraphReuse::ExtendExisting(mir_query.clone()));
-                }
-                ReuseType::BackjoinRequired(_) => {
-                    error!(self.log, "Choose unsupported reuse via backjoin!");
-                }
-            }
+            return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {
             info!(self.log, "No reuse opportunity, adding fresh query");
         }
@@ -376,7 +354,7 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
-        extend_mir: MirQuery,
+        reuse_mirs: Vec<MirQuery>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use super::mir::reuse::merge_mir_for_queries;
@@ -391,8 +369,14 @@ impl SqlIncorporator {
         trace!(self.log, "Optimized MIR: {}", new_opt_mir);
 
         // compare to existing query MIR and reuse prefix
-        let (reused_mir, num_reused_nodes) =
-            merge_mir_for_queries(&self.log, &new_opt_mir, &extend_mir);
+        let mut reused_mir = new_opt_mir.clone();
+        let mut num_reused_nodes = 0;
+        for m in reuse_mirs {
+            let res =
+                merge_mir_for_queries(&self.log, &reused_mir, &m);
+            reused_mir = res.0;
+            if res.1 > num_reused_nodes { num_reused_nodes = res.1; }
+        }
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
 
@@ -523,8 +507,8 @@ impl SqlIncorporator {
                             query_leaf: flow_node,
                         }
                     }
-                    QueryGraphReuse::ExtendExisting(mq) => {
-                        self.extend_existing_query(&query_name, sq, qg, mq, mig)
+                    QueryGraphReuse::ExtendExisting(mqs) => {
+                        self.extend_existing_query(&query_name, sq, qg, mqs, mig)
                     }
                     QueryGraphReuse::ReaderOntoExisting(mn, params) => {
                         self.add_leaf_to_existing_query(&query_name, &params, mn, mig)
