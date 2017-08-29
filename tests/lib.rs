@@ -1613,6 +1613,41 @@ fn recipe_activates_and_migrates_with_join() {
 }
 
 #[test]
+fn finkelstein1982_queries() {
+    use std::io::Read;
+    use std::fs::File;
+
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let mut inc = distributary::SqlIncorporator::default();
+    {
+        let mut mig = g.start_migration();
+
+        let mut f = File::open("tests/finkelstein82.txt").unwrap();
+        let mut s = String::new();
+
+        // Load queries
+        f.read_to_string(&mut s).unwrap();
+        let lines: Vec<String> = s.lines()
+            .filter(|l| !l.is_empty() && !l.starts_with("#"))
+            .map(|l| if !(l.ends_with("\n") || l.ends_with(";")) {
+                String::from(l) + "\n"
+            } else {
+                String::from(l)
+            })
+            .collect();
+
+        // Add them one by one
+        for q in lines.iter() {
+            assert!(inc.add_query(q, None, &mut mig).is_ok());
+        }
+        mig.commit();
+    }
+
+    println!("{}", g);
+}
+
+#[test]
 fn tpc_w() {
     use std::io::Read;
     use std::fs::File;
