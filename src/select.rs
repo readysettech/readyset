@@ -146,15 +146,9 @@ named!(join_rhs<&[u8], JoinRightSide>,
     alt_complete!(
           complete!(chain!(
               select: delimited!(tag!("("), nested_selection, tag!(")")) ~
-              alias: as_alias,
+              alias: opt!(as_alias),
               || {
-                  JoinRightSide::NestedSelect(Box::new(select), Some(String::from(alias)))
-              }
-          ))
-        | complete!(chain!(
-              select: delimited!(tag!("("), nested_selection, tag!(")")),
-              || {
-                  JoinRightSide::NestedSelect(Box::new(select), None)
+                  JoinRightSide::NestedSelect(Box::new(select), alias.map(String::from))
               }
           ))
         | complete!(chain!(
