@@ -1,28 +1,30 @@
-use nom_sql::{SqlQuery, ConditionExpression, ConditionBase, Column};
+use nom_sql::{SqlQuery, ConditionExpression, ConditionBase, Column, JoinRightSide};
 use nom_sql::ConditionExpression::*;
 
-pub trait SubQueries {
-    fn extract_subqueries<'a>(&'a mut self) -> Vec<&'a mut ConditionBase>;
+#[derive(Debug, PartialEq)]
+pub enum Subquery<'a> {
+    InJoin(&'a mut JoinRightSide),
+    InComparison(&'a mut ConditionBase),
 }
 
-fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec<&'a mut ConditionBase> {
+pub trait SubQueries {
+    fn extract_subqueries<'a>(&'a mut self) -> Vec<Subquery>;
+}
+
+fn extract_subqueries_from_condition<'a>(ce: &'a mut ConditionExpression) -> Vec<Subquery> {
     use nom_sql::ConditionBase::NestedSelect;
     match *ce {
         ComparisonOp(ref mut ct) | LogicalOp(ref mut ct) => {
             let lb = extract_subqueries_from_condition(&mut *ct.left);
             let rb = extract_subqueries_from_condition(&mut *ct.right);
 
-            lb.into_iter()
-            .chain(rb.into_iter())
-            .collect()
-        },
-        NegationOp(ref mut bce) => {
-            extract_subqueries_from_condition(&mut *bce)
-        },
+            lb.into_iter().chain(rb.into_iter()).collect()
+        }
+        NegationOp(ref mut bce) => extract_subqueries_from_condition(&mut *bce),
         Base(ref mut cb) => {
             match *cb {
-                NestedSelect(_) => vec![cb],
-                _ => vec![]
+                NestedSelect(_) => vec![Subquery::InComparison(cb)],
+                _ => vec![],
             }
         }
     }
@@ -58,25 +60,36 @@ pub fn query_from_condition_base(cond: &ConditionBase) -> (SqlQuery, Column) {
 }
 
 impl SubQueries for SqlQuery {
-    fn extract_subqueries<'a>(&'a mut self) -> Vec<&'a mut ConditionBase> {
+    fn extract_subqueries<'a>(&'a mut self) -> Vec<Subquery> {
+        let mut subqueries = Vec::new();
         match *self {
             SqlQuery::Select(ref mut st) => {
+                for jc in &mut st.join {
+                    match jc.right {
+                        ref mut jrs @ JoinRightSide::NestedSelect(_, _) => {
+                            subqueries.push(Subquery::InJoin(jrs));
+                        }
+                        _ => (),
+                    }
+                }
                 match st.where_clause {
-                    Some(ref mut ce) => { return extract_subqueries_from_condition(ce); },
-                    None => ()
+                    Some(ref mut ce) => {
+                        subqueries.extend(extract_subqueries_from_condition(ce));
+                    }
+                    None => (),
                 }
             }
             _ => (),
         }
 
-        Vec::new()
+        subqueries
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{ConditionTree, Operator,
-        Table, FieldExpression, Column, SelectStatement, SqlQuery};
+    use nom_sql::{ConditionTree, Operator, Table, FieldExpression, Column, SelectStatement,
+                  SqlQuery};
     use nom_sql::ConditionBase::*;
     use nom_sql::ConditionExpression::*;
     use super::*;
@@ -98,7 +111,7 @@ mod tests {
             ..Default::default()
         };
 
-        let expected = NestedSelect(Box::new(sq.clone()));
+        let mut expected = NestedSelect(Box::new(sq.clone()));
 
         // select pid from post where author in (select userid from role where type=1)
         let st = SelectStatement {
@@ -115,7 +128,7 @@ mod tests {
         let mut q = SqlQuery::Select(st);
         let res = q.extract_subqueries();
 
-        assert_eq!(res, vec![&expected]);
+        assert_eq!(res, vec![Subquery::InComparison(&mut expected)]);
     }
 
     #[test]
@@ -133,7 +146,7 @@ mod tests {
         });
 
         let res = q.extract_subqueries();
-        let expected: Vec<&ConditionBase> = Vec::new();
+        let expected: Vec<Subquery> = Vec::new();
 
         assert_eq!(res, expected);
     }
@@ -169,7 +182,7 @@ mod tests {
             ..Default::default()
         });
 
-        let expected: Vec<&ConditionBase> = Vec::new();
+        let expected: Vec<Subquery> = Vec::new();
 
         let res = q.extract_subqueries();
 

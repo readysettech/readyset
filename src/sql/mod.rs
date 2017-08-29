@@ -433,6 +433,7 @@ impl SqlIncorporator {
         query_name: String,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
+        use nom_sql::{JoinRightSide, Table};
         use self::query_utils::ReferredTables;
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
@@ -449,13 +450,34 @@ impl SqlIncorporator {
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         let mut fq = q.clone();
-        for mut cond_base in fq.extract_subqueries() {
-            use sql::passes::subqueries::query_from_condition_base;
-            use sql::passes::subqueries::field_with_table_name;
-            let (sq, column) = query_from_condition_base(&cond_base);
+        for sq in fq.extract_subqueries() {
+            use sql::passes::subqueries::{field_with_table_name, query_from_condition_base,
+                                          Subquery};
+            match sq {
+                Subquery::InComparison(mut cond_base) => {
+                    let (sq, column) = query_from_condition_base(&cond_base);
 
-            let qfp = self.add_parsed_query(sq, None, mig).expect("failed to add subquery");
-            *cond_base = field_with_table_name(qfp.name.clone(), column);
+                    let qfp = self.add_parsed_query(sq, None, mig)
+                        .expect("failed to add subquery");
+                    *cond_base = field_with_table_name(qfp.name.clone(), column);
+                }
+                Subquery::InJoin(mut join_right_side) => {
+                    *join_right_side = match *join_right_side {
+                        JoinRightSide::NestedSelect(box ref ns, ref alias) => {
+                            let qfp = self.add_parsed_query(
+                                SqlQuery::Select(ns.clone()),
+                                alias.clone(),
+                                mig,
+                            ).expect("failed to add subquery in join");
+                            JoinRightSide::Table(Table {
+                                name: qfp.name.clone(),
+                                alias: None,
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
         }
 
         // first, check that all tables mentioned in the query exist.
@@ -1199,5 +1221,55 @@ mod tests {
         let edge = get_node(&inc, &mig, &res.unwrap().name);
         assert_eq!(edge.fields(), &["name", "literal"]);
         assert_eq!(edge.description(), format!("π[1, lit: 1]"));
+    }
+
+    #[test]
+    fn it_incorporates_join_with_nested_query() {
+        let mut g = Blender::new();
+        let mut inc = SqlIncorporator::default();
+        let mut mig = g.start_migration();
+
+        assert!(
+            inc.add_query(
+                "CREATE TABLE users (id int, name varchar(40));",
+                None,
+                &mut mig
+            ).is_ok()
+        );
+        assert!(
+            inc.add_query(
+                "CREATE TABLE articles (id int, author int, title varchar(255));",
+                None,
+                &mut mig
+            ).is_ok()
+        );
+
+        let q = "SELECT nested_users.name, articles.title \
+                 FROM articles \
+                 JOIN (SELECT * FROM users) AS nested_users \
+                 ON (nested_users.id = articles.author);";
+        let q = inc.add_query(q, None, &mut mig);
+        assert!(q.is_ok());
+        let qid = query_id_hash(
+            &["articles", "nested_users"],
+            &[
+                &Column::from("articles.author"),
+                &Column::from("nested_users.id"),
+            ],
+            &[
+                &Column::from("articles.title"),
+                &Column::from("nested_users.name"),
+            ],
+        );
+        // join node
+        let new_join_view = get_node(&inc, &mig, &format!("q_{:x}_n0", qid));
+        assert_eq!(
+            new_join_view.fields(),
+            &["id", "name", "id", "author", "title"]
+        );
+        // leaf node
+        let new_leaf_view = get_node(&inc, &mig, &q.unwrap().name);
+        assert_eq!(new_leaf_view.fields(), &["name", "title"]);
+        assert_eq!(new_leaf_view.description(), format!("π[1, 4]"));
     }
 }
