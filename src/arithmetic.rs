@@ -1,8 +1,8 @@
 use nom::multispace;
 use std::str;
 
-use common::{integer_literal, sql_identifier, Literal};
-use column::Column;
+use common::{column_identifier_no_alias, integer_literal, Literal};
+use column::{Column, FunctionExpression};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArithmeticOperator {
@@ -50,10 +50,7 @@ named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
 named!(pub arithmetic_base<&[u8], ArithmeticBase>,
     alt_complete!(
           map!(integer_literal, |il| ArithmeticBase::Scalar(il))
-        | map!(sql_identifier, |si| {
-              let c = Column::from(str::from_utf8(si).unwrap());
-              ArithmeticBase::Column(c)
-          })
+        | map!(column_identifier_no_alias, |ci| ArithmeticBase::Column(ci))
     )
 );
 
@@ -83,10 +80,14 @@ mod tests {
     #[test]
     fn it_parses_arithmetic_expressions() {
         use super::ArithmeticOperator::*;
-        use super::ArithmeticBase::*;
+        use super::ArithmeticBase::Scalar;
+        use super::ArithmeticBase::Column as ABColumn;
 
         let lit_ae = ["5 + 42", "5+42", "5 * 42", "5 - 42", "5 / 42"];
-        let col_lit_ae = ["foo+5", "foo + 5", "5 + foo"];
+        // N.B. trailing space in "5 + foo " is required because `sql_identifier`'s keyword
+        // detection requires a follow-up character (in practice, there always is one because we
+        // use semicolon-terminated queries).
+        let col_lit_ae = ["foo+5", "foo + 5", "5 + foo ", "MAX(foo)-3333"];
 
         let expected_lit_ae = [
             ArithmeticExpression::new(Add, Scalar(5.into()), Scalar(42.into())),
@@ -96,9 +97,19 @@ mod tests {
             ArithmeticExpression::new(Divide, Scalar(5.into()), Scalar(42.into())),
         ];
         let expected_col_lit_ae = [
-            ArithmeticExpression::new(Add, Column("foo".into()), Scalar(5.into())),
-            ArithmeticExpression::new(Add, Column("foo".into()), Scalar(5.into())),
-            ArithmeticExpression::new(Add, Scalar(5.into()), Column("foo".into())),
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into())),
+            ArithmeticExpression::new(Add, ABColumn("foo".into()), Scalar(5.into())),
+            ArithmeticExpression::new(Add, Scalar(5.into()), ABColumn("foo".into())),
+            ArithmeticExpression::new(
+                Subtract,
+                ABColumn(Column {
+                    name: String::from("max(foo)"),
+                    alias: None,
+                    table: None,
+                    function: Some(Box::new(FunctionExpression::Max("foo".into()))),
+                }),
+                Scalar(3333.into()),
+            ),
         ];
 
         for (i, e) in lit_ae.iter().enumerate() {
@@ -112,6 +123,5 @@ mod tests {
             assert!(res.is_done());
             assert_eq!(res.unwrap().1, expected_col_lit_ae[i]);
         }
-
     }
 }
