@@ -2,9 +2,9 @@ use nom::multispace;
 use std::str;
 
 use common::{column_identifier_no_alias, integer_literal, Literal};
-use column::{Column, FunctionExpression};
+use column::Column;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticOperator {
     Add,
     Subtract,
@@ -12,17 +12,17 @@ pub enum ArithmeticOperator {
     Divide,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ArithmeticBase {
     Column(Column),
     Scalar(Literal),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ArithmeticExpression {
-    op: ArithmeticOperator,
-    left: ArithmeticBase,
-    right: ArithmeticBase,
+    pub op: ArithmeticOperator,
+    pub left: ArithmeticBase,
+    pub right: ArithmeticBase,
 }
 
 impl ArithmeticExpression {
@@ -79,6 +79,7 @@ mod tests {
 
     #[test]
     fn it_parses_arithmetic_expressions() {
+        use column::FunctionExpression;
         use super::ArithmeticOperator::*;
         use super::ArithmeticBase::Scalar;
         use super::ArithmeticBase::Column as ABColumn;
