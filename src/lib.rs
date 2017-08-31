@@ -22,6 +22,7 @@ pub mod parser;
 #[macro_use]
 mod caseless_tag;
 mod keywords;
+mod arithmetic;
 mod column;
 mod common;
 mod condition;
