@@ -36,6 +36,7 @@ impl ArithmeticExpression {
 }
 
 /// Parse standard math operators.
+/// TODO(malte): this doesn't currently observe operator precedence.
 named!(pub arithmetic_operator<&[u8], ArithmeticOperator>,
     alt_complete!(
           map!(tag!("+"), |_| ArithmeticOperator::Add)
@@ -57,6 +58,7 @@ named!(pub arithmetic_base<&[u8], ArithmeticBase>,
 );
 
 /// Parse simple arithmetic expressions combining literals, and columns and literals.
+/// TODO(malte): this doesn't currently support nested expressions.
 named!(pub arithmetic_expression<&[u8], ArithmeticExpression>,
     complete!(chain!(
         left: arithmetic_base ~
