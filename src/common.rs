@@ -4,6 +4,7 @@ use std::fmt::{self, Display};
 use std::str;
 use std::str::FromStr;
 
+use arithmetic::{arithmetic_expression, ArithmeticExpression};
 use column::{Column, FunctionExpression};
 use keywords::sql_keyword;
 use table::Table;
@@ -129,6 +130,7 @@ pub enum TableKey {
 pub enum FieldExpression {
     All,
     AllInTable(String),
+    Arithmetic(ArithmeticExpression),
     Col(Column),
     Literal(Literal),
 }
@@ -138,6 +140,7 @@ impl Display for FieldExpression {
         match *self {
             FieldExpression::All => write!(f, "*"),
             FieldExpression::AllInTable(ref table) => write!(f, "{}.*", table),
+            FieldExpression::Arithmetic(ref expr) => write!(f, "{:?}", expr),
             FieldExpression::Col(ref col) => write!(f, "{}", col.name.as_str()),
             FieldExpression::Literal(ref lit) => write!(f, "{}", lit.to_string()),
         }
@@ -423,6 +426,12 @@ named!(pub field_definition_expr<&[u8], Vec<FieldExpression>>,
                      tag!(".*"),
                      || {
                          FieldExpression::AllInTable(table.name.clone())
+                     }
+                 )
+                 | chain!(
+                     expr: arithmetic_expression,
+                     || {
+                         FieldExpression::Arithmetic(expr)
                      }
                  )
                  | chain!(

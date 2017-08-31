@@ -1054,4 +1054,33 @@ mod tests {
 
         assert_eq!(res.unwrap().1, outer_select);
     }
+
+
+    #[test]
+    fn project_arithmetic_expressions() {
+        use arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
+
+        let qstr = "SELECT MAX(o_id)-3333 FROM orders;";
+        let res = selection(qstr.as_bytes());
+
+        let expected = SelectStatement {
+            tables: vec![Table::from("orders")],
+            fields: vec![
+                FieldExpression::Arithmetic(ArithmeticExpression {
+                    op: ArithmeticOperator::Subtract,
+                    left: ArithmeticBase::Column(Column {
+                        name: String::from("max(o_id)"),
+                        alias: None,
+                        table: None,
+                        function: Some(Box::new(FunctionExpression::Max("o_id".into()))),
+                    }),
+                    right: ArithmeticBase::Scalar(3333.into()),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(res.unwrap().1, expected);
+    }
+
 }
