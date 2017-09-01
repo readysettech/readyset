@@ -20,15 +20,21 @@ pub enum ReuseType {
     #[allow(dead_code)] BackjoinRequired(Vec<Table>),
 }
 
-enum ReuseConfigType {
+#[derive(Clone, Debug, PartialEq)]
+#[allow(missing_docs)]
+pub enum ReuseConfigType {
     Finkelstein,
     Relaxed,
     Full,
+    NoReuse,
 }
 
+<<<<<<< HEAD
 // TODO(larat): make this a dynamic option
 const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Full;
 
+=======
+>>>>>>> configurable reuse type
 pub struct ReuseConfig {
     config: ReuseConfigType,
 }
@@ -45,6 +51,7 @@ impl ReuseConfig {
             }
             ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs),
             ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
+            _ => unreachable!(),
         };
         self.reorder_joins(qg, &reuse_candidates);
 
@@ -56,11 +63,12 @@ impl ReuseConfig {
         reorder_joins(qg, reuse_candidates);
     }
 
-    pub fn default() -> ReuseConfig {
-        match REUSE_CONFIG {
+    pub fn new(reuse_type: ReuseConfigType) -> ReuseConfig {
+        match reuse_type {
             ReuseConfigType::Finkelstein => ReuseConfig::finkelstein(),
             ReuseConfigType::Relaxed => ReuseConfig::relaxed(),
             ReuseConfigType::Full => ReuseConfig::full(),
+            _ => unreachable!(),
         }
     }
 

@@ -3,7 +3,7 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-mod reuse;
+pub mod reuse;
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
@@ -12,8 +12,8 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
-use self::reuse::ReuseConfig;
-use sql::query_graph::{to_query_graph, QueryGraph};
+use self::reuse::{ReuseConfig, ReuseConfigType};
+use sql::query_graph::{QueryGraph, to_query_graph};
 
 use slog;
 use std::collections::HashMap;
@@ -54,7 +54,7 @@ pub struct SqlIncorporator {
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
-    enable_reuse: bool,
+    reuse_type: ReuseConfigType,
 }
 
 impl Default for SqlIncorporator {
@@ -68,7 +68,7 @@ impl Default for SqlIncorporator {
             schema_version: 0,
             view_schemas: HashMap::default(),
             transactional: false,
-            enable_reuse: true,
+            reuse_type: ReuseConfigType::Finkelstein,
         }
     }
 }
@@ -91,12 +91,12 @@ impl SqlIncorporator {
 
     /// Disable node reuse for future migrations.
     pub fn disable_reuse(&mut self) {
-        self.enable_reuse = false;
+        self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
-    pub fn enable_reuse(&mut self) {
-        self.enable_reuse = true;
+    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.reuse_type = reuse_type;
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -161,7 +161,7 @@ impl SqlIncorporator {
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
         // if reuse is disabled, we're done
-        if !self.enable_reuse {
+        if self.reuse_type == ReuseConfigType::NoReuse {
             return (qg, QueryGraphReuse::None);
         }
 
@@ -243,7 +243,7 @@ impl SqlIncorporator {
             }
         }
 
-        let reuse_config = ReuseConfig::default();
+        let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
         let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
 
