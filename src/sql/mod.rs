@@ -126,7 +126,7 @@ impl SqlIncorporator {
         &mut self,
         query: SqlQuery,
         name: Option<String>,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         match name {
             None => self.nodes_for_query(query, mig),
@@ -415,7 +415,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: String,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, String> {
         use nom_sql::{JoinRightSide, Table};
         use self::query_utils::ReferredTables;
@@ -438,14 +438,14 @@ impl SqlIncorporator {
             use sql::passes::subqueries::{field_with_table_name, query_from_condition_base,
                                           Subquery};
             match sq {
-                Subquery::InComparison(mut cond_base) => {
+                Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
                     let qfp = self.add_parsed_query(sq, None, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
-                Subquery::InJoin(mut join_right_side) => {
+                Subquery::InJoin(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(box ref ns, ref alias) => {
                             let qfp = self.add_parsed_query(

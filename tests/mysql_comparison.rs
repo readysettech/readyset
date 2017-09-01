@@ -1,6 +1,5 @@
 #![feature(slice_concat_ext)]
 
-extern crate slog;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
