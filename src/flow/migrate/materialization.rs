@@ -230,7 +230,7 @@ pub fn index(
         let mut tmp = HashMap::new();
         while !leftover_indices.is_empty() {
             for (v, idxs) in leftover_indices.drain() {
-                if let Some(mut state) = state.get_mut(&v) {
+                if let Some(state) = state.get_mut(&v) {
                     // this node is materialized! add the indices!
                     info!(log,
                           "adding indices";

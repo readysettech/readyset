@@ -75,7 +75,7 @@ impl SqlToMirConverter {
     fn to_conditions(
         &self,
         ct: &ConditionTree,
-        mut columns: &mut Vec<Column>,
+        columns: &mut Vec<Column>,
         n: &MirNodeRef,
     ) -> Vec<Option<(Operator, DataType)>> {
         use std::cmp::max;
@@ -367,7 +367,7 @@ impl SqlToMirConverter {
                         );
 
                         // remember the schema for this version
-                        let mut base_schemas = self.base_schemas
+                        let base_schemas = self.base_schemas
                             .entry(String::from(name))
                             .or_insert(Vec::new());
                         base_schemas.push((self.schema_version, columns.clone()));
@@ -402,7 +402,7 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let mut base_schemas = self.base_schemas
+        let base_schemas = self.base_schemas
             .entry(String::from(name))
             .or_insert(Vec::new());
         base_schemas.push((self.schema_version, cols.clone()));

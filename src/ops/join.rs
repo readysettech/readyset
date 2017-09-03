@@ -78,8 +78,8 @@ impl Join {
                     .max()
                     .unwrap_or(0);
 
-                /// Tracks how columns have moved. At any point during the iteration, column i in
-                /// the original row will be located at position remap[i].
+                // Tracks how columns have moved. At any point during the iteration, column i in
+                // the original row will be located at position remap[i].
                 let mut remap: Vec<_> = (0..num_columns).collect();
                 emit.iter()
                     .enumerate()
