@@ -253,7 +253,7 @@ impl SqlIncorporator {
         let mut mir = self.mir_converter
             .add_leaf_below(final_query_node, query_name, params);
 
-        trace!(self.log, "Reused leaf node MIR: {:#?}", mir);
+        trace!(self.log, "Reused leaf node MIR: {}", mir);
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
