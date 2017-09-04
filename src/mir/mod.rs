@@ -403,7 +403,7 @@ impl MirNode {
             // and assume that only one column of the same name ever exists at the same time.
             MirNodeType::Base { ref column_specs, .. } => {
                 match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    None => panic!("tried to look up non-existent column {:?}", c),
                     Some(id) => {
                         column_specs[id]
                             .1
