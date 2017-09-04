@@ -49,6 +49,7 @@ impl Egress {
         } = self;
 
         // send any queued updates to all external children
+        assert!(txs.len() > 0);
         let txn = txs.len() - 1;
 
         // we need to find the ingress node following this egress according to the path

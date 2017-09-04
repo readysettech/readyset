@@ -375,9 +375,7 @@ extern crate memcached;
 #[cfg(feature = "web")]
 extern crate rustful;
 
-#[cfg(feature = "b_netsoup")]
 extern crate bincode;
-#[cfg(feature = "b_netsoup")]
 extern crate bufstream;
 
 extern crate serde;
@@ -445,6 +443,5 @@ pub fn logger_pls() -> slog::Logger {
 /// web provides a simple REST HTTP server for reading from and writing to the data flow graph.
 pub mod web;
 
-#[cfg(feature = "b_netsoup")]
 /// srv provides a networked RPC server for accessing the data flow graph.
 pub mod srv;

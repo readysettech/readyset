@@ -158,6 +158,13 @@ impl Worker {
         (domain, shard): (DomainIndex, usize),
         addr: SocketAddr,
     ) -> Result<(), String> {
+        trace!(
+            self.log,
+            "found that domain {}.{} is at {:?}",
+            domain.index(),
+            shard,
+            addr
+        );
         self.channel_coordinator.insert_addr((domain, shard), addr);
         Ok(())
     }

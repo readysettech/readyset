@@ -16,6 +16,11 @@ slog = "2.0.6"
 #slog = { version = "2.0.6", features = ["max_level_trace", "release_max_level_debug"] }
 slog-term = "2.0.1"
 
+# Not needed directly, but we want to force the version used by our dependencies to have default
+# features. If this isn't here, then the features used for `num` will vary between subcrates,
+# triggering unnecessary recompiles.
+num = "0.1"
+
 [dependencies.rustful]
 version = "0.9.0"
 default-features = false
