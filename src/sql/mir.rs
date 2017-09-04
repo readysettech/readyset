@@ -124,21 +124,43 @@ impl SqlToMirConverter {
         prior_leaf: MirNodeRef,
         name: &str,
         params: &Vec<Column>,
+        project_columns: Option<Vec<Column>>,
     ) -> MirQuery {
-        let columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
-
-        // reuse the previous leaf node
+        // hang off the previous logical leaf node
+        let parent_columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
         let parent = MirNode::reuse(prior_leaf, self.schema_version);
 
-        // add an identity node and then another leaf
-        let id = MirNode::new(
-            &format!("{}_id", name),
-            self.schema_version,
-            columns.clone(),
-            MirNodeType::Identity,
-            vec![parent.clone()],
-            vec![],
-        );
+        let (reproject, columns): (bool, Vec<Column>) = match project_columns {
+            // parent is a projection already, so no need to reproject; just reuse its columns
+            None => (false, parent_columns),
+            // parent is not a projection, so we need to reproject to the columns passed to us
+            Some(pc) => (true, pc.into_iter().chain(params.iter().cloned()).collect()),
+        };
+
+        let n = if reproject {
+            // add a (re-)projection and then another leaf
+            MirNode::new(
+                &format!("{}_reproject", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Project {
+                    emit: columns.clone(),
+                    literals: vec![],
+                },
+                vec![parent.clone()],
+                vec![],
+            )
+        } else {
+            // add an identity node and then another leaf
+            MirNode::new(
+                &format!("{}_id", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Identity,
+                vec![parent.clone()],
+                vec![],
+            )
+        };
 
         let new_leaf = MirNode::new(
             name,
@@ -152,7 +174,7 @@ impl SqlToMirConverter {
                 node: parent.clone(),
                 keys: params.clone(),
             },
-            vec![id.clone()],
+            vec![n],
             vec![],
         );
 
