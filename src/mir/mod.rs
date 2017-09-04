@@ -218,7 +218,7 @@ pub struct MirNode {
     name: String,
     from_version: usize,
     columns: Vec<Column>,
-    inner: MirNodeType,
+    pub(crate) inner: MirNodeType,
     ancestors: Vec<MirNodeRef>,
     children: Vec<MirNodeRef>,
     pub flow_node: Option<FlowNode>,
