@@ -1345,14 +1345,18 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = qg.columns
+            let mut projected_columns: Vec<&Column> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Data(ref c) => Some(c),
                     OutputColumn::Literal(_) => None,
                 })
-                .chain(qg.parameters())
                 .collect();
+            for pc in qg.parameters() {
+                if !projected_columns.contains(&pc) {
+                    projected_columns.push(pc);
+                }
+            }
             let projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
