@@ -1329,6 +1329,9 @@ fn make_union_node(
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
+    // column_id_for_column doesn't take into consideration table aliases
+    // which might cause improper ordering of columns in a union node
+    // eg. Q6 in finkelstein.txt
     for (i, n) in ancestors.clone().iter().enumerate() {
         let emit_cols = emit[i].iter()
             .map(|c| n.borrow().column_id_for_column(c))
