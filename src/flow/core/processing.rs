@@ -30,16 +30,12 @@ where
     fn take(&mut self) -> ops::NodeOperator;
 
     fn ancestors(&self) -> Vec<prelude::NodeIndex>;
-    fn should_materialize(&self) -> bool;
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
     fn must_replay_among(&self) -> Option<HashSet<prelude::NodeIndex>> {
         None
     }
-
-    /// Should return true if this ingredient will ever query the state of an ancestor.
-    fn will_query(&self, materialized: bool) -> bool;
 
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     ///

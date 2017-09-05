@@ -46,7 +46,7 @@ macro_rules! dur_to_ns {
 }
 
 type Readers = Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>;
-pub type Edge = bool; // should the edge be materialized?
+pub type Edge = ();
 
 /// `Blender` is the core component of the alternate Soup implementation.
 ///
@@ -59,8 +59,6 @@ pub struct Blender {
     source: NodeIndex,
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
-    partial: HashSet<NodeIndex>,
-    partial_enabled: bool,
     sharding_enabled: bool,
 
     /// Parameters for persistence code.
@@ -114,7 +112,7 @@ impl Blender {
 
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
-        self.partial_enabled = false;
+        self.materializations.disable_partial();
     }
 
     /// Disable sharding for all subsequent migrations
@@ -526,35 +524,6 @@ impl<'a> Migration<'a> {
     #[cfg(test)]
     pub fn graph(&self) -> &prelude::Graph {
         self.mainline.graph()
-    }
-
-    /// Mark the edge between `src` and `dst` in the graph as requiring materialization.
-    ///
-    /// The reason this is placed per edge rather than per node is that only some children of a
-    /// node may require materialization of their inputs (i.e., only those that will query along
-    /// this edge). Since we must materialize the output of a node in a foreign domain once for
-    /// every receiving domain, this can save us some space if a child that doesn't require
-    /// materialization is in its own domain. If multiple nodes in the same domain require
-    /// materialization of the same parent, that materialized state will be shared.
-    pub fn materialize(&mut self, src: prelude::NodeIndex, dst: prelude::NodeIndex) {
-        // TODO
-        // what about if a user tries to materialize a cross-domain edge that has already been
-        // converted to an egress/ingress pair?
-        let e = self.mainline
-            .ingredients
-            .find_edge(src, dst)
-            .expect("asked to materialize non-existing edge");
-
-        debug!(self.log, "told to materialize"; "node" => src.index());
-
-        let e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
-        if !*e {
-            *e = true;
-            // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
-            // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
-            // commit())
-            self.materialize.insert((src, dst));
-        }
     }
 
     fn ensure_reader_for(&mut self, n: prelude::NodeIndex) {
