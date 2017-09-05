@@ -1479,31 +1479,44 @@ fn make_join_node(
         n.borrow().column_id_for_column(col)
     };
 
-    let join_config = proj_cols
+    assert_eq!(on_left.len(), 1, "no support for multiple column joins");
+    assert_eq!(on_right.len(), 1, "no support for multiple column joins");
+
+    // this assumes the columns we want to join on appear first in the list
+    // of projected columns. this is fine for joins against different tables
+    // since we assume unique column names in each table. however, this is
+    // not correct for joins against the same table, for example:
+    // SELECT r1.a as a1, r2.a as a2 from r as r1, r as r2 where r1.a = r2.b and r2.a = r1.b;
+    //
+    // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
+    // however, because the way we deal with alias, we can't distinguish between `r1.a` and `r2.a`
+    // at this point in the codebase, and because so the `r2.a = r1.b` will join on the wrong `a`
+    // column.
+    let left_join_col_id = projected_cols_left.iter().position(|lc| lc == on_left.first().unwrap()).unwrap();
+    let right_join_col_id = projected_cols_right.iter().position(|rc| rc == on_right.first().unwrap()).unwrap();
+
+    let join_config = projected_cols_left
         .iter()
-        .map(|ref c| match on_left.iter().position(|ref lc| lc == c) {
-            Some(pos) => {
+        .enumerate()
+        .map(|(i, _)| {
+            if i == left_join_col_id {
                 JoinSource::B(
-                    find_column_id(&left, c),
-                    find_column_id(&right, &on_right[pos]),
+                    i,
+                    right_join_col_id,
                 )
             }
-            // WTF, rustfmt?
-            None => {
-                if projected_cols_left.contains(c) {
-                    JoinSource::L(find_column_id(&left, c))
-                } else if projected_cols_right.contains(c) {
-                    JoinSource::R(find_column_id(&right, c))
-                } else {
-                    panic!(
-                        "Join column {:?} found in neither parent {:?} or {:?}?!",
-                        c,
-                        left,
-                        right
-                    );
-                }
+            else {
+                JoinSource::L(i)
             }
         })
+        .chain(
+            projected_cols_right
+            .iter()
+            .enumerate()
+            .map(|(i, _)|
+                JoinSource::R(i)
+            )
+        )
         .collect();
 
     let left_na = left.borrow().flow_node_addr().unwrap();
