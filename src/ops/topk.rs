@@ -216,14 +216,6 @@ impl Ingredient for TopK {
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        true
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src.as_global()];
         self.cols = srcn.fields().len();

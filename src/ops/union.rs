@@ -85,14 +85,6 @@ impl Ingredient for Union {
         }
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        false
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
             ref mut cols,

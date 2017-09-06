@@ -489,7 +489,7 @@ pub fn shard(
             *graph.node_weight_mut(n).unwrap() = new;
             let e = graph.find_edge(grandp, p).unwrap();
             let w = graph.remove_edge(e).unwrap();
-            graph.add_edge(grandp, n, false);
+            graph.add_edge(grandp, n, ());
             graph.add_edge(n, p, w);
             swaps.insert((p, grandp), n);
 
@@ -573,7 +573,7 @@ fn reshard(
     // hook in node that does appropriate shuffle
     let old = graph.find_edge(src, dst).unwrap();
     let was_materialized = graph.remove_edge(old).unwrap();
-    graph.add_edge(src, node, false);
+    graph.add_edge(src, node, ());
     graph.add_edge(node, dst, was_materialized);
 
     // if `dst` refers to `src`, it now needs to refer to `node` instead

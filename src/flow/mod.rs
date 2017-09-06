@@ -63,6 +63,7 @@ pub struct Blender {
 
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
+    materializations: migrate::materialization::Materializations,
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
@@ -82,14 +83,18 @@ impl Default for Blender {
             node::special::Source,
             true,
         ));
+
+        let readers = Readers::default();
+        let log = slog::Logger::root(slog::Discard, o!());
+        let materializations = migrate::materialization::Materializations::new(&log, &readers);
+
         Blender {
             ingredients: g,
             source: source,
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
-            partial: Default::default(),
-            partial_enabled: true,
             sharding_enabled: true,
+            materializations: materializations,
 
             persistence: persistence::Parameters::default(),
 
@@ -97,9 +102,9 @@ impl Default for Blender {
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
-            readers: Arc::default(),
+            readers: readers,
 
-            log: slog::Logger::root(slog::Discard, o!()),
+            log: log,
         }
     }
 }
@@ -154,6 +159,7 @@ impl Blender {
     /// By default, all log messages are discarded.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
+        self.materializations.set_logger(&self.log);
     }
 
     /// Start setting up a new `Migration`.
@@ -164,7 +170,6 @@ impl Blender {
             mainline: self,
             added: Default::default(),
             columns: Default::default(),
-            materialize: Default::default(),
             readers: Default::default(),
 
             start: time::Instant::now(),
@@ -344,12 +349,7 @@ impl fmt::Display for Blender {
         for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
             indentln(f)?;
             write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
-            if !edge.weight {
-                // not materialized
-                writeln!(f, " [style=\"dashed\"]")?;
-            } else {
-                writeln!(f, "")?;
-            }
+            writeln!(f, "")?;
         }
 
         // Output footer.
@@ -373,7 +373,6 @@ pub struct Migration<'a> {
     added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
-    materialize: HashSet<(NodeIndex, NodeIndex)>,
 
     start: time::Instant,
     log: slog::Logger,
@@ -424,10 +423,10 @@ impl<'a> Migration<'a> {
         if parents.is_empty() {
             self.mainline
                 .ingredients
-                .add_edge(self.mainline.source, ni, false);
+                .add_edge(self.mainline.source, ni, ());
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, false);
+                self.mainline.ingredients.add_edge(parent, ni, ());
             }
         }
         // and tell the caller its id
@@ -464,7 +463,7 @@ impl<'a> Migration<'a> {
         // insert it into the graph
         self.mainline
             .ingredients
-            .add_edge(self.mainline.source, ni, false);
+            .add_edge(self.mainline.source, ni, ());
         // and tell the caller its id
         ni.into()
     }
@@ -532,7 +531,7 @@ impl<'a> Migration<'a> {
             let r = node::special::Reader::new(n);
             let r = self.mainline.ingredients[n].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
-            self.mainline.ingredients.add_edge(n, r, false);
+            self.mainline.ingredients.add_edge(n, r, ());
             self.readers.insert(n, r);
         }
     }
@@ -645,7 +644,7 @@ impl<'a> Migration<'a> {
         let h = try!(hook::Hook::new(name, servers, vec![key]));
         let h = self.mainline.ingredients[n].mirror(h);
         let h = self.mainline.ingredients.add_node(h);
-        self.mainline.ingredients.add_edge(n, h, false);
+        self.mainline.ingredients.add_edge(n, h, ());
         Ok(h.into())
     }
 
@@ -839,17 +838,12 @@ impl<'a> Migration<'a> {
         // NOTE: index will also contain the materialization information for *existing* domains
         // TODO: this should re-use materialization decisions across shard domains
         debug!(log, "calculating materializations");
-        let index = domain_nodes
-            .iter()
-            .map(|(domain, nodes)| {
-                use self::migrate::materialization::{pick, index};
-                debug!(log, "picking materializations"; "domain" => domain.index());
-                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
-                debug!(log, "deriving indices"; "domain" => domain.index());
-                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
-                (*domain, idx)
-            })
-            .collect();
+        for (&domain, nodes) in &domain_nodes {
+            debug!(log, "picking materializations"; "domain" => domain.index());
+            mainline
+                .materializations
+                .extend(&mainline.ingredients, &nodes[..]);
+        }
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
         let deps = migrate::transactions::analyze_graph(
@@ -929,7 +923,9 @@ impl<'a> Migration<'a> {
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        let domains_on_path = migrate::materialization::initialize(&log, mainline, &new, index);
+        mainline
+            .materializations
+            .commit(&mainline.ingredients, &new, &mut mainline.domains);
 
         info!(log, "finalizing migration");
 
@@ -940,7 +936,7 @@ impl<'a> Migration<'a> {
             .checktable
             .lock()
             .unwrap()
-            .add_replay_paths(domains_on_path);
+            .add_replay_paths(&mut mainline.materializations.domains_on_path);
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 

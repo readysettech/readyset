@@ -29,6 +29,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
@@ -40,9 +41,9 @@ impl Tag {
     }
 }
 
-struct Indices(HashSet<Vec<usize>>);
+type Indices = HashSet<Vec<usize>>;
 
-struct Materializations {
+pub struct Materializations {
     log: Logger,
 
     have: HashMap<NodeIndex, Indices>,
@@ -52,14 +53,15 @@ struct Materializations {
     partial_enabled: bool,
 
     // TODO: this doesn't belong here
-    domains_on_path: HashMap<Tag, Vec<domain::Index>>,
+    pub domains_on_path: HashMap<Tag, Vec<domain::Index>>,
 
     tag_generator: AtomicUsize,
+    readers: flow::Readers,
 }
 
 impl Materializations {
     /// Create a new set of materializations.
-    pub fn new(logger: &Logger) -> Self {
+    pub fn new(logger: &Logger, readers: &flow::Readers) -> Self {
         Materializations {
             log: logger.new(o!()),
 
@@ -68,7 +70,16 @@ impl Materializations {
 
             partial: HashSet::default(),
             partial_enabled: true,
+
+            domains_on_path: Default::default(),
+
+            tag_generator: AtomicUsize::default(),
+            readers: readers.clone(),
         }
+    }
+
+    pub fn set_logger(&mut self, logger: &Logger) {
+        self.log = logger.new(o!());
     }
 
     /// Disable partial materialization for all new materializations.
@@ -78,6 +89,7 @@ impl Materializations {
 }
 
 struct PendingReplay {
+    tag: Tag,
     source: LocalNodeIndex,
     source_domain: domain::Index,
     target_domain: domain::Index,
@@ -121,14 +133,14 @@ impl Materializations {
                 continue;
             }
 
-            let mut indices = n.suggest_indexes();
+            let mut indices = n.suggest_indexes(ni);
             if indices.is_empty() && n.get_base().is_some() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
                 indices.insert(ni, vec![0]);
             }
 
-            for (ni, cols) in n.suggest_indexes() {
+            for (ni, cols) in indices {
                 trace!(self.log, "new indexing obligation";
                        "node" => ni.index(),
                        "columns" => ?cols);
@@ -145,7 +157,7 @@ impl Materializations {
         // that aren't. And then we continue until there are no obligations left.
         while !obligations.is_empty() {
             let ni = obligations.keys().next().map(|&ni| ni).unwrap(); // unwrap ok because !empty
-            let (ni, indices) = obligations.remove(&ni).unwrap();
+            let indices = obligations.remove(&ni).unwrap();
 
             if let Some(have) = self.have.get_mut(&ni) {
                 // no need to push these indices down further, just add them to this already
@@ -170,7 +182,7 @@ impl Materializations {
             let n = &graph[ni];
             if n.is_internal() && n.can_query_through() {
                 // push these obligations to the ancestor of n.
-                let mut ancestors = graph.neighbors_directed(petgraph::EdgeDirection::Incoming);
+                let mut ancestors = graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming);
                 let ancestor = ancestors
                     .next()
                     .expect("query through node has no ancestor");
@@ -184,26 +196,32 @@ impl Materializations {
                     // TODO: what about ingress -> query through -> query through?
 
                     // we need to figure out how the columns remap through the ancestor
-                    for index in &mut indices {
-                        for col in &mut index {
-                            let really = n.parent_columns(col);
-                            assert_eq!(
-                                really.len(),
-                                1,
-                                "query through node does not resolve column"
-                            );
-                            assert_eq!(
-                                really[0].0,
-                                ancestor,
-                                "query through node doesn't resolve to ancestor"
-                            );
-                            assert!(
-                                really[0].1.is_some(),
-                                "query through node does not resolve column"
-                            );
-                            *col = really.into_iter().next().unwrap().1.unwrap();
-                        }
-                    }
+                    let indices = indices
+                        .into_iter()
+                        .map(|index| {
+                            index
+                                .into_iter()
+                                .map(|col| {
+                                    let really = n.parent_columns(col);
+                                    assert_eq!(
+                                        really.len(),
+                                        1,
+                                        "query through node does not resolve column"
+                                    );
+                                    assert_eq!(
+                                        really[0].0,
+                                        ancestor,
+                                        "query through node doesn't resolve to ancestor"
+                                    );
+                                    assert!(
+                                        really[0].1.is_some(),
+                                        "query through node does not resolve column"
+                                    );
+                                    really.into_iter().next().unwrap().1.unwrap()
+                                })
+                                .collect()
+                        })
+                        .collect();
 
                     trace!(self.log, "hoisting indexing obligations";
                            "for" => ni.index(),
@@ -232,7 +250,12 @@ impl Materializations {
     ///
     /// This includes setting up replay paths, adding new indices to existing materializations, and
     /// populating new materializations.
-    pub fn commit(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) {
+    pub fn commit(
+        &mut self,
+        graph: &Graph,
+        new: &HashSet<NodeIndex>,
+        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+    ) {
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(graph);
@@ -244,7 +267,7 @@ impl Materializations {
                 continue;
             }
 
-            if new.contains_key(&node) {
+            if new.contains(&node) {
                 make.push(node);
             } else if self.added.contains_key(&node) {
                 reindex.push(node);
@@ -252,22 +275,25 @@ impl Materializations {
         }
 
         // first, we add any new indices to existing nodes
-        // TODO FIXME
+        if !reindex.is_empty() {
+            // TODO FIXME
+            unimplemented!();
+        }
 
         // then, we start prepping new nodes
         let mut empty = HashSet::new();
         for ni in make {
             let n = &graph[ni];
-            let index_on = self.added
-                .remove(ni)
+            let mut index_on = self.added
+                .remove(&ni)
                 .map(|idxs| {
                     assert!(!idxs.is_empty());
                     idxs
                 })
-                .unwrap_or_else(Vec::new);
+                .unwrap_or_else(HashSet::new);
 
             let start = ::std::time::Instant::now();
-            self.ready_one(ni, &mut index_on, graph, &mut empty);
+            self.ready_one(ni, &mut index_on, graph, &mut empty, domains);
             let reconstructed = index_on.is_empty();
 
             // communicate to the domain in charge of a particular node that it should start
@@ -275,8 +301,8 @@ impl Materializations {
             // acknowledge the change. this is important so that we don't ready a child in a
             // different domain before the parent has been readied. it's also important to avoid us
             // returning before the graph is actually fully operational.
-            trace!(self.log, "readying node"; "node" => node.index());
-            let domain = unimplemented!().handles.get_mut(&n.domain()).unwrap();
+            trace!(self.log, "readying node"; "node" => ni.index());
+            let domain = domains.get_mut(&n.domain()).unwrap();
             domain
                 .send(box Packet::Ready {
                     node: *n.local_addr(),
@@ -284,7 +310,7 @@ impl Materializations {
                 })
                 .unwrap();
             domain.wait_for_ack().unwrap();
-            trace!(self.log, "node ready"; "node" => node.index());
+            trace!(self.log, "node ready"; "node" => ni.index());
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
@@ -300,9 +326,10 @@ impl Materializations {
     fn ready_one(
         &mut self,
         ni: NodeIndex,
-        index_on: &mut Vec<Vec<usize>>,
+        index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         empty: &mut HashSet<NodeIndex>,
+        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
     ) {
         let n = &graph[ni];
         if graph
@@ -321,8 +348,7 @@ impl Materializations {
 
                     match n.sharded_by() {
                         Sharding::None => {
-                            unimplemented!()
-                                .readers
+                            self.readers
                                 .lock()
                                 .unwrap()
                                 .insert(ni, ReadHandle::Singleton(None));
@@ -333,8 +359,7 @@ impl Materializations {
                             for _ in 0..::SHARDS {
                                 shards.push(None);
                             }
-                            unimplemented!()
-                                .readers
+                            self.readers
                                 .lock()
                                 .unwrap()
                                 .insert(ni, ReadHandle::Sharded(shards));
@@ -352,12 +377,7 @@ impl Materializations {
                 })
             });
             if let Some(Some(prep)) = prep {
-                unimplemented!()
-                    .domains
-                    .get_mut(&n.domain())
-                    .unwrap()
-                    .send(prep)
-                    .unwrap();
+                domains.get_mut(&n.domain()).unwrap().send(prep).unwrap();
             }
             return;
         }
@@ -371,14 +391,16 @@ impl Materializations {
         });
 
         if !has_state {
-            debug!(self.log, "no need to replay non-materialized view"; "node" => node.index());
+            debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());
             return;
         }
 
         // we have a parent that has data, so we need to replay and reconstruct
-        let log = log.new(o!("node" => node.index()));
         info!(self.log, "beginning reconstruction of {:?}", n);
-        self.reconstruct(graph, ni, index_on, graph, &empty);
+        let log = self.log.new(o!("node" => ni.index()));
+        let log = mem::replace(&mut self.log, log);
+        self.reconstruct(ni, index_on, graph, &empty, domains);
+        mem::replace(&mut self.log, log);
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
         // wait for the domain to finish replay, which the ready executed by the outer commit()
@@ -391,18 +413,19 @@ impl Materializations {
     fn reconstruct(
         &mut self,
         ni: NodeIndex,
-        index_on: &mut Vec<Vec<usize>>,
+        index_on: &mut HashSet<Vec<usize>>,
         graph: &Graph,
         empty: &HashSet<NodeIndex>,
+        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
     ) {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
             // figure out what key that Reader is using
-            graph[node]
+            graph[ni]
                 .with_reader(|r| {
                     assert!(r.is_materialized());
                     if let Some(rh) = r.key() {
-                        index_on.push(vec![rh]);
+                        index_on.insert(vec![rh]);
                     }
                 })
                 .unwrap();
@@ -420,14 +443,14 @@ impl Materializations {
         //
         // to decide that, we need to find all our paths up the tree.
         let paths = {
-            let mut on_join = self.cost_fn(graph, &mut unimplemented!().domains, empty);
+            let mut on_join = self.cost_fn(graph, empty, domains);
             // TODO: what if we're constructing multiple indices?
             // TODO: what if we have a compound index?
-            let trace_col = index_on[0][0];
+            let trace_col = index_on.iter().next().unwrap()[0];
             keys::provenance_of(graph, ni, trace_col, &mut *on_join)
         };
         // and cut paths so they only reach to the the closest materialized node
-        let paths: Vec<_> = paths
+        let mut paths: Vec<_> = paths
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
@@ -463,7 +486,8 @@ impl Materializations {
         // this is because we don't yet support multiple partial indices on the same node (it would
         // would require per-index replay paths) and we don't support partial materialization on
         // compound keys (it would require more complex key provenance computation).
-        let partial_ok = self.partial_enabled && index_on.len() == 1 && index_on[0].len() == 1;
+        let partial_ok = self.partial_enabled && index_on.len() == 1 &&
+            index_on.iter().next().unwrap().len() == 1;
         // we also require that `index_on[0][0]` of `ni` trace back to some `key` in the
         // materialized state we're replaying? if it does not, partial replay isn't possible.
         let partial_ok = partial_ok && paths.iter().all(|path| {
@@ -492,7 +516,7 @@ impl Materializations {
         // keep track of the fact that this view is partially materialized
         if partial_ok {
             warn!(self.log, "using partial materialization");
-            self.partial.insert(node);
+            self.partial.insert(ni);
         }
 
         // FIXME: we need to detect materialized nodes downstream of partially materialized nodes.
@@ -501,6 +525,7 @@ impl Materializations {
 
         // inform domains about replay paths
         let mut pending = Vec::with_capacity(paths.len());
+        let mut tags = Vec::with_capacity(paths.len());
         for path in &mut paths {
             // there should always be a replay path
             assert!(
@@ -511,11 +536,24 @@ impl Materializations {
             // we want path to have the ancestor closest to the root *first*
             path.reverse();
 
-            if let Some(p) = self.expose_path(path, partial_ok, graph) {
+            let (tag, p) = self.expose_path(&mut path[..], partial_ok, graph, domains);
+            if let Some(p) = p {
                 // this path requires doing a replay and then waiting for the replay to finish
                 pending.push(p);
             }
+            tags.push(tag);
         }
+
+        // prepare the target domain to receive state
+        self.prepare_state(
+            ni,
+            partial_ok,
+            index_on,
+            &tags[..],
+            &paths[..],
+            graph,
+            domains,
+        );
 
         trace!(self.log, "all domains ready for replay");
         if !partial_ok {
@@ -525,18 +563,16 @@ impl Materializations {
         }
 
         // prepare for, start, and wait for replays
-        self.prepare_state(ni, graph, &paths[..]);
         for pending in pending {
             // tell the first domain to start playing
             trace!(self.log, "telling root domain to start replay";
                    "domain" => pending.source_domain.index());
 
-            unimplemented!()
-                .domains
+            domains
                 .get_mut(&pending.source_domain)
                 .unwrap()
                 .send(box Packet::StartReplay {
-                    tag: tag,
+                    tag: pending.tag,
                     from: pending.source,
                 })
                 .unwrap();
@@ -544,11 +580,10 @@ impl Materializations {
             // and then wait for the last domain to receive all the records
             trace!(self.log,
                "waiting for done message from target";
-               "domain" => pending.target_domain
+               "domain" => pending.target_domain.index()
             );
 
-            unimplemented!()
-                .domains
+            domains
                 .get_mut(&pending.target_domain)
                 .unwrap()
                 .wait_for_ack()
@@ -559,15 +594,17 @@ impl Materializations {
     /// Tell all domains along the given replay path about that path
     fn expose_path(
         &mut self,
-        path: &[(NodeIndex, Vec<usize>)],
+        path: &mut [(NodeIndex, Option<usize>)],
+        use_partial: bool,
         graph: &Graph,
-    ) -> Option<PendingReplay> {
+        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+    ) -> (Tag, Option<PendingReplay>) {
         let tag = Tag(self.tag_generator.fetch_add(1, Ordering::SeqCst) as u32);
         trace!(self.log, "setting up replay path {:?}", path; "tag" => tag.id());
 
         // what key are we using for partial materialization (if any)?
         let mut partial = None;
-        if partial_ok {
+        if use_partial {
             if let Some(&(_, Some(ref key))) = path.first() {
                 partial = Some(key.clone());
             }
@@ -576,13 +613,13 @@ impl Materializations {
         // first, find out which domains we are crossing
         let mut segments = Vec::new();
         let mut last_domain = None;
-        for &mut (node, ref mut key) in &mut path {
+        for &mut (node, ref mut key) in path {
             let domain = graph[node].domain();
             if last_domain.is_none() || domain != last_domain.unwrap() {
                 segments.push((domain, Vec::new()));
                 last_domain = Some(domain);
 
-                if partial_ok && graph[node].is_transactional() {
+                if use_partial && graph[node].is_transactional() {
                     self.domains_on_path
                         .entry(tag.clone())
                         .or_insert_with(Vec::new)
@@ -598,15 +635,15 @@ impl Materializations {
         // tell all the domains about their segment of this replay path
         let mut pending = None;
         let mut seen = HashSet::new();
-        for (i, &(ref domain, ref nodes)) in segments.iter().enumerate() {
+        for (i, &(domain, ref nodes)) in segments.iter().enumerate() {
             // TODO:
             //  a domain may appear multiple times in this list if a path crosses into the same
             //  domain more than once. currently, that will cause a deadlock.
             assert!(
-                !seen.contains(domain),
+                !seen.contains(&domain),
                 "a-b-a domain replays are not yet supported"
             );
-            seen.insert(*domain);
+            seen.insert(domain);
 
             // we're not replaying through the starter node
             // *unless* it's a Base (because it might need to add defaults)
@@ -619,7 +656,7 @@ impl Materializations {
             }
 
             // use the local index for each node
-            let locals = nodes
+            let locals: Vec<_> = nodes
                 .iter()
                 .skip(skip_first)
                 .map(|&(ni, key)| (*graph[ni].local_addr(), key))
@@ -663,7 +700,7 @@ impl Materializations {
                         *trigger = TriggerEndpoint::Start(vec![*key]);
                     } else if i == segments.len() - 1 {
                         // otherwise, should know how to trigger partial replay
-                        let shards = blender.domains.get_mut(&segments[0].0).unwrap().shards();
+                        let shards = domains.get_mut(&segments[0].0).unwrap().shards();
                         *trigger = TriggerEndpoint::End(segments[0].0.clone(), shards);
                     }
                 } else {
@@ -679,11 +716,13 @@ impl Materializations {
                     {
                         *notify_done = true;
                         assert!(pending.is_none());
-                        pending = Some(PendingReplay{
-                            source: graph[segments[0].1[0].0].local_addr(),
+                        pending = Some(PendingReplay {
+                            tag: tag,
+                            source: *graph[segments[0].1[0].0].local_addr(),
                             source_domain: segments[0].0,
                             target_domain: domain,
                         });
+                    }
                 }
             }
 
@@ -693,9 +732,8 @@ impl Materializations {
                 // replay path so that it knows what path to forward replay packets on.
                 let n = &graph[nodes.last().unwrap().0];
                 if n.is_egress() {
-                    unimplemented!()
-                        .domains
-                        .get_mut(domain)
+                    domains
+                        .get_mut(&domain)
                         .unwrap()
                         .send(box Packet::UpdateEgress {
                             node: *n.local_addr(),
@@ -709,25 +747,26 @@ impl Materializations {
             }
 
             trace!(self.log, "telling domain about replay path"; "domain" => domain.index());
-            let ctx = unimplemented!().domains.get_mut(domain).unwrap();
+            let ctx = domains.get_mut(&domain).unwrap();
             ctx.send(setup).unwrap();
             ctx.wait_for_ack().unwrap();
         }
 
-        pending
+        (tag, pending)
     }
 
     /// Tell the node's domain to create an empty state for the node in question
-    fn prepare_state(&self, ni: NodeIndex, graph: &Graph, paths: &[(NodeIndex, Vec<usize>)]) {
+    fn prepare_state(
+        &self,
+        ni: NodeIndex,
+        use_partial: bool,
+        index_on: &mut HashSet<Vec<usize>>,
+        tags: &[Tag],
+        paths: &[Vec<(NodeIndex, Option<usize>)>],
+        graph: &Graph,
+        domains: &mut HashMap<domain::Index, domain::DomainHandle>,
+    ) {
         use flow::payload::InitialState;
-
-        // we need to play a little bit of trickery here.
-        // if we are partially materializing a reader, the reader needs to know how to request
-        // backfills when a read misses. in order to do that, it needs to know the replay path tag.
-        // but since we haven't constructed the replay paths yet, we don't yet know the tag. and we
-        // can't construct the tag
-        let last_domain = paths.get(0).map(|p| graph[p[0].0].domain());
-        let next_tag = Tag(self.tag_generator.load(Ordering::SeqCst) as u32);
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
@@ -736,11 +775,10 @@ impl Materializations {
                 // we need to make sure there's an entry in readers for this reader!
                 match graph[ni].sharded_by() {
                     Sharding::None => {
-                        blender
-                            .readers
+                        self.readers
                             .lock()
                             .unwrap()
-                            .insert(node, ReadHandle::Singleton(None));
+                            .insert(ni, ReadHandle::Singleton(None));
                     }
                     _ => {
                         use arrayvec::ArrayVec;
@@ -748,55 +786,53 @@ impl Materializations {
                         for _ in 0..::SHARDS {
                             shards.push(None);
                         }
-                        blender
-                            .readers
+                        self.readers
                             .lock()
                             .unwrap()
-                            .insert(node, ReadHandle::Sharded(shards));
+                            .insert(ni, ReadHandle::Sharded(shards));
                     }
                 }
 
-                if partial_ok {
+                if use_partial {
                     // make sure Reader is actually prepared to receive state
                     assert!(r.is_materialized());
 
-                    if paths.len() != 1 {
-                        unreachable!(); // due to FIXME above
-                    }
+                    assert_eq!(tags.len(), 1);
+                    assert_eq!(paths.len(), 1);
+                    let last_domain = graph[paths[0].last().unwrap().0].domain();
 
-                    let num_shards = blender.domains[&last_domain.unwrap()].shards();
+                    let num_shards = domains[&last_domain].shards();
 
                     // since we're partially materializing a reader node,
                     // we need to give it a way to trigger replays.
                     InitialState::PartialGlobal {
-                        gid: node,
-                        cols,
+                        gid: ni,
+                        cols: graph[ni].fields().len(),
                         key: r.key().unwrap(),
-                        tag: first_tag.unwrap(),
-                        trigger_domain: (last_domain.unwrap(), num_shards),
+                        tag: tags[0],
+                        trigger_domain: (last_domain, num_shards),
                     }
                 } else {
                     InitialState::Global {
-                        cols,
+                        cols: graph[ni].fields().len(),
                         key: r.key().unwrap(),
-                        gid: node,
+                        gid: ni,
                     }
                 }
             })
-            .unwrap_or_else(|| if partial_ok {
+            .unwrap_or_else(|| if use_partial {
                 assert_eq!(index_on.len(), 1);
-                assert_eq!(index_on[0].len(), 1);
-                InitialState::PartialLocal(index_on[0][0])
+                assert_eq!(index_on.iter().next().unwrap().len(), 1);
+                InitialState::PartialLocal(index_on.drain().next().unwrap()[0])
             } else {
-                InitialState::IndexedLocal(index_on)
+                InitialState::IndexedLocal(mem::replace(index_on, HashSet::new()))
             });
 
-        unimplemented!()
-            .domains
-            .get_mut(&domain)
+        domains
+            .get_mut(&graph[ni].domain())
             .unwrap()
             .send(box Packet::PrepareState {
-                node: addr,
+                node: *graph[ni].local_addr(),
                 state: s,
             })
             .unwrap();
@@ -804,11 +840,11 @@ impl Materializations {
 
     /// `cost_fn` provides a cost function that can be used to determine which ancestor (if any)
     /// should be preferred when replaying.
-    fn cost_fn(
-        &self,
-        graph: &Graph,
-        txs: &mut HashMap<domain::Index, domain::DomainHandle>,
-        empty: &HashSet<NodeIndex>,
+    fn cost_fn<'a>(
+        &'a self,
+        graph: &'a Graph,
+        empty: &'a HashSet<NodeIndex>,
+        domains: &'a mut HashMap<domain::Index, domain::DomainHandle>,
     ) -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
         Box::new(move |node, parents| {
             // this function should only be called when there's a choice
@@ -834,7 +870,7 @@ impl Materializations {
             }
 
             // if *all* the options are empty, we can safely pick any of them
-            if parents.iter().all(|&p| empty.contains(p)) {
+            if parents.iter().all(|p| empty.contains(p)) {
                 return parents.pop();
             }
 
@@ -923,7 +959,7 @@ impl Materializations {
 
                     // find the size of the state we would end up replaying
                     let stateful = &graph[stateful];
-                    let domain = txs.get_mut(&stateful.domain()).unwrap();
+                    let domain = domains.get_mut(&stateful.domain()).unwrap();
                     domain
                         .send(box Packet::StateSizeProbe {
                             node: *stateful.local_addr(),

@@ -364,10 +364,10 @@ impl CheckTable {
 
     pub fn add_replay_paths(
         &mut self,
-        additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
+        additional_replay_paths: &mut HashMap<ReplayPath, Vec<domain::Index>>,
     ) {
         self.replay_paths
-            .extend(additional_replay_paths.into_iter());
+            .extend(additional_replay_paths.drain());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {

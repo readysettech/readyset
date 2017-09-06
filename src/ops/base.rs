@@ -112,14 +112,6 @@ impl Ingredient for Base {
         vec![]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized && self.primary_key.is_some()
-    }
-
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {

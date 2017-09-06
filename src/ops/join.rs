@@ -187,10 +187,6 @@ impl Ingredient for Join {
         vec![self.left.as_global(), self.right.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
     fn is_join(&self) -> bool {
         true
     }
@@ -206,10 +202,6 @@ impl Ingredient for Join {
                 )
             }
         }
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        true
     }
 
     fn on_connected(&mut self, _g: &Graph) {}

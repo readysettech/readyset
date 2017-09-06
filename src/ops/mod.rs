@@ -96,14 +96,8 @@ impl Ingredient for NodeOperator {
     fn ancestors(&self) -> Vec<NodeIndex> {
         impl_ingredient_fn_ref!(self,ancestors,)
     }
-    fn should_materialize(&self) -> bool {
-        impl_ingredient_fn_ref!(self,should_materialize,)
-    }
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self,must_replay_among,)
-    }
-    fn will_query(&self, materialized: bool) -> bool {
-        impl_ingredient_fn_ref!(self, will_query, materialized)
     }
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
@@ -241,7 +235,7 @@ pub mod test {
             i.on_connected(&self.graph);
             let i: NodeOperator = i.into();
             let global = self.graph.add_node(Node::new(name, fields, i, false));
-            self.graph.add_edge(self.source, global, false);
+            self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             let mut ip: IndexPair = global.into();
@@ -278,7 +272,7 @@ pub mod test {
                 self.states.insert(local, State::default());
             }
             for parent in parents {
-                self.graph.add_edge(parent, global, false);
+                self.graph.add_edge(parent, global, ());
             }
             let mut ip: IndexPair = global.into();
             ip.set_local(local);

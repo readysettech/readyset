@@ -11,7 +11,7 @@ use flow::statistics;
 use flow::prelude::*;
 
 use std::fmt;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ pub enum TriggerEndpoint {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum InitialState {
     PartialLocal(usize),
-    IndexedLocal(Vec<Vec<usize>>),
+    IndexedLocal(HashSet<Vec<usize>>),
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
@@ -205,7 +205,7 @@ pub enum Packet {
     /// updates.
     Ready {
         node: LocalNodeIndex,
-        index: Vec<Vec<usize>>,
+        index: HashSet<Vec<usize>>,
     },
 
     /// Notification from Blender for domain to terminate
