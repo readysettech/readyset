@@ -94,7 +94,7 @@ impl MirQuery {
         nodes
     }
 
-    pub fn into_flow_parts(&mut self, mut mig: &mut Migration) -> QueryFlowParts {
+    pub fn into_flow_parts(&mut self, mig: &mut Migration) -> QueryFlowParts {
         use std::collections::VecDeque;
 
         let mut new_nodes = Vec::new();
@@ -218,7 +218,7 @@ pub struct MirNode {
     name: String,
     from_version: usize,
     columns: Vec<Column>,
-    inner: MirNodeType,
+    pub(crate) inner: MirNodeType,
     ancestors: Vec<MirNodeRef>,
     children: Vec<MirNodeRef>,
     pub flow_node: Option<FlowNode>,
@@ -403,7 +403,7 @@ impl MirNode {
             // and assume that only one column of the same name ever exists at the same time.
             MirNodeType::Base { ref column_specs, .. } => {
                 match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                    None => panic!("tried to look up non-existent column {:?}", c.name),
+                    None => panic!("tried to look up non-existent column {:?}", c),
                     Some(id) => {
                         column_specs[id]
                             .1
@@ -1213,8 +1213,8 @@ impl Debug for MirNodeType {
 
 fn adapt_base_node(
     over_node: MirNodeRef,
-    mut mig: &mut Migration,
-    mut column_specs: &mut [(ColumnSpecification, Option<usize>)],
+    mig: &mut Migration,
+    column_specs: &mut [(ColumnSpecification, Option<usize>)],
     add: &Vec<ColumnSpecification>,
     remove: &Vec<ColumnSpecification>,
 ) -> FlowNode {
@@ -1264,11 +1264,11 @@ fn make_base_node(
     name: &str,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     pkey_columns: &Vec<Column>,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
     transactional: bool,
 ) -> FlowNode {
     // remember the absolute base column ID for potential later removal
-    for (i, mut cs) in column_specs.iter_mut().enumerate() {
+    for (i, cs) in column_specs.iter_mut().enumerate() {
         cs.1 = Some(i);
     }
 
@@ -1324,7 +1324,7 @@ fn make_union_node(
     columns: &[Column],
     emit: &Vec<Vec<Column>>,
     ancestors: &[MirNodeRef],
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -1352,7 +1352,7 @@ fn make_filter_node(
     parent: MirNodeRef,
     columns: &[Column],
     conditions: &Vec<Option<(Operator, DataType)>>,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -1372,7 +1372,7 @@ fn make_grouped_node(
     on: &Column,
     group_by: &Vec<Column>,
     kind: GroupedNodeType,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
@@ -1425,7 +1425,7 @@ fn make_identity_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -1447,7 +1447,7 @@ fn make_join_node(
     on_right: &Vec<Column>,
     proj_cols: &Vec<Column>,
     kind: JoinType,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     use ops::join::JoinSource;
 
@@ -1523,7 +1523,7 @@ fn make_latest_node(
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &Vec<Column>,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -1547,7 +1547,7 @@ fn make_project_node(
     columns: &[Column],
     emit: &Vec<Column>,
     literals: &Vec<(String, DataType)>,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -1578,7 +1578,7 @@ fn make_topk_node(
     group_by: &Vec<Column>,
     k: usize,
     offset: usize,
-    mut mig: &mut Migration,
+    mig: &mut Migration,
 ) -> FlowNode {
     let parent_na = parent.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -1623,7 +1623,7 @@ fn make_topk_node(
     FlowNode::New(na)
 }
 
-fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mut mig: &mut Migration) {
+fn materialize_leaf_node(node: &MirNodeRef, key_cols: &Vec<Column>, mig: &mut Migration) {
     let na = node.borrow().flow_node_addr().unwrap();
 
     // we must add a new reader for this query. This also requires adding an identity node (at

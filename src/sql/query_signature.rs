@@ -39,8 +39,26 @@ impl<'a> QuerySignature<'a> {
         if !self.relations.is_subset(&other.relations) {
             return false;
         }
+
         // 2) either the same attributes as in `other`, or a subset of them
         if !self.attributes.is_subset(&other.attributes) {
+            return false;
+        }
+
+        return true;
+    }
+
+    // Checks if a query is a weak generalization of the other by analyzing their
+    // relations.
+    pub fn is_weak_generalization_of(&self, other: &QuerySignature) -> bool {
+        // if the queries are the same, they are (non-strict) generalizations of each other
+        if self.hash == other.hash {
+            return true;
+        }
+
+        // to be a generalization, we must have
+        // 1) either the same relations as in `other`, or a subset of them
+        if self.relations.is_disjoint(&other.relations) {
             return false;
         }
 

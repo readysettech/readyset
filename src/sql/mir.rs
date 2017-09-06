@@ -75,7 +75,7 @@ impl SqlToMirConverter {
     fn to_conditions(
         &self,
         ct: &ConditionTree,
-        mut columns: &mut Vec<Column>,
+        columns: &mut Vec<Column>,
         n: &MirNodeRef,
     ) -> Vec<Option<(Operator, DataType)>> {
         use std::cmp::max;
@@ -124,21 +124,43 @@ impl SqlToMirConverter {
         prior_leaf: MirNodeRef,
         name: &str,
         params: &Vec<Column>,
+        project_columns: Option<Vec<Column>>,
     ) -> MirQuery {
-        let columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
-
-        // reuse the previous leaf node
+        // hang off the previous logical leaf node
+        let parent_columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
         let parent = MirNode::reuse(prior_leaf, self.schema_version);
 
-        // add an identity node and then another leaf
-        let id = MirNode::new(
-            &format!("{}_id", name),
-            self.schema_version,
-            columns.clone(),
-            MirNodeType::Identity,
-            vec![parent.clone()],
-            vec![],
-        );
+        let (reproject, columns): (bool, Vec<Column>) = match project_columns {
+            // parent is a projection already, so no need to reproject; just reuse its columns
+            None => (false, parent_columns),
+            // parent is not a projection, so we need to reproject to the columns passed to us
+            Some(pc) => (true, pc.into_iter().chain(params.iter().cloned()).collect()),
+        };
+
+        let n = if reproject {
+            // add a (re-)projection and then another leaf
+            MirNode::new(
+                &format!("{}_reproject", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Project {
+                    emit: columns.clone(),
+                    literals: vec![],
+                },
+                vec![parent.clone()],
+                vec![],
+            )
+        } else {
+            // add an identity node and then another leaf
+            MirNode::new(
+                &format!("{}_id", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Identity,
+                vec![parent.clone()],
+                vec![],
+            )
+        };
 
         let new_leaf = MirNode::new(
             name,
@@ -152,7 +174,7 @@ impl SqlToMirConverter {
                 node: parent.clone(),
                 keys: params.clone(),
             },
-            vec![id.clone()],
+            vec![n],
             vec![],
         );
 
@@ -367,7 +389,7 @@ impl SqlToMirConverter {
                         );
 
                         // remember the schema for this version
-                        let mut base_schemas = self.base_schemas
+                        let base_schemas = self.base_schemas
                             .entry(String::from(name))
                             .or_insert(Vec::new());
                         base_schemas.push((self.schema_version, columns.clone()));
@@ -402,7 +424,7 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let mut base_schemas = self.base_schemas
+        let base_schemas = self.base_schemas
             .entry(String::from(name))
             .or_insert(Vec::new());
         base_schemas.push((self.schema_version, cols.clone()));
@@ -658,7 +680,7 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
         for p in jps.iter() {
             // equi-join only
-            assert_eq!(p.operator, Operator::Equal);
+            assert!(p.operator == Operator::Equal || p.operator == Operator::In );
             let l_col = match *p.left {
                 ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
                 _ => unimplemented!(),
@@ -1345,14 +1367,18 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = qg.columns
+            let mut projected_columns: Vec<&Column> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Data(ref c) => Some(c),
                     OutputColumn::Literal(_) => None,
                 })
-                .chain(qg.parameters())
                 .collect();
+            for pc in qg.parameters() {
+                if !projected_columns.contains(&pc) {
+                    projected_columns.push(pc);
+                }
+            }
             let projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {

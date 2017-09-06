@@ -1,6 +1,5 @@
 #![feature(slice_concat_ext)]
 
-extern crate slog;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
@@ -10,7 +9,7 @@ extern crate backtrace;
 extern crate diff;
 
 use mysql::OptsBuilder;
-use mysql::value::Params;
+use mysql::Params;
 
 use std::path::Path;
 use std::io::{Read, Write, BufRead, BufReader};
@@ -214,7 +213,7 @@ fn generate_target_results(schemas: &BTreeMap<String, Schema>) {
                         .unwrap()
                         .into_iter()
                         .map(|v| {
-                            v.into_str()
+                            format!("{:?}", v)
                                 .trim_matches(|c| c == '\'' || c == '"')
                                 .to_owned()
                         })

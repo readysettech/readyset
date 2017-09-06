@@ -385,13 +385,10 @@ extern crate serde_json;
 extern crate serde_derive;
 
 extern crate buf_redux;
-extern crate snowflake;
 extern crate chrono;
-extern crate time;
 extern crate mio;
 #[macro_use]
 extern crate tarpc;
-extern crate futures;
 extern crate tokio_core;
 
 extern crate channel;

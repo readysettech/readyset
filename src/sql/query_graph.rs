@@ -254,10 +254,10 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &ConditionExpression,
-    mut local: &mut HashMap<String, Vec<ConditionExpression>>,
-    mut join: &mut Vec<ConditionTree>,
-    mut global: &mut Vec<ConditionTree>,
-    mut params: &mut Vec<Column>,
+    local: &mut HashMap<String, Vec<ConditionExpression>>,
+    join: &mut Vec<ConditionTree>,
+    global: &mut Vec<ConditionTree>,
+    params: &mut Vec<Column>,
 ) {
     use std::cmp::Ordering;
 
@@ -281,14 +281,14 @@ fn classify_conditionals(
                 ct.left.as_ref(),
                 &mut new_local,
                 &mut new_join,
-                &mut global,
+                global,
                 &mut new_params,
             );
             classify_conditionals(
                 ct.right.as_ref(),
                 &mut new_local,
                 &mut new_join,
-                &mut global,
+                global,
                 &mut new_params,
             );
 
@@ -342,7 +342,7 @@ fn classify_conditionals(
                         ConditionBase::Field(ref fr) => {
                             // column/column comparison --> comma join
                             if let ConditionBase::Field(ref fl) = *l {
-                                if ct.operator == Operator::Equal {
+                                if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
                                     if let Ordering::Less = fr.table
@@ -367,7 +367,7 @@ fn classify_conditionals(
                                 // we assume that implied table names have previously been expanded
                                 // and thus all columns carry table names
                                 assert!(lf.table.is_some());
-                                let mut e =
+                                let e =
                                     local.entry(lf.table.clone().unwrap()).or_insert(Vec::new());
                                 e.push(ce.clone());
                             }
@@ -591,7 +591,22 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
             // We have a ConditionExpression, but both sides of it are ConditionBase of type Field
             if let ConditionExpression::Base(ConditionBase::Field(ref l)) = *jp.left.as_ref() {
                 if let ConditionExpression::Base(ConditionBase::Field(ref r)) = *jp.right.as_ref() {
-                    let mut e = qg.edges
+                    // If tables aren't already in the relations, add them.
+                    if !qg.relations.contains_key(&l.table.clone().unwrap()) {
+                        qg.relations.insert(
+                            l.table.clone().unwrap(),
+                            new_node(l.table.clone().unwrap(), Vec::new(), st),
+                        );
+                    }
+
+                    if !qg.relations.contains_key(&r.table.clone().unwrap()) {
+                        qg.relations.insert(
+                            r.table.clone().unwrap(),
+                            new_node(r.table.clone().unwrap(), Vec::new(), st),
+                        );
+                    }
+
+                    let e = qg.edges
                         .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
                         .or_insert_with(|| QueryGraphEdge::Join(vec![]));
                     match *e {
@@ -642,7 +657,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     Some(_) => {
                         // add a special node representing the computed columns; if it already
                         // exists, add another computed column to it
-                        let mut n = qg.relations
+                        let n = qg.relations
                             .entry(String::from("computed_columns"))
                             .or_insert_with(
                                 || new_node(String::from("computed_columns"), vec![], st),
@@ -660,7 +675,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         Some(ref clause) => {
             for column in &clause.columns {
                 // add an edge for each relation whose columns appear in the GROUP BY clause
-                let mut e = qg.edges
+                let e = qg.edges
                     .entry((
                         String::from("computed_columns"),
                         column.table.as_ref().unwrap().clone(),
