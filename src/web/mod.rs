@@ -64,7 +64,7 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
     for (path, ep) in ins.into_iter() {
         let put = Mutex::new(Box::new(ep.mutator));
         let args = ep.arguments;
-        insert_routes! {
+        #[allow(unused_mut)]{insert_routes! {
             &mut router => {
                 path => Post: Box::new(move |mut ctx: Context, mut res: Response| {
                     let json = ctx.body.read_json_body().unwrap();
@@ -80,13 +80,13 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                     res.send(json!(result).to_string()); // TODO this is always `null`
                 }) as Box<Handler>,
             }
-        };
+        }};
     }
 
     for (path, ep) in outs.into_iter() {
         let get = Mutex::new(ep.f);
         let args = ep.arguments;
-        insert_routes! {
+        #[allow(unused_mut)]{insert_routes! {
             &mut router => {
                 path => Get: Box::new(move |ctx: Context, mut res: Response| {
                     if let Some(key) = ctx.query.get("key") {
@@ -111,10 +111,10 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                     }
                 }) as Box<Handler>,
             }
-        };
+        }};
     }
 
-    insert_routes! {
+    #[allow(unused_mut)]{insert_routes! {
         &mut router => {
             "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
                 let m: &Arc<Mutex<Blender>> = ctx.global.get().unwrap();
@@ -142,7 +142,7 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
                 res.send(include_str!("js/worker.js"));
             }) as Box<Handler>,
         }
-    };
+    }};
 
     Server {
         handlers: router,
