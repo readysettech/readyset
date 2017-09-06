@@ -1477,11 +1477,6 @@ fn make_join_node(
         proj_cols.len()
     );
 
-    let find_column_id = |n: &MirNodeRef, col: &Column| -> usize {
-        //rustfmt
-        n.borrow().column_id_for_column(col)
-    };
-
     assert_eq!(on_left.len(), 1, "no support for multiple column joins");
     assert_eq!(on_right.len(), 1, "no support for multiple column joins");
 
@@ -1492,9 +1487,8 @@ fn make_join_node(
     // SELECT r1.a as a1, r2.a as a2 from r as r1, r as r2 where r1.a = r2.b and r2.a = r1.b;
     //
     // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
-    // however, because the way we deal with alias, we can't distinguish between `r1.a` and `r2.a`
-    // at this point in the codebase, and because so the `r2.a = r1.b` will join on the wrong `a`
-    // column.
+    // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
+    // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
     let left_join_col_id = projected_cols_left.iter().position(|lc| lc == on_left.first().unwrap()).unwrap();
     let right_join_col_id = projected_cols_right.iter().position(|rc| rc == on_right.first().unwrap()).unwrap();
 

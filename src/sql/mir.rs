@@ -1042,50 +1042,36 @@ impl SqlToMirConverter {
 
                 for &(&(ref src, ref dst), edge) in &sorted_edges {
                     let mut jns = Vec::new();
-                    match *edge {
+                    let (join_type, jps) = match *edge {
                         // Edge represents a LEFT JOIN
                         QueryGraphEdge::LeftJoin(ref jps) => {
-                            let (left_node, right_node) =
-                                pick_join_columns(src, dst, prev_node, &joined_tables);
-
-                            let mut prev_join = right_node;
-                            for jp in jps.into_iter() {
-                                let cur_join = self.make_join_node(
-                                    &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                    jp,
-                                    left_node.clone(),
-                                    prev_join.clone(),
-                                    JoinType::Left,
-                                );
-
-                                prev_join = cur_join.clone();
-                                new_node_count+=1;
-                                jns.push(cur_join);
-                            }
+                            (JoinType::Left, jps)
                         }
                         // Edge represents a JOIN
                         QueryGraphEdge::Join(ref jps) => {
-                            let (left_node, right_node) =
-                                pick_join_columns(src, dst, prev_node, &joined_tables);
-
-                            let mut prev_join = right_node;
-                            for jp in jps.into_iter() {
-                                let cur_join = self.make_join_node(
-                                    &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                    jp,
-                                    left_node.clone(),
-                                    prev_join.clone(),
-                                    JoinType::Inner,
-                                );
-
-                                prev_join = cur_join.clone();
-                                new_node_count+=1;
-                                jns.push(cur_join);
-                            }
+                            (JoinType::Inner, jps)
                         }
                         // Edge represents a GROUP BY, which we handle later
                         QueryGraphEdge::GroupBy(_) => continue,
                     };
+
+                    let (left_node, right_node) =
+                                pick_join_columns(src, dst, prev_node, &joined_tables);
+
+                    let mut prev_join = right_node;
+                    for jp in jps.into_iter() {
+                        let cur_join = self.make_join_node(
+                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                            jp,
+                            left_node.clone(),
+                            prev_join.clone(),
+                            join_type.clone(),
+                        );
+
+                        prev_join = cur_join.clone();
+                        new_node_count+=1;
+                        jns.push(cur_join);
+                    }
 
                     // bookkeeping (shared between both join types)
                     prev_node = Some(jns.last().unwrap().clone());
