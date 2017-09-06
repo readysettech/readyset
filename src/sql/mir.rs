@@ -652,7 +652,7 @@ impl SqlToMirConverter {
     fn make_join_node(
         &mut self,
         name: &str,
-        jps: &[ConditionTree],
+        jp: &ConditionTree,
         left_node: MirNodeRef,
         right_node: MirNodeRef,
         kind: JoinType,
@@ -678,20 +678,20 @@ impl SqlToMirConverter {
         // TODO(malte): no multi-level joins yet
         let mut left_join_columns = Vec::new();
         let mut right_join_columns = Vec::new();
-        for p in jps.iter() {
-            // equi-join only
-            assert!(p.operator == Operator::Equal || p.operator == Operator::In );
-            let l_col = match *p.left {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            let r_col = match *p.right {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            left_join_columns.push(l_col);
-            right_join_columns.push(r_col);
-        }
+
+        // equi-join only
+        assert!(jp.operator == Operator::Equal || jp.operator == Operator::In );
+        let l_col = match *jp.left {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        let r_col = match *jp.right {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        left_join_columns.push(l_col);
+        right_join_columns.push(r_col);
+
         assert_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
             JoinType::Inner => {
@@ -1063,39 +1063,41 @@ impl SqlToMirConverter {
                 };
 
                 for &(&(ref src, ref dst), edge) in &sorted_edges {
-                    let jn = match *edge {
+                    let mut jns = Vec::new();
+                    let (join_type, jps) = match *edge {
                         // Edge represents a LEFT JOIN
                         QueryGraphEdge::LeftJoin(ref jps) => {
-                            let (left_node, right_node) =
-                                pick_join_columns(src, dst, prev_node, &joined_tables);
-                            self.make_join_node(
-                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                jps,
-                                left_node,
-                                right_node,
-                                JoinType::Left,
-                            )
+                            (JoinType::Left, jps)
                         }
                         // Edge represents a JOIN
                         QueryGraphEdge::Join(ref jps) => {
-                            let (left_node, right_node) =
-                                pick_join_columns(src, dst, prev_node, &joined_tables);
-                            self.make_join_node(
-                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                                jps,
-                                left_node,
-                                right_node,
-                                JoinType::Inner,
-                            )
+                            (JoinType::Inner, jps)
                         }
                         // Edge represents a GROUP BY, which we handle later
                         QueryGraphEdge::GroupBy(_) => continue,
                     };
 
+                    let (left_node, right_node) =
+                                pick_join_columns(src, dst, prev_node, &joined_tables);
+
+                    let mut prev_join = right_node;
+                    for jp in jps.into_iter() {
+                        let cur_join = self.make_join_node(
+                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                            jp,
+                            left_node.clone(),
+                            prev_join.clone(),
+                            join_type.clone(),
+                        );
+
+                        prev_join = cur_join.clone();
+                        new_node_count+=1;
+                        jns.push(cur_join);
+                    }
+
                     // bookkeeping (shared between both join types)
-                    join_nodes.push(jn.clone());
-                    new_node_count += 1;
-                    prev_node = Some(jn);
+                    prev_node = Some(jns.last().unwrap().clone());
+                    join_nodes.extend(jns);
 
                     // we've now joined both tables
                     joined_tables.insert(src);

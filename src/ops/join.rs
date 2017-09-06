@@ -68,6 +68,8 @@ impl Join {
                 }
             })
             .collect();
+
+        assert_eq!(join_columns.len(), 1, "only supports single column joins");
         let on = *join_columns.iter().next().unwrap();
 
         let (in_place_left_emit, in_place_right_emit) = {

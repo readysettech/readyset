@@ -20,4 +20,5 @@ SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c WHERE p.e
 SELECT p.name, s.schoolname FROM people AS p, companies AS c, schools AS s WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND c.location = 'NY' AND c.earnings > 500000 AND p.education = s.schoolname AND s.level = 'university';
 
 # Q6
-SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c, companies AS c1 WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND ( c.location = 'NY' OR c.location = 'CA' ) AND c.earnings > 500000 AND p.name = c1.president AND c1.president = 'Smith' AND c1.business = 'manufacturing';
+# Need proper support of table aliases
+# SELECT p.name, c.corpname, c.location FROM people AS p, companies AS c, companies AS c1 WHERE p.experience >= 20 AND p.age <= 65 AND p.employer = c.corpname AND ( c.location = 'NY' OR c.location = 'CA' ) AND c.earnings > 500000 AND p.name = c1.president AND c1.president = 'Smith' AND c1.business = 'manufacturing';
