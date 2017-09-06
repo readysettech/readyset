@@ -742,7 +742,16 @@ impl Domain {
                     } => {
                         let channel = new_tx
                             .as_ref()
-                            .and_then(|&(_, _, ref k)| self.channel_coordinator.get_tx(k));
+                            .map(|&(_, _, ref k)| {
+                                let mut tx = None;
+                                // The `UpdateEgress` message can race with the channel
+                                // coordinator finding out about a parent domain. Thus, we need to
+                                // spin here to ensure that the parent is indeed connected.
+                                while tx.is_none() {
+                                    tx = self.channel_coordinator.get_tx(k);
+                                }
+                                tx.unwrap()
+                            });
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_egress_mut(move |e| {
                             if let (Some(new_tx), Some(channel)) = (new_tx, channel) {
