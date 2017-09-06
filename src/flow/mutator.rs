@@ -14,6 +14,7 @@ pub enum MutatorError {
     TransactionFailed,
 }
 
+/// Serializable struct that Mutators can be constructed from.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MutatorBuilder {
     pub(crate) txs: Vec<SocketAddr>,
@@ -26,6 +27,7 @@ pub struct MutatorBuilder {
 }
 
 impl MutatorBuilder {
+    /// Construct a `Mutator`.
     pub fn build(self) -> Mutator {
         Mutator {
             domain_input_handle: DomainInputHandle::new(self.txs).unwrap(),

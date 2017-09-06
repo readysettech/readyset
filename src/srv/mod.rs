@@ -24,14 +24,10 @@ pub enum Method {
         key: DataType,
     },
 
-    /// Insert a new record into the given view.
-    ///
-    /// `args` gives the column values for the new record.
-    Insert {
-        /// The view to insert into
+    /// Obtain a MutatorBuilder for the indicated view.
+    GetMutatorBuilder {
+        /// The view to get a mutator builder for.
         view: usize,
-        /// The column values for the new record
-        args: Vec<DataType>,
     },
 
     /// Flush any buffered responses.
@@ -49,7 +45,7 @@ pub fn make_server(soup: &flow::Blender) -> Server {
                 (
                     n.name().to_owned(),
                     n.fields().iter().cloned().collect(),
-                    soup.get_mutator(ni),
+                    soup.get_mutator_builder(ni),
                 ),
             )
         })
@@ -78,13 +74,13 @@ pub fn make_server(soup: &flow::Blender) -> Server {
 /// A handle to Soup put and get endpoints
 pub struct Server {
     /// All put endpoints.
-    pub put: VecMap<(String, Vec<String>, flow::Mutator)>,
+    pub put: VecMap<(String, Vec<String>, flow::MutatorBuilder)>,
     /// All get endpoints.
     pub get: VecMap<(String, Vec<String>, flow::Getter)>,
 }
 
 /// Handle RPCs from a single `TcpStream`
-pub fn main(stream: TcpStream, mut s: Server) {
+pub fn main(stream: TcpStream, s: Server) {
     let mut stream = BufStream::new(stream);
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
@@ -116,11 +112,9 @@ pub fn main(stream: TcpStream, mut s: Server) {
                     break;
                 }
             }
-            Ok(Method::Insert { view, args }) => {
-                if let Err(e) = s.put[view].2.put(args) {
-                    println!("Error executing client insert request: {:?}", e);
-                }
-                if let Err(e) = bincode::serialize_into(&mut stream, &0i64, bincode::Infinite) {
+            Ok(Method::GetMutatorBuilder {view}) => {
+                let r = bincode::serialize_into(&mut stream, &s.put[view].2, bincode::Infinite);
+                if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
