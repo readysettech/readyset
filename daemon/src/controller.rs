@@ -122,8 +122,8 @@ impl Controller {
     fn handle_domain_booted(
         &mut self,
         msg: &CoordinationMessage,
-        domain: &(DomainIndex, usize),
-        addr: &SocketAddr,
+        _domain: &(DomainIndex, usize),
+        _addr: &SocketAddr,
     ) -> Result<(), io::Error> {
         use std::str::FromStr;
 
@@ -133,7 +133,7 @@ impl Controller {
             SocketAddr::from_str(&format!("{}:{}", self.listen_addr, self.listen_port)).unwrap();
 
         // notify ChannelCoordinators on other workers about this new domain
-        for (worker, mut status) in &mut self.workers {
+        for (worker, status) in &mut self.workers {
             if *worker == msg.source {
                 continue;
             }

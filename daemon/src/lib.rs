@@ -1,11 +1,8 @@
-extern crate bincode;
 extern crate channel;
 extern crate distributary;
 extern crate mio;
-extern crate serde;
 #[macro_use]
 extern crate slog;
-extern crate slog_term;
 
 mod controller;
 mod worker;
