@@ -41,7 +41,7 @@ mod transactions;
 
 use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
 
-pub use self::mutator::{Mutator, MutatorError};
+pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
 pub use self::getter::Getter;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -289,11 +289,15 @@ impl Blender {
             .and_then(|r| Getter::new(r, &self.readers, &self.ingredients))
     }
 
-    /// Obtain a mutator that can be used to perform writes and deletes from the given base node.
+    /// Convience method that obtains a MutatorBuilder and then calls build() on it.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
+        self.get_mutator_builder(base).build()
+    }
+
+    /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes
+    /// from the given base node.
+    pub fn get_mutator_builder(&self, base: prelude::NodeIndex) -> MutatorBuilder {
         let node = &self.ingredients[base];
-        let domain_input_handle =
-            self.domains[&node.domain()].get_input_handle(&self.channel_coordinator);
 
         trace!(self.log, "creating mutator"; "for" => base.index());
 
@@ -310,17 +314,21 @@ impl Blender {
             is_primary = true;
         }
 
+
+        let txs = (0..self.domains[&node.domain()].shards()).map(|i|{
+           self.channel_coordinator.get_addr(&(node.domain(), i)).unwrap()
+        }).collect();
+
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
             .expect("asked to get mutator for non-base node");
-        Mutator {
-            domain_input_handle,
+        MutatorBuilder {
+            txs,
             addr: (*node.local_addr()).into(),
             key: key,
             key_is_primary: is_primary,
             transactional: self.ingredients[base].is_transactional(),
             dropped: base_operator.get_dropped(),
-            tracer: None,
             expected_columns: num_fields - base_operator.get_dropped().len(),
         }
     }

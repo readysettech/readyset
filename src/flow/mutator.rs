@@ -1,7 +1,8 @@
-use flow;
 use flow::prelude::*;
+use flow::domain::DomainInputHandle;
 use checktable;
 
+use std::net::SocketAddr;
 use vec_map::VecMap;
 
 /// Indicates why a Mutator operation failed.
@@ -13,16 +14,42 @@ pub enum MutatorError {
     TransactionFailed,
 }
 
-/// A `Mutator` is used to perform reads and writes to base nodes.
-pub struct Mutator {
-    pub(crate) domain_input_handle: flow::domain::DomainInputHandle,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MutatorBuilder {
+    pub(crate) txs: Vec<SocketAddr>,
     pub(crate) addr: LocalNodeIndex,
     pub(crate) key_is_primary: bool,
     pub(crate) key: Vec<usize>,
     pub(crate) transactional: bool,
     pub(crate) dropped: VecMap<DataType>,
-    pub(crate) tracer: Tracer,
     pub(crate) expected_columns: usize,
+}
+
+impl MutatorBuilder {
+    pub fn build(self) -> Mutator {
+        Mutator {
+            domain_input_handle: DomainInputHandle::new(self.txs).unwrap(),
+            addr: self.addr,
+            key: self.key,
+            key_is_primary: self.key_is_primary,
+            transactional: self.transactional,
+            dropped: self.dropped,
+            tracer: None,
+            expected_columns: self.expected_columns,
+        }
+    }
+}
+
+/// A `Mutator` is used to perform reads and writes to base nodes.
+pub struct Mutator {
+    domain_input_handle: DomainInputHandle,
+    addr: LocalNodeIndex,
+    key_is_primary: bool,
+    key: Vec<usize>,
+    transactional: bool,
+    dropped: VecMap<DataType>,
+    tracer: Tracer,
+    expected_columns: usize,
 }
 
 impl Mutator {

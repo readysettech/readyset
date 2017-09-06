@@ -10,12 +10,10 @@ use flow::placement;
 use flow::prelude::*;
 use flow::statistics::{DomainStats, NodeStats};
 
-use std;
-use std::cell;
+use std::{self, cell, io, thread};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread;
 
 use mio;
 use petgraph::graph::NodeIndex;
@@ -33,6 +31,18 @@ pub struct DomainInputHandle {
 }
 
 impl DomainInputHandle {
+    pub fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
+        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr, None)).collect();
+        let tx_reply = PollingLoop::new();
+        let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
+
+        Ok(Self {
+            txs: txs?,
+            tx_reply,
+            tx_reply_addr,
+        })
+    }
+
     pub fn base_send(&mut self, p: Box<Packet>, key: &[usize]) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
             self.txs[0].send(p)
@@ -82,7 +92,7 @@ impl DomainInputHandle {
 }
 
 pub struct DomainHandle {
-    idx: domain::Index,
+    _idx: domain::Index,
 
     cr_poll: PollingLoop<ControlReplyPacket>,
     txs: Vec<TcpSender<Box<Packet>>>,
@@ -198,28 +208,10 @@ impl DomainHandle {
         });
 
         DomainHandle {
-            idx,
+            _idx: idx,
             threads,
             cr_poll,
             txs,
-        }
-    }
-
-    pub fn get_input_handle(
-        &self,
-        channel_coordinator: &Arc<ChannelCoordinator>,
-    ) -> DomainInputHandle {
-        let tx_reply = PollingLoop::new();
-        let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
-
-        DomainInputHandle {
-            txs: (0..self.shards())
-                .map(|i| {
-                    channel_coordinator.get_input_tx(&(self.idx, i)).unwrap()
-                })
-                .collect(),
-            tx_reply,
-            tx_reply_addr,
         }
     }
 

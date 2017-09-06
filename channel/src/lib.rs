@@ -133,6 +133,10 @@ impl<K: Eq + Hash + Clone> ChannelCoordinator<K> {
         inner.addrs.insert(key, addr);
     }
 
+    pub fn get_addr(&self, key: &K) -> Option<SocketAddr> {
+        self.inner.lock().unwrap().addrs.get(key).cloned()
+    }
+
     fn get_sized_tx<T: Serialize>(&self, key: &K, size: Option<u32>) -> Option<TcpSender<T>> {
         let addr = { self.inner.lock().unwrap().addrs.get(key).cloned() };
         addr.and_then(|addr| TcpSender::connect(&addr, size).ok())
