@@ -310,13 +310,35 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
             return;
         }
 
-        if !self.state.is_empty() && !self.state[0].1.is_empty() {
-            // we'd need to *construct* the index!
-            unimplemented!();
-        }
-
         self.state
             .push((Vec::from(columns), columns.into(), partial));
+
+        if !self.is_empty() {
+            // we need to *construct* the index!
+            if partial {
+                // would require multi-index partial view support
+                unimplemented!();
+            }
+
+            let (new, old) = self.state.split_last_mut().unwrap();
+            let mut insert = move |rs: &Vec<Row<Vec<T>>>| for r in rs {
+                State::insert_into(new, Row(r.0));
+            };
+            match old[0].1 {
+                KeyedState::Single(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
+                KeyedState::Double(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
+                KeyedState::Tri(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
+                KeyedState::Quad(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
+            }
+        }
     }
 
     pub fn keys(&self) -> Vec<Vec<usize>> {

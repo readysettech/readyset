@@ -736,11 +736,13 @@ impl Domain {
                                 self.state.insert(node, state);
                             }
                             InitialState::IndexedLocal(index) => {
-                                let mut state = State::default();
+                                if !self.state.contains_key(&node) {
+                                    self.state.insert(node, State::default());
+                                }
+                                let state = self.state.get_mut(&node).unwrap();
                                 for idx in index {
                                     state.add_key(&idx[..], false);
                                 }
-                                self.state.insert(node, state);
                             }
                             InitialState::PartialGlobal {
                                 gid,

@@ -276,8 +276,33 @@ impl Materializations {
 
         // first, we add any new indices to existing nodes
         if !reindex.is_empty() {
-            // TODO FIXME
-            unimplemented!();
+            for node in reindex {
+                let cols = self.added.remove(&node).unwrap();
+                let n = &graph[node];
+                if self.partial.contains(&node) {
+                    error!(self.log, "asked to add index to partially materialized node";
+                           "node" => node.index(),
+                           "cols" => ?cols);
+                    unimplemented!();
+                }
+                if n.sharded_by() != Sharding::None {
+                    // what do we even do here?!
+                    error!(self.log, "asked to add index to sharded node";
+                           "node" => node.index(),
+                           "cols" => ?cols);
+                    unimplemented!();
+                }
+
+                use flow::payload::InitialState;
+                domains
+                    .get_mut(&n.domain())
+                    .unwrap()
+                    .send(box Packet::PrepareState {
+                        node: *n.local_addr(),
+                        state: InitialState::IndexedLocal(cols),
+                    })
+                    .unwrap();
+            }
         }
 
         // then, we start prepping new nodes
