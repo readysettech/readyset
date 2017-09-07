@@ -66,7 +66,7 @@ impl Controller {
         self.blender.clone()
     }
 
-    /// Listen for workers to connect
+    /// Listen for messages from workers
     pub fn listen(&mut self) {
         use channel::poll::ProcessResult;
         use mio::net::TcpListener;
