@@ -315,9 +315,13 @@ impl Blender {
         }
 
 
-        let txs = (0..self.domains[&node.domain()].shards()).map(|i|{
-           self.channel_coordinator.get_addr(&(node.domain(), i)).unwrap()
-        }).collect();
+        let txs = (0..self.domains[&node.domain()].shards())
+            .map(|i| {
+                self.channel_coordinator
+                    .get_addr(&(node.domain(), i))
+                    .unwrap()
+            })
+            .collect();
 
         let num_fields = node.fields().len();
         let base_operator = node.get_base()
@@ -352,7 +356,6 @@ impl Blender {
 
                         ((di.clone(), i), (domain_stats, node_map))
                     })
-
             })
             .collect();
 
@@ -645,8 +648,9 @@ impl<'a> Migration<'a> {
             .track(token_generator.clone())
             .unwrap();
 
-        self.mainline.ingredients[ri]
-            .with_reader_mut(|r| { r.set_token_generator(token_generator); });
+        self.mainline.ingredients[ri].with_reader_mut(|r| {
+            r.set_token_generator(token_generator);
+        });
     }
 
     /// Set up the given node such that its output can be efficiently queried.
@@ -678,7 +682,9 @@ impl<'a> Migration<'a> {
         // directly.
         let ri = self.readers[&n];
         let mut res = None;
-        self.mainline.ingredients[ri].with_reader_mut(|r| { res = Some(r.add_streamer(tx)); });
+        self.mainline.ingredients[ri].with_reader_mut(|r| {
+            res = Some(r.add_streamer(tx));
+        });
         tx = match res.unwrap() {
             Ok(_) => return rx,
             Err(tx) => tx,
@@ -908,7 +914,7 @@ impl<'a> Migration<'a> {
         let index = domain_nodes
             .iter()
             .map(|(domain, nodes)| {
-                use self::migrate::materialization::{pick, index};
+                use self::migrate::materialization::{index, pick};
                 debug!(log, "picking materializations"; "domain" => domain.index());
                 let mat = pick(&log, &mainline.ingredients, &nodes[..]);
                 debug!(log, "deriving indices"; "domain" => domain.index());
@@ -974,19 +980,15 @@ impl<'a> Migration<'a> {
         for (ni, change) in self.columns {
             let n = &mainline.ingredients[ni];
             let m = match change {
-                ColumnChange::Add(field, default) => {
-                    box payload::Packet::AddBaseColumn {
-                        node: *n.local_addr(),
-                        field: field,
-                        default: default,
-                    }
-                }
-                ColumnChange::Drop(column) => {
-                    box payload::Packet::DropBaseColumn {
-                        node: *n.local_addr(),
-                        column: column,
-                    }
-                }
+                ColumnChange::Add(field, default) => box payload::Packet::AddBaseColumn {
+                    node: *n.local_addr(),
+                    field: field,
+                    default: default,
+                },
+                ColumnChange::Drop(column) => box payload::Packet::DropBaseColumn {
+                    node: *n.local_addr(),
+                    column: column,
+                },
             };
 
             let domain = mainline.domains.get_mut(&n.domain()).unwrap();

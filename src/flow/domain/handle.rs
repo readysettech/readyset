@@ -1,5 +1,5 @@
-use channel::{tcp, TcpSender, TcpReceiver};
-use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
+use channel::{tcp, TcpReceiver, TcpSender};
+use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 
 use flow;
 use flow::domain;
@@ -32,7 +32,9 @@ pub struct DomainInputHandle {
 
 impl DomainInputHandle {
     pub fn new(txs: Vec<SocketAddr>) -> Result<Self, io::Error> {
-        let txs: Result<Vec<_>, _> = txs.iter().map(|addr| TcpSender::connect(addr, None)).collect();
+        let txs: Result<Vec<_>, _> = txs.iter()
+            .map(|addr| TcpSender::connect(addr, None))
+            .collect();
         let tx_reply = PollingLoop::new();
         let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
 
@@ -132,7 +134,6 @@ impl DomainHandle {
         let mut nodes = Some(Self::build_descriptors(graph, nodes));
 
         for i in 0..num_shards {
-
             let logger = if num_shards == 1 {
                 log.new(o!("domain" => idx.index()))
             } else {
@@ -158,9 +159,7 @@ impl DomainHandle {
             };
 
             // TODO(malte): simple round-robin placement for the moment
-            let worker = placer
-                .place_domain(&idx, i)
-                .map(|wi| workers[&wi].clone());
+            let worker = placer.place_domain(&idx, i).map(|wi| workers[&wi].clone());
 
             match worker {
                 Some(worker) => {

@@ -30,14 +30,11 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
-    #[serde(skip)]
-    writer: Option<backlog::WriteHandle>,
+    #[serde(skip)] writer: Option<backlog::WriteHandle>,
 
-    #[serde(skip)]
-    streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
+    #[serde(skip)] streamers: Vec<channel::StreamSender<Vec<StreamUpdate>>>,
 
-    #[serde(skip)]
-    token_generator: Option<checktable::TokenGenerator>,
+    #[serde(skip)] token_generator: Option<checktable::TokenGenerator>,
 
     for_node: NodeIndex,
     state: Option<usize>,
@@ -46,9 +43,7 @@ pub struct Reader {
 impl Clone for Reader {
     fn clone(&self) -> Self {
         assert!(self.writer.is_none());
-        assert!(
-            self.streamers.is_empty()
-        );
+        assert!(self.streamers.is_empty());
         Reader {
             writer: None,
             streamers: self.streamers.clone(),

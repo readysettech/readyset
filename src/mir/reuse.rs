@@ -35,7 +35,7 @@ pub fn merge_mir_for_queries(
     new_query: &MirQuery,
     old_query: &MirQuery,
 ) -> (MirQuery, usize) {
-    use std::collections::{HashSet, HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::rc::Rc;
     use std::cell::RefCell;
 

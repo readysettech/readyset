@@ -59,7 +59,6 @@ impl Ingredient for Filter {
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
-
         rs.retain(|r| {
             self.filter.iter().enumerate().all(|(i, fi)| {
                 // check if this filter matches
@@ -234,12 +233,10 @@ mod tests {
     fn it_forwards_mfilter() {
         let mut g = setup(
             false,
-            Some(
-                &[
-                    Some((Operator::Equal, 1.into())),
-                    Some((Operator::Equal, "a".into())),
-                ],
-            ),
+            Some(&[
+                Some((Operator::Equal, 1.into())),
+                Some((Operator::Equal, "a".into())),
+            ]),
         );
 
         let mut left: Vec<DataType>;
@@ -295,12 +292,10 @@ mod tests {
     fn it_works_with_inequalities() {
         let mut g = setup(
             false,
-            Some(
-                &[
-                    Some((Operator::LessOrEqual, 2.into())),
-                    Some((Operator::NotEqual, "a".into())),
-                ],
-            ),
+            Some(&[
+                Some((Operator::LessOrEqual, 2.into())),
+                Some((Operator::NotEqual, "a".into())),
+            ]),
         );
 
         let mut left: Vec<DataType>;

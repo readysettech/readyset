@@ -14,7 +14,7 @@ use flow::payload::TriggerEndpoint;
 use petgraph;
 use petgraph::graph::NodeIndex;
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use slog::Logger;
 
@@ -188,7 +188,6 @@ pub fn index(
     nodes: &[(NodeIndex, bool)],
     materialize: HashSet<NodeIndex>,
 ) -> HashMap<LocalNodeIndex, Vec<Vec<usize>>> {
-
     let nodes: Vec<_> = nodes.iter().map(|&(ni, new)| (&graph[ni], new)).collect();
     let mut state: HashMap<_, Option<Vec<Vec<usize>>>> =
         materialize.into_iter().map(|n| (n, None)).collect();
@@ -453,7 +452,6 @@ pub fn reconstruct(
     node: NodeIndex,
     mut index_on: Vec<Vec<usize>>,
 ) -> HashMap<Tag, Vec<domain::Index>> {
-
     if index_on.is_empty() {
         // we must be reconstructing a Reader.
         // figure out what key that Reader is using
@@ -553,25 +551,24 @@ pub fn reconstruct(
     // `key` in the materialized state we're replaying?
     let mut partial_ok = blender.partial_enabled;
     if partial_ok {
-        partial_ok = index_on.len() == 1 && index_on[0].len() == 1 &&
-            paths.iter().all(|path| {
-                let &(node, col) = path.last().unwrap();
-                if col.is_none() {
-                    // doesn't trace back to a column
-                    return false;
-                }
+        partial_ok = index_on.len() == 1 && index_on[0].len() == 1 && paths.iter().all(|path| {
+            let &(node, col) = path.last().unwrap();
+            if col.is_none() {
+                // doesn't trace back to a column
+                return false;
+            }
 
-                let n = &blender.ingredients[node];
-                let col = col.unwrap();
-                // node must also have an *index* on col
-                materialized
-                    .get(&n.domain())
-                    .and_then(|d| d.get(n.local_addr()))
-                    .map(|indices| {
-                        indices.iter().any(|idx| idx.len() == 1 && idx[0] == col)
-                    })
-                    .unwrap_or(false)
-            });
+            let n = &blender.ingredients[node];
+            let col = col.unwrap();
+            // node must also have an *index* on col
+            materialized
+                .get(&n.domain())
+                .and_then(|d| d.get(n.local_addr()))
+                .map(|indices| {
+                    indices.iter().any(|idx| idx.len() == 1 && idx[0] == col)
+                })
+                .unwrap_or(false)
+        });
     }
 
     // FIXME: if a reader has no materialized views between it and a union, we will end
@@ -776,7 +773,10 @@ pub fn reconstruct(
 
 
             if let Some(ref key) = partial {
-                if let box Packet::SetupReplayPath { ref mut trigger, .. } = setup {
+                if let box Packet::SetupReplayPath {
+                    ref mut trigger, ..
+                } = setup
+                {
                     if segments.len() == 1 {
                         // replay is entirely contained within one domain
                         *trigger = TriggerEndpoint::Local(vec![*key]);
@@ -794,7 +794,11 @@ pub fn reconstruct(
             } else {
                 if i == segments.len() - 1 {
                     // last domain should report when it's done if it is to be fully replayed
-                    if let box Packet::SetupReplayPath { ref mut notify_done, .. } = setup {
+                    if let box Packet::SetupReplayPath {
+                        ref mut notify_done,
+                        ..
+                    } = setup
+                    {
                         *notify_done = true;
                         assert!(notify_source.is_none());
                         notify_source = Some(domain);
@@ -871,7 +875,6 @@ fn cost_fn<'a, T>(
     empty: &'a HashSet<NodeIndex>,
     materialized: &'a HashMap<domain::Index, HashMap<LocalNodeIndex, T>>,
 ) -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
-
     Box::new(move |node, parents| {
         assert!(parents.len() > 1);
 
@@ -988,8 +991,8 @@ fn cost_fn<'a, T>(
                     // as they increase the cost
                     intermediates.push(n.is_selective());
                     // now walk to the parent.
-                    let mut ps = graph
-                        .neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
+                    let mut ps =
+                        graph.neighbors_directed(stateful, petgraph::EdgeDirection::Incoming);
                     // of which there must be at least one
                     stateful = ps.next().expect("recursed all the way to source");
                     // there shouldn't ever be multiple, because neither join nor union
@@ -1001,7 +1004,9 @@ fn cost_fn<'a, T>(
                 let stateful = &graph[stateful];
                 let domain = txs.get_mut(&stateful.domain()).unwrap();
                 domain
-                    .send(box Packet::StateSizeProbe { node: *stateful.local_addr() })
+                    .send(box Packet::StateSizeProbe {
+                        node: *stateful.local_addr(),
+                    })
                     .unwrap();
                 let mut size = domain.wait_for_state_size().unwrap();
 

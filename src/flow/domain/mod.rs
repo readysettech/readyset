@@ -10,10 +10,10 @@ use std::net::SocketAddr;
 
 use backlog::ReadHandle;
 use channel::TcpSender;
-use channel::poll::{PollingLoop, PollEvent, KeepPolling, StopPolling};
+use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
-                    ControlReplyPacket};
+use flow::payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
+                    TransactionState};
 use flow::statistics;
 use flow::transactions;
 use flow::persistence;
@@ -21,7 +21,7 @@ use flow::debug;
 use flow;
 use checktable;
 use slog::Logger;
-use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
+use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tarpc::sync::client::{self, ClientExt};
 
 const BATCH_SIZE: usize = 256;
@@ -415,7 +415,6 @@ impl Domain {
         process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
         enable_output: bool,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
-
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
@@ -425,7 +424,8 @@ impl Domain {
                 ref to,
                 ref mut buffered,
                 ..
-            } if to == &me => {
+            } if to == &me =>
+            {
                 buffered.push_back(m);
                 return output_messages;
             }
@@ -606,9 +606,14 @@ impl Domain {
             self.process_times.start(addr);
             self.process_ptimes.start(addr);
             let mut m = Some(m);
-            self.nodes[&addr]
-                .borrow_mut()
-                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
+            self.nodes[&addr].borrow_mut().process(
+                &mut m,
+                None,
+                &mut self.state,
+                &self.nodes,
+                self.shard,
+                true,
+            );
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().nchildren(), 0);
@@ -620,7 +625,9 @@ impl Domain {
             match self.transaction_state.get_next_event() {
                 transactions::Event::Transaction(m) => self.transactional_dispatch(m),
                 transactions::Event::StartMigration => {
-                    self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                    self.control_reply_tx
+                        .send(ControlReplyPacket::ack())
+                        .unwrap();
                 }
                 transactions::Event::CompleteMigration => {}
                 transactions::Event::SeedReplay(tag, key, rts) => {
@@ -700,7 +707,8 @@ impl Domain {
                 self.handle_replay(m);
             }
             consumed => {
-                match consumed {// workaround #16223
+                match consumed {
+                    // workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr();
@@ -726,32 +734,34 @@ impl Domain {
                         n.get_base_mut()
                             .expect("told to add base column to non-base node")
                             .add_column(default);
-                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                        self.control_reply_tx
+                            .send(ControlReplyPacket::ack())
+                            .unwrap();
                     }
                     Packet::DropBaseColumn { node, column } => {
                         let mut n = self.nodes[&node].borrow_mut();
                         n.get_base_mut()
                             .expect("told to drop base column from non-base node")
                             .drop_column(column);
-                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                        self.control_reply_tx
+                            .send(ControlReplyPacket::ack())
+                            .unwrap();
                     }
                     Packet::UpdateEgress {
                         node,
                         new_tx,
                         new_tag,
                     } => {
-                        let channel = new_tx
-                            .as_ref()
-                            .map(|&(_, _, ref k)| {
-                                let mut tx = None;
-                                // The `UpdateEgress` message can race with the channel
-                                // coordinator finding out about a parent domain. Thus, we need to
-                                // spin here to ensure that the parent is indeed connected.
-                                while tx.is_none() {
-                                    tx = self.channel_coordinator.get_tx(k);
-                                }
-                                tx.unwrap()
-                            });
+                        let channel = new_tx.as_ref().map(|&(_, _, ref k)| {
+                            let mut tx = None;
+                            // The `UpdateEgress` message can race with the channel
+                            // coordinator finding out about a parent domain. Thus, we need to
+                            // spin here to ensure that the parent is indeed connected.
+                            while tx.is_none() {
+                                tx = self.channel_coordinator.get_tx(k);
+                            }
+                            tx.unwrap()
+                        });
                         let mut n = self.nodes[&node].borrow_mut();
                         n.with_egress_mut(move |e| {
                             if let (Some(new_tx), Some(channel)) = (new_tx, channel) {
@@ -769,9 +779,9 @@ impl Domain {
                             .filter_map(|ntx| self.channel_coordinator.get_tx(ntx))
                             .collect();
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_sharder_mut(
-                            move |s| { s.add_sharded_child(new_txs.0, new_channels); },
-                        );
+                        n.with_sharder_mut(move |s| {
+                            s.add_sharded_child(new_txs.0, new_channels);
+                        });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -886,7 +896,9 @@ impl Domain {
                         trigger,
                     } => {
                         // let coordinator know that we've registered the tagged path
-                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                        self.control_reply_tx
+                            .send(ControlReplyPacket::ack())
+                            .unwrap();
 
                         if notify_done {
                             info!(self.log,
@@ -905,17 +917,15 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(domain, shards) => {
-                                TriggerEndpoint::End(
-                                    (0..shards)
-                                        .map(|shard| {
-                                            self.channel_coordinator
-                                                .get_unbounded_tx(&(domain, shard))
-                                                .unwrap()
-                                        })
-                                        .collect(),
-                                )
-                            }
+                            payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
+                                (0..shards)
+                                    .map(|shard| {
+                                        self.channel_coordinator
+                                            .get_unbounded_tx(&(domain, shard))
+                                            .unwrap()
+                                    })
+                                    .collect(),
+                            ),
                         };
 
                         self.replay_paths.insert(
@@ -986,7 +996,6 @@ impl Domain {
                         self.finish_replay(tag, ni);
                     }
                     Packet::Ready { node, index } => {
-
                         if let DomainMode::Forwarding = self.mode {
                         } else {
                             unreachable!();
@@ -1028,7 +1037,9 @@ impl Domain {
                             }
                         }
 
-                        self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                        self.control_reply_tx
+                            .send(ControlReplyPacket::ack())
+                            .unwrap();
                     }
                     Packet::GetStatistics => {
                         let domain_stats = statistics::DomainStats {
@@ -1538,7 +1549,9 @@ impl Domain {
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
-                                n.with_reader_mut(|r| { r.writer_mut().map(|wh| wh.swap()); });
+                                n.with_reader_mut(|r| {
+                                    r.writer_mut().map(|wh| wh.swap());
+                                });
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) = self.reader_triggered.get_mut(&ni) {
                                     prev.remove(&partial_key[0]);
@@ -1798,7 +1811,9 @@ impl Domain {
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "acknowledging replay completed"; "node" => node.id());
-                self.control_reply_tx.send(ControlReplyPacket::ack()).unwrap();
+                self.control_reply_tx
+                    .send(ControlReplyPacket::ack())
+                    .unwrap();
             } else {
                 unreachable!()
             }

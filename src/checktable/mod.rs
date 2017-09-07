@@ -12,7 +12,7 @@ use std::fmt::Debug;
 
 use flow::domain;
 use flow::prelude::*;
-use flow::payload::{IngressFromBase, EgressForBase};
+use flow::payload::{EgressForBase, IngressFromBase};
 use flow::migrate::materialization::Tag as ReplayPath;
 
 pub mod service;

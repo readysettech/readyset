@@ -1,7 +1,7 @@
 use flow::prelude::*;
 use flow::node;
 use petgraph::graph::NodeIndex;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use slog::Logger;
 use petgraph;
 use ops;
@@ -19,7 +19,6 @@ pub fn shard(
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
 ) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
-
     let mut topo_list = Vec::with_capacity(new.len());
     let mut topo = petgraph::visit::Topo::new(&*graph);
     while let Some(node) = topo.next(&*graph) {
@@ -79,7 +78,7 @@ pub fn shard(
         };
         if need_sharding.is_empty() &&
             (input_shardings.len() == 1 ||
-                 input_shardings.iter().all(|(_, &s)| s == Sharding::None))
+                input_shardings.iter().all(|(_, &s)| s == Sharding::None))
         {
             let s = input_shardings.into_iter().map(|(_, s)| s).next().unwrap();
             info!(log, "preserving sharding of pass-through node";

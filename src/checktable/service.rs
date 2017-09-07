@@ -69,13 +69,11 @@ impl FutureService for CheckTableServer {
         let mut checktable = self.checktable.lock().unwrap();
         let (tr, committed) = checktable.apply_batch(request.base, &request.transactions);
         Ok(match tr {
-            TransactionResult::Committed(ts, prevs) => {
-                Some(TimestampReply {
-                    timestamp: ts,
-                    prevs,
-                    committed_transactions: committed,
-                })
-            }
+            TransactionResult::Committed(ts, prevs) => Some(TimestampReply {
+                timestamp: ts,
+                prevs,
+                committed_transactions: committed,
+            }),
             TransactionResult::Aborted => None,
         })
     }

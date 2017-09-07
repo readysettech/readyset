@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::mem;
 
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState, IngressFromBase, EgressForBase};
+use flow::payload::{EgressForBase, IngressFromBase, ReplayTransactionState, TransactionState};
 use flow::domain;
 
 use checktable;
@@ -109,37 +109,33 @@ impl DomainState {
             Packet::Transaction {
                 state: TransactionState::Committed(ts, base, ref prevs),
                 ..
-            } => {
-                if self.ts == ts - 1 {
-                    (ts, Some(base), ts - 1)
-                } else {
-                    let prev_ts = prevs
-                        .as_ref()
-                        .and_then(|p| p.get(&self.domain_index))
-                        .cloned()
-                        .unwrap_or(ts - 1);
+            } => if self.ts == ts - 1 {
+                (ts, Some(base), ts - 1)
+            } else {
+                let prev_ts = prevs
+                    .as_ref()
+                    .and_then(|p| p.get(&self.domain_index))
+                    .cloned()
+                    .unwrap_or(ts - 1);
 
-                    (ts, Some(base), prev_ts)
-                }
-            }
+                (ts, Some(base), prev_ts)
+            },
             Packet::StartMigration { at, prev_ts, .. } => (at, None, prev_ts),
             Packet::CompleteMigration { at, .. } => (at, None, at - 1),
             Packet::ReplayPiece {
                 transaction_state: Some(ReplayTransactionState { ts, ref prevs }),
                 ..
-            } => {
-                if self.ts == ts - 1 {
-                    (ts, None, ts - 1)
-                } else {
-                    let prev_ts = prevs
-                        .as_ref()
-                        .and_then(|p| p.get(&self.domain_index))
-                        .cloned()
-                        .unwrap_or(ts - 1);
+            } => if self.ts == ts - 1 {
+                (ts, None, ts - 1)
+            } else {
+                let prev_ts = prevs
+                    .as_ref()
+                    .and_then(|p| p.get(&self.domain_index))
+                    .cloned()
+                    .unwrap_or(ts - 1);
 
-                    (ts, None, prev_ts)
-                }
-            }
+                (ts, None, prev_ts)
+            },
             _ => unreachable!(),
         };
 

@@ -1,4 +1,4 @@
-use mir::{MirQuery, MirNodeRef, MirNodeType, MirNode};
+use mir::{MirNode, MirNodeRef, MirNodeType, MirQuery};
 use std::collections::HashMap;
 use nom_sql::Operator;
 use flow::core::DataType;
@@ -82,13 +82,12 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
         let last_node = chained_filters.last().unwrap();
         let schema_version = first_node.borrow().from_version.clone();
 
-        let name = chained_filters.iter().fold(
-            "merged_filter_".to_string(),
-            |mut acc, ref node| {
+        let name = chained_filters
+            .iter()
+            .fold("merged_filter_".to_string(), |mut acc, ref node| {
                 acc.push_str(node.borrow().name());
                 acc
-            },
-        );
+            });
 
         let prev_node = first_node.borrow().ancestors.first().unwrap().clone();
         let fields: Vec<_> = prev_node.borrow().columns().iter().cloned().collect();
@@ -106,7 +105,9 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
             name.as_str(),
             schema_version,
             fields,
-            MirNodeType::Filter { conditions: merged_conditions.clone() },
+            MirNodeType::Filter {
+                conditions: merged_conditions.clone(),
+            },
             vec![prev_node],
             vec![],
         );
@@ -121,7 +122,6 @@ fn end_filter_chain(chained_filters: &mut Vec<MirNodeRef>) {
             merged_filter.borrow_mut().add_child(child.clone());
             child.borrow_mut().add_ancestor(merged_filter.clone());
             child.borrow_mut().remove_ancestor(last_node.clone());
-
         }
     }
 
@@ -132,7 +132,6 @@ fn to_conditions(
     chained_filters: &Vec<MirNodeRef>,
     num_columns: usize,
 ) -> Vec<Option<(Operator, DataType)>> {
-
     let mut merged_conditions = vec![None; num_columns];
     for filter in chained_filters {
         match filter.borrow().inner {

@@ -151,9 +151,9 @@ impl GroupCommitQueueSet {
     /// directed to otherwise.
     fn packet_destination(p: &Box<Packet>) -> Option<LocalNodeIndex> {
         match **p {
-            Packet::Message { ref link, .. } | Packet::Transaction { ref link, .. } => Some(
-                link.dst,
-            ),
+            Packet::Message { ref link, .. } | Packet::Transaction { ref link, .. } => {
+                Some(link.dst)
+            }
             _ => None,
         }
     }
@@ -309,21 +309,17 @@ impl GroupCommitQueueSet {
         });
 
         match transaction_state {
-            Some(merged_state) => {
-                Some(Box::new(Packet::Transaction {
-                    link: merged_link,
-                    data: merged_data,
-                    tracer: merged_tracer,
-                    state: merged_state,
-                }))
-            }
-            None => {
-                Some(Box::new(Packet::Message {
-                    link: merged_link,
-                    data: merged_data,
-                    tracer: merged_tracer,
-                }))
-            }
+            Some(merged_state) => Some(Box::new(Packet::Transaction {
+                link: merged_link,
+                data: merged_data,
+                tracer: merged_tracer,
+                state: merged_state,
+            })),
+            None => Some(Box::new(Packet::Message {
+                link: merged_link,
+                data: merged_data,
+                tracer: merged_tracer,
+            })),
         }
     }
 
@@ -362,11 +358,9 @@ impl GroupCommitQueueSet {
                     } = *p
                     {
                         match *state {
-                            TransactionState::Pending(ref token, _) => (
-                                id,
-                                data.clone(),
-                                Some(token.clone()),
-                            ),
+                            TransactionState::Pending(ref token, _) => {
+                                (id, data.clone(), Some(token.clone()))
+                            }
                             TransactionState::WillCommit => (id, data.clone(), None),
                             TransactionState::Committed(..) => unreachable!(),
                         }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use flow::prelude::*;
-use channel::{TcpSender, STcpSender};
+use channel::{STcpSender, TcpSender};
 
 #[derive(Serialize, Deserialize)]
 pub struct Egress {
@@ -29,12 +29,7 @@ impl Default for Egress {
 }
 
 impl Egress {
-    pub fn add_tx(
-        &mut self,
-        dst_g: NodeIndex,
-        dst_l: LocalNodeIndex,
-        tx: TcpSender<Box<Packet>>,
-    ) {
+    pub fn add_tx(&mut self, dst_g: NodeIndex, dst_l: LocalNodeIndex, tx: TcpSender<Box<Packet>>) {
         self.txs.push((dst_g, dst_l, STcpSender(tx)));
     }
 

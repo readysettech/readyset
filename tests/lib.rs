@@ -286,7 +286,7 @@ fn it_works_deletion() {
 
 #[test]
 fn votes() {
-    use distributary::{Base, Union, Aggregation, Join, JoinType};
+    use distributary::{Aggregation, Base, Join, JoinType, Union};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -396,7 +396,7 @@ fn votes() {
 
 #[test]
 fn transactional_vote() {
-    use distributary::{Base, Union, Aggregation, Join, JoinType, Identity};
+    use distributary::{Aggregation, Base, Identity, Join, JoinType, Union};
 
     // set up graph
     let mut g = distributary::Blender::new();
@@ -1229,7 +1229,7 @@ fn migration_depends_on_unchanged_domain() {
 }
 
 fn do_full_vote_migration(old_puts_after: bool) {
-    use distributary::{Blender, Base, Join, JoinType, Aggregation, DataType};
+    use distributary::{Aggregation, Base, Blender, DataType, Join, JoinType};
     let mut g = Blender::new();
     let article;
     let vote;
@@ -1372,7 +1372,7 @@ fn full_vote_migration_new_and_old() {
 #[test]
 fn live_writes() {
     use std::time::Duration;
-    use distributary::{Blender, Aggregation, DataType};
+    use distributary::{Aggregation, Blender, DataType};
     let mut g = Blender::new();
     let vote;
     let vc;

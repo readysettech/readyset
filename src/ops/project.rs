@@ -97,11 +97,9 @@ impl Ingredient for Project {
                     new_r.push(r[*i].clone());
                 }
                 match self.additional {
-                    Some(ref a) => {
-                        for i in a {
-                            new_r.push(i.clone());
-                        }
-                    }
+                    Some(ref a) => for i in a {
+                        new_r.push(i.clone());
+                    },
                     None => (),
                 }
                 **r = new_r;
@@ -124,23 +122,17 @@ impl Ingredient for Project {
     fn description(&self) -> String {
         let emit_cols = match self.emit.as_ref() {
             None => "*".into(),
-            Some(emit) => {
-                match self.additional {
-                    None => {
-                        emit.iter()
-                            .map(|e| e.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
-                    Some(ref add) => {
-                        emit.iter()
-                            .map(|e| e.to_string())
-                            .chain(add.iter().map(|e| format!("lit: {}", e.to_string())))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
-                }
-            }
+            Some(emit) => match self.additional {
+                None => emit.iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                Some(ref add) => emit.iter()
+                    .map(|e| e.to_string())
+                    .chain(add.iter().map(|e| format!("lit: {}", e.to_string())))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            },
         };
         format!("π[{}]", emit_cols)
     }

@@ -18,8 +18,7 @@ impl ReferredTables for ConditionExpression {
     fn referred_tables(&self) -> Vec<Table> {
         let mut tables = Vec::new();
         match *self {
-            ConditionExpression::LogicalOp(ref ct) |
-            ConditionExpression::ComparisonOp(ref ct) => {
+            ConditionExpression::LogicalOp(ref ct) | ConditionExpression::ComparisonOp(ref ct) => {
                 for t in ct.left
                     .referred_tables()
                     .into_iter()
@@ -30,17 +29,15 @@ impl ReferredTables for ConditionExpression {
                     }
                 }
             }
-            ConditionExpression::Base(ConditionBase::Field(ref f)) => {
-                match f.table {
-                    Some(ref t) => {
-                        let t = Table::from(t.as_ref());
-                        if !tables.contains(&t) {
-                            tables.push(t);
-                        }
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => match f.table {
+                Some(ref t) => {
+                    let t = Table::from(t.as_ref());
+                    if !tables.contains(&t) {
+                        tables.push(t);
                     }
-                    None => (),
                 }
-            }
+                None => (),
+            },
             _ => unimplemented!(),
         }
         tables

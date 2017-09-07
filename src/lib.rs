@@ -334,8 +334,7 @@ fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {
         DataType::Int(n) => n as usize % shards,
         DataType::BigInt(n) => n as usize % shards,
-        DataType::Text(..) |
-        DataType::TinyText(..) => {
+        DataType::Text(..) | DataType::TinyText(..) => {
             use std::hash::Hasher;
             use std::borrow::Cow;
             let mut hasher = fnv::FnvHasher::default();
@@ -357,16 +356,16 @@ extern crate backtrace;
 extern crate slog;
 extern crate slog_term;
 
-extern crate fnv;
-extern crate evmap;
 extern crate arccstr;
-extern crate vec_map;
 extern crate arrayvec;
+extern crate evmap;
+extern crate fnv;
+extern crate vec_map;
 
 extern crate itertools;
+extern crate nom_sql;
 extern crate petgraph;
 extern crate regex;
-extern crate nom_sql;
 extern crate timekeeper;
 
 extern crate memcached;
@@ -380,9 +379,9 @@ extern crate bufstream;
 
 extern crate serde;
 #[macro_use]
-extern crate serde_json;
-#[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate serde_json;
 
 extern crate buf_redux;
 extern crate chrono;
@@ -402,7 +401,7 @@ mod recipe;
 mod sql;
 
 pub use checktable::{Token, TransactionResult};
-pub use flow::{Blender, Migration, Getter, Mutator, MutatorBuilder, MutatorError};
+pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError};
 pub use flow::core::{DataType, Datas};
 pub use petgraph::graph::NodeIndex;
 pub use flow::coordination::{CoordinationMessage, CoordinationPayload};
@@ -414,15 +413,15 @@ pub use flow::persistence::Parameters as PersistenceParameters;
 pub use flow::persistence::DurabilityMode;
 pub use flow::prelude::ChannelCoordinator;
 pub use ops::base::Base;
-pub use ops::grouped::aggregate::{Aggregator, Aggregation};
+pub use ops::grouped::aggregate::{Aggregation, Aggregator};
 pub use ops::grouped::concat::{GroupConcat, TextComponent};
 pub use ops::grouped::extremum::{Extremum, ExtremumOperator};
 pub use ops::identity::Identity;
 pub use ops::project::Project;
-pub use ops::join::{Join, JoinType, JoinSource};
+pub use ops::join::{Join, JoinSource, JoinType};
 pub use ops::union::Union;
 pub use ops::latest::Latest;
-pub use ops::filter::{Operator, Filter};
+pub use ops::filter::{Filter, Operator};
 pub use ops::topk::TopK;
 pub use recipe::{ActivationResult, Recipe};
 pub use sql::{SqlIncorporator, ToFlowParts};

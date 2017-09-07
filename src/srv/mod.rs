@@ -112,19 +112,17 @@ pub fn main(stream: TcpStream, s: Server) {
                     break;
                 }
             }
-            Ok(Method::GetMutatorBuilder {view}) => {
+            Ok(Method::GetMutatorBuilder { view }) => {
                 let r = bincode::serialize_into(&mut stream, &s.put[view].2, bincode::Infinite);
                 if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
             }
-            Ok(Method::Flush) => {
-                if let Err(e) = stream.flush() {
-                    println!("client left prematurely: {:?}", e);
-                    break;
-                }
-            }
+            Ok(Method::Flush) => if let Err(e) = stream.flush() {
+                println!("client left prematurely: {:?}", e);
+                break;
+            },
             Err(e) => {
                 match *e {
                     bincode::internal::ErrorKind::IoError(e) => {

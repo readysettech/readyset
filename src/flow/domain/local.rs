@@ -191,14 +191,12 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
             1 => KeyType::Single(&other[0]),
             2 => KeyType::Double((other[0].clone(), other[1].clone())),
             3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
-            4 => {
-                KeyType::Quad((
-                    other[0].clone(),
-                    other[1].clone(),
-                    other[2].clone(),
-                    other[3].clone(),
-                ))
-            }
+            4 => KeyType::Quad((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+            )),
             _ => unimplemented!(),
         }
     }
@@ -211,14 +209,12 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [&'a T]> for KeyType<'a, T> {
             1 => KeyType::Single(other[0]),
             2 => KeyType::Double((other[0].clone(), other[1].clone())),
             3 => KeyType::Tri((other[0].clone(), other[1].clone(), other[2].clone())),
-            4 => {
-                KeyType::Quad((
-                    other[0].clone(),
-                    other[1].clone(),
-                    other[2].clone(),
-                    other[3].clone(),
-                ))
-            }
+            4 => KeyType::Quad((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+            )),
             _ => unimplemented!(),
         }
     }
@@ -347,40 +343,38 @@ impl<T: Hash + Eq + Clone> State<T> {
                     }
                     map.insert(r[s.0[0]].clone(), vec![r]);
                 }
-                _ => {
-                    match s.1 {
-                        KeyedState::Double(ref mut map) => {
-                            let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
-                            match map.entry(key) {
-                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => unimplemented!(),
-                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                            }
+                _ => match s.1 {
+                    KeyedState::Double(ref mut map) => {
+                        let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
+                        match map.entry(key) {
+                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                            Entry::Vacant(..) if s.2 => unimplemented!(),
+                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
                         }
-                        KeyedState::Tri(ref mut map) => {
-                            let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
-                            match map.entry(key) {
-                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => unimplemented!(),
-                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                            }
-                        }
-                        KeyedState::Quad(ref mut map) => {
-                            let key = (
-                                r[s.0[0]].clone(),
-                                r[s.0[1]].clone(),
-                                r[s.0[2]].clone(),
-                                r[s.0[3]].clone(),
-                            );
-                            match map.entry(key) {
-                                Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                                Entry::Vacant(..) if s.2 => unimplemented!(),
-                                rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                            }
-                        }
-                        KeyedState::Single(..) => unreachable!(),
                     }
-                }
+                    KeyedState::Tri(ref mut map) => {
+                        let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
+                        match map.entry(key) {
+                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                            Entry::Vacant(..) if s.2 => unimplemented!(),
+                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        }
+                    }
+                    KeyedState::Quad(ref mut map) => {
+                        let key = (
+                            r[s.0[0]].clone(),
+                            r[s.0[1]].clone(),
+                            r[s.0[2]].clone(),
+                            r[s.0[3]].clone(),
+                        );
+                        match map.entry(key) {
+                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                            Entry::Vacant(..) if s.2 => unimplemented!(),
+                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        }
+                    }
+                    KeyedState::Single(..) => unreachable!(),
+                },
             }
         }
     }
@@ -487,27 +481,23 @@ impl<T: Hash + Eq + Clone> State<T> {
             KeyedState::Double(ref mut map) => {
                 map.insert((key.next().unwrap(), key.next().unwrap()), Vec::new())
             }
-            KeyedState::Tri(ref mut map) => {
-                map.insert(
-                    (
-                        key.next().unwrap(),
-                        key.next().unwrap(),
-                        key.next().unwrap(),
-                    ),
-                    Vec::new(),
-                )
-            }
-            KeyedState::Quad(ref mut map) => {
-                map.insert(
-                    (
-                        key.next().unwrap(),
-                        key.next().unwrap(),
-                        key.next().unwrap(),
-                        key.next().unwrap(),
-                    ),
-                    Vec::new(),
-                )
-            }
+            KeyedState::Tri(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Vec::new(),
+            ),
+            KeyedState::Quad(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Vec::new(),
+            ),
         };
         assert!(replaced.is_none());
     }
@@ -525,14 +515,12 @@ impl<T: Hash + Eq + Clone> State<T> {
             KeyedState::Tri(ref mut map) => {
                 map.remove(&(key[0].clone(), key[1].clone(), key[2].clone()))
             }
-            KeyedState::Quad(ref mut map) => {
-                map.remove(&(
-                    key[0].clone(),
-                    key[1].clone(),
-                    key[2].clone(),
-                    key[3].clone(),
-                ))
-            }
+            KeyedState::Quad(ref mut map) => map.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+            )),
         };
         assert!(removed.is_some());
         assert!(removed.unwrap().is_empty());
@@ -545,11 +533,9 @@ impl<T: Hash + Eq + Clone> State<T> {
             }
 
             match s.1 {
-                KeyedState::Single(ref map) => {
-                    if !map.contains_key(&r[s.0[0]]) {
-                        return Some(&s.0[..]);
-                    }
-                }
+                KeyedState::Single(ref map) => if !map.contains_key(&r[s.0[0]]) {
+                    return Some(&s.0[..]);
+                },
                 KeyedState::Double(ref map) => {
                     let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
                     if !map.contains_key(&key) {

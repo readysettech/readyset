@@ -1,6 +1,6 @@
 use flow::domain;
 use flow::prelude::*;
-use flow::payload::{IngressFromBase, EgressForBase};
+use flow::payload::{EgressForBase, IngressFromBase};
 use petgraph;
 use petgraph::graph::NodeIndex;
 use std::borrow::Borrow;
@@ -47,7 +47,6 @@ fn count_base_ingress(
 }
 
 fn base_egress_map(graph: &Graph, source: NodeIndex, nodes: &[(NodeIndex, bool)]) -> EgressForBase {
-
     let output_nodes: Vec<_> = nodes
         .into_iter()
         .map(|&(ni, _)| ni)

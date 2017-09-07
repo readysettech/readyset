@@ -6,9 +6,9 @@ pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use ops::join::JoinType;
 
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
-              Literal, Operator, TableKey, SqlQuery};
-use nom_sql::{SelectStatement, LimitClause, OrderClause};
-use sql::query_graph::{QueryGraph, QueryGraphEdge, OutputColumn};
+              Literal, Operator, SqlQuery, TableKey};
+use nom_sql::{LimitClause, OrderClause, SelectStatement};
+use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -194,12 +194,10 @@ impl SqlToMirConverter {
     pub fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,
-            Some(ref node) => {
-                match node.borrow().flow_node {
-                    None => None,
-                    Some(ref flow_node) => Some(flow_node.address()),
-                }
-            }
+            Some(ref node) => match node.borrow().flow_node {
+                None => None,
+                Some(ref flow_node) => Some(flow_node.address()),
+            },
         }
     }
 
@@ -411,14 +409,12 @@ impl SqlToMirConverter {
 
         let primary_keys = match keys {
             None => vec![],
-            Some(keys) => {
-                keys.iter()
-                    .filter_map(|k| match *k {
-                        ref k @ TableKey::PrimaryKey(..) => Some(k),
-                        _ => None,
-                    })
-                    .collect()
-            }
+            Some(keys) => keys.iter()
+                .filter_map(|k| match *k {
+                    ref k @ TableKey::PrimaryKey(..) => Some(k),
+                    _ => None,
+                })
+                .collect(),
         };
         // TODO(malte): support >1 pkey
         assert!(primary_keys.len() <= 1);
@@ -476,25 +472,25 @@ impl SqlToMirConverter {
         }
     }
 
-    fn make_union_node(
-        &self,
-        name: &str,
-        ancestors: Vec<MirNodeRef>
-    ) -> MirNodeRef {
+    fn make_union_node(&self, name: &str, ancestors: Vec<MirNodeRef>) -> MirNodeRef {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         assert!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
-        let ucols: Vec<Column> = ancestors.first().unwrap()
-                                    .borrow()
-                                    .columns()
-                                    .iter()
-                                    .cloned()
-                                    .collect();
+        let ucols: Vec<Column> = ancestors
+            .first()
+            .unwrap()
+            .borrow()
+            .columns()
+            .iter()
+            .cloned()
+            .collect();
 
-        assert!(ancestors
+        assert!(
+            ancestors
                 .iter()
                 .all(|a| a.borrow().columns().len() == ucols.len()),
-                "all ancestors columns must have the same size");
+            "all ancestors columns must have the same size"
+        );
 
         for ancestor in ancestors.iter() {
             let cols: Vec<Column> = ancestor.borrow().columns().iter().cloned().collect();
@@ -511,12 +507,7 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_filter_node(
-        &self,
-        name: &str,
-        parent: MirNodeRef,
-        cond: &ConditionTree,
-    ) -> MirNodeRef {
+    fn make_filter_node(&self, name: &str, parent: MirNodeRef, cond: &ConditionTree) -> MirNodeRef {
         let mut fields = parent.borrow().columns().iter().cloned().collect();
 
         let filter = self.to_conditions(cond, &mut fields, &parent);
@@ -585,14 +576,12 @@ impl SqlToMirConverter {
         // match against a parent node column, and is often aliased)
         let computed_col = match computed_col.alias {
             None => computed_col.clone(),
-            Some(ref a) => {
-                Column {
-                    name: a.clone(),
-                    alias: None,
-                    table: computed_col.table.clone(),
-                    function: computed_col.function.clone(),
-                }
-            }
+            Some(ref a) => Column {
+                name: a.clone(),
+                alias: None,
+                table: computed_col.table.clone(),
+                function: computed_col.function.clone(),
+            },
         };
 
         // The function node's set of output columns is the group columns plus the function
@@ -605,47 +594,41 @@ impl SqlToMirConverter {
 
         // make the new operator
         match node_type {
-            GroupedNodeType::Aggregation(agg) => {
-                MirNode::new(
-                    name,
-                    self.schema_version,
-                    combined_columns,
-                    MirNodeType::Aggregation {
-                        on: over_col.clone(),
-                        group_by: group_by.into_iter().cloned().collect(),
-                        kind: agg,
-                    },
-                    vec![parent_node.clone()],
-                    vec![],
-                )
-            }
-            GroupedNodeType::Extremum(extr) => {
-                MirNode::new(
-                    name,
-                    self.schema_version,
-                    combined_columns,
-                    MirNodeType::Extremum {
-                        on: over_col.clone(),
-                        group_by: group_by.into_iter().cloned().collect(),
-                        kind: extr,
-                    },
-                    vec![parent_node.clone()],
-                    vec![],
-                )
-            }
-            GroupedNodeType::GroupConcat(sep) => {
-                MirNode::new(
-                    name,
-                    self.schema_version,
-                    combined_columns,
-                    MirNodeType::GroupConcat {
-                        on: over_col.clone(),
-                        separator: sep,
-                    },
-                    vec![parent_node.clone()],
-                    vec![],
-                )
-            }
+            GroupedNodeType::Aggregation(agg) => MirNode::new(
+                name,
+                self.schema_version,
+                combined_columns,
+                MirNodeType::Aggregation {
+                    on: over_col.clone(),
+                    group_by: group_by.into_iter().cloned().collect(),
+                    kind: agg,
+                },
+                vec![parent_node.clone()],
+                vec![],
+            ),
+            GroupedNodeType::Extremum(extr) => MirNode::new(
+                name,
+                self.schema_version,
+                combined_columns,
+                MirNodeType::Extremum {
+                    on: over_col.clone(),
+                    group_by: group_by.into_iter().cloned().collect(),
+                    kind: extr,
+                },
+                vec![parent_node.clone()],
+                vec![],
+            ),
+            GroupedNodeType::GroupConcat(sep) => MirNode::new(
+                name,
+                self.schema_version,
+                combined_columns,
+                MirNodeType::GroupConcat {
+                    on: over_col.clone(),
+                    separator: sep,
+                },
+                vec![parent_node.clone()],
+                vec![],
+            ),
         }
     }
 
@@ -680,7 +663,7 @@ impl SqlToMirConverter {
         let mut right_join_columns = Vec::new();
 
         // equi-join only
-        assert!(jp.operator == Operator::Equal || jp.operator == Operator::In );
+        assert!(jp.operator == Operator::Equal || jp.operator == Operator::In);
         let l_col = match *jp.left {
             ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
             _ => unimplemented!(),
@@ -694,20 +677,16 @@ impl SqlToMirConverter {
 
         assert_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
-            JoinType::Inner => {
-                MirNodeType::Join {
-                    on_left: left_join_columns,
-                    on_right: right_join_columns,
-                    project: fields.clone(),
-                }
-            }
-            JoinType::Left => {
-                MirNodeType::LeftJoin {
-                    on_left: left_join_columns,
-                    on_right: right_join_columns,
-                    project: fields.clone(),
-                }
-            }
+            JoinType::Inner => MirNodeType::Join {
+                on_left: left_join_columns,
+                on_right: right_join_columns,
+                project: fields.clone(),
+            },
+            JoinType::Left => MirNodeType::LeftJoin {
+                on_left: left_join_columns,
+                on_right: right_join_columns,
+                project: fields.clone(),
+            },
         };
         MirNode::new(
             name,
@@ -749,14 +728,12 @@ impl SqlToMirConverter {
             .clone()
             .into_iter()
             .map(|c| match c.alias {
-                Some(ref a) => {
-                    Column {
-                        name: a.clone(),
-                        table: c.table.clone(),
-                        alias: Some(a.clone()),
-                        function: c.function.clone(),
-                    }
-                }
+                Some(ref a) => Column {
+                    name: a.clone(),
+                    table: c.table.clone(),
+                    alias: Some(a.clone()),
+                    function: c.function.clone(),
+                },
                 None => c.clone(),
             })
             .chain(literal_names.into_iter().map(|n| {
@@ -845,65 +822,51 @@ impl SqlToMirConverter {
                 let (left, right);
                 match ct.operator {
                     Operator::And => {
-                        left = self.make_predicate_nodes(
-                            name,
-                            parent.clone(),
-                            &*ct.left,
-                            nc
-                        );
+                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
 
                         right = self.make_predicate_nodes(
                             name,
                             left.last().unwrap().clone(),
                             &*ct.right,
-                            nc + left.len()
+                            nc + left.len(),
                         );
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
-
-                    },
+                    }
                     Operator::Or => {
-                        left = self.make_predicate_nodes(
-                            name,
-                            parent.clone(),
-                            &*ct.left,
-                            nc
-                        );
+                        left = self.make_predicate_nodes(name, parent.clone(), &*ct.left, nc);
 
                         right = self.make_predicate_nodes(
                             name,
                             parent.clone(),
                             &*ct.right,
-                            nc + left.len()
+                            nc + left.len(),
                         );
 
                         debug!(self.log, "Creating union node for `or` predicate");
 
                         let last_left = left.last().unwrap().clone();
                         let last_right = right.last().unwrap().clone();
-                        let union = self.make_union_node(
-                            &format!("{}_u", name),
-                            vec![last_left, last_right]
-                        );
+                        let union =
+                            self.make_union_node(
+                                &format!("{}_u", name),
+                                vec![last_left, last_right],
+                            );
 
                         pred_nodes.extend(left.clone());
                         pred_nodes.extend(right.clone());
                         pred_nodes.push(union);
-                    },
-                    _ => unreachable!("LogicalOp operator is {:?}", ct.operator)
+                    }
+                    _ => unreachable!("LogicalOp operator is {:?}", ct.operator),
                 }
-            },
+            }
             ComparisonOp(ref ct) => {
                 // currently, we only support filter-like comparison operations, no nested-selections
-                let f = self.make_filter_node(
-                    &format!("{}_f{}", name, nc),
-                    parent,
-                    ct,
-                );
+                let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ct);
 
                 pred_nodes.push(f);
-            },
+            }
             NegationOp(_) => unreachable!("negation should have been removed earlier"),
             Base(_) => unreachable!("dangling base predicate"),
         }
@@ -912,10 +875,7 @@ impl SqlToMirConverter {
     }
 
     /// Returns all collumns used in a predicate
-    fn predicate_columns(
-        &self,
-        ce: ConditionExpression
-    ) -> HashSet<Column> {
+    fn predicate_columns(&self, ce: ConditionExpression) -> HashSet<Column> {
         use nom_sql::ConditionExpression::*;
 
         let mut cols = HashSet::new();
@@ -923,10 +883,10 @@ impl SqlToMirConverter {
             LogicalOp(ct) | ComparisonOp(ct) => {
                 cols.extend(self.predicate_columns(*ct.left));
                 cols.extend(self.predicate_columns(*ct.right));
-            },
+            }
             Base(ConditionBase::Field(c)) => {
                 cols.insert(c);
-            },
+            }
             NegationOp(_) => unreachable!("negations should have been eliminated"),
             _ => (),
         }
@@ -1066,19 +1026,15 @@ impl SqlToMirConverter {
                     let mut jns = Vec::new();
                     let (join_type, jps) = match *edge {
                         // Edge represents a LEFT JOIN
-                        QueryGraphEdge::LeftJoin(ref jps) => {
-                            (JoinType::Left, jps)
-                        }
+                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
                         // Edge represents a JOIN
-                        QueryGraphEdge::Join(ref jps) => {
-                            (JoinType::Inner, jps)
-                        }
+                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
                         // Edge represents a GROUP BY, which we handle later
                         QueryGraphEdge::GroupBy(_) => continue,
                     };
 
                     let (left_node, right_node) =
-                                pick_join_columns(src, dst, prev_node, &joined_tables);
+                        pick_join_columns(src, dst, prev_node, &joined_tables);
 
                     let mut prev_join = right_node;
                     for jp in jps.into_iter() {
@@ -1091,7 +1047,7 @@ impl SqlToMirConverter {
                         );
 
                         prev_join = cur_join.clone();
-                        new_node_count+=1;
+                        new_node_count += 1;
                         jns.push(cur_join);
                     }
 
@@ -1108,7 +1064,8 @@ impl SqlToMirConverter {
 
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> = HashMap::new();
+            let mut column_to_predicates: HashMap<Column, Vec<&ConditionExpression>> =
+                HashMap::new();
             let mut predicate_nodes = Vec::new();
             let mut sorted_rels: Vec<&String> = qg.relations.keys().collect();
             let mut created_predicates = Vec::new();
@@ -1140,8 +1097,7 @@ impl SqlToMirConverter {
                     let gb_edges: Vec<_> = qg.edges
                         .values()
                         .filter(|e| match **e {
-                            QueryGraphEdge::Join(_) |
-                            QueryGraphEdge::LeftJoin(_) => false,
+                            QueryGraphEdge::Join(_) | QueryGraphEdge::LeftJoin(_) => false,
                             QueryGraphEdge::GroupBy(_) => true,
                         })
                         .collect();
@@ -1154,19 +1110,16 @@ impl SqlToMirConverter {
                         if column_to_predicates.contains_key(&over_col) {
                             let parent = match prev_node {
                                 Some(p) => p,
-                                None => base_nodes[over_table].clone()
+                                None => base_nodes[over_table].clone(),
                             };
 
                             let new_mpns = self.predicates_above_group_by(
-                                    &format!(
-                                        "q_{:x}_n{}",
-                                        qg.signature().hash,
-                                        new_node_count
-                                    ),
-                                    &column_to_predicates,
-                                    over_col.clone(),
-                                    parent,
-                                    &mut created_predicates);
+                                &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                                &column_to_predicates,
+                                over_col.clone(),
+                                parent,
+                                &mut created_predicates,
+                            );
 
                             new_node_count += predicates_above_group_by_nodes.len();
                             prev_node = Some(new_mpns.last().unwrap().clone());
@@ -1235,7 +1188,6 @@ impl SqlToMirConverter {
                     } else {
                         // Function columns without GROUP BY
                         for computed_col in &computed_cols_cgn.columns {
-
                             let agg_node_name =
                                 &format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
 
@@ -1385,9 +1337,9 @@ impl SqlToMirConverter {
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Data(_) => None,
-                    OutputColumn::Literal(ref lc) => Some(
-                        (lc.name.clone(), DataType::from(&lc.value)),
-                    ),
+                    OutputColumn::Literal(ref lc) => {
+                        Some((lc.name.clone(), DataType::from(&lc.value)))
+                    }
                 })
                 .collect();
 

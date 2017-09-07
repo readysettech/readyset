@@ -88,21 +88,18 @@ impl GroupConcat {
                 TextComponent::Literal(ref l) => {
                     s.push_str(l);
                 }
-                TextComponent::Column(ref i) => {
-                    match rec[*i] {
-                        DataType::Text(..) |
-                        DataType::TinyText(..) => {
-                            use std::borrow::Cow;
-                            let text: Cow<str> = (&rec[*i]).into();
-                            s.push_str(&*text);
-                        }
-                        DataType::Int(ref n) => s.push_str(&n.to_string()),
-                        DataType::BigInt(ref n) => s.push_str(&n.to_string()),
-                        DataType::Real(..) => s.push_str(&rec[*i].to_string()),
-                        DataType::Timestamp(ref ts) => s.push_str(&ts.format("%+").to_string()),
-                        DataType::None => unreachable!(),
+                TextComponent::Column(ref i) => match rec[*i] {
+                    DataType::Text(..) | DataType::TinyText(..) => {
+                        use std::borrow::Cow;
+                        let text: Cow<str> = (&rec[*i]).into();
+                        s.push_str(&*text);
                     }
-                }
+                    DataType::Int(ref n) => s.push_str(&n.to_string()),
+                    DataType::BigInt(ref n) => s.push_str(&n.to_string()),
+                    DataType::Real(..) => s.push_str(&rec[*i].to_string()),
+                    DataType::Timestamp(ref ts) => s.push_str(&ts.format("%+").to_string()),
+                    DataType::None => unreachable!(),
+                },
             }
         }
 
@@ -164,8 +161,7 @@ impl GroupedOperation for GroupConcat {
 
         use std::borrow::Cow;
         let current: Cow<str> = match current {
-            Some(dt @ &DataType::Text(..)) |
-            Some(dt @ &DataType::TinyText(..)) => dt.into(),
+            Some(dt @ &DataType::Text(..)) | Some(dt @ &DataType::TinyText(..)) => dt.into(),
             None => Cow::Borrowed(""),
             _ => unreachable!(),
         };
@@ -185,14 +181,13 @@ impl GroupedOperation for GroupConcat {
         }
 
         // WHY doesn't rust have an iterator joiner?
-        let mut new = current.into_iter().fold(
-            String::with_capacity(2 * clen),
-            |mut acc, s| {
+        let mut new = current
+            .into_iter()
+            .fold(String::with_capacity(2 * clen), |mut acc, s| {
                 acc.push_str(s);
                 acc.push_str(&self.separator);
                 acc
-            },
-        );
+            });
         // we pushed one separator too many above
         let real_len = new.len() - self.separator.len();
         new.truncate(real_len);
@@ -352,7 +347,7 @@ mod tests {
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
-        // group 1 had [2], now has [1,2]
+                                 // group 1 had [2], now has [1,2]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 1.into() {
                 assert_eq!(r[1], ".2;".into());

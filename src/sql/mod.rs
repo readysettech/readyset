@@ -13,7 +13,7 @@ use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
 use self::reuse::ReuseConfig;
-use sql::query_graph::{QueryGraph, to_query_graph};
+use sql::query_graph::{to_query_graph, QueryGraph};
 
 use slog;
 use std::collections::HashMap;
@@ -236,8 +236,8 @@ impl SqlIncorporator {
                                 qg,
                                 QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
                             );
-                        },
-                        None => ()
+                        }
+                        None => (),
                     }
                 }
             }
@@ -260,11 +260,10 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
-            .map(|c| {
-                self.query_graphs[&c.1.signature().hash].1.clone()
-            })
-            .collect();
+            let mir_queries: Vec<MirQuery> = reuse_candidates
+                .iter()
+                .map(|c| self.query_graphs[&c.1.signature().hash].1.clone())
+                .collect();
 
             return (qg, QueryGraphReuse::ExtendExisting(mir_queries));
         } else {
@@ -282,8 +281,12 @@ impl SqlIncorporator {
         project_columns: Option<Vec<Column>>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
-        let mut mir = self.mir_converter
-            .add_leaf_below(final_query_node, query_name, params, project_columns);
+        let mut mir = self.mir_converter.add_leaf_below(
+            final_query_node,
+            query_name,
+            params,
+            project_columns,
+        );
 
         trace!(self.log, "Reused leaf node MIR: {}", mir);
 
@@ -404,10 +407,11 @@ impl SqlIncorporator {
         let mut reused_mir = new_opt_mir.clone();
         let mut num_reused_nodes = 0;
         for m in reuse_mirs {
-            let res =
-                merge_mir_for_queries(&self.log, &reused_mir, &m);
+            let res = merge_mir_for_queries(&self.log, &reused_mir, &m);
             reused_mir = res.0;
-            if res.1 > num_reused_nodes { num_reused_nodes = res.1; }
+            if res.1 > num_reused_nodes {
+                num_reused_nodes = res.1;
+            }
         }
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
@@ -504,8 +508,7 @@ impl SqlIncorporator {
             // does, we will amend or reuse it; if it does not, we create it.
             SqlQuery::CreateTable(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::Select(_) |
-            ref q @ SqlQuery::Insert(_) => {
+            ref q @ SqlQuery::Select(_) | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
                         return Err(format!("query refers to unknown table \"{}\"", t.name));
