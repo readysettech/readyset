@@ -68,6 +68,8 @@ impl Join {
                 }
             })
             .collect();
+
+        assert_eq!(join_columns.len(), 1, "only supports single column joins");
         let on = *join_columns.iter().next().unwrap();
 
         let (in_place_left_emit, in_place_right_emit) = {
@@ -78,8 +80,8 @@ impl Join {
                     .max()
                     .unwrap_or(0);
 
-                /// Tracks how columns have moved. At any point during the iteration, column i in
-                /// the original row will be located at position remap[i].
+                // Tracks how columns have moved. At any point during the iteration, column i in
+                // the original row will be located at position remap[i].
                 let mut remap: Vec<_> = (0..num_columns).collect();
                 emit.iter()
                     .enumerate()

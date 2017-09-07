@@ -5,7 +5,7 @@ use slog;
 pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Option<MirNodeRef> {
     let mut cur = leaf;
     loop {
-        if cur.borrow().ancestors().len() > 1 {
+        if cur.borrow().ancestors().len() != 1 {
             return None;
         }
         // silly, but the borrow checker doesn't let us do this in a single line
@@ -15,6 +15,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &Vec<Column>) -> Op
             .next()
             .expect(&format!("{:?} has no ancestors", cur))
             .clone();
+
         cur = next;
 
         let mut missing_any = false;

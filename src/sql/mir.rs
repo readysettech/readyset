@@ -92,7 +92,7 @@ impl SqlToMirConverter {
     fn to_conditions(
         &self,
         ct: &ConditionTree,
-        mut columns: &mut Vec<Column>,
+        columns: &mut Vec<Column>,
         n: &MirNodeRef,
     ) -> Vec<Option<(Operator, DataType)>> {
         use std::cmp::max;
@@ -145,21 +145,43 @@ impl SqlToMirConverter {
         prior_leaf: MirNodeRef,
         name: &str,
         params: &Vec<Column>,
+        project_columns: Option<Vec<Column>>,
     ) -> MirQuery {
-        let columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
-
-        // reuse the previous leaf node
+        // hang off the previous logical leaf node
+        let parent_columns: Vec<Column> = prior_leaf.borrow().columns().iter().cloned().collect();
         let parent = MirNode::reuse(prior_leaf, self.schema_version);
 
-        // add an identity node and then another leaf
-        let id = MirNode::new(
-            &format!("{}_id", name),
-            self.schema_version,
-            columns.clone(),
-            MirNodeType::Identity,
-            vec![parent.clone()],
-            vec![],
-        );
+        let (reproject, columns): (bool, Vec<Column>) = match project_columns {
+            // parent is a projection already, so no need to reproject; just reuse its columns
+            None => (false, parent_columns),
+            // parent is not a projection, so we need to reproject to the columns passed to us
+            Some(pc) => (true, pc.into_iter().chain(params.iter().cloned()).collect()),
+        };
+
+        let n = if reproject {
+            // add a (re-)projection and then another leaf
+            MirNode::new(
+                &format!("{}_reproject", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Project {
+                    emit: columns.clone(),
+                    literals: vec![],
+                },
+                vec![parent.clone()],
+                vec![],
+            )
+        } else {
+            // add an identity node and then another leaf
+            MirNode::new(
+                &format!("{}_id", name),
+                self.schema_version,
+                columns.clone(),
+                MirNodeType::Identity,
+                vec![parent.clone()],
+                vec![],
+            )
+        };
 
         let new_leaf = MirNode::new(
             name,
@@ -173,7 +195,7 @@ impl SqlToMirConverter {
                 node: parent.clone(),
                 keys: params.clone(),
             },
-            vec![id.clone()],
+            vec![n],
             vec![],
         );
 
@@ -390,7 +412,7 @@ impl SqlToMirConverter {
                         );
 
                         // remember the schema for this version
-                        let mut base_schemas = self.base_schemas
+                        let base_schemas = self.base_schemas
                             .entry(String::from(name))
                             .or_insert(Vec::new());
                         base_schemas.push((self.schema_version, columns.clone()));
@@ -425,7 +447,7 @@ impl SqlToMirConverter {
         assert!(primary_keys.len() <= 1);
 
         // remember the schema for this version
-        let mut base_schemas = self.base_schemas
+        let base_schemas = self.base_schemas
             .entry(String::from(name))
             .or_insert(Vec::new());
         base_schemas.push((self.schema_version, cols.clone()));
@@ -647,7 +669,7 @@ impl SqlToMirConverter {
     fn make_join_node(
         &mut self,
         name: &str,
-        jps: &[ConditionTree],
+        jp: &ConditionTree,
         left_node: MirNodeRef,
         right_node: MirNodeRef,
         kind: JoinType,
@@ -673,20 +695,20 @@ impl SqlToMirConverter {
         // TODO(malte): no multi-level joins yet
         let mut left_join_columns = Vec::new();
         let mut right_join_columns = Vec::new();
-        for p in jps.iter() {
-            // equi-join only
-            assert!(p.operator == Operator::Equal || p.operator == Operator::In );
-            let l_col = match *p.left {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            let r_col = match *p.right {
-                ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
-                _ => unimplemented!(),
-            };
-            left_join_columns.push(l_col);
-            right_join_columns.push(r_col);
-        }
+
+        // equi-join only
+        assert!(jp.operator == Operator::Equal || jp.operator == Operator::In );
+        let l_col = match *jp.left {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        let r_col = match *jp.right {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+        left_join_columns.push(l_col);
+        right_join_columns.push(r_col);
+
         assert_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
             JoinType::Inner => {
@@ -1246,39 +1268,41 @@ impl SqlToMirConverter {
             let mut prev_node = None;
 
             for &(&(ref src, ref dst), edge) in &sorted_edges {
-                let jn = match *edge {
+                let mut jns = Vec::new();
+                let (join_type, jps) = match *edge {
                     // Edge represents a LEFT JOIN
                     QueryGraphEdge::LeftJoin(ref jps) => {
-                        let (left_node, right_node) =
-                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &node_for_rel);
-                        self.make_join_node(
-                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                            jps,
-                            left_node,
-                            right_node,
-                            JoinType::Left,
-                        )
+                        (JoinType::Left, jps)
                     }
                     // Edge represents a JOIN
                     QueryGraphEdge::Join(ref jps) => {
-                        let (left_node, right_node) =
-                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &node_for_rel);
-                        self.make_join_node(
-                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                            jps,
-                            left_node,
-                            right_node,
-                            JoinType::Inner,
-                        )
+                        (JoinType::Inner, jps)
                     }
                     // Edge represents a GROUP BY, which we handle later
                     QueryGraphEdge::GroupBy(_) => continue,
                 };
 
+                let (left_node, right_node) =
+                            pick_join_columns(src, dst, prev_node, &joined_tables);
+
+                let mut prev_join = right_node;
+                for jp in jps.into_iter() {
+                    let cur_join = self.make_join_node(
+                        &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                        jp,
+                        left_node.clone(),
+                        prev_join.clone(),
+                        join_type.clone(),
+                    );
+
+                    prev_join = cur_join.clone();
+                    new_node_count+=1;
+                    jns.push(cur_join);
+                }
+
                 // bookkeeping (shared between both join types)
-                join_nodes.push(jn.clone());
-                new_node_count += 1;
-                prev_node = Some(jn);
+                prev_node = Some(jns.last().unwrap().clone());
+                join_nodes.extend(jns);
 
                 // we've now joined both tables
                 joined_tables.insert(src);
@@ -1548,14 +1572,18 @@ impl SqlToMirConverter {
                 .collect();
 
             // 5. Generate leaf views that expose the query result
-            let projected_columns: Vec<&Column> = qg.columns
+            let mut projected_columns: Vec<&Column> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
                     OutputColumn::Data(ref c) => Some(c),
                     OutputColumn::Literal(_) => None,
                 })
-                .chain(qg.parameters())
                 .collect();
+            for pc in qg.parameters() {
+                if !projected_columns.contains(&pc) {
+                    projected_columns.push(pc);
+                }
+            }
             let projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {

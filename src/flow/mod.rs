@@ -644,7 +644,7 @@ impl<'a> Migration<'a> {
 
         debug!(self.log, "told to materialize"; "node" => src.index());
 
-        let mut e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
+        let e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
         if !*e {
             *e = true;
             // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
@@ -1079,7 +1079,7 @@ impl<'a> Migration<'a> {
 impl Drop for Blender {
     fn drop(&mut self) {
         self.channel_coordinator.reset();
-        for (_, mut d) in &mut self.domains {
+        for (_, d) in &mut self.domains {
             // don't unwrap, because given domain may already have terminated
             drop(d.send(box payload::Packet::Quit));
         }
