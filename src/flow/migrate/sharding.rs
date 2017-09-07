@@ -89,7 +89,7 @@ pub fn shard(
         }
 
         let mut complex = false;
-        for (_, lookup_col) in &need_sharding {
+        for (_, &(ref lookup_col, _)) in &need_sharding {
             if lookup_col.len() != 1 {
                 complex = true;
             }
@@ -115,7 +115,7 @@ pub fn shard(
         // if a node does a lookup into itself by a given key, it must be sharded by that key (or
         // not at all). this *also* means that its inputs must be sharded by the column(s) that the
         // output column resolves to.
-        if let Some(want_sharding) = need_sharding.remove(&node.into()) {
+        if let Some((want_sharding, _)) = need_sharding.remove(&node.into()) {
             assert_eq!(want_sharding.len(), 1);
             let want_sharding = want_sharding[0];
 
@@ -161,7 +161,7 @@ pub fn shard(
                     // lookups based on any *other* columns in any ancestor. if we do, we must
                     // force no sharding :(
                     let mut ok = true;
-                    for (ni, lookup_col) in &need_sharding {
+                    for (ni, &(ref lookup_col, _)) in &need_sharding {
                         assert_eq!(lookup_col.len(), 1);
                         let lookup_col = lookup_col[0];
 
@@ -263,7 +263,7 @@ pub fn shard(
                 // does it match the key we're doing lookups based on?
                 for &(ni, src) in &srcs {
                     match need_sharding.get(&ni) {
-                        Some(col) if col.len() != 1 => {
+                        Some(&(ref col, _)) if col.len() != 1 => {
                             // we're looking up by a compound key -- that's hard to shard
                             trace!(log, "column traces to node looked up in by compound key";
                                    "node" => ?node,
@@ -271,7 +271,7 @@ pub fn shard(
                                    "column" => src);
                             break 'outer;
                         }
-                        Some(col) if col[0] != src => {
+                        Some(&(ref col, _)) if col[0] != src => {
                             // we're looking up by a different key. it's kind of weird that this
                             // output column still resolved to a column in all our inputs...
                             trace!(log, "column traces to node that is not looked up by";

@@ -338,10 +338,10 @@ impl Ingredient for Join {
         }
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         vec![
-            (self.left.as_global(), vec![self.on.0]),
-            (self.right.as_global(), vec![self.on.1]),
+            (self.left.as_global(), (vec![self.on.0], true)),
+            (self.right.as_global(), (vec![self.on.1], true)),
         ].into_iter()
             .collect()
     }
@@ -537,8 +537,8 @@ mod tests {
         let me = 2.into();
         let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![
-            (l.as_global(), vec![0]), /* join column for left */
-            (r.as_global(), vec![0]), /* join column for right */
+            (l.as_global(), (vec![0], true)), /* join column for left */
+            (r.as_global(), (vec![0], true)), /* join column for right */
         ].into_iter()
             .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);

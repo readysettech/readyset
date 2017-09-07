@@ -128,16 +128,30 @@ impl Materializations {
             }
 
             let n = &graph[ni];
-            if !n.is_internal() {
+            let mut indices = if n.is_reader() {
+                let (anc, key) = n.with_reader(|r| (r.is_for(), r.key())).unwrap();
+                if key.is_none() {
+                    // only streaming, no indexing needed
+                    continue;
+                }
+
+                // for a reader that will get lookups, we'd like to have an index above us
+                // somewhere on our key so that we can make the reader partial
+                // XXX: always?
+                let mut i = HashMap::new();
+                i.insert(anc, (vec![key.unwrap()], false));
+                i
+            } else if !n.is_internal() {
                 // non-internal nodes cannot generate indexing obligations
                 continue;
-            }
+            } else {
+                n.suggest_indexes(ni)
+            };
 
-            let mut indices = n.suggest_indexes(ni);
             if indices.is_empty() && n.get_base().is_some() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, vec![0]);
+                indices.insert(ni, (vec![0], true));
             }
 
             for (ni, cols) in indices {
@@ -162,7 +176,7 @@ impl Materializations {
             if let Some(have) = self.have.get_mut(&ni) {
                 // no need to push these indices down further, just add them to this already
                 // materialized view (which must also be the closest).
-                for columns in indices {
+                for (columns, _) in indices {
                     if have.insert(columns.clone()) {
                         // not already indexed on this particular column set
                         info!(self.log,
@@ -180,69 +194,87 @@ impl Materializations {
             }
 
             let n = &graph[ni];
-            if n.is_internal() && n.can_query_through() {
-                // push these obligations to the ancestor of n.
-                let mut ancestors = graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming);
-                let ancestor = ancestors
-                    .next()
-                    .expect("query through node has no ancestor");
-                assert!(
-                    ancestors.next().is_none(),
-                    "query through node has >1 ancestors"
-                );
+            if !n.is_internal() || !n.can_query_through() {
+                // if we have any indices that require lookups, then we can't push them up further,
+                // and we instead have to materialize this node. since we're already materializing
+                // it, we might as well add all the indices here.
+                //
+                // the n.is_internal() check is to ensure that we don't try to push indices above
+                // an ingress node.
+                //
+                // XXX: a lookup obligation could also imply that we should propagate the indexing
+                // obligation (w/o lookup) up to the parent to incentivise partial replay
+                // opportunities)
+                if !n.is_internal() || indices.iter().any(|&(_, lookup)| lookup) {
+                    let h = self.have.entry(ni).or_insert_with(HashSet::new);
+                    let a = self.added.entry(ni).or_insert_with(HashSet::new);
+                    for (columns, _) in indices {
+                        info!(self.log,
+                              "adding index to new view";
+                              "node" => ni.index(),
+                              "columns" => ?columns,
+                        );
+                        h.insert(columns.clone());
+                        a.insert(columns);
+                    }
+                }
+                continue;
+            }
 
-                // optimization: ingress -> query through = materialize only query through
-                if !graph[ancestor].is_ingress() {
-                    // TODO: what about ingress -> query through -> query through?
+            // it is safe to push these obligations to the ancestor of n, either because n is
+            // query_through, or because none of the obligations require lookups.
+            let ancestors: Vec<_> = graph
+                .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                .collect();
+            assert!(!ancestors.is_empty());
 
-                    // we need to figure out how the columns remap through the ancestor
-                    let indices = indices
-                        .into_iter()
-                        .map(|index| {
-                            index
-                                .into_iter()
-                                .map(|col| {
-                                    let really = n.parent_columns(col);
-                                    assert_eq!(
-                                        really.len(),
-                                        1,
-                                        "query through node does not resolve column"
-                                    );
-                                    assert_eq!(
-                                        really[0].0,
-                                        ancestor,
-                                        "query through node doesn't resolve to ancestor"
-                                    );
-                                    assert!(
-                                        really[0].1.is_some(),
-                                        "query through node does not resolve column"
-                                    );
-                                    really.into_iter().next().unwrap().1.unwrap()
-                                })
-                                .collect()
-                        })
-                        .collect();
-
-                    trace!(self.log, "hoisting indexing obligations";
-                           "for" => ni.index(),
-                           "to" => ancestor.index());
-
-                    obligations.insert(ancestor, indices);
-                    continue;
+            if ancestors.len() != 1 {
+                if n.is_join() {
+                    // TODO:
+                    // for joins, push only to the parent that we'll replay (how do we know?)
+                    unimplemented!();
                 } else {
-                    trace!(self.log, "not hoisting indexing obligations to ingress";
-                           "for" => ni.index());
+                    // for unions, push obligations to all ancestors
                 }
             }
 
-            // no pushing through, we need to materialize this node!
-            info!(self.log,
-                  "adding indices";
-                  "node" => ni.index(),
-                  "cols" => ?indices,
-              );
-            self.have.insert(ni, indices.clone());
-            self.added.insert(ni, indices);
+            // XXX: we'll probably want an optimization here where we choose to materialize more
+            // specific child nodes rather than reindex less specific parent nodes.
+
+            for ancestor in ancestors {
+                // we need to figure out how the columns remap through the ancestor
+                let indices = indices
+                    .iter()
+                    .map(|&(ref index, lookup)| {
+                        let cols = index
+                            .iter()
+                            .map(|&col| {
+                                let really = n.parent_columns(col);
+                                let really = really
+                                    .into_iter()
+                                    .find(|&(anc, _)| anc == ancestor)
+                                    .and_then(|(_, col)| col);
+
+                                if really.is_none() {
+                                    error!(self.log, "could not resolve obligation past operator";
+                                           "node" => ni.index(),
+                                           "ancestor" => ancestor.index(),
+                                           "column" => col);
+                                    unreachable!();
+                                }
+                                really.unwrap()
+                            })
+                            .collect();
+                        (cols, lookup)
+                    })
+                    .collect();
+
+                trace!(self.log, "hoisting indexing obligations";
+                       "for" => ni.index(),
+                       "to" => ancestor.index());
+
+                obligations.insert(ancestor, indices);
+            }
         }
     }
 
