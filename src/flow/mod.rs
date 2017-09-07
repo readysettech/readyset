@@ -153,6 +153,11 @@ impl Blender {
         }
     }
 
+    /// Return the number of workers currently registered.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
     /// Use a debug channel. This function may only be called once because the receiving end it
     /// returned.
     pub fn create_debug_channel(&mut self) -> TcpListener {
