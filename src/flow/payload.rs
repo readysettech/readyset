@@ -126,9 +126,6 @@ pub enum Packet {
     },
 
     /// Update that is part of a tagged data-flow replay path.
-    FullReplay { link: Link, tag: Tag, state: State },
-
-    /// Update that is part of a tagged data-flow replay path.
     ReplayPiece {
         link: Link,
         tag: Tag,
@@ -252,7 +249,6 @@ impl Packet {
         match *self {
             Packet::Message { ref link, .. } => link,
             Packet::Transaction { ref link, .. } => link,
-            Packet::FullReplay { ref link, .. } => link,
             Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
         }
@@ -262,7 +258,6 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
-            Packet::FullReplay { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
             _ => unreachable!(),
         }
@@ -272,7 +267,6 @@ impl Packet {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
             Packet::Transaction { ref data, .. } => data.is_empty(),
-            Packet::FullReplay { .. } => false,
             Packet::ReplayPiece { ref data, .. } => data.is_empty(),
             _ => unreachable!(),
         }
@@ -304,7 +298,6 @@ impl Packet {
 
     pub fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::FullReplay { tag, .. } => Some(tag),
             Packet::ReplayPiece { tag, .. } => Some(tag),
             _ => None,
         }
@@ -430,17 +423,6 @@ impl fmt::Debug for Packet {
                 link,
                 tag.id(),
                 data.len()
-            ),
-            Packet::FullReplay {
-                ref link,
-                ref tag,
-                ref state,
-            } => write!(
-                f,
-                "Packet::FullReplay({:?}, {}, {} row state)",
-                link,
-                tag.id(),
-                state.len()
             ),
             _ => write!(f, "Packet::Control"),
         }

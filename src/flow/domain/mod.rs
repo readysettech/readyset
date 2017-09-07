@@ -392,7 +392,7 @@ impl Domain {
                 // Any message with a timestamp (ie part of a transaction) must flow through the
                 // entire graph, even if there are no updates associated with it.
             }
-            &box Packet::ReplayPiece { .. } | &box Packet::FullReplay { .. } => {
+            &box Packet::ReplayPiece { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
             ref m => unreachable!("dispatch process got {:?}", m),
@@ -636,7 +636,7 @@ impl Domain {
                 self.transaction_state.handle(m);
                 self.process_transactions();
             }
-            Packet::ReplayPiece { .. } | Packet::FullReplay { .. } => {
+            Packet::ReplayPiece { .. } => {
                 self.handle_replay(m);
             }
             consumed => {
@@ -879,6 +879,7 @@ impl Domain {
                         self.seed_replay(tag, &key[..], None);
                     }
                     Packet::StartReplay { tag, from } => {
+                        use std::thread;
                         assert_eq!(self.replay_paths[&tag].source, Some(from));
 
                         let start = time::Instant::now();
@@ -902,13 +903,88 @@ impl Domain {
                                "μs" => dur_to_ns!(start.elapsed()) / 1000
                         );
 
-                        let m = box Packet::FullReplay {
-                            link: Link::new(from, self.replay_paths[&tag].path[0].0),
+                        let link = Link::new(from, self.replay_paths[&tag].path[0].0);
+
+                        // we're been given an entire state snapshot, but we need to digest it
+                        // piece by piece spawn off a thread to do that chunking. however, before
+                        // we spin off that thread, we need to send a single Replay message to tell
+                        // the target domain to start buffering everything that follows. we can't
+                        // do that inside the thread, because by the time that thread is scheduled,
+                        // we may already have processed some other messages that are not yet a
+                        // part of state.
+                        let p = box Packet::ReplayPiece {
                             tag: tag,
-                            state: state,
+                            link: link.clone(),
+                            nshards: self.nshards,
+                            context: ReplayPieceContext::Regular {
+                                last: state.is_empty(),
+                            },
+                            data: Vec::<Record>::new().into(),
+                            transaction_state: None,
                         };
 
-                        self.handle_replay(m);
+                        if !state.is_empty() {
+                            let log = self.log.new(o!());
+                            let nshards = self.nshards;
+                            let chunked_replay_tx = self.chunked_replay_tx.clone().unwrap();
+                            thread::Builder::new()
+                            .name(format!(
+                                "replay{}.{}",
+                                self.nodes
+                                    .values()
+                                    .next()
+                                    .unwrap()
+                                    .borrow()
+                                    .domain()
+                                    .index(),
+                                link.src
+                            ))
+                            .spawn(move || {
+                                use itertools::Itertools;
+
+                                let start = time::Instant::now();
+                                debug!(log, "starting state chunker"; "node" => %link.dst);
+
+                                let iter = state
+                                    .into_iter()
+                                    .flat_map(|rs| rs)
+                                    .map(|rs| (*rs).clone())
+                                    .chunks(BATCH_SIZE);
+                                let mut iter = iter.into_iter().enumerate().peekable();
+
+                                // process all records in state to completion within domain
+                                // and then forward on tx (if there is one)
+                                while let Some((i, chunk)) = iter.next() {
+                                    use std::iter::FromIterator;
+                                    let chunk = Records::from_iter(chunk.into_iter());
+                                    let len = chunk.len();
+                                    let last = iter.peek().is_none();
+                                    let p = box Packet::ReplayPiece {
+                                        tag: tag,
+                                        link: link.clone(), // to will be overwritten by receiver
+                                        nshards: nshards,
+                                        context: ReplayPieceContext::Regular { last },
+                                        data: chunk,
+                                        transaction_state: None,
+                                    };
+
+                                    trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                    if chunked_replay_tx.send(p).is_err() {
+                                        warn!(log, "replayer noticed domain shutdown");
+                                        break;
+                                    }
+                                }
+
+                                debug!(log,
+                                   "state chunker finished";
+                                   "node" => %link.dst,
+                                   "μs" => dur_to_ns!(start.elapsed()) / 1000
+                                );
+                            })
+                            .unwrap();
+                        }
+
+                        self.handle_replay(p);
                     }
                     Packet::Finish(tag, ni) => {
                         self.finish_replay(tag, ni);
@@ -1106,7 +1182,6 @@ impl Domain {
     fn handle_replay(&mut self, m: Box<Packet>) {
         let tag = m.tag().unwrap();
         let mut finished = None;
-        let mut playback = None;
         let mut need_replay = None;
         let mut finished_partial = false;
         'outer: loop {
@@ -1143,49 +1218,6 @@ impl Domain {
                 }
             }
 
-            // we may be able to just absorb all the state in one go if we're lucky!
-            let mut can_handle_directly = path.len() == 1;
-            if can_handle_directly {
-                // unfortunately, if this is a reader node, we can't just copy in the state
-                // since State and Reader use different internal data structures
-                // TODO: can we do better?
-                let n = self.nodes[&path[0].0].borrow();
-                if n.is_reader() {
-                    can_handle_directly = false;
-                }
-            }
-
-            if can_handle_directly {
-                let n = self.nodes[&path[0].0].borrow();
-                if n.is_internal() && n.get_base().map(|b| b.is_unmodified()) == Some(false) {
-                    // also need to include defaults for new columns
-                    can_handle_directly = false;
-                }
-            }
-
-            // if the key columns of the state and the target state differ, we cannot use the
-            // state directly, even if it is otherwise suitable. Note that we need to check
-            // `can_handle_directly` again here because it will have been changed for reader
-            // nodes above, and this check only applies to non-reader nodes.
-            if can_handle_directly && notify_done {
-                if let box Packet::FullReplay { ref state, .. } = m {
-                    let local_pkey = self.state[&path[0].0].keys();
-                    if local_pkey != state.keys() {
-                        debug!(self.log,
-                           "cannot use state directly, so falling back to regular replay";
-                           "node" => %path[0].0,
-                           "src keys" => ?state.keys(),
-                           "dst keys" => ?local_pkey);
-                        can_handle_directly = false;
-                    }
-                }
-            }
-
-            // TODO: if StateCopy debug_assert!(last);
-            // TODO
-            // we've been given a state dump, and only have a single node in this domain that needs
-            // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
-
             if let box Packet::ReplayPiece {
                 context: ReplayPieceContext::Partial { ignore: true, .. },
                 ..
@@ -1212,143 +1244,6 @@ impl Domain {
             // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
             let m = *m; // workaround for #16223
             match m {
-                Packet::FullReplay { tag, link, state } => {
-                    if can_handle_directly && notify_done {
-                        // oh boy, we're in luck! we're replaying into one of our nodes, and were
-                        // just given the entire state. no need to process or anything, just move
-                        // in the state and we're done.
-                        let node = path[0].0;
-                        debug!(self.log, "absorbing state clone"; "node" => %node);
-                        assert_eq!(self.state[&node].keys(), state.keys());
-                        self.state.insert(node, state);
-                        debug!(self.log, "direct state clone absorbed");
-                        finished = Some((tag, node, None));
-                    } else if can_handle_directly {
-                        // if we're not terminal, and the domain only has a single node, that node
-                        // *has* to be an egress node (since we're relaying to another domain).
-                        let node = path[0].0;
-                        let mut n = self.nodes[&node].borrow_mut();
-                        if n.is_egress() {
-                            // forward the state to the next domain without doing anything with it.
-                            let mut p = Some(box Packet::FullReplay {
-                                tag: tag,
-                                link: link, // the egress node will fix this up
-                                state: state,
-                            });
-                            debug!(self.log, "doing bulk egress forward");
-                            n.process(
-                                &mut p,
-                                None,
-                                &mut self.state,
-                                &self.nodes,
-                                self.shard,
-                                false,
-                            );
-                            debug!(self.log, "bulk egress forward completed");
-                            drop(n);
-                        } else {
-                            unreachable!();
-                        }
-                    } else if state.is_empty() {
-                        // TODO: eliminate this branch by detecting at the source
-                        //
-                        // we're been given an entire state snapshot, which needs to be replayed
-                        // row by row, *but* it's empty. fun fact: creating a chunked iterator over
-                        // an empty hashmap yields *no* chunks, which *also* means that an update
-                        // with last=true is never sent, which means that the replay never
-                        // finishes. so, we deal with this case separately (and also avoid spawning
-                        // a thread to walk empty state).
-                        let p = box Packet::ReplayPiece {
-                            tag: tag,
-                            link: link,
-                            nshards: self.nshards,
-                            context: ReplayPieceContext::Regular { last: true },
-                            data: Records::default(),
-                            transaction_state: None,
-                        };
-
-                        debug!(self.log, "empty full state replay conveyed");
-                        playback = Some(p);
-                    } else {
-                        use std::thread;
-
-                        // we're been given an entire state snapshot, but we need to digest it
-                        // piece by piece spawn off a thread to do that chunking. however, before
-                        // we spin off that thread, we need to send a single Replay message to tell
-                        // the target domain to start buffering everything that follows. we can't
-                        // do that inside the thread, because by the time that thread is scheduled,
-                        // we may already have processed some other messages that are not yet a
-                        // part of state.
-                        let p = box Packet::ReplayPiece {
-                            tag: tag,
-                            link: link.clone(),
-                            nshards: self.nshards,
-                            context: ReplayPieceContext::Regular { last: false },
-                            data: Vec::<Record>::new().into(),
-                            transaction_state: None,
-                        };
-                        playback = Some(p);
-
-                        let log = self.log.new(o!());
-                        let nshards = self.nshards;
-                        let chunked_replay_tx = self.chunked_replay_tx.clone().unwrap();
-                        thread::Builder::new()
-                            .name(format!(
-                                "replay{}.{}",
-                                self.nodes
-                                    .values()
-                                    .next()
-                                    .unwrap()
-                                    .borrow()
-                                    .domain()
-                                    .index(),
-                                link.src
-                            ))
-                            .spawn(move || {
-                                use itertools::Itertools;
-
-                                let start = time::Instant::now();
-                                debug!(log, "starting state chunker"; "node" => %link.dst);
-
-                                let iter = state
-                                    .into_iter()
-                                    .flat_map(|rs| rs)
-                                    .map(|rs| (*rs).clone())
-                                    .chunks(BATCH_SIZE);
-                                let mut iter = iter.into_iter().enumerate().peekable();
-
-                                // process all records in state to completion within domain
-                                // and then forward on tx (if there is one)
-                                while let Some((i, chunk)) = iter.next() {
-                                    use std::iter::FromIterator;
-                                    let chunk = Records::from_iter(chunk.into_iter());
-                                    let len = chunk.len();
-                                    let last = iter.peek().is_none();
-                                    let p = box Packet::ReplayPiece {
-                                        tag: tag,
-                                        link: link.clone(), // to will be overwritten by receiver
-                                        nshards: nshards,
-                                        context: ReplayPieceContext::Regular { last },
-                                        data: chunk,
-                                        transaction_state: None,
-                                    };
-
-                                    trace!(log, "sending batch"; "#" => i, "[]" => len);
-                                    if chunked_replay_tx.send(p).is_err() {
-                                        warn!(log, "replayer noticed domain shutdown");
-                                        break;
-                                    }
-                                }
-
-                                debug!(log,
-                                   "state chunker finished";
-                                   "node" => %link.dst,
-                                   "μs" => dur_to_ns!(start.elapsed()) / 1000
-                                );
-                            })
-                            .unwrap();
-                    }
-                }
                 Packet::ReplayPiece {
                     tag,
                     link,
@@ -1601,10 +1496,6 @@ impl Domain {
         if let Some((node, key, tag)) = need_replay {
             self.on_replay_miss(node, key, tag);
             return;
-        }
-
-        if let Some(p) = playback {
-            self.handle(p);
         }
 
         if let Some((tag, ni, for_key)) = finished {
