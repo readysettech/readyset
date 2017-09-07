@@ -395,11 +395,9 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     let mut qg = QueryGraph::new();
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: String,
-                    preds: Vec<ConditionExpression>,
-                    st: &SelectStatement|
-     -> QueryGraphNode {
-        QueryGraphNode {
+    let new_node =
+        |rel: String, preds: Vec<ConditionExpression>, st: &SelectStatement| -> QueryGraphNode {
+            QueryGraphNode {
             rel_name: rel.clone(),
             predicates: preds,
             columns: st.fields
@@ -433,7 +431,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                 .collect(),
             parameters: Vec::new(),
         }
-    };
+        };
 
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
