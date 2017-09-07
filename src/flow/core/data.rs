@@ -50,8 +50,7 @@ impl DataType {
             DataType::Int(n) => json!(n),
             DataType::BigInt(n) => json!(n),
             DataType::Real(i, f) => json!((i as f64) + (f as f64) * 1.0e-9),
-            DataType::Text(..) |
-            DataType::TinyText(..) => Value::String(self.into()),
+            DataType::Text(..) | DataType::TinyText(..) => Value::String(self.into()),
             DataType::Timestamp(ts) => json!(ts.format("%+").to_string()),
         }
     }
@@ -230,8 +229,7 @@ impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             DataType::None => write!(f, "*"),
-            DataType::Text(..) |
-            DataType::TinyText(..) => {
+            DataType::Text(..) | DataType::TinyText(..) => {
                 let text: Cow<str> = self.into();
                 write!(f, "\"{}\"", text)
             }
@@ -261,8 +259,7 @@ pub enum Record {
 impl Record {
     pub fn rec(&self) -> &[DataType] {
         match *self {
-            Record::Positive(ref v) |
-            Record::Negative(ref v) => &v[..],
+            Record::Positive(ref v) | Record::Negative(ref v) => &v[..],
             Record::DeleteRequest(..) => unreachable!(),
         }
     }
@@ -288,8 +285,7 @@ impl Deref for Record {
     type Target = Vec<DataType>;
     fn deref(&self) -> &Self::Target {
         match *self {
-            Record::Positive(ref r) |
-            Record::Negative(ref r) => r,
+            Record::Positive(ref r) | Record::Negative(ref r) => r,
             Record::DeleteRequest(..) => unreachable!(),
         }
     }
@@ -298,8 +294,7 @@ impl Deref for Record {
 impl DerefMut for Record {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match *self {
-            Record::Positive(ref mut r) |
-            Record::Negative(ref mut r) => r,
+            Record::Positive(ref mut r) | Record::Negative(ref mut r) => r,
             Record::DeleteRequest(..) => unreachable!(),
         }
     }

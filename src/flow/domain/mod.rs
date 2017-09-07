@@ -4,10 +4,10 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::hash_map::Entry;
-use channel::{TraceSender, ChannelSender};
+use channel::{ChannelSender, TraceSender};
 use flow::prelude::*;
-use flow::payload::{TransactionState, ReplayTransactionState, ReplayPieceContext,
-                    ControlReplyPacket};
+use flow::payload::{ControlReplyPacket, ReplayPieceContext, ReplayTransactionState,
+                    TransactionState};
 use flow::statistics;
 use flow::transactions;
 use flow::persistence;
@@ -15,7 +15,7 @@ use flow::debug;
 use flow;
 use checktable;
 use slog::Logger;
-use timekeeper::{Timer, TimerSet, SimpleTracker, RealTime, ThreadTime};
+use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
 const BATCH_SIZE: usize = 256;
 
@@ -327,8 +327,7 @@ impl Domain {
             TriggerEndpoint::Local(..) => {
                 // didn't count against our quote, so we're also not decementing
             }
-            TriggerEndpoint::Start(..) |
-            TriggerEndpoint::None => {
+            TriggerEndpoint::Start(..) | TriggerEndpoint::None => {
                 unreachable!();
             }
         }
@@ -347,7 +346,6 @@ impl Domain {
         process_ptimes: &mut TimerSet<LocalNodeIndex, SimpleTracker, ThreadTime>,
         enable_output: bool,
     ) -> HashMap<LocalNodeIndex, Vec<Record>> {
-
         let me = m.link().dst;
         let mut output_messages = HashMap::new();
 
@@ -357,7 +355,8 @@ impl Domain {
                 ref to,
                 ref mut buffered,
                 ..
-            } if to == &me => {
+            } if to == &me =>
+            {
                 buffered.push_back(m);
                 return output_messages;
             }
@@ -393,8 +392,7 @@ impl Domain {
                 // Any message with a timestamp (ie part of a transaction) must flow through the
                 // entire graph, even if there are no updates associated with it.
             }
-            &box Packet::ReplayPiece { .. } |
-            &box Packet::FullReplay { .. } => {
+            &box Packet::ReplayPiece { .. } | &box Packet::FullReplay { .. } => {
                 unreachable!("replay should never go through dispatch");
             }
             ref m => unreachable!("dispatch process got {:?}", m),
@@ -539,9 +537,14 @@ impl Domain {
             self.process_times.start(addr);
             self.process_ptimes.start(addr);
             let mut m = Some(m);
-            self.nodes[&addr]
-                .borrow_mut()
-                .process(&mut m, None, &mut self.state, &self.nodes, self.shard, true);
+            self.nodes[&addr].borrow_mut().process(
+                &mut m,
+                None,
+                &mut self.state,
+                &self.nodes,
+                self.shard,
+                true,
+            );
             self.process_ptimes.stop();
             self.process_times.stop();
             assert_eq!(n.borrow().nchildren(), 0);
@@ -626,16 +629,19 @@ impl Domain {
             Packet::Transaction { .. } |
             Packet::StartMigration { .. } |
             Packet::CompleteMigration { .. } |
-            Packet::ReplayPiece { transaction_state: Some(_), .. } => {
+            Packet::ReplayPiece {
+                transaction_state: Some(_),
+                ..
+            } => {
                 self.transaction_state.handle(m);
                 self.process_transactions();
             }
-            Packet::ReplayPiece { .. } |
-            Packet::FullReplay { .. } => {
+            Packet::ReplayPiece { .. } | Packet::FullReplay { .. } => {
                 self.handle_replay(m);
             }
             consumed => {
-                match consumed {// workaround #16223
+                match consumed {
+                    // workaround #16223
                     Packet::AddNode { node, parents } => {
                         use std::cell;
                         let addr = *node.local_addr();
@@ -705,9 +711,9 @@ impl Domain {
                             .filter_map(|ntx| self.channel_coordinator.get_tx(ntx))
                             .collect();
                         let mut n = self.nodes[&node].borrow_mut();
-                        n.with_sharder_mut(
-                            move |s| { s.add_sharded_child(new_txs.0, new_channels); },
-                        );
+                        n.with_sharder_mut(move |s| {
+                            s.add_sharded_child(new_txs.0, new_channels);
+                        });
                     }
                     Packet::AddStreamer { node, new_streamer } => {
                         let mut n = self.nodes[&node].borrow_mut();
@@ -829,17 +835,15 @@ impl Domain {
                             payload::TriggerEndpoint::None => TriggerEndpoint::None,
                             payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                             payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
-                            payload::TriggerEndpoint::End(domain, shards) => {
-                                TriggerEndpoint::End(
-                                    (0..shards)
-                                        .map(|shard| {
-                                            self.channel_coordinator
-                                                .get_unbounded_tx(&(domain, shard))
-                                                .unwrap()
-                                        })
-                                        .collect(),
-                                )
-                            }
+                            payload::TriggerEndpoint::End(domain, shards) => TriggerEndpoint::End(
+                                (0..shards)
+                                    .map(|shard| {
+                                        self.channel_coordinator
+                                            .get_unbounded_tx(&(domain, shard))
+                                            .unwrap()
+                                    })
+                                    .collect(),
+                            ),
                         };
 
                         self.replay_paths.insert(
@@ -857,8 +861,10 @@ impl Domain {
                             return;
                         }
 
-                        if let ReplayPath { trigger: TriggerEndpoint::End(..), .. } =
-                            self.replay_paths[&tag]
+                        if let ReplayPath {
+                            trigger: TriggerEndpoint::End(..),
+                            ..
+                        } = self.replay_paths[&tag]
                         {
                             // request came in from reader -- forward
                             self.request_partial_replay(tag, key);
@@ -908,7 +914,6 @@ impl Domain {
                         self.finish_replay(tag, ni);
                     }
                     Packet::Ready { node, index } => {
-
                         if let DomainMode::Forwarding = self.mode {
                         } else {
                             unreachable!();
@@ -1182,7 +1187,8 @@ impl Domain {
             // to deal with that dump. chances are, we'll be able to re-use that state wholesale.
 
             if let box Packet::ReplayPiece {
-                context: ReplayPieceContext::Partial { ignore: true, .. }, ..
+                context: ReplayPieceContext::Partial { ignore: true, .. },
+                ..
             } = m
             {
                 let mut n = self.nodes[&path.last().unwrap().0].borrow_mut();
@@ -1383,9 +1389,10 @@ impl Domain {
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         if !n.is_transactional() {
-                            if let Some(
-                                box Packet::ReplayPiece { ref mut transaction_state, .. },
-                            ) = m
+                            if let Some(box Packet::ReplayPiece {
+                                ref mut transaction_state,
+                                ..
+                            }) = m
                             {
                                 // Transactional replays that cross into non-transactional subgraphs
                                 // should stop being transactional. This is necessary to ensure that
@@ -1402,8 +1409,8 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = partial_key.is_some() &&
-                            (is_reader || self.waiting.contains_key(&ni));
+                        let target =
+                            partial_key.is_some() && (is_reader || self.waiting.contains_key(&ni));
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1461,7 +1468,9 @@ impl Domain {
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
-                                n.with_reader_mut(|r| { r.writer_mut().map(|wh| wh.swap()); });
+                                n.with_reader_mut(|r| {
+                                    r.writer_mut().map(|wh| wh.swap());
+                                });
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) = self.reader_triggered.get_mut(&ni) {
                                     prev.remove(&partial_key[0]);
@@ -1799,8 +1808,8 @@ impl Domain {
                     // then. If no flush is needed, then avoid going to sleep for 1ms because sleeps
                     // and wakeups are expensive.
                     let duration_until_flush = group_commit_queues.duration_until_flush();
-                    let spin_duration = duration_until_flush
-                        .unwrap_or(time::Duration::from_millis(1));
+                    let spin_duration =
+                        duration_until_flush.unwrap_or(time::Duration::from_millis(1));
                     let start = time::Instant::now();
                     loop {
                         if let Ok(p) = self.inject

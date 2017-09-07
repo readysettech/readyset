@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use {SqlIncorporator, Migration};
+use {Migration, SqlIncorporator};
 use flow::prelude::NodeIndex;
 
 use slog;
@@ -107,13 +107,11 @@ impl Recipe {
                     }
                 };
                 match na {
-                    None => {
-                        Err(format!(
-                            "No query endpoint for \"{}\" exists at v{}.",
-                            name,
-                            self.version
-                        ))
-                    }
+                    None => Err(format!(
+                        "No query endpoint for \"{}\" exists at v{}.",
+                        name,
+                        self.version
+                    )),
                     Some(na) => Ok(na),
                 }
             }
@@ -234,7 +232,10 @@ impl Recipe {
             let (n, q) = self.expressions[&qid].clone();
 
             // add the query
-            let qfp = self.inc.as_mut().unwrap().add_parsed_query(q, n.clone(), mig)?;
+            let qfp = self.inc
+                .as_mut()
+                .unwrap()
+                .add_parsed_query(q, n.clone(), mig)?;
 
             // we currently use a domain per query
             // let d = mig.add_domain();
@@ -246,7 +247,7 @@ impl Recipe {
             // If not, use the name internally used by the QFP.
             let query_name = match n {
                 Some(name) => name,
-                None => qfp.name.clone()
+                None => qfp.name.clone(),
             };
 
             result.new_nodes.insert(query_name, qfp.query_leaf);

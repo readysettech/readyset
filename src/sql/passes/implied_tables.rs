@@ -42,13 +42,11 @@ where
             operator,
             box left,
             box right,
-        }) => {
-            LogicalOp(ConditionTree {
-                operator: operator,
-                left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
-                right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
-            })
-        }
+        }) => LogicalOp(ConditionTree {
+            operator: operator,
+            left: Box::new(rewrite_conditional(expand_columns, left, avail_tables)),
+            right: Box::new(rewrite_conditional(expand_columns, right, avail_tables)),
+        }),
         x => x,
     }
 }
@@ -141,18 +139,14 @@ impl ImpliedTableExpansion for SqlQuery {
         // computed columns.
         let set_table = |mut f: Column, table: &Table| -> Column {
             f.table = match f.table {
-                None => {
-                    match f.function {
-                        Some(ref mut f) => {
-                            panic!(
-                                "set_table({}) invoked on computed column {:?}",
-                                table.name,
-                                f
-                            )
-                        }
-                        None => Some(table.name.clone()),
-                    }
-                }
+                None => match f.function {
+                    Some(ref mut f) => panic!(
+                        "set_table({}) invoked on computed column {:?}",
+                        table.name,
+                        f
+                    ),
+                    None => Some(table.name.clone()),
+                },
                 Some(x) => Some(x),
             };
             f
@@ -190,30 +184,26 @@ impl ImpliedTableExpansion for SqlQuery {
                 // Expand within GROUP BY clause
                 sq.group_by = match sq.group_by {
                     None => None,
-                    Some(gbc) => {
-                        Some(GroupByClause {
-                            columns: gbc.columns
-                                .into_iter()
-                                .map(|f| expand_columns(f, &tables))
-                                .collect(),
-                            having: match gbc.having {
-                                None => None,
-                                Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
-                            },
-                        })
-                    }
+                    Some(gbc) => Some(GroupByClause {
+                        columns: gbc.columns
+                            .into_iter()
+                            .map(|f| expand_columns(f, &tables))
+                            .collect(),
+                        having: match gbc.having {
+                            None => None,
+                            Some(hc) => Some(rewrite_conditional(&expand_columns, hc, &tables)),
+                        },
+                    }),
                 };
                 // Expand within ORDER BY clause
                 sq.order = match sq.order {
                     None => None,
-                    Some(oc) => {
-                        Some(OrderClause {
-                            columns: oc.columns
-                                .into_iter()
-                                .map(|(f, o)| (expand_columns(f, &tables), o))
-                                .collect(),
-                        })
-                    }
+                    Some(oc) => Some(OrderClause {
+                        columns: oc.columns
+                            .into_iter()
+                            .map(|(f, o)| (expand_columns(f, &tables), o))
+                            .collect(),
+                    }),
                 };
 
                 SqlQuery::Select(sq)

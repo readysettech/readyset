@@ -1,7 +1,7 @@
 use nom_sql::{Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::{Error, Formatter, Debug, Display};
+use std::fmt::{Debug, Display, Error, Formatter};
 use std::rc::Rc;
 
 use flow::Migration;
@@ -28,8 +28,7 @@ pub enum FlowNode {
 impl FlowNode {
     pub fn address(&self) -> NodeIndex {
         match *self {
-            FlowNode::New(na) |
-            FlowNode::Existing(na) => na,
+            FlowNode::New(na) | FlowNode::Existing(na) => na,
         }
     }
 }
@@ -401,44 +400,39 @@ impl MirNode {
             // Note that `rposition` is required because multiple columns of the same name might
             // exist if a column has been removed and re-added. We always use the latest column,
             // and assume that only one column of the same name ever exists at the same time.
-            MirNodeType::Base { ref column_specs, .. } => {
-                match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                    None => panic!("tried to look up non-existent column {:?}", c),
-                    Some(id) => {
-                        column_specs[id]
-                            .1
-                            .expect("must have an absolute column ID on base")
-                    }
-                }
-            }
+            MirNodeType::Base {
+                ref column_specs, ..
+            } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+                None => panic!("tried to look up non-existent column {:?}", c),
+                Some(id) => column_specs[id]
+                    .1
+                    .expect("must have an absolute column ID on base"),
+            },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => {
-                match self.columns.iter().position(|cc| cc == c) {
-                    None => panic!("tried to look up non-existent column {:?}", c.name),
-                    Some(id) => id,
-                }
-            }
+            _ => match self.columns.iter().position(|cc| cc == c) {
+                None => panic!("tried to look up non-existent column {:?}", c.name),
+                Some(id) => id,
+            },
         }
     }
 
     pub fn column_specifications(&self) -> &[(ColumnSpecification, Option<usize>)] {
         match self.inner {
-            MirNodeType::Base { ref column_specs, .. } => column_specs.as_slice(),
+            MirNodeType::Base {
+                ref column_specs, ..
+            } => column_specs.as_slice(),
             _ => panic!("non-base MIR nodes don't have column specifications!"),
         }
     }
 
     fn flow_node_addr(&self) -> Result<NodeIndex, String> {
         match self.flow_node {
-            Some(FlowNode::New(na)) |
-            Some(FlowNode::Existing(na)) => Ok(na),
-            None => {
-                Err(format!(
-                    "MIR node \"{}\" does not have an associated FlowNode",
-                    self.versioned_name()
-                ))
-            }
+            Some(FlowNode::New(na)) | Some(FlowNode::Existing(na)) => Ok(na),
+            None => Err(format!(
+                "MIR node \"{}\" does not have an associated FlowNode",
+                self.versioned_name()
+            )),
         }
     }
 
@@ -483,13 +477,11 @@ impl MirNode {
                     }
                 }
             }
-            MirNodeType::Project { ref emit, .. } => {
-                for c in emit {
-                    if !columns.contains(&c) {
-                        columns.push(c.clone());
-                    }
+            MirNodeType::Project { ref emit, .. } => for c in emit {
+                if !columns.contains(&c) {
+                    columns.push(c.clone());
                 }
-            }
+            },
             _ => (),
         }
         columns
@@ -537,28 +529,22 @@ impl MirNode {
                         ref keys,
                         transactional,
                         ref adapted_over,
-                    } => {
-                        match *adapted_over {
-                            None => {
-                                make_base_node(
-                                    &name,
-                                    column_specs.as_mut_slice(),
-                                    keys,
-                                    mig,
-                                    transactional,
-                                )
-                            }
-                            Some(ref bna) => {
-                                adapt_base_node(
-                                    bna.over.clone(),
-                                    mig,
-                                    column_specs.as_mut_slice(),
-                                    &bna.columns_added,
-                                    &bna.columns_removed,
-                                )
-                            }
-                        }
-                    }
+                    } => match *adapted_over {
+                        None => make_base_node(
+                            &name,
+                            column_specs.as_mut_slice(),
+                            keys,
+                            mig,
+                            transactional,
+                        ),
+                        Some(ref bna) => adapt_base_node(
+                            bna.over.clone(),
+                            mig,
+                            column_specs.as_mut_slice(),
+                            &bna.columns_added,
+                            &bna.columns_removed,
+                        ),
+                    },
                     MirNodeType::Extremum {
                         ref on,
                         ref group_by,
@@ -691,13 +677,7 @@ impl MirNode {
                     }
                     MirNodeType::Union { ref emit } => {
                         assert_eq!(self.ancestors.len(), emit.len());
-                        make_union_node(
-                            &name,
-                            self.columns.as_slice(),
-                            emit,
-                            self.ancestors(),
-                            mig,
-                        )
+                        make_union_node(&name, self.columns.as_slice(), emit, self.ancestors(), mig)
                     }
                     MirNodeType::TopK {
                         ref order,
@@ -763,7 +743,9 @@ pub enum MirNodeType {
         kind: ExtremumKind,
     },
     /// filter conditions (one for each parent column)
-    Filter { conditions: Vec<Option<(Operator, DataType)>>, },
+    Filter {
+        conditions: Vec<Option<(Operator, DataType)>>,
+    },
     /// over column, separator
     GroupConcat { on: Column, separator: String },
     /// no extra info required
@@ -792,9 +774,7 @@ pub enum MirNodeType {
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
-    Union {
-        emit: Vec<Vec<Column>>,
-    },
+    Union { emit: Vec<Vec<Column>> },
     /// order function, group columns, k
     TopK {
         order: Option<Vec<(Column, OrderType)>>,
@@ -815,25 +795,35 @@ impl MirNodeType {
 
     fn add_column(&mut self, c: Column) {
         match *self {
-            MirNodeType::Aggregation { ref mut group_by, .. } => {
+            MirNodeType::Aggregation {
+                ref mut group_by, ..
+            } => {
                 group_by.push(c);
             }
             MirNodeType::Base { .. } => panic!("can't add columns to base nodes!"),
-            MirNodeType::Extremum { ref mut group_by, .. } => {
+            MirNodeType::Extremum {
+                ref mut group_by, ..
+            } => {
                 group_by.push(c);
             }
             MirNodeType::Filter { ref mut conditions } => {
                 conditions.push(None);
             }
-            MirNodeType::Join { ref mut project, .. } |
-            MirNodeType::LeftJoin { ref mut project, .. } => {
+            MirNodeType::Join {
+                ref mut project, ..
+            } |
+            MirNodeType::LeftJoin {
+                ref mut project, ..
+            } => {
                 project.push(c);
             }
             MirNodeType::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
             MirNodeType::Union { .. } => unimplemented!(),
-            MirNodeType::TopK { ref mut group_by, .. } => {
+            MirNodeType::TopK {
+                ref mut group_by, ..
+            } => {
                 group_by.push(c);
             }
             _ => (),
@@ -842,7 +832,7 @@ impl MirNodeType {
 
     fn can_reuse_as(&self, other: &MirNodeType) -> bool {
         match *self {
-            MirNodeType::Reuse { .. } => (),  // handled below
+            MirNodeType::Reuse { .. } => (), // handled below
             _ => {
                 // we're not a `Reuse` ourselves, but the other side might be
                 match *other {
@@ -860,7 +850,7 @@ impl MirNodeType {
                         // here.
                         return self.can_reuse_as(&node.borrow().inner);
                     }
-                    _ => (),  // handled below
+                    _ => (), // handled below
                 }
             }
         }
@@ -916,12 +906,12 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            MirNodeType::Filter { conditions: ref our_conditions } => {
-                match *other {
-                    MirNodeType::Filter { ref conditions } => our_conditions == conditions,
-                    _ => false,
-                }
-            }
+            MirNodeType::Filter {
+                conditions: ref our_conditions,
+            } => match *other {
+                MirNodeType::Filter { ref conditions } => our_conditions == conditions,
+                _ => false,
+            },
             MirNodeType::Join {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,
@@ -943,15 +933,13 @@ impl MirNodeType {
             MirNodeType::Project {
                 emit: ref our_emit,
                 literals: ref our_literals,
-            } => {
-                match *other {
-                    MirNodeType::Project {
-                        ref emit,
-                        ref literals,
-                    } => our_emit == emit && our_literals == literals,
-                    _ => false,
-                }
-            }
+            } => match *other {
+                MirNodeType::Project {
+                    ref emit,
+                    ref literals,
+                } => our_emit == emit && our_literals == literals,
+                _ => false,
+            },
             MirNodeType::Reuse { node: ref us } => {
                 match *other {
                     // both nodes are `Reuse` nodes, so we simply compare the both sides' reuse
@@ -969,26 +957,24 @@ impl MirNodeType {
                 group_by: ref our_group_by,
                 k: our_k,
                 offset: our_offset,
-            } => {
-                match *other {
-                    MirNodeType::TopK {
-                        ref order,
-                        ref group_by,
-                        k,
-                        offset,
-                    } => {
-                        order == our_order && group_by == our_group_by && k == our_k &&
-                            offset == our_offset
-                    }
-                    _ => false,
+            } => match *other {
+                MirNodeType::TopK {
+                    ref order,
+                    ref group_by,
+                    k,
+                    offset,
+                } => {
+                    order == our_order && group_by == our_group_by && k == our_k &&
+                        offset == our_offset
                 }
-            }
-            MirNodeType::Leaf { keys: ref our_keys, .. } => {
-                match *other {
-                    MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
-                    _ => false,
-                }
-            }
+                _ => false,
+            },
+            MirNodeType::Leaf {
+                keys: ref our_keys, ..
+            } => match *other {
+                MirNodeType::Leaf { ref keys, .. } => keys == our_keys,
+                _ => false,
+            },
             _ => unimplemented!(),
         }
     }
@@ -1034,29 +1020,26 @@ impl Debug for MirNodeType {
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "{} γ[{}]", op_string, group_cols)
-
             }
             MirNodeType::Base {
                 ref column_specs,
                 ref keys,
                 transactional,
                 ..
-            } => {
-                write!(
-                    f,
-                    "B{} [{}; ⚷: {}]",
-                    if transactional { "*" } else { "" },
-                    column_specs
-                        .into_iter()
-                        .map(|&(ref cs, _)| cs.column.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    keys.iter()
-                        .map(|c| c.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
+            } => write!(
+                f,
+                "B{} [{}; ⚷: {}]",
+                if transactional { "*" } else { "" },
+                column_specs
+                    .into_iter()
+                    .map(|&(ref cs, _)| cs.column.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                keys.iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             MirNodeType::Extremum {
                 ref on,
                 ref group_by,
@@ -1072,7 +1055,6 @@ impl Debug for MirNodeType {
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "{} γ[{}]", op_string, group_cols)
-
             }
             MirNodeType::Filter { ref conditions } => {
                 use regex::Regex;
@@ -1167,46 +1149,43 @@ impl Debug for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
-            } => {
-                write!(
-                    f,
-                    "π [{}{}]",
-                    emit.iter()
-                        .map(|c| c.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    if literals.len() > 0 {
-                        format!(
-                            ", lit: {}",
-                            literals
-                                .iter()
-                                .map(|&(ref n, ref v)| format!("{}: {}", n, v))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    } else {
-                        format!("")
-                    }
-                )
-            }
-            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
-            MirNodeType::TopK { ref order, ref k, .. } => write!(f, "TopK [k: {}, {:?}]", k, order),
-            MirNodeType::Union {
-                ref emit,
-            } => {
-                let cols = emit
-                    .iter()
-                    .map(|c|
-                        c.iter()
-                        .map(|e| e.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+            } => write!(
+                f,
+                "π [{}{}]",
+                emit.iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if literals.len() > 0 {
+                    format!(
+                        ", lit: {}",
+                        literals
+                            .iter()
+                            .map(|&(ref n, ref v)| format!("{}: {}", n, v))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )
+                } else {
+                    format!("")
+                }
+            ),
+            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::TopK {
+                ref order, ref k, ..
+            } => write!(f, "TopK [k: {}, {:?}]", k, order),
+            MirNodeType::Union { ref emit } => {
+                let cols = emit.iter()
+                    .map(|c| {
+                        c.iter()
+                            .map(|e| e.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
                     .collect::<Vec<_>>()
                     .join(" ⋃ ");
 
                 write!(f, "{}", cols)
-            },
+            }
         }
     }
 }
@@ -1230,7 +1209,8 @@ fn adapt_base_node(
                 ColumnConstraint::DefaultValue(ref dv) => Some(dv.into()),
                 _ => None,
             })
-            .next() {
+            .next()
+        {
             None => DataType::None,
             Some(dv) => dv,
         };
@@ -1333,13 +1313,13 @@ fn make_union_node(
     // which might cause improper ordering of columns in a union node
     // eg. Q6 in finkelstein.txt
     for (i, n) in ancestors.clone().iter().enumerate() {
-        let emit_cols = emit[i].iter()
+        let emit_cols = emit[i]
+            .iter()
             .map(|c| n.borrow().column_id_for_column(c))
             .collect::<Vec<_>>();
 
         let ni = n.borrow().flow_node_addr().unwrap();
         emit_column_id.insert(ni, emit_cols);
-
     }
     let node = mig.add_ingredient(
         String::from(name),
@@ -1399,20 +1379,16 @@ fn make_grouped_node(
     assert!(group_col_indx.len() > 0);
 
     let na = match kind {
-        GroupedNodeType::Aggregation(agg) => {
-            mig.add_ingredient(
-                String::from(name),
-                column_names.as_slice(),
-                agg.over(parent_na, over_col_indx, group_col_indx.as_slice()),
-            )
-        }
-        GroupedNodeType::Extremum(extr) => {
-            mig.add_ingredient(
-                String::from(name),
-                column_names.as_slice(),
-                extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
-            )
-        }
+        GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            agg.over(parent_na, over_col_indx, group_col_indx.as_slice()),
+        ),
+        GroupedNodeType::Extremum(extr) => mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
+        ),
         GroupedNodeType::GroupConcat(sep) => {
             use ops::grouped::concat::{GroupConcat, TextComponent};
 
@@ -1489,30 +1465,28 @@ fn make_join_node(
     // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
     // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
     // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
-    let left_join_col_id = projected_cols_left.iter().position(|lc| lc == on_left.first().unwrap()).unwrap();
-    let right_join_col_id = projected_cols_right.iter().position(|rc| rc == on_right.first().unwrap()).unwrap();
+    let left_join_col_id = projected_cols_left
+        .iter()
+        .position(|lc| lc == on_left.first().unwrap())
+        .unwrap();
+    let right_join_col_id = projected_cols_right
+        .iter()
+        .position(|rc| rc == on_right.first().unwrap())
+        .unwrap();
 
     let join_config = projected_cols_left
         .iter()
         .enumerate()
-        .map(|(i, _)| {
-            if i == left_join_col_id {
-                JoinSource::B(
-                    i,
-                    right_join_col_id,
-                )
-            }
-            else {
-                JoinSource::L(i)
-            }
+        .map(|(i, _)| if i == left_join_col_id {
+            JoinSource::B(i, right_join_col_id)
+        } else {
+            JoinSource::L(i)
         })
         .chain(
             projected_cols_right
-            .iter()
-            .enumerate()
-            .map(|(i, _)|
-                JoinSource::R(i)
-            )
+                .iter()
+                .enumerate()
+                .map(|(i, _)| JoinSource::R(i)),
         )
         .collect();
 

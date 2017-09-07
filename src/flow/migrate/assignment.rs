@@ -13,7 +13,6 @@ pub fn assign(
     new: &HashSet<NodeIndex>,
     ndomains: &mut usize,
 ) {
-
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we use a couple of heuristics to pick and assignment:
     //
@@ -62,8 +61,8 @@ pub fn assign(
                 // sharder belongs to parent domain
                 ps[0].1.domain().index()
             } else if n.sharded_by() == Sharding::None &&
-                       ps.iter()
-                           .any(|&(_, ref p)| p.sharded_by() != Sharding::None)
+                ps.iter()
+                    .any(|&(_, ref p)| p.sharded_by() != Sharding::None)
             {
                 // shard merger
                 next_domain()

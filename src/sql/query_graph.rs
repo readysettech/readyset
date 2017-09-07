@@ -36,29 +36,25 @@ impl Ord for OutputColumn {
                 ref name,
                 ref table,
                 ..
-            }) => {
-                match *other {
-                    OutputColumn::Data(Column {
-                        name: ref other_name,
-                        table: ref other_table,
-                        ..
-                    }) |
-                    OutputColumn::Literal(LiteralColumn {
-                        name: ref other_name,
-                        table: ref other_table,
-                        ..
-                    }) => {
-                        if table.is_some() && other_table.is_some() {
-                            match table.cmp(&other_table) {
-                                Ordering::Equal => name.cmp(&other_name),
-                                x => x,
-                            }
-                        } else {
-                            name.cmp(&other_name)
-                        }
+            }) => match *other {
+                OutputColumn::Data(Column {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
+                OutputColumn::Literal(LiteralColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) => if table.is_some() && other_table.is_some() {
+                    match table.cmp(&other_table) {
+                        Ordering::Equal => name.cmp(&other_name),
+                        x => x,
                     }
-                }
-            }
+                } else {
+                    name.cmp(&other_name)
+                },
+            },
         }
     }
 }
@@ -75,31 +71,27 @@ impl PartialOrd for OutputColumn {
                 ref name,
                 ref table,
                 ..
-            }) => {
-                match *other {
-                    OutputColumn::Data(Column {
-                        name: ref other_name,
-                        table: ref other_table,
-                        ..
-                    }) |
-                    OutputColumn::Literal(LiteralColumn {
-                        name: ref other_name,
-                        table: ref other_table,
-                        ..
-                    }) => {
-                        if table.is_some() && other_table.is_some() {
-                            match table.cmp(&other_table) {
-                                Ordering::Equal => Some(name.cmp(&other_name)),
-                                x => Some(x),
-                            }
-                        } else if table.is_none() && other_table.is_none() {
-                            Some(name.cmp(&other_name))
-                        } else {
-                            None
-                        }
+            }) => match *other {
+                OutputColumn::Data(Column {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
+                OutputColumn::Literal(LiteralColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) => if table.is_some() && other_table.is_some() {
+                    match table.cmp(&other_table) {
+                        Ordering::Equal => Some(name.cmp(&other_name)),
+                        x => Some(x),
                     }
-                }
-            }
+                } else if table.is_none() && other_table.is_none() {
+                    Some(name.cmp(&other_name))
+                } else {
+                    None
+                },
+            },
         }
     }
 }
@@ -142,13 +134,12 @@ impl QueryGraph {
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
     pub fn parameters<'a>(&'a self) -> Vec<&'a Column> {
-        self.relations.values().fold(
-            Vec::new(),
-            |mut acc: Vec<&'a Column>, ref qgn| {
+        self.relations
+            .values()
+            .fold(Vec::new(), |mut acc: Vec<&'a Column>, ref qgn| {
                 acc.extend(qgn.parameters.iter());
                 acc
-            },
-        )
+            })
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -173,11 +164,9 @@ impl QueryGraph {
         for n in self.relations.values() {
             for p in &n.predicates {
                 match *p {
-                    ComparisonOp(ref ct) | LogicalOp (ref ct) =>  {
-                        for c in &ct.contained_columns() {
-                            attrs_vec.push(c);
-                            attrs.insert(c);
-                        }
+                    ComparisonOp(ref ct) | LogicalOp(ref ct) => for c in &ct.contained_columns() {
+                        attrs_vec.push(c);
+                        attrs.insert(c);
                     },
                     _ => unreachable!(),
                 }
@@ -186,20 +175,16 @@ impl QueryGraph {
         for e in self.edges.values() {
             match *e {
                 QueryGraphEdge::Join(ref join_predicates) |
-                QueryGraphEdge::LeftJoin(ref join_predicates) => {
-                    for p in join_predicates {
-                        for c in &p.contained_columns() {
-                            attrs_vec.push(c);
-                            attrs.insert(c);
-                        }
-                    }
-                }
-                QueryGraphEdge::GroupBy(ref cols) => {
-                    for c in cols {
+                QueryGraphEdge::LeftJoin(ref join_predicates) => for p in join_predicates {
+                    for c in &p.contained_columns() {
                         attrs_vec.push(c);
                         attrs.insert(c);
                     }
-                }
+                },
+                QueryGraphEdge::GroupBy(ref cols) => for c in cols {
+                    attrs_vec.push(c);
+                    attrs.insert(c);
+                },
             }
         }
 
@@ -235,11 +220,15 @@ fn split_conjunctions(ces: Vec<ConditionExpression>) -> Vec<ConditionExpression>
                     Operator::And => {
                         new_ces.extend(split_conjunctions(vec![*ct.left.clone()]));
                         new_ces.extend(split_conjunctions(vec![*ct.right.clone()]));
-                    },
-                    _ => { new_ces.push(ce.clone()); }
+                    }
+                    _ => {
+                        new_ces.push(ce.clone());
+                    }
                 };
-            },
-            _ => { new_ces.push(ce.clone()); }
+            }
+            _ => {
+                new_ces.push(ce.clone());
+            }
         }
     }
 
@@ -293,28 +282,39 @@ fn classify_conditionals(
             );
 
             match ct.operator {
-                Operator::And => {
-                    for (t, ces) in new_local {
-                        assert!(ces.len() <= 2, "can only combine two or fewer ConditionExpression's");
-                        if ces.len() == 2 {
-                            let new_ce = ConditionExpression::LogicalOp(ConditionTree {
-                                operator: Operator::And,
-                                left: Box::new(ces.first().unwrap().clone()),
-                                right: Box::new(ces.last().unwrap().clone()),
-                            });
+                Operator::And => for (t, ces) in new_local {
+                    assert!(
+                        ces.len() <= 2,
+                        "can only combine two or fewer ConditionExpression's"
+                    );
+                    if ces.len() == 2 {
+                        let new_ce = ConditionExpression::LogicalOp(ConditionTree {
+                            operator: Operator::And,
+                            left: Box::new(ces.first().unwrap().clone()),
+                            right: Box::new(ces.last().unwrap().clone()),
+                        });
 
-                            let e = local.entry(t.to_string()).or_insert(Vec::new());
-                            e.push(new_ce);
-                        } else {
-                            let e = local.entry(t.to_string()).or_insert(Vec::new());
-                            e.extend(ces);
-                        }
+                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        e.push(new_ce);
+                    } else {
+                        let e = local.entry(t.to_string()).or_insert(Vec::new());
+                        e.extend(ces);
                     }
                 },
                 Operator::Or => {
-                    assert!(new_join.is_empty(), "can't handle OR expressions between join predicates");
-                    assert!(new_params.is_empty(), "can't handle OR expressions between query parameter predicates");
-                    assert_eq!(new_local.keys().len(), 1, "can't handle OR expressions between different tables");
+                    assert!(
+                        new_join.is_empty(),
+                        "can't handle OR expressions between join predicates"
+                    );
+                    assert!(
+                        new_params.is_empty(),
+                        "can't handle OR expressions between query parameter predicates"
+                    );
+                    assert_eq!(
+                        new_local.keys().len(),
+                        1,
+                        "can't handle OR expressions between different tables"
+                    );
                     for (t, ces) in new_local {
                         assert_eq!(ces.len(), 2, "should combine only 2 ConditionExpression's");
                         let new_ce = ConditionExpression::LogicalOp(ConditionTree {
@@ -327,7 +327,7 @@ fn classify_conditionals(
                         e.push(new_ce);
                     }
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
 
             join.extend(new_join);
@@ -345,9 +345,8 @@ fn classify_conditionals(
                                 if ct.operator == Operator::Equal || ct.operator == Operator::In {
                                     // equi-join between two tables
                                     let mut join_ct = ct.clone();
-                                    if let Ordering::Less = fr.table
-                                        .as_ref()
-                                        .cmp(&fl.table.as_ref())
+                                    if let Ordering::Less =
+                                        fr.table.as_ref().cmp(&fl.table.as_ref())
                                     {
                                         use std::mem;
                                         mem::swap(&mut join_ct.left, &mut join_ct.right);
@@ -373,12 +372,10 @@ fn classify_conditionals(
                             }
                         }
                         // right-hand side is a placeholder, so this must be a query parameter
-                        ConditionBase::Placeholder => {
-                            if let ConditionBase::Field(ref lf) = *l {
-                                params.push(lf.clone());
-                            }
-                        }
-                        ConditionBase::NestedSelect(_) => unimplemented!()
+                        ConditionBase::Placeholder => if let ConditionBase::Field(ref lf) = *l {
+                            params.push(lf.clone());
+                        },
+                        ConditionBase::NestedSelect(_) => unimplemented!(),
                     }
                 };
             };
@@ -425,13 +422,11 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                                     }
                                 }
                             }
-                            Some(t) => {
-                                if *t == rel {
-                                    Some(c.clone())
-                                } else {
-                                    None
-                                }
-                            }
+                            Some(t) => if *t == rel {
+                                Some(c.clone())
+                            } else {
+                                None
+                            },
                         }
                     }
                 })
@@ -451,14 +446,12 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     }
     for jc in &st.join {
         match jc.right {
-            JoinRightSide::Table(ref table) => {
-                if !qg.relations.contains_key(&table.name) {
-                    qg.relations.insert(
-                        table.name.clone(),
-                        new_node(table.name.clone(), Vec::new(), st),
-                    );
-                }
-            }
+            JoinRightSide::Table(ref table) => if !qg.relations.contains_key(&table.name) {
+                qg.relations.insert(
+                    table.name.clone(),
+                    new_node(table.name.clone(), Vec::new(), st),
+                );
+            },
             _ => unimplemented!(),
         }
     }
@@ -642,18 +635,19 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
     //    nodes corresponding to individual relations.
     for field in st.fields.iter() {
         match *field {
-            FieldExpression::All |
-            FieldExpression::AllInTable(_) => panic!("Stars should have been expanded by now!"),
+            FieldExpression::All | FieldExpression::AllInTable(_) => {
+                panic!("Stars should have been expanded by now!")
+            }
             FieldExpression::Literal(ref l) => {
                 qg.columns.push(OutputColumn::Literal(LiteralColumn {
                     name: String::from("literal"),
                     table: None,
                     value: l.clone(),
                 }));
-            },
+            }
             FieldExpression::Col(ref c) => {
                 match c.function {
-                    None => (),  // we've already dealt with this column as part of some relation
+                    None => (), // we've already dealt with this column as part of some relation
                     Some(_) => {
                         // add a special node representing the computed columns; if it already
                         // exists, add another computed column to it

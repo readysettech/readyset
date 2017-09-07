@@ -205,12 +205,10 @@ impl ReadHandle {
         F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
         match *self {
-            ReadHandle::Sharded(ref shards) => {
-                shards[::shard_by(key, shards.len())]
-                    .as_ref()
-                    .unwrap()
-                    .find_and(key, then, block)
-            }
+            ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
+                .as_ref()
+                .unwrap()
+                .find_and(key, then, block),
             ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().find_and(key, then, block),
         }
     }
@@ -221,12 +219,10 @@ impl ReadHandle {
         F: FnMut(&[Arc<Vec<DataType>>]) -> T,
     {
         match *self {
-            ReadHandle::Sharded(ref shards) => {
-                shards[::shard_by(key, shards.len())]
-                    .as_ref()
-                    .unwrap()
-                    .try_find_and(key, then)
-            }
+            ReadHandle::Sharded(ref shards) => shards[::shard_by(key, shards.len())]
+                .as_ref()
+                .unwrap()
+                .try_find_and(key, then),
             ReadHandle::Singleton(ref srh) => srh.as_ref().unwrap().try_find_and(key, then),
         }
     }

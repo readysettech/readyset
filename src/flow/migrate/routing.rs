@@ -11,7 +11,7 @@ use flow::domain;
 use flow::node;
 use petgraph;
 use petgraph::graph::NodeIndex;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use slog::Logger;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
@@ -22,7 +22,6 @@ pub fn add(
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
 ) -> HashMap<(NodeIndex, NodeIndex), NodeIndex> {
-
     // find all new nodes in topological order. we collect first since we'll be mutating the graph
     // below. it's convenient to have the nodes in topological order, because we then know that
     // we'll first add egress nodes, and then the related ingress nodes. if we're ever required to
@@ -85,13 +84,12 @@ pub fn add(
             // parent is in other domain! does it already have an egress?
             let mut ingress = None;
             if parent != source {
-                'search: for pchild in graph
-                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                'search: for pchild in
+                    graph.neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
                 {
                     if graph[pchild].is_egress() {
                         // it does! does `domain` have an ingress already listed there?
-                        for i in graph
-                            .neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing)
+                        for i in graph.neighbors_directed(pchild, petgraph::EdgeDirection::Outgoing)
                         {
                             assert!(graph[i].is_ingress());
                             if graph[i].domain() == domain {
@@ -173,8 +171,8 @@ pub fn add(
             }
 
             let sender = {
-                let mut senders = graph
-                    .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
+                let mut senders =
+                    graph.neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
                 let sender = senders.next().expect("ingress has no parents");
                 assert_eq!(senders.count(), 0, "ingress had more than one parent");
                 sender
@@ -256,7 +254,6 @@ pub fn connect(
     domains: &mut HashMap<domain::Index, domain::DomainHandle>,
     new: &HashSet<NodeIndex>,
 ) {
-
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
     for &node in new {
         let n = &graph[node];
