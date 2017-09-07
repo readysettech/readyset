@@ -6,7 +6,7 @@ use flow::prelude::{WorkerEndpoint, WorkerIdentifier};
 use flow::domain;
 
 pub trait DomainPlacementStrategy<'a> {
-    fn place_domain(&mut self, d: &domain::Index) -> Option<WorkerIdentifier>;
+    fn place_domain(&mut self, d: &domain::Index, s: usize) -> Option<WorkerIdentifier>;
 }
 
 pub(crate) struct RoundRobinPlacer<'a> {
@@ -22,7 +22,7 @@ impl<'a> RoundRobinPlacer<'a> {
 }
 
 impl<'a> DomainPlacementStrategy<'a> for RoundRobinPlacer<'a> {
-    fn place_domain(&mut self, _: &domain::Index) -> Option<WorkerIdentifier> {
+    fn place_domain(&mut self, _: &domain::Index, _: usize) -> Option<WorkerIdentifier> {
         self.iter.next().map(|ref w| w.0.clone())
     }
 }

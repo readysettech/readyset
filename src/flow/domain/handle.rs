@@ -159,7 +159,7 @@ impl DomainHandle {
 
             // TODO(malte): simple round-robin placement for the moment
             let worker = placer
-                .place_domain(&idx)
+                .place_domain(&idx, i)
                 .map(|wi| workers[&wi].clone());
 
             match worker {
