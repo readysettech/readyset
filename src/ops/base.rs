@@ -68,10 +68,6 @@ impl Base {
             .map(|&col| (col, self.defaults[col].clone()))
             .collect()
     }
-
-    pub(crate) fn is_unmodified(&self) -> bool {
-        self.unmodified
-    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
