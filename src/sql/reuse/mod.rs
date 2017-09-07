@@ -1,5 +1,5 @@
 use nom_sql::Table;
-use sql::query_graph::QueryGraph;
+use sql::query_graph::{QueryGraph, QueryGraphEdge};
 use mir::MirQuery;
 
 use std::vec::Vec;
@@ -33,9 +33,10 @@ pub struct ReuseConfig {
 impl ReuseConfig {
     pub fn reuse_candidates<'a>(
         &self,
-        qg: &QueryGraph,
+        qg: &mut QueryGraph,
         query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
     ) -> Vec<(ReuseType, &'a QueryGraph)> {
+        self.make_join_order(qg);
         match self.config {
             ReuseConfigType::Finkelstein => {
                 finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)
@@ -43,6 +44,20 @@ impl ReuseConfig {
             ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs),
             ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
         }
+
+    }
+
+    pub fn make_join_order(&self, qg: &mut QueryGraph) {
+        let mut join_order: Vec<(String, String, usize)> = Vec::new();
+        for (&(ref src, ref dst), edge) in qg.edges.iter() {
+            match *edge {
+                QueryGraphEdge::Join(ref jps) => join_order.extend(jps.iter().enumerate().map(|(idx, _)| (src.clone(), dst.clone(), idx)).collect::<Vec<_>>()),
+                QueryGraphEdge::LeftJoin(ref jps) => join_order.extend(jps.iter().enumerate().map(|(idx, _)| (src.clone(), dst.clone(), idx)).collect::<Vec<_>>()),
+                QueryGraphEdge::GroupBy(_) => continue
+            }
+        }
+
+        qg.join_order = join_order;
     }
 
     pub fn default() -> ReuseConfig {

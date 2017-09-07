@@ -10,6 +10,7 @@ use std::string::String;
 use std::vec::Vec;
 
 use sql::query_signature::QuerySignature;
+use ops::join::JoinType;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -120,6 +121,9 @@ pub struct QueryGraph {
     /// Final set of projected columns in this query; may include literals in addition to the
     /// columns reflected in individual relations' `QueryGraphNode` structures.
     pub columns: Vec<OutputColumn>,
+    /// Establishes an order for join predicates. Each join predicate can be identified by
+    /// its (src, dst) pair, and its index in the array of predicates.
+    pub join_order: Vec<(String, String, usize)>,
 }
 
 impl QueryGraph {
@@ -128,6 +132,7 @@ impl QueryGraph {
             relations: HashMap::new(),
             edges: HashMap::new(),
             columns: Vec::new(),
+            join_order: Vec::new(),
         }
     }
 
@@ -140,6 +145,26 @@ impl QueryGraph {
                 acc.extend(qgn.parameters.iter());
                 acc
             })
+    }
+
+    /// Returns an array of join predicates sorted according to the query graph's join order.
+    pub fn sorted_joins<'a>(&'a self) -> Vec<(JoinType, String, String, &'a ConditionTree)> {
+        self.join_order.clone().into_iter()
+            .filter(|&(ref src, ref dst, _)| {
+                let edge = self.edges.get(&(src.clone(), dst.clone())).unwrap();
+                match *edge {
+                    QueryGraphEdge::Join(_) => true,
+                    QueryGraphEdge::LeftJoin(_) => true,
+                    QueryGraphEdge::GroupBy(_) => false,
+                }
+            }).map(|(src, dst, idx)| {
+                let edge = self.edges.get(&(src.clone(), dst.clone())).unwrap();
+                match *edge {
+                    QueryGraphEdge::Join(ref jp) => (JoinType::Inner, src, dst, jp.get(idx).unwrap()),
+                    QueryGraphEdge::LeftJoin(ref jp) => (JoinType::Left, src, dst, jp.get(idx).unwrap()),
+                    QueryGraphEdge::GroupBy(_) => unreachable!()
+                }
+            }).collect()
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check

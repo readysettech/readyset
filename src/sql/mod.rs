@@ -153,7 +153,7 @@ impl SqlIncorporator {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
-        let qg = match to_query_graph(st) {
+        let mut qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
@@ -245,7 +245,7 @@ impl SqlIncorporator {
 
         let reuse_config = ReuseConfig::default();
 
-        let reuse_candidates = reuse_config.reuse_candidates(&qg, &self.query_graphs);
+        let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
 
         if reuse_candidates.len() > 0 {
             info!(

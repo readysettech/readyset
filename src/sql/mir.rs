@@ -998,12 +998,7 @@ impl SqlToMirConverter {
                  -> (MirNodeRef, MirNodeRef) {
                     let left_node;
                     let right_node;
-                    if joined_tables.contains(src) && joined_tables.contains(dst) {
-                        // We have already handled *both* tables that are part of the join.
-                        // This should never occur, because their join predicates must be
-                        // associated with the same query graph edge.
-                        unreachable!();
-                    } else if joined_tables.contains(src) {
+                    if joined_tables.contains(src) {
                         // join left against previous join, right against base
                         left_node = prev_node.as_ref().unwrap().clone();
                         right_node = base_nodes[dst.as_str()].clone();
@@ -1022,38 +1017,23 @@ impl SqlToMirConverter {
                     (left_node, right_node)
                 };
 
-                for &(&(ref src, ref dst), edge) in &sorted_edges {
-                    let mut jns = Vec::new();
-                    let (join_type, jps) = match *edge {
-                        // Edge represents a LEFT JOIN
-                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
-                        // Edge represents a JOIN
-                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
-                        // Edge represents a GROUP BY, which we handle later
-                        QueryGraphEdge::GroupBy(_) => continue,
-                    };
-
+                for (join_type, src, dst, jp) in qg.sorted_joins() {
                     let (left_node, right_node) =
-                        pick_join_columns(src, dst, prev_node, &joined_tables);
+                        pick_join_columns(&src, &dst, prev_node, &joined_tables);
 
-                    let mut prev_join = right_node;
-                    for jp in jps.into_iter() {
-                        let cur_join = self.make_join_node(
-                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                            jp,
-                            left_node.clone(),
-                            prev_join.clone(),
-                            join_type.clone(),
-                        );
+                    let jn = self.make_join_node(
+                        &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                        jp,
+                        left_node,
+                        right_node,
+                        join_type,
+                    );
 
-                        prev_join = cur_join.clone();
-                        new_node_count += 1;
-                        jns.push(cur_join);
-                    }
+                    new_node_count += 1;
 
                     // bookkeeping (shared between both join types)
-                    prev_node = Some(jns.last().unwrap().clone());
-                    join_nodes.extend(jns);
+                    prev_node = Some(jn.clone());
+                    join_nodes.push(jn);
 
                     // we've now joined both tables
                     joined_tables.insert(src);
