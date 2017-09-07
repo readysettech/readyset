@@ -239,7 +239,7 @@ mod tests {
         // negatives and positives should still result in only one new current for each group
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 4); // one - and one + for each group
-        // group 1 lost 2 and gained 3
+                                 // group 1 lost 2 and gained 3
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             r[0] == 1.into() && r[1] == 2.into()
         } else {

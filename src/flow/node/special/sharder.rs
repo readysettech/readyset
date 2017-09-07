@@ -95,13 +95,15 @@ impl Sharder {
             }
 
             if let box Packet::ReplayPiece {
-                context: payload::ReplayPieceContext::Partial { .. }, ..
+                context: payload::ReplayPieceContext::Partial { .. },
+                ..
             } = m
             {
                 // we only need to send this to the shard responsible for the key being replayed!
                 // ugh, I'm sad about this double destruct, but it's necessary for borrowing :(
                 let shard = if let box Packet::ReplayPiece {
-                    context: payload::ReplayPieceContext::Partial { ref for_key, .. }, ..
+                    context: payload::ReplayPieceContext::Partial { ref for_key, .. },
+                    ..
                 } = m
                 {
                     assert_eq!(for_key.len(), 1);
@@ -110,7 +112,10 @@ impl Sharder {
                     unreachable!()
                 };
 
-                if let box Packet::ReplayPiece { ref mut nshards, .. } = m {
+                if let box Packet::ReplayPiece {
+                    ref mut nshards, ..
+                } = m
+                {
                     *nshards = 1;
                 }
 
@@ -136,7 +141,8 @@ impl Sharder {
 
         let mut force_all = false;
         if let Packet::ReplayPiece {
-            context: payload::ReplayPieceContext::Regular { last: true }, ..
+            context: payload::ReplayPieceContext::Regular { last: true },
+            ..
         } = *m
         {
             // this is the last replay piece for a full replay
@@ -164,7 +170,10 @@ impl Sharder {
             // it's unclear how we do that.
             unimplemented!();
         }
-        if let Packet::ReplayPiece { ref mut nshards, .. } = *m {
+        if let Packet::ReplayPiece {
+            ref mut nshards, ..
+        } = *m
+        {
             *nshards = self.sharded.len();
         }
 

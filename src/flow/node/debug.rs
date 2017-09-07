@@ -22,8 +22,7 @@ impl fmt::Debug for Node {
 impl Node {
     pub fn describe(&self, f: &mut fmt::Write, idx: NodeIndex) -> fmt::Result {
         let border = match self.sharded_by {
-            Sharding::ByColumn(_) |
-            Sharding::Random => "filled,dashed",
+            Sharding::ByColumn(_) | Sharding::Random => "filled,dashed",
             _ => "filled",
         };
         write!(
@@ -37,13 +36,11 @@ impl Node {
         )?;
 
         let addr = match self.index {
-            Some(ref idx) => {
-                if idx.has_local() {
-                    format!("{} / {}", idx.as_global().index(), **idx)
-                } else {
-                    format!("{} / -", idx.as_global().index())
-                }
-            }
+            Some(ref idx) => if idx.has_local() {
+                format!("{} / {}", idx.as_global().index(), **idx)
+            } else {
+                format!("{} / -", idx.as_global().index())
+            },
             None => format!("{} / -", idx.index()),
         };
         match self.inner {

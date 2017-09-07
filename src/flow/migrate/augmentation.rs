@@ -24,7 +24,6 @@ pub fn inform(
     ts: i64,
     prevs: Box<HashMap<domain::Index, i64>>,
 ) {
-
     let source = blender.source;
     for (domain, nodes) in nodes {
         let log = log.new(o!("domain" => domain.index()));

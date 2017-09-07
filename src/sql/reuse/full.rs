@@ -12,7 +12,13 @@ use std::collections::HashMap;
 pub struct Full;
 
 impl ReuseConfiguration for Full {
-    fn reuse_candidates<'a>(_qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>{
-        query_graphs.values().map(|c| (ReuseType::DirectExtension, &c.0)).collect()
+    fn reuse_candidates<'a>(
+        _qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)> {
+        query_graphs
+            .values()
+            .map(|c| (ReuseType::DirectExtension, &c.0))
+            .collect()
     }
 }

@@ -12,7 +12,7 @@ use std::fmt::Debug;
 
 use flow::domain;
 use flow::prelude::*;
-use flow::payload::{IngressFromBase, EgressForBase};
+use flow::payload::{EgressForBase, IngressFromBase};
 use flow::migrate::materialization::Tag as ReplayPath;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -48,7 +48,9 @@ impl Token {
     /// Generate an empty token that conflicts with nothing. Such a token can be used to do a
     /// transaction that has no read set.
     pub fn empty() -> Self {
-        Token { conflicts: Vec::new() }
+        Token {
+            conflicts: Vec::new(),
+        }
     }
 
     /// Get the latest timestamp associated with this Token.
@@ -106,7 +108,9 @@ impl TokenGenerator {
 
     // Generate a token that conflicts with any write that could modify a row with the given key.
     pub fn generate(&self, ts: i64, key: DataType) -> Token {
-        Token { conflicts: vec![(ts, key, self.conflicts.clone())] }
+        Token {
+            conflicts: vec![(ts, key, self.conflicts.clone())],
+        }
     }
 }
 
@@ -366,8 +370,7 @@ impl CheckTable {
         &mut self,
         additional_replay_paths: &mut HashMap<ReplayPath, Vec<domain::Index>>,
     ) {
-        self.replay_paths
-            .extend(additional_replay_paths.drain());
+        self.replay_paths.extend(additional_replay_paths.drain());
     }
 
     pub fn track(&mut self, gen: &TokenGenerator) {

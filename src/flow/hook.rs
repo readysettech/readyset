@@ -16,8 +16,7 @@ unsafe impl Send for Memcache {}
 /// A node that pushes updates to an external datastore. Currently only Memcached is supported.
 #[derive(Serialize, Deserialize)]
 pub struct Hook {
-    #[serde(skip)]
-    client: Option<Memcache>,
+    #[serde(skip)] client: Option<Memcache>,
     key_columns: Vec<usize>,
     name: Value,
 
@@ -72,18 +71,15 @@ impl Hook {
         let mut modified_keys: Vec<_> = records
             .into_iter()
             .map(|rec| match rec {
-                Record::Positive(a) |
-                Record::Negative(a) => {
-                    a.iter()
-                        .enumerate()
-                        .filter_map(|(i, v)| if self.key_columns.iter().any(|col| col == &i) {
-                            Some(v)
-                        } else {
-                            None
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }
+                Record::Positive(a) | Record::Negative(a) => a.iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| if self.key_columns.iter().any(|col| col == &i) {
+                        Some(v)
+                    } else {
+                        None
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>(),
                 Record::DeleteRequest(..) => unreachable!(),
             })
             .collect();
@@ -95,7 +91,8 @@ impl Hook {
         // Push to Memcached
         for key in modified_keys {
             let rows = match self.state
-                .lookup(&self.key_columns[..], &KeyType::from(&key[..])) {
+                .lookup(&self.key_columns[..], &KeyType::from(&key[..]))
+            {
                 LookupResult::Some(rows) => rows,
                 LookupResult::Missing => {
                     unreachable!();

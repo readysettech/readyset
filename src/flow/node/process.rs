@@ -179,5 +179,4 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
         }
         Vec::new()
     }
-
 }

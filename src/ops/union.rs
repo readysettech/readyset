@@ -137,14 +137,11 @@ impl Ingredient for Union {
         _: &StateMap,
     ) -> ProcessingResult {
         match self.emit {
-            Emit::AllFrom(_) => {
-                ProcessingResult {
-                    results: rs,
-                    misses: Vec::new(),
-                }
-            }
+            Emit::AllFrom(_) => ProcessingResult {
+                results: rs,
+                misses: Vec::new(),
+            },
             Emit::Project { ref emit_l, .. } => {
-
                 let rs = rs.into_iter()
                     .map(move |rec| {
                         let (r, pos) = rec.extract();
@@ -278,13 +275,11 @@ impl Ingredient for Union {
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
         match self.emit {
             Emit::AllFrom(p) => Some(vec![(p.as_global(), col)]),
-            Emit::Project { ref emit, .. } => {
-                Some(
-                    emit.iter()
-                        .map(|(src, emit)| (src.as_global(), emit[col]))
-                        .collect(),
-                )
-            }
+            Emit::Project { ref emit, .. } => Some(
+                emit.iter()
+                    .map(|(src, emit)| (src.as_global(), emit[col]))
+                    .collect(),
+            ),
         }
     }
 
@@ -311,11 +306,9 @@ impl Ingredient for Union {
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         match self.emit {
             Emit::AllFrom(p) => vec![(p.as_global(), Some(col))],
-            Emit::Project { ref emit, .. } => {
-                emit.iter()
-                    .map(|(src, emit)| (src.as_global(), Some(emit[col])))
-                    .collect()
-            }
+            Emit::Project { ref emit, .. } => emit.iter()
+                .map(|(src, emit)| (src.as_global(), Some(emit[col])))
+                .collect(),
         }
     }
 }

@@ -14,18 +14,16 @@ fn rewrite_conditional(
     let translate_column = |f: Column| {
         let new_f = match f.table {
             None => f,
-            Some(t) => {
-                Column {
-                    name: f.name,
-                    alias: f.alias,
-                    table: if table_aliases.contains_key(&t) {
-                        Some(table_aliases[&t].clone())
-                    } else {
-                        Some(t)
-                    },
-                    function: None,
-                }
-            }
+            Some(t) => Column {
+                name: f.name,
+                alias: f.alias,
+                table: if table_aliases.contains_key(&t) {
+                    Some(table_aliases[&t].clone())
+                } else {
+                    Some(t)
+                },
+                function: None,
+            },
         };
         ConditionExpression::Base(ConditionBase::Field(new_f))
     };
@@ -83,20 +81,16 @@ impl AliasRemoval for SqlQuery {
                     }
                     for jc in &sq.join {
                         match jc.right {
-                            JoinRightSide::Table(ref t) => {
+                            JoinRightSide::Table(ref t) => match t.alias {
+                                None => (),
+                                Some(ref a) => add_alias(a, &t.name),
+                            },
+                            JoinRightSide::Tables(ref ts) => for t in ts {
                                 match t.alias {
                                     None => (),
                                     Some(ref a) => add_alias(a, &t.name),
                                 }
-                            }
-                            JoinRightSide::Tables(ref ts) => {
-                                for t in ts {
-                                    match t.alias {
-                                        None => (),
-                                        Some(ref a) => add_alias(a, &t.name),
-                                    }
-                                }
-                            }
+                            },
                             JoinRightSide::NestedJoin(_) => unimplemented!(),
                             _ => (),
                         }
@@ -119,13 +113,11 @@ impl AliasRemoval for SqlQuery {
                             }
                             FieldExpression::Col(col)
                         }
-                        FieldExpression::AllInTable(t) => {
-                            if table_aliases.contains_key(&t) {
-                                FieldExpression::AllInTable(table_aliases[&t].clone())
-                            } else {
-                                FieldExpression::AllInTable(t)
-                            }
-                        }
+                        FieldExpression::AllInTable(t) => if table_aliases.contains_key(&t) {
+                            FieldExpression::AllInTable(table_aliases[&t].clone())
+                        } else {
+                            FieldExpression::AllInTable(t)
+                        },
                         f => f,
                     })
                     .collect();

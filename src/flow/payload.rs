@@ -69,8 +69,15 @@ pub enum ReplayPieceContext {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TransactionState {
-    Committed(i64, petgraph::graph::NodeIndex, Option<Box<HashMap<domain::Index, i64>>>),
-    Pending(checktable::Token, channel::TransactionReplySender<Result<i64, ()>>),
+    Committed(
+        i64,
+        petgraph::graph::NodeIndex,
+        Option<Box<HashMap<domain::Index, i64>>>,
+    ),
+    Pending(
+        checktable::Token,
+        channel::TransactionReplySender<Result<i64, ()>>,
+    ),
     WillCommit,
 }
 
@@ -329,26 +336,22 @@ impl Packet {
                 ref link,
                 ref data,
                 ref tracer,
-            } => {
-                Packet::Message {
-                    link: link.clone(),
-                    data: data.clone(),
-                    tracer: tracer.clone(),
-                }
-            }
+            } => Packet::Message {
+                link: link.clone(),
+                data: data.clone(),
+                tracer: tracer.clone(),
+            },
             Packet::Transaction {
                 ref link,
                 ref data,
                 ref state,
                 ref tracer,
-            } => {
-                Packet::Transaction {
-                    link: link.clone(),
-                    data: data.clone(),
-                    state: state.clone(),
-                    tracer: tracer.clone(),
-                }
-            }
+            } => Packet::Transaction {
+                link: link.clone(),
+                data: data.clone(),
+                state: state.clone(),
+                tracer: tracer.clone(),
+            },
             Packet::ReplayPiece {
                 ref link,
                 ref tag,
@@ -356,24 +359,28 @@ impl Packet {
                 ref nshards,
                 context: ref context @ ReplayPieceContext::Regular { .. },
                 ref transaction_state,
-            } => {
-                Packet::ReplayPiece {
-                    link: link.clone(),
-                    tag: tag.clone(),
-                    data: data.clone(),
-                    nshards: *nshards,
-                    context: context.clone(),
-                    transaction_state: transaction_state.clone(),
-                }
-            }
+            } => Packet::ReplayPiece {
+                link: link.clone(),
+                tag: tag.clone(),
+                data: data.clone(),
+                nshards: *nshards,
+                context: context.clone(),
+                transaction_state: transaction_state.clone(),
+            },
             _ => unreachable!(),
         }
     }
 
     pub fn trace(&self, event: PacketEvent) {
         match *self {
-            Packet::Message { tracer: Some((tag, Some(ref sender))), .. } |
-            Packet::Transaction { tracer: Some((tag, Some(ref sender))), .. } => {
+            Packet::Message {
+                tracer: Some((tag, Some(ref sender))),
+                ..
+            } |
+            Packet::Transaction {
+                tracer: Some((tag, Some(ref sender))),
+                ..
+            } => {
                 sender
                     .send(DebugEvent {
                         instant: time::Instant::now(),
@@ -387,8 +394,9 @@ impl Packet {
 
     pub fn tracer(&mut self) -> Option<&mut Tracer> {
         match *self {
-            Packet::Message { ref mut tracer, .. } |
-            Packet::Transaction { ref mut tracer, .. } => Some(tracer),
+            Packet::Message { ref mut tracer, .. } | Packet::Transaction { ref mut tracer, .. } => {
+                Some(tracer)
+            }
             _ => None,
         }
     }
@@ -402,44 +410,38 @@ impl fmt::Debug for Packet {
                 ref link,
                 ref state,
                 ..
-            } => {
-                match *state {
-                    TransactionState::Committed(ts, ..) => {
-                        write!(f, "Packet::Transaction({:?}, {})", link, ts)
-                    }
-                    TransactionState::Pending(..) => {
-                        write!(f, "Packet::Transaction({:?}, pending)", link)
-                    }
-                    TransactionState::WillCommit => write!(f, "Packet::Transaction({:?}, ?)", link),
+            } => match *state {
+                TransactionState::Committed(ts, ..) => {
+                    write!(f, "Packet::Transaction({:?}, {})", link, ts)
                 }
-            }
+                TransactionState::Pending(..) => {
+                    write!(f, "Packet::Transaction({:?}, pending)", link)
+                }
+                TransactionState::WillCommit => write!(f, "Packet::Transaction({:?}, ?)", link),
+            },
             Packet::ReplayPiece {
                 ref link,
                 ref tag,
                 ref data,
                 ..
-            } => {
-                write!(
-                    f,
-                    "Packet::ReplayPiece({:?}, {}, {} records)",
-                    link,
-                    tag.id(),
-                    data.len()
-                )
-            }
+            } => write!(
+                f,
+                "Packet::ReplayPiece({:?}, {}, {} records)",
+                link,
+                tag.id(),
+                data.len()
+            ),
             Packet::FullReplay {
                 ref link,
                 ref tag,
                 ref state,
-            } => {
-                write!(
-                    f,
-                    "Packet::FullReplay({:?}, {}, {} row state)",
-                    link,
-                    tag.id(),
-                    state.len()
-                )
-            }
+            } => write!(
+                f,
+                "Packet::FullReplay({:?}, {}, {} row state)",
+                link,
+                tag.id(),
+                state.len()
+            ),
             _ => write!(f, "Packet::Control"),
         }
     }
@@ -447,12 +449,13 @@ impl fmt::Debug for Packet {
 
 #[derive(Debug)]
 pub enum ControlReplyPacket {
-    #[cfg(debug_assertions)]
-    Ack(Backtrace),
-    #[cfg(not(debug_assertions))]
-    Ack(()),
+    #[cfg(debug_assertions)] Ack(Backtrace),
+    #[cfg(not(debug_assertions))] Ack(()),
     StateSize(usize),
-    Statistics(statistics::DomainStats, HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>),
+    Statistics(
+        statistics::DomainStats,
+        HashMap<petgraph::graph::NodeIndex, statistics::NodeStats>,
+    ),
 }
 
 impl ControlReplyPacket {

@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use ops::base::Base;
 use ops;
@@ -147,9 +147,9 @@ where
         states
             .get(&parent)
             .and_then(move |state| match state.lookup(columns, key) {
-                prelude::LookupResult::Some(rs) => Some(
-                    Some(Box::new(rs.iter().map(|r| &r[..])) as Box<_>),
-                ),
+                prelude::LookupResult::Some(rs) => {
+                    Some(Some(Box::new(rs.iter().map(|r| &r[..])) as Box<_>))
+                }
                 prelude::LookupResult::Missing => Some(None),
             })
             .or_else(|| {

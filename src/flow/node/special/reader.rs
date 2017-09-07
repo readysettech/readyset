@@ -31,17 +31,13 @@ impl From<Vec<DataType>> for StreamUpdate {
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
-    #[serde(skip)]
-    writer: Option<backlog::WriteHandle>,
+    #[serde(skip)] writer: Option<backlog::WriteHandle>,
 
-    #[serde(skip)]
-    streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
+    #[serde(skip)] streamers: Option<Vec<channel::StreamSender<Vec<StreamUpdate>>>>,
 
-    #[serde(skip)]
-    token_generator: Option<checktable::TokenGenerator>,
+    #[serde(skip)] token_generator: Option<checktable::TokenGenerator>,
 
-    #[serde(skip)]
-    barrier: Option<Barrier>,
+    #[serde(skip)] barrier: Option<Barrier>,
 
     for_node: NodeIndex,
     state: Option<usize>,
@@ -148,11 +144,7 @@ impl Reader {
         self.token_generator = Some(gen);
     }
 
-    pub fn process(
-        &mut self,
-        m: &mut Option<Box<Packet>>,
-        swap: bool,
-    ) {
+    pub fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();
             // make sure we don't fill a partial materialization
@@ -211,7 +203,11 @@ impl Reader {
             } else {
                 state.add(m.data().iter().cloned());
             }
-            if let Packet::Transaction { state: TransactionState::Committed(ts, ..), .. } = **m {
+            if let Packet::Transaction {
+                state: TransactionState::Committed(ts, ..),
+                ..
+            } = **m
+            {
                 state.update_ts(ts);
             }
 
@@ -234,9 +230,7 @@ impl Reader {
 
         // TODO: don't send replays to streams?
 
-        m.as_mut()
-            .unwrap()
-            .trace(PacketEvent::ReachedReader);
+        m.as_mut().unwrap().trace(PacketEvent::ReachedReader);
 
         if !self.streamers.as_ref().unwrap().is_empty() {
             let mut data = Some(m.take().unwrap().take_data()); // so we can .take() for last tx

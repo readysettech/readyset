@@ -149,17 +149,15 @@ impl GroupCommitQueueSet {
     /// directed to otherwise.
     fn packet_destination(p: &Box<Packet>) -> Option<LocalNodeIndex> {
         match **p {
-            Packet::Message { ref link, .. } |
-            Packet::Transaction { ref link, .. } => Some(link.dst),
+            Packet::Message { ref link, .. } | Packet::Transaction { ref link, .. } => {
+                Some(link.dst)
+            }
             _ => None,
         }
     }
 
     /// Find the first queue that has timed out waiting for more packets, and flush it to disk.
-    pub fn flush_if_necessary(
-        &mut self,
-        nodes: &DomainNodes,
-    ) -> Option<Box<Packet>> {
+    pub fn flush_if_necessary(&mut self, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let mut needs_flush = None;
         for (node, wait_start) in self.wait_start.iter() {
             if wait_start.elapsed() >= self.timeout {
@@ -178,8 +176,7 @@ impl GroupCommitQueueSet {
         nodes: &DomainNodes,
     ) -> Option<Box<Packet>> {
         match self.durability_mode {
-            DurabilityMode::DeleteOnExit |
-            DurabilityMode::Permanent => {
+            DurabilityMode::DeleteOnExit | DurabilityMode::Permanent => {
                 if !self.files.contains_key(node) {
                     let file = self.create_file(node);
                     self.files.insert(node.clone(), file);
@@ -215,11 +212,7 @@ impl GroupCommitQueueSet {
 
     /// Add a new packet to be persisted, and if this triggered a flush return an iterator over the
     /// packets that were written.
-    pub fn append<'a>(
-        &mut self,
-        p: Box<Packet>,
-        nodes: &DomainNodes,
-    ) -> Option<Box<Packet>> {
+    pub fn append<'a>(&mut self, p: Box<Packet>, nodes: &DomainNodes) -> Option<Box<Packet>> {
         let node = Self::packet_destination(&p).unwrap();
         if !self.pending_packets.contains_key(&node) {
             self.pending_packets
@@ -256,8 +249,9 @@ impl GroupCommitQueueSet {
     {
         let mut packets = packets.peekable();
         let merged_link = match **packets.peek().as_mut().unwrap() {
-            box Packet::Message { ref link, .. } |
-            box Packet::Transaction { ref link, .. } => link.clone(),
+            box Packet::Message { ref link, .. } | box Packet::Transaction { ref link, .. } => {
+                link.clone()
+            }
             _ => unreachable!(),
         };
         let mut merged_tracer: Tracer = None;
@@ -302,21 +296,17 @@ impl GroupCommitQueueSet {
         });
 
         match transaction_state {
-            Some(merged_state) => {
-                Some(Box::new(Packet::Transaction {
-                    link: merged_link,
-                    data: merged_data,
-                    tracer: merged_tracer,
-                    state: merged_state,
-                }))
-            }
-            None => {
-                Some(Box::new(Packet::Message {
-                    link: merged_link,
-                    data: merged_data,
-                    tracer: merged_tracer,
-                }))
-            }
+            Some(merged_state) => Some(Box::new(Packet::Transaction {
+                link: merged_link,
+                data: merged_data,
+                tracer: merged_tracer,
+                state: merged_state,
+            })),
+            None => Some(Box::new(Packet::Message {
+                link: merged_link,
+                data: merged_data,
+                tracer: merged_tracer,
+            })),
         }
     }
 
@@ -340,7 +330,8 @@ impl GroupCommitQueueSet {
                 checktable::TransactionResult::Aborted => {
                     for packet in packets.drain(..) {
                         if let (box Packet::Transaction {
-                            state: TransactionState::Pending(_, ref mut sender), ..
+                            state: TransactionState::Pending(_, ref mut sender),
+                            ..
                         },) = (packet,)
                         {
                             sender.send(Err(())).unwrap();
@@ -359,7 +350,8 @@ impl GroupCommitQueueSet {
             .zip(commit_decisions.iter())
             .map(|(mut packet, committed)| {
                 if let box Packet::Transaction {
-                    state: TransactionState::Pending(_, ref mut sender), ..
+                    state: TransactionState::Pending(_, ref mut sender),
+                    ..
                 } = packet
                 {
                     if *committed {
