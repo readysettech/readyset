@@ -4,9 +4,9 @@ extern crate distributary;
 extern crate hostname;
 #[macro_use]
 extern crate rustful;
+extern crate serde;
 #[macro_use]
 extern crate serde_json;
-extern crate serde;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
@@ -32,7 +32,7 @@ fn logger_pls() -> slog::Logger {
 }
 
 fn parse_args(_log: &Logger) -> Config {
-    use clap::{Arg, App};
+    use clap::{App, Arg};
 
     let matches = App::new("gulaschkanone")
         .version("0.0.1")

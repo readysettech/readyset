@@ -36,7 +36,9 @@ fn main() {
     );
 
     // run controller in the background
-    let jh = thread::spawn(move || { controller.listen(); });
+    let jh = thread::spawn(move || {
+        controller.listen();
+    });
 
     // wait for a worker to connect
     info!(log, "waiting 10s for a worker to connect...");

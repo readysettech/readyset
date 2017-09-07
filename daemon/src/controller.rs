@@ -74,7 +74,8 @@ impl Controller {
 
         let listener = TcpListener::bind(&SocketAddr::from_str(
             &format!("{}:{}", self.listen_addr, self.listen_port),
-        ).unwrap()).unwrap();
+        ).unwrap())
+            .unwrap();
 
         let mut pl: PollingLoop<CoordinationMessage> = PollingLoop::from_listener(listener);
         pl.run_polling_loop(|e| {
@@ -169,13 +170,11 @@ impl Controller {
 
     fn handle_heartbeat(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match self.workers.get_mut(&msg.source) {
-            None => {
-                crit!(
-                    self.log,
-                    "got heartbeat for unknown worker {:?}",
-                    msg.source
-                )
-            }
+            None => crit!(
+                self.log,
+                "got heartbeat for unknown worker {:?}",
+                msg.source
+            ),
             Some(ref mut ws) => {
                 ws.last_heartbeat = Instant::now();
             }

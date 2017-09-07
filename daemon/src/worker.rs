@@ -2,7 +2,7 @@ use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use slog::Logger;
 use std::net::SocketAddr;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 use std::thread::JoinHandle;
 use std::sync::Arc;
 
@@ -61,7 +61,8 @@ impl Worker {
             None => {
                 let listener = TcpListener::bind(&SocketAddr::from_str(
                     &format!("{}:{}", self.listen_addr, self.listen_port),
-                ).unwrap()).unwrap();
+                ).unwrap())
+                    .unwrap();
                 let addr = listener.local_addr().unwrap();
                 self.receiver = Some(PollingLoop::from_listener(listener));
                 addr
