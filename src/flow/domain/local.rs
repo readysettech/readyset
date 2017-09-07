@@ -1,5 +1,5 @@
 use flow::prelude::*;
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::hash_map::Entry;
 
@@ -168,6 +168,17 @@ use std::collections::hash_map;
 use fnv::FnvHashMap;
 use std::hash::Hash;
 
+pub struct Row<T>(*mut T);
+
+unsafe impl<T> Send for Row<T> {}
+
+impl<T> Deref for Row<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.0 }
+    }
+}
+
 #[derive(Clone)]
 pub enum KeyType<'a, T: 'a> {
     Single(&'a T),
@@ -176,12 +187,11 @@ pub enum KeyType<'a, T: 'a> {
     Quad((T, T, T, T)),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 enum KeyedState<T: Eq + Hash> {
-    Single(FnvHashMap<T, Vec<Box<Vec<T>>>>),
-    Double(FnvHashMap<(T, T), Vec<Box<Vec<T>>>>),
-    Tri(FnvHashMap<(T, T, T), Vec<Box<Vec<T>>>>),
-    Quad(FnvHashMap<(T, T, T, T), Vec<Box<Vec<T>>>>),
+    Single(FnvHashMap<T, Vec<Row<Vec<T>>>>),
+    Double(FnvHashMap<(T, T), Vec<Row<Vec<T>>>>),
+    Tri(FnvHashMap<(T, T, T), Vec<Row<Vec<T>>>>),
+    Quad(FnvHashMap<(T, T, T, T), Vec<Row<Vec<T>>>>),
 }
 
 impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
@@ -239,7 +249,7 @@ impl<T: Eq + Hash> KeyedState<T> {
         }
     }
 
-    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Box<Vec<T>>>> {
+    pub fn lookup<'a>(&'a self, key: &KeyType<T>) -> Option<&'a Vec<Row<Vec<T>>>> {
         match (self, key) {
             (&KeyedState::Single(ref m), &KeyType::Single(k)) => m.get(k),
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
@@ -264,17 +274,18 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
 }
 
 pub enum LookupResult<'a, T: 'a> {
-    Some(&'a [Box<Vec<T>>]),
+    Some(&'a [Row<Vec<T>>]),
     Missing,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct State<T: Hash + Eq + Clone> {
-    state: Vec<(Vec<usize>, KeyedState<T>, bool)>,
+type SingleState<T> = (Vec<usize>, KeyedState<T>, bool);
+
+pub struct State<T: Hash + Eq + Clone + 'static> {
+    state: Vec<SingleState<T>>,
     rows: usize,
 }
 
-impl<T: Hash + Eq + Clone> Default for State<T> {
+impl<T: Hash + Eq + Clone + 'static> Default for State<T> {
     fn default() -> Self {
         State {
             state: Vec::new(),
@@ -283,7 +294,7 @@ impl<T: Hash + Eq + Clone> Default for State<T> {
     }
 }
 
-impl<T: Hash + Eq + Clone> State<T> {
+impl<T: Hash + Eq + Clone + 'static> State<T> {
     /// Construct base materializations differently (potentially)
     pub fn base() -> Self {
         Self::default()
@@ -320,76 +331,76 @@ impl<T: Hash + Eq + Clone> State<T> {
         self.state.iter().any(|s| s.2)
     }
 
+    fn insert_into(s: &mut SingleState<T>, r: Row<Vec<T>>) {
+        match s.1 {
+            KeyedState::Single(ref mut map) => {
+                // treat this specially to avoid the extra Vec
+                debug_assert_eq!(s.0.len(), 1);
+                // i *wish* we could use the entry API here, but it would mean an extra clone
+                // in the common case of an entry already existing for the given key...
+                if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
+                    rs.push(r);
+                    return;
+                } else if s.2 {
+                    // trying to insert a record into partial materialization hole!
+                    unimplemented!();
+                }
+                map.insert(r[s.0[0]].clone(), vec![r]);
+            }
+            _ => match s.1 {
+                KeyedState::Double(ref mut map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
+                    match map.entry(key) {
+                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                        Entry::Vacant(..) if s.2 => unimplemented!(),
+                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                    }
+                }
+                KeyedState::Tri(ref mut map) => {
+                    let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
+                    match map.entry(key) {
+                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                        Entry::Vacant(..) if s.2 => unimplemented!(),
+                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                    }
+                }
+                KeyedState::Quad(ref mut map) => {
+                    let key = (
+                        r[s.0[0]].clone(),
+                        r[s.0[1]].clone(),
+                        r[s.0[2]].clone(),
+                        r[s.0[3]].clone(),
+                    );
+                    match map.entry(key) {
+                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                        Entry::Vacant(..) if s.2 => unimplemented!(),
+                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                    }
+                }
+                KeyedState::Single(..) => unreachable!(),
+            },
+        }
+    }
+
     pub fn insert(&mut self, r: Vec<T>) {
         // we alias this box into every index, and then make sure that we carefully control how
         // records in KeyedStates are dropped (in particular, that we only drop *one* index).
         let r = Box::into_raw(Box::new(r));
 
         self.rows = self.rows.saturating_add(1);
-        for s in &mut self.state {
-            let r = unsafe { Box::from_raw(r) };
-            match s.1 {
-                KeyedState::Single(ref mut map) => {
-                    // treat this specially to avoid the extra Vec
-                    debug_assert_eq!(s.0.len(), 1);
-                    // i *wish* we could use the entry API here, but it would mean an extra clone
-                    // in the common case of an entry already existing for the given key...
-                    if let Some(ref mut rs) = map.get_mut(&r[s.0[0]]) {
-                        rs.push(r);
-                        return;
-                    } else if s.2 {
-                        // trying to insert a record into partial materialization hole!
-                        unimplemented!();
-                    }
-                    map.insert(r[s.0[0]].clone(), vec![r]);
-                }
-                _ => match s.1 {
-                    KeyedState::Double(ref mut map) => {
-                        let key = (r[s.0[0]].clone(), r[s.0[1]].clone());
-                        match map.entry(key) {
-                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                            Entry::Vacant(..) if s.2 => unimplemented!(),
-                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                        }
-                    }
-                    KeyedState::Tri(ref mut map) => {
-                        let key = (r[s.0[0]].clone(), r[s.0[1]].clone(), r[s.0[2]].clone());
-                        match map.entry(key) {
-                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                            Entry::Vacant(..) if s.2 => unimplemented!(),
-                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                        }
-                    }
-                    KeyedState::Quad(ref mut map) => {
-                        let key = (
-                            r[s.0[0]].clone(),
-                            r[s.0[1]].clone(),
-                            r[s.0[2]].clone(),
-                            r[s.0[3]].clone(),
-                        );
-                        match map.entry(key) {
-                            Entry::Occupied(mut rs) => rs.get_mut().push(r),
-                            Entry::Vacant(..) if s.2 => unimplemented!(),
-                            rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
-                        }
-                    }
-                    KeyedState::Single(..) => unreachable!(),
-                },
-            }
+        for i in 0..self.state.len() {
+            State::insert_into(&mut self.state[i], Row(r));
         }
     }
 
     pub fn remove(&mut self, r: &[T]) {
         let mut removed = None;
-        let fix = |removed: &mut Option<_>, rs: &mut Vec<Box<Vec<T>>>| {
+        let fix = |removed: &mut Option<_>, rs: &mut Vec<Row<Vec<T>>>| {
             // rustfmt
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                use std::mem;
                 let rm = rs.swap_remove(i);
                 if removed.is_none() {
                     *removed = Some(rm);
-                } else {
-                    mem::forget(rm);
                 }
             }
         };
@@ -433,13 +444,13 @@ impl<T: Hash + Eq + Clone> State<T> {
             }
         }
 
-        if removed.is_some() {
+        if let Some(r) = removed {
+            drop(unsafe { Box::from_raw(r.0) });
             self.rows = self.rows.saturating_sub(1);
         }
-        // NOTE: removed will go out of scope here, and be dropped, and exactly *one* Box is freed
     }
 
-    pub fn iter(&self) -> hash_map::Values<T, Vec<Box<Vec<T>>>> {
+    pub fn iter(&self) -> hash_map::Values<T, Vec<Row<Vec<T>>>> {
         for &(_, ref state, partial) in &self.state {
             if let KeyedState::Single(ref map) = *state {
                 if partial {
@@ -581,8 +592,38 @@ impl<T: Hash + Eq + Clone> State<T> {
         }
     }
 
+    fn fix<'a>(rs: &'a Vec<Row<Vec<T>>>) -> impl Iterator<Item = Vec<T>> + 'a {
+        rs.iter().map(|r| Vec::clone(&**r))
+    }
+
+    pub fn cloned_records(&self) -> Vec<Vec<T>> {
+        match self.state[0].1 {
+            KeyedState::Single(ref map) => map.values().flat_map(State::fix).collect(),
+            KeyedState::Double(ref map) => map.values().flat_map(State::fix).collect(),
+            KeyedState::Tri(ref map) => map.values().flat_map(State::fix).collect(),
+            KeyedState::Quad(ref map) => map.values().flat_map(State::fix).collect(),
+        }
+    }
+
+    fn free<'a, I: Iterator<Item = &'a Vec<Row<Vec<T>>>>>(it: I) {
+        for rs in it {
+            for r in rs {
+                drop(unsafe { Box::from_raw(r.0) })
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
         self.rows = 0;
+        if !self.state.is_empty() {
+            match self.state[0].1 {
+                KeyedState::Single(ref map) => State::free(map.values()),
+                KeyedState::Double(ref map) => State::free(map.values()),
+                KeyedState::Tri(ref map) => State::free(map.values()),
+                KeyedState::Quad(ref map) => State::free(map.values()),
+            }
+        }
+
         for s in &mut self.state {
             match s.1 {
                 KeyedState::Single(ref mut map) => map.clear(),
@@ -594,42 +635,19 @@ impl<T: Hash + Eq + Clone> State<T> {
     }
 }
 
-impl<'a, T: Eq + Hash + Clone> State<T> {
-    fn unalias_for_state(&mut self, i: usize) {
-        let left = self.state.drain(..).enumerate().filter_map(|(statei, mut state)| {
-            // we want to undo all the unsafe stuff we did so that only one KeyedState is left (the
-            // given one), and it truly owns the underlying Boxes (and thus can free them or give
-            // them out). to do this, we drain() all the vectors for all keys in the other states,
-            // and mem::forget the Boxes they contain. that way, the state we care about has the
-            // only remaining reference.
-            if statei != i {
-                let nodrop = |rs| for r in rs {
-                    use std::mem;
-                    mem::forget(r);
-                };
-                match state.1 {
-                    KeyedState::Single(ref mut m) => m.drain().map(|(_, rs)| nodrop(rs)).count(),
-                    KeyedState::Double(ref mut m) => m.drain().map(|(_, rs)| nodrop(rs)).count(),
-                    KeyedState::Tri(ref mut m) => m.drain().map(|(_, rs)| nodrop(rs)).count(),
-                    KeyedState::Quad(ref mut m) => m.drain().map(|(_, rs)| nodrop(rs)).count(),
-                };
-                None
-            } else {
-                // for the last one we want the regular destructor to run, and free the Boxes,
-                // so we just let state go out of scope normally
-                Some(state)
-            }
-        }).last();
-
+impl<'a, T: Eq + Hash + Clone + 'static> State<T> {
+    fn unalias_for_state(&mut self) {
+        let left = self.state.drain(..).last();
         if let Some(left) = left {
             self.state.push(left);
         }
     }
 }
 
-impl<'a, T: Eq + Hash + Clone> Drop for State<T> {
+impl<'a, T: Eq + Hash + Clone + 'static> Drop for State<T> {
     fn drop(&mut self) {
-        self.unalias_for_state(0);
+        self.unalias_for_state();
+        self.clear();
     }
 }
 
@@ -637,20 +655,24 @@ impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
     type Item = Vec<Box<Vec<T>>>;
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(mut self) -> Self::IntoIter {
-        let i = self.state
-            .iter()
-            .position(|&(_, _, partial)| !partial)
-            .unwrap();
-        self.unalias_for_state(i);
+        // we need to make sure that the records eventually get dropped, so we need to ensure there
+        // is only one index left (which therefore owns the records), and then cast back to the
+        // original boxes.
+        self.unalias_for_state();
+        let own = |rs: Vec<Row<Vec<T>>>| {
+            rs.into_iter()
+                .map(|r| unsafe { Box::from_raw(r.0) })
+                .collect()
+        };
         self.state
             .drain(..)
             .last()
-            .map(|(_, state, _)| -> Self::IntoIter {
+            .map(move |(_, state, _)| -> Self::IntoIter {
                 match state {
-                    KeyedState::Single(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                    KeyedState::Double(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                    KeyedState::Tri(map) => Box::new(map.into_iter().map(|(_, v)| v)),
-                    KeyedState::Quad(map) => Box::new(map.into_iter().map(|(_, v)| v)),
+                    KeyedState::Single(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
+                    KeyedState::Double(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
+                    KeyedState::Tri(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
+                    KeyedState::Quad(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
                 }
             })
             .unwrap()

@@ -89,13 +89,13 @@ impl TopK {
     /// relaying to us. thus, since we got this key, our parent must have it.
     fn apply(
         &self,
-        current_topk: &[Box<Vec<DataType>>],
+        current_topk: &[Row<Vec<DataType>>],
         new: Records,
         state: &StateMap,
         group: &[DataType],
     ) -> Records {
         let mut delta: Vec<Record> = Vec::new();
-        let mut current: Vec<&Box<Vec<DataType>>> = current_topk.iter().collect();
+        let mut current: Vec<&Row<Vec<DataType>>> = current_topk.iter().collect();
         current.sort_by(|a, b| self.order.cmp(&&***a, &&***b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {

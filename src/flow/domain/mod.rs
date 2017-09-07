@@ -893,10 +893,10 @@ impl Domain {
                         // we clone the entire state so that we can continue to occasionally
                         // process incoming updates to the domain without disturbing the state that
                         // is being replayed.
-                        let state: State = self.state
+                        let state = self.state
                             .get(&from)
                             .expect("migration replay path started with non-materialized node")
-                            .clone();
+                            .cloned_records();
 
                         debug!(self.log,
                                "current state cloned for replay";
@@ -945,11 +945,7 @@ impl Domain {
                                 let start = time::Instant::now();
                                 debug!(log, "starting state chunker"; "node" => %link.dst);
 
-                                let iter = state
-                                    .into_iter()
-                                    .flat_map(|rs| rs)
-                                    .map(|rs| (*rs).clone())
-                                    .chunks(BATCH_SIZE);
+                                let iter = state.into_iter().chunks(BATCH_SIZE);
                                 let mut iter = iter.into_iter().enumerate().peekable();
 
                                 // process all records in state to completion within domain

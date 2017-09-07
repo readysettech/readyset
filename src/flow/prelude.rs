@@ -25,8 +25,7 @@ pub use flow::domain::local::Map;
 pub type DomainNodes = local::Map<cell::RefCell<Node>>;
 pub type State = local::State<core::DataType>;
 pub type StateMap = local::Map<State>;
-pub use flow::domain::local::KeyType;
-pub use flow::domain::local::LookupResult;
+pub use flow::domain::local::{KeyType, LookupResult, Row};
 
 // channel related types
 use channel;
