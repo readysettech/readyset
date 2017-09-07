@@ -1,18 +1,18 @@
 #![feature(slice_concat_ext)]
 
+extern crate backtrace;
+extern crate diff;
+extern crate distributary;
+extern crate mysql;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
-extern crate distributary;
-extern crate mysql;
-extern crate backtrace;
-extern crate diff;
 
 use mysql::OptsBuilder;
 use mysql::Params;
 
 use std::path::Path;
-use std::io::{Read, Write, BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::fs::{self, File};
 use std::collections::BTreeMap;
 use std::slice::SliceConcatExt;
@@ -25,7 +25,7 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use distributary::{Blender, Recipe, DataType};
+use distributary::{Blender, DataType, Recipe};
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 
@@ -95,12 +95,10 @@ fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
 
         let message = match info.payload().downcast_ref::<&'static str>() {
             Some(s) => *s,
-            None => {
-                match info.payload().downcast_ref::<String>() {
-                    Some(s) => &**s,
-                    None => "Box<Any>",
-                }
-            }
+            None => match info.payload().downcast_ref::<String>() {
+                Some(s) => &**s,
+                None => "Box<Any>",
+            },
         }.to_owned();
 
         let (file, line) = match info.location() {
@@ -327,8 +325,7 @@ fn check_query(
                         DataType::Int(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
                         DataType::Real(i, f) => ((i as f64) + (f as f64) * 1.0e-9).to_string(),
-                        DataType::Text(_) |
-                        DataType::TinyText(_) => v.into(),
+                        DataType::Text(_) | DataType::TinyText(_) => v.into(),
                         DataType::Timestamp(_) => unimplemented!(),
                         DataType::ContextKey(_) => unimplemented!(),
                     })
