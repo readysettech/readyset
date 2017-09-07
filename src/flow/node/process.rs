@@ -28,14 +28,6 @@ impl Node {
                 r.process(m, swap);
                 vec![]
             }
-            NodeType::Hook(ref mut h) => {
-                if let &mut Some(ref mut h) = h {
-                    h.on_input(m.take().unwrap().take_data());
-                } else {
-                    unreachable!();
-                }
-                vec![]
-            }
             NodeType::Egress(None) => unreachable!(),
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(m, on_shard.unwrap_or(0));

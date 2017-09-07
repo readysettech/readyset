@@ -368,8 +368,6 @@ extern crate petgraph;
 extern crate regex;
 extern crate timekeeper;
 
-extern crate memcached;
-
 #[macro_use]
 #[cfg(feature = "web")]
 extern crate rustful;

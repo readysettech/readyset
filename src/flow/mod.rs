@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::time;
 use std::fmt;
-use std::io;
 
 use slog;
 use petgraph;
@@ -19,7 +18,6 @@ use petgraph::graph::NodeIndex;
 pub mod core;
 pub mod debug;
 pub mod domain;
-pub mod hook;
 pub mod keys;
 pub mod migrate;
 pub mod node;
@@ -633,21 +631,6 @@ impl<'a> Migration<'a> {
             .unwrap();
 
         rx
-    }
-
-    /// Set up the given node such that its output is stored in Memcached.
-    pub fn memcached_hook(
-        &mut self,
-        n: prelude::NodeIndex,
-        name: String,
-        servers: &[(&str, usize)],
-        key: usize,
-    ) -> io::Result<prelude::NodeIndex> {
-        let h = try!(hook::Hook::new(name, servers, vec![key]));
-        let h = self.mainline.ingredients[n].mirror(h);
-        let h = self.mainline.ingredients.add_node(h);
-        self.mainline.ingredients.add_edge(n, h, ());
-        Ok(h.into())
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
