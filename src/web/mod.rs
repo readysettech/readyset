@@ -1,4 +1,4 @@
-use rustful::{Server, Handler, Context, Response, TreeRouter, HttpResult};
+use rustful::{Context, Handler, HttpResult, Response, Server, TreeRouter};
 use rustful::server::Listening;
 use rustful::server::Global;
 use std::sync::{Arc, Mutex};

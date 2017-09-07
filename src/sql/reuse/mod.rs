@@ -14,8 +14,7 @@ mod helpers;
 pub enum ReuseType {
     DirectExtension,
     PrefixReuse,
-    #[allow(dead_code)]
-    BackjoinRequired(Vec<Table>),
+    #[allow(dead_code)] BackjoinRequired(Vec<Table>),
 }
 
 enum ReuseConfigType {
@@ -32,9 +31,15 @@ pub struct ReuseConfig {
 }
 
 impl ReuseConfig {
-    pub fn reuse_candidates<'a>(&self, qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)> {
+    pub fn reuse_candidates<'a>(
+        &self,
+        qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)> {
         match self.config {
-            ReuseConfigType::Finkelstein => finkelstein::Finkelstein::reuse_candidates(qg, query_graphs),
+            ReuseConfigType::Finkelstein => {
+                finkelstein::Finkelstein::reuse_candidates(qg, query_graphs)
+            }
             ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs),
             ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs),
         }
@@ -68,5 +73,8 @@ impl ReuseConfig {
 }
 
 pub trait ReuseConfiguration {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>;
+    fn reuse_candidates<'a>(
+        qg: &QueryGraph,
+        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+    ) -> Vec<(ReuseType, &'a QueryGraph)>;
 }
