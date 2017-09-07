@@ -29,12 +29,6 @@ pub enum ReuseConfigType {
     NoReuse,
 }
 
-<<<<<<< HEAD
-// TODO(larat): make this a dynamic option
-const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Full;
-
-=======
->>>>>>> configurable reuse type
 pub struct ReuseConfig {
     config: ReuseConfigType,
 }

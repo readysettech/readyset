@@ -1,6 +1,6 @@
 use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
-use {SqlIncorporator, Migration};
+use {Migration, SqlIncorporator};
 use sql::reuse::ReuseConfigType;
 use flow::prelude::NodeIndex;
 

@@ -13,7 +13,7 @@ use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
 use self::reuse::{ReuseConfig, ReuseConfigType};
-use sql::query_graph::{QueryGraph, to_query_graph};
+use sql::query_graph::{to_query_graph, QueryGraph};
 
 use slog;
 use std::collections::HashMap;
