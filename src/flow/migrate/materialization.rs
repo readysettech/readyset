@@ -109,17 +109,35 @@ impl Materializations {
         // is true). `extend` will be called once per new domain, so it will be called several
         // times before `commit` is ultimately called to create the new materializations.
         //
-        // There are two ways in which an indexing obligation can be created: a node can ask for
-        // its own state to be materialized, or a node can indicate that it will perform lookups on
-        // its ancestors. In the former case, the materialization decision is easy: we materialize
-        // the node in question. In the latter case, it is a bit more complex, since the parent may
-        // be in a different domain, or may be a "query through" node that we want to avoid
-        // materializing.
+        // There are multiple ways in which an indexing obligation can be created:
         //
-        // Computing indexing obligations is therefore a two-stage process. First, we compute what
-        // indexes each *new* operator requires. Then, we push those indexing requirements up to
-        // the nearest non-"query through" operator.
-        let mut obligations = HashMap::new();
+        //  - a node can ask for its own state to be materialized
+        //  - a node can indicate that it will perform lookups on its ancestors
+        //  - a node can declare that it would benefit from an ancestor index for replays
+        //
+        // The last point is special, in that those indexes can be hoisted past *all* nodes,
+        // including across domain boundaries. We call these "replay obligations". They are also
+        // special in that they also need to be carried along all the way to the nearest *full*
+        // materialization.
+        //
+        // In the first case, the materialization decision is easy: we materialize the node in
+        // question. In the latter case, it is a bit more complex, since the parent may be in a
+        // different domain, or may be a "query through" node that we want to avoid materializing.
+        //
+        // Computing indexing obligations is therefore a multi-stage process.
+        //
+        //  1. Compute what indexes each *new* operator requires.
+        //  2. Add materializations for any lookup obligations, considering query-through.
+        //  3. Recursively add indexes for replay obligations.
+        //
+
+        // Holds all lookup obligations. Keyed by the node that should be materialized.
+        let mut lookup_obligations = HashMap::new();
+
+        // Holds all replay obligations. Keyed by the node whose *parent* should be materialized.
+        let mut replay_obligations = HashMap::new();
+
+        // Find indices we need to add.
         for &(ni, new) in nodes {
             if !new {
                 // we only construct obligations from new nodes, since existing nodes cannot
@@ -129,7 +147,7 @@ impl Materializations {
 
             let n = &graph[ni];
             let mut indices = if n.is_reader() {
-                let (anc, key) = n.with_reader(|r| (r.is_for(), r.key())).unwrap();
+                let key = n.with_reader(|r| r.key()).unwrap();
                 if key.is_none() {
                     // only streaming, no indexing needed
                     continue;
@@ -137,9 +155,8 @@ impl Materializations {
 
                 // for a reader that will get lookups, we'd like to have an index above us
                 // somewhere on our key so that we can make the reader partial
-                // XXX: always?
                 let mut i = HashMap::new();
-                i.insert(anc, (vec![key.unwrap()], false));
+                i.insert(ni, (vec![key.unwrap()], false));
                 i
             } else if !n.is_internal() {
                 // non-internal nodes cannot generate indexing obligations
@@ -154,126 +171,230 @@ impl Materializations {
                 indices.insert(ni, (vec![0], true));
             }
 
-            for (ni, cols) in indices {
+            for (ni, (cols, lookup)) in indices {
                 trace!(self.log, "new indexing obligation";
                        "node" => ni.index(),
-                       "columns" => ?cols);
+                       "columns" => ?cols,
+                       "lookup" => lookup);
 
-                obligations
-                    .entry(ni)
-                    .or_insert_with(HashSet::new)
-                    .insert(cols);
+                if lookup {
+                    lookup_obligations
+                        .entry(ni)
+                        .or_insert_with(HashSet::new)
+                        .insert(cols);
+                } else {
+                    replay_obligations
+                        .entry(ni)
+                        .or_insert_with(HashSet::new)
+                        .insert(cols);
+                }
             }
         }
 
-        // now, we do a little song-and-dance where we eliminate any obligations that have been
-        // met, push down any indices on "query through" operators, and decide to materialize those
-        // that aren't. And then we continue until there are no obligations left.
-        while !obligations.is_empty() {
-            let ni = obligations.keys().next().map(|&ni| ni).unwrap(); // unwrap ok because !empty
-            let indices = obligations.remove(&ni).unwrap();
+        // map all the indices to the corresponding columns in the parent
+        fn map_indices(
+            n: &Node,
+            parent: NodeIndex,
+            indices: &HashSet<Vec<usize>>,
+        ) -> Result<HashSet<Vec<usize>>, String> {
+            indices
+                .iter()
+                .map(|index| {
+                    index
+                        .iter()
+                        .map(|&col| {
+                            if !n.is_internal() {
+                                return Ok(col);
+                            }
 
-            if let Some(have) = self.have.get_mut(&ni) {
-                // no need to push these indices down further, just add them to this already
-                // materialized view (which must also be the closest).
-                for (columns, _) in indices {
-                    if have.insert(columns.clone()) {
-                        // not already indexed on this particular column set
-                        info!(self.log,
-                              "adding index to existing view";
-                              "node" => ni.index(),
-                              "columns" => ?columns,
-                          );
-                        self.added
-                            .entry(ni)
-                            .or_insert_with(HashSet::new)
-                            .insert(columns);
-                    }
-                }
-                continue;
-            }
+                            let really = n.parent_columns(col);
+                            let really = really
+                                .into_iter()
+                                .find(|&(anc, _)| anc == parent)
+                                .and_then(|(_, col)| col);
 
-            let n = &graph[ni];
-            if !n.is_internal() || !n.can_query_through() {
-                // if we have any indices that require lookups, then we can't push them up further,
-                // and we instead have to materialize this node. since we're already materializing
-                // it, we might as well add all the indices here.
-                //
-                // the n.is_internal() check is to ensure that we don't try to push indices above
-                // an ingress node.
-                //
-                // XXX: a lookup obligation could also imply that we should propagate the indexing
-                // obligation (w/o lookup) up to the parent to incentivise partial replay
-                // opportunities)
-                if !n.is_internal() || indices.iter().any(|&(_, lookup)| lookup) {
-                    let h = self.have.entry(ni).or_insert_with(HashSet::new);
-                    let a = self.added.entry(ni).or_insert_with(HashSet::new);
-                    for (columns, _) in indices {
-                        info!(self.log,
-                              "adding index to new view";
-                              "node" => ni.index(),
-                              "columns" => ?columns,
-                        );
-                        h.insert(columns.clone());
-                        a.insert(columns);
-                    }
-                }
-                continue;
-            }
-
-            // it is safe to push these obligations to the ancestor of n, either because n is
-            // query_through, or because none of the obligations require lookups.
-            let ancestors: Vec<_> = graph
-                .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-                .collect();
-            assert!(!ancestors.is_empty());
-
-            if ancestors.len() != 1 {
-                if n.is_join() {
-                    // TODO:
-                    // for joins, push only to the parent that we'll replay (how do we know?)
-                    unimplemented!();
-                } else {
-                    // for unions, push obligations to all ancestors
-                }
-            }
-
-            // XXX: we'll probably want an optimization here where we choose to materialize more
-            // specific child nodes rather than reindex less specific parent nodes.
-
-            for ancestor in ancestors {
-                // we need to figure out how the columns remap through the ancestor
-                let indices = indices
-                    .iter()
-                    .map(|&(ref index, lookup)| {
-                        let cols = index
-                            .iter()
-                            .map(|&col| {
-                                let really = n.parent_columns(col);
-                                let really = really
-                                    .into_iter()
-                                    .find(|&(anc, _)| anc == ancestor)
-                                    .and_then(|(_, col)| col);
-
-                                if really.is_none() {
-                                    error!(self.log, "could not resolve obligation past operator";
-                                           "node" => ni.index(),
-                                           "ancestor" => ancestor.index(),
-                                           "column" => col);
-                                    unreachable!();
-                                }
-                                really.unwrap()
+                            really.ok_or_else(|| {
+                                format!(
+                                    "could not resolve obligation past operator;\
+                                     node => {}, ancestor => {}, column => {}",
+                                    n.global_addr().index(),
+                                    parent.index(),
+                                    col
+                                )
                             })
-                            .collect();
-                        (cols, lookup)
-                    })
-                    .collect();
+                        })
+                        .collect()
+                })
+                .collect()
+        }
 
+        // lookup obligations are fairly rigid, in that they require a materialization, and can
+        // only be pushed through query-through nodes, and never across domains. so, we deal with
+        // those first.
+        for (ni, mut indices) in lookup_obligations {
+            // we want to find the closest materialization that allows lookups (i.e., counting
+            // query-through operators).
+            let mut mi = ni;
+            let mut m = &graph[mi];
+            loop {
+                if self.have.contains_key(&mi) {
+                    break;
+                }
+                if !m.is_internal() || !m.can_query_through() {
+                    break;
+                }
+
+                let mut parents = graph.neighbors_directed(mi, petgraph::EdgeDirection::Incoming);
+                let parent = parents.next().unwrap();
+                assert_eq!(
+                    parents.count(),
+                    0,
+                    "query_through had more than one ancestor"
+                );
+
+                // hoist index to parent
                 trace!(self.log, "hoisting indexing obligations";
-                       "for" => ni.index(),
-                       "to" => ancestor.index());
+                       "for" => mi.index(),
+                       "to" => parent.index());
+                mi = parent;
+                indices = map_indices(m, mi, &indices).unwrap();
+                m = &graph[mi];
+            }
 
-                obligations.insert(ancestor, indices);
+            for columns in indices {
+                info!(self.log,
+                          "adding lookup index to view";
+                          "node" => ni.index(),
+                          "columns" => ?columns,
+                      );
+
+                // also add a replay obligation to enable partial
+                replay_obligations
+                    .entry(mi)
+                    .or_insert_with(HashSet::new)
+                    .insert(columns.clone());
+
+                self.have
+                    .entry(mi)
+                    .or_insert_with(HashSet::new)
+                    .insert(columns.clone());
+                self.added
+                    .entry(mi)
+                    .or_insert_with(HashSet::new)
+                    .insert(columns);
+            }
+        }
+
+        // we're now going to walk the replay obligations, and try to apply them to enable more
+        // partial materialization opportunities. this is a little tricky, because there are fairly
+        // strict restrictions on when we can use partial replay. in particular, it is required
+        // that the key traces all the way back to some existing materialization, and that that
+        // materialization has a key for the same columns. this means that a single replay
+        // obligation is *really* a set of replay obligations going all the way up to the nearest
+        // full materialization.
+        for (ni, indices) in replay_obligations {
+            // we first want to find out if it's even *possible* to partially materialize this
+            // node. for that to be the case, we need to keep moving up the ancestor tree of `ni`,
+            // and check at each stage that the node either (a) is fully materialized (so we can
+            // add a key), or (b) is partially materialized on the same key. note that we
+            // *currently* cannot have multiple partial materializations on a single view.
+            //
+            // we are thus going to have to recursively walk the ancestors, keeping track of all
+            // indices we'd need to add, and only if we decide that there's nothing *preventing*
+            // partial materialization will we add those indices.
+            fn walk(
+                this: &Materializations,
+                graph: &Graph,
+                ni: NodeIndex,
+                indices: HashSet<Vec<usize>>,
+            ) -> (Vec<(NodeIndex, Vec<usize>)>, bool) {
+                let ancestors: Vec<_> = graph
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                    .collect();
+                assert!(!ancestors.is_empty());
+
+                let n = &graph[ni];
+                if n.is_internal() && n.get_base().is_some() {
+                    // can't make a base partial, no matter how much we'd like to
+                    return (Vec::new(), false);
+                }
+
+                if ancestors.len() != 1 {
+                    if n.is_join() {
+                        // TODO:
+                        // for joins, push only to the parent that we'll replay (how do we know?)
+                        return (Vec::new(), false);
+                    } else {
+                        // for unions, push obligations to all ancestors
+                    }
+                }
+
+                let mut add = Vec::new();
+                for ancestor in ancestors {
+                    let indices = map_indices(n, ancestor, &indices);
+                    if let Err(_) = indices {
+                        return (Vec::new(), false);
+                    }
+                    let indices = indices.unwrap();
+
+                    if let Some(m) = this.have.get(&ancestor) {
+                        // is the existing materialization compatible with the partial replay
+                        // opportunity that we'd like?
+                        if this.partial.contains(&ancestor) {
+                            if indices.iter().any(|idx| !m.contains(idx)) {
+                                // no -- already partial on different key
+                                // TODO
+                                return (Vec::new(), false);
+                            } else {
+                                // yes! partial on same key
+                                assert_eq!(indices.len(), 1);
+                                // no need to add an index, or to recurse further along this tree.
+                                // since a partial key is already there, we know the tree above it
+                                // must be compatible too.
+                            }
+                        } else {
+                            // yes! full materialization, so no need to recurse.
+                            // we can just add these indices to that materialization, and partial
+                            // will be possible (at least as far as this path is concerned).
+                            for index in indices {
+                                add.push((ancestor, index));
+                            }
+                        }
+                    } else {
+                        // unknown -- this node is not materialized, so we need to recurse.
+                        let (more, possible) = walk(this, graph, ancestor, indices);
+                        if !possible {
+                            return (Vec::new(), false);
+                        }
+                        add.extend(more);
+                    }
+                }
+
+                // we haven't discovered any evidence that partial is *not* possible
+                (add, true)
+            }
+
+            let (add, possible) = walk(&self, graph, ni, indices);
+            if !possible {
+                // no reason to add all these indices, because partial replay is impossible anyway.
+                continue;
+            }
+
+            // we can do partial if we add all these indices!
+            for (mi, index) in add {
+                let m = self.have.entry(mi).or_insert_with(HashSet::new);
+                if m.insert(index.clone()) {
+                    info!(self.log,
+                          "adding index to view to enable partial";
+                          "on" => mi.index(),
+                          "for" => ni.index(),
+                          "columns" => ?index,
+                    );
+                    self.added
+                        .entry(mi)
+                        .or_insert_with(HashSet::new)
+                        .insert(index);
+                }
             }
         }
     }
