@@ -492,7 +492,9 @@ impl Materializations {
 
             if reconstructed {
                 info!(self.log, "reconstruction completed";
-                      "ms" => dur_to_ns!(start.elapsed()) / 1_000_000);
+                      "ms" => dur_to_ns!(start.elapsed()) / 1_000_000,
+                      "node" => ni.index(),
+                      );
             }
         }
 
@@ -672,6 +674,8 @@ impl Materializations {
             let &(node, col) = path.last().unwrap();
             if col.is_none() {
                 // doesn't trace back to a column
+                warn!(self.log, "cannot partially materialize; key does not trace back";
+                      "key" => ?index_on);
                 return false;
             }
             let col = col.unwrap();
@@ -680,7 +684,15 @@ impl Materializations {
             self.have
                 .get(&node)
                 .map(|indices| {
-                    indices.iter().any(|idx| idx.len() == 1 && idx[0] == col)
+                    if indices.iter().any(|idx| idx.len() == 1 && idx[0] == col) {
+                        true
+                    } else {
+                        warn!(self.log, "cannot partially materialize; key not available at src";
+                              "key" => ?index_on,
+                              "col" => col,
+                              "src" => node.index());
+                        false
+                    }
                 })
                 .unwrap_or(false)
         });
