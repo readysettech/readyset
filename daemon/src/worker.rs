@@ -1,12 +1,14 @@
 use channel::{self, TcpSender};
 use channel::poll::{PollEvent, PollingLoop, ProcessResult};
 use slog::Logger;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use std::thread::JoinHandle;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder};
+use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder,
+                   NodeIndex, SingleReadHandle};
 use distributary::Index as DomainIndex;
 
 pub struct Worker {
@@ -20,6 +22,7 @@ pub struct Worker {
     sender: Option<TcpSender<CoordinationMessage>>,
     channel_coordinator: Arc<ChannelCoordinator>,
     domain_threads: Vec<JoinHandle<()>>,
+    readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
 
     // liveness
     heartbeat_every: Duration,
@@ -45,6 +48,7 @@ impl Worker {
             sender: None,
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
             domain_threads: Vec::new(),
+            readers: Arc::new(Mutex::new(HashMap::new())),
 
             heartbeat_every: heartbeat_every,
             last_heartbeat: None,
@@ -129,8 +133,7 @@ impl Worker {
         let shard = d.shard;
         let (jh, addr) = d.boot(
             self.log.clone(),
-            // domains initialize their own readers
-            Arc::default(),
+            self.readers.clone(),
             self.channel_coordinator.clone(),
         );
         self.domain_threads.push(jh);

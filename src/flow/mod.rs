@@ -52,7 +52,7 @@ macro_rules! dur_to_ns {
     }}
 }
 
-type Readers = Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>;
+type Readers = Arc<Mutex<HashMap<(NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type Edge = bool; // should the edge be materialized?
 
 /// `Blender` is the core component of the alternate Soup implementation.
@@ -78,7 +78,7 @@ pub struct Blender {
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
     debug_channel: Option<SocketAddr>,
 
-    readers: Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>,
+    readers: Readers,
     workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
 
     log: slog::Logger,
@@ -290,8 +290,10 @@ impl Blender {
 
     /// Obtain a `Getter` that allows querying a given (already maintained) reader node.
     pub fn get_getter(&self, node: prelude::NodeIndex) -> Option<Getter> {
-        self.find_getter_for(node)
-            .and_then(|r| Getter::new(r, &self.readers, &self.ingredients))
+        self.find_getter_for(node).and_then(|r| {
+            let sharded = self.ingredients[r].sharded_by() != migrate::sharding::Sharding::None;
+            Getter::new(r, sharded, &self.readers, &self.ingredients)
+        })
     }
 
     /// Convience method that obtains a MutatorBuilder and then calls build() on it.

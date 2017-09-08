@@ -1,8 +1,9 @@
 use flow::prelude::*;
 use flow;
 use checktable;
-use backlog;
+use backlog::{self, ReadHandle};
 use std::sync::Arc;
+use arrayvec::ArrayVec;
 
 /// A handle for looking up results in a materialized view.
 pub struct Getter {
@@ -14,22 +15,37 @@ pub struct Getter {
 impl Getter {
     pub(crate) fn new(
         node: NodeIndex,
+        sharded: bool,
         readers: &flow::Readers,
         ingredients: &Graph,
     ) -> Option<Self> {
-        {
+        let rh = if sharded {
             let vr = readers.lock().unwrap();
-            vr.get(&node).cloned()
-        }.map(move |rh| {
-            let gen = ingredients[node]
-                .with_reader(|r| r)
-                .and_then(|r| r.token_generator().cloned());
-            assert_eq!(ingredients[node].is_transactional(), gen.is_some());
-            Getter {
-                generator: gen,
-                handle: rh,
-                last_ts: i64::min_value(),
+
+            let mut array = ArrayVec::new();
+            for shard in 0..::SHARDS {
+                match vr.get(&(node, shard)).cloned() {
+                    Some(rh) => array.push(Some(rh)),
+                    None => return None,
+                }
             }
+            ReadHandle::Sharded(array)
+        } else {
+            let vr = readers.lock().unwrap();
+            match vr.get(&(node, 0)).cloned() {
+                Some(rh) => ReadHandle::Singleton(Some(rh)),
+                None => return None,
+            }
+        };
+
+        let gen = ingredients[node]
+            .with_reader(|r| r)
+            .and_then(|r| r.token_generator().cloned());
+        assert_eq!(ingredients[node].is_transactional(), gen.is_some());
+        Some(Getter {
+            generator: gen,
+            handle: rh,
+            last_ts: i64::min_value(),
         })
     }
 

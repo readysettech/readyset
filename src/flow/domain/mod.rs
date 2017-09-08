@@ -8,7 +8,6 @@ use std::rc::Rc;
 
 use std::net::SocketAddr;
 
-use backlog::ReadHandle;
 use channel::TcpSender;
 use channel::poll::{KeepPolling, PollEvent, PollingLoop, StopPolling};
 use flow::prelude::*;
@@ -196,7 +195,7 @@ impl DomainBuilder {
                     addr,
                     readers,
                     inject: None,
-                    debug_tx,
+                    _debug_tx: debug_tx,
                     control_reply_tx,
                     channel_coordinator,
 
@@ -240,7 +239,7 @@ pub struct Domain {
     addr: SocketAddr,
     readers: flow::Readers,
     inject: Option<Box<Packet>>,
-    debug_tx: Option<TcpSender<debug::DebugEvent>>,
+    _debug_tx: Option<TcpSender<debug::DebugEvent>>,
     control_reply_tx: TcpSender<ControlReplyPacket>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
@@ -839,21 +838,13 @@ impl Domain {
                                             tag: tag,
                                         }).unwrap();
                                     });
-                                self.readers
-                                    .lock()
-                                    .unwrap()
-                                    .entry(gid)
-                                    .or_insert_with(|| if self.nshards > 1 {
-                                        use arrayvec::ArrayVec;
-                                        let mut shards = ArrayVec::new();
-                                        for _ in 0..self.nshards {
-                                            shards.push(None);
-                                        }
-                                        ReadHandle::Sharded(shards)
-                                    } else {
-                                        ReadHandle::Singleton(None)
-                                    })
-                                    .set_single_handle(self.shard, r_part);
+                                assert!(
+                                    self.readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none()
+                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {
@@ -864,21 +855,13 @@ impl Domain {
                             InitialState::Global { gid, cols, key } => {
                                 use backlog;
                                 let (r_part, w_part) = backlog::new(cols, key);
-                                self.readers
-                                    .lock()
-                                    .unwrap()
-                                    .entry(gid)
-                                    .or_insert_with(|| if self.nshards > 1 {
-                                        use arrayvec::ArrayVec;
-                                        let mut shards = ArrayVec::new();
-                                        for _ in 0..self.nshards {
-                                            shards.push(None);
-                                        }
-                                        ReadHandle::Sharded(shards)
-                                    } else {
-                                        ReadHandle::Singleton(None)
-                                    })
-                                    .set_single_handle(self.shard, r_part);
+                                assert!(
+                                    self.readers
+                                        .lock()
+                                        .unwrap()
+                                        .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                        .is_none()
+                                );
 
                                 let mut n = self.nodes[&node].borrow_mut();
                                 n.with_reader_mut(|r| {

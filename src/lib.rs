@@ -400,6 +400,7 @@ mod ops;
 mod recipe;
 mod sql;
 
+pub use backlog::SingleReadHandle;
 pub use checktable::{Token, TransactionResult};
 pub use flow::{Blender, Getter, Migration, Mutator, MutatorBuilder, MutatorError};
 pub use flow::core::{DataType, Datas};
