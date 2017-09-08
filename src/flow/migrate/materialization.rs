@@ -1035,8 +1035,8 @@ impl Materializations {
         graph: &'a Graph,
         empty: &'a HashSet<NodeIndex>,
         domains: &'a mut HashMap<domain::Index, domain::DomainHandle>,
-    ) -> Box<FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
-        Box::new(move |node, parents| {
+    ) -> Box<FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex> + 'a> {
+        Box::new(move |node, col, parents| {
             // this function should only be called when there's a choice
             assert!(parents.len() > 1);
 
@@ -1052,6 +1052,25 @@ impl Materializations {
                 .expect("join did not have must replay preference");
             parents.retain(|&parent| options.contains(&parent));
             assert!(!parents.is_empty());
+
+            // we want to prefer source paths where we can translate the key
+            if let Some(c) = col {
+                let srcs = n.parent_columns(c);
+                let has = |p: &NodeIndex| {
+                    for &(ref src, ref col) in &srcs {
+                        if src == p && col.is_some() {
+                            return true;
+                        }
+                    }
+                    false
+                };
+
+                // we only want to prune non-resolving parents if there's at least one resolving.
+                // otherwise, we might end up pruning all the parents!
+                if parents.iter().any(&has) {
+                    parents.retain(&has);
+                }
+            }
 
             // if there is only one left, we don't have a choice
             if parents.len() == 1 {
