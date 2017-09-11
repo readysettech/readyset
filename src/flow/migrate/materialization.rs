@@ -666,6 +666,8 @@ impl Materializations {
         // this is because we don't yet support multiple partial indices on the same node (it would
         // would require per-index replay paths) and we don't support partial materialization on
         // compound keys (it would require more complex key provenance computation).
+        //
+        // TODO: if !new, don't try to partially materialize something that is already full
         let partial_ok = self.partial_enabled && index_on.len() == 1 &&
             index_on.iter().next().unwrap().len() == 1;
         // we also require that `index_on[0][0]` of `ni` trace back to some `key` in the

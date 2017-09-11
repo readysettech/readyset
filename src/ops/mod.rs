@@ -365,7 +365,7 @@ pub mod test {
                     Record::Positive(r) => state.insert(r, None),
                     Record::Negative(_) => unreachable!(),
                     Record::DeleteRequest(..) => unreachable!(),
-                }
+                };
             } else {
                 assert!(
                     false,
@@ -396,13 +396,7 @@ pub mod test {
                 return u;
             }
 
-            let misses = node::materialize(
-                &mut u,
-                *self.nut.unwrap(),
-                None,
-                self.states.get_mut(&*self.nut.unwrap()),
-            );
-            assert_eq!(misses, vec![]);
+            node::materialize(&mut u, None, self.states.get_mut(&*self.nut.unwrap()));
             u
         }
 

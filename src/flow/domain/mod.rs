@@ -1315,7 +1315,7 @@ impl Domain {
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(&segment.node) {
-                                state.mark_filled(partial_key.clone());
+                                state.mark_filled(partial_key.clone(), &tag);
                             } else {
                                 n.with_reader_mut(|r| {
                                     // we must be filling a hole in a Reader. we need to ensure
@@ -1353,7 +1353,7 @@ impl Domain {
                             let partial_key = partial_key.unwrap();
                             if !hole_filled {
                                 if let Some(state) = self.state.get_mut(&segment.node) {
-                                    state.mark_hole(&partial_key[..]);
+                                    state.mark_hole(&partial_key[..], &tag);
                                 } else {
                                     n.with_reader_mut(|r| {
                                         r.writer_mut().map(|wh| wh.mark_hole(&partial_key[0]));
