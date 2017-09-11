@@ -26,3 +26,21 @@ impl<'a> DomainPlacementStrategy for RoundRobinPlacer<'a> {
         self.iter.next().map(|ref w| w.0.clone())
     }
 }
+
+pub(crate) struct ShardIdPlacer {
+    ids: Vec<WorkerIdentifier>,
+}
+
+impl ShardIdPlacer {
+    pub fn new(workers: &HashMap<WorkerIdentifier, WorkerEndpoint>) -> Self {
+        ShardIdPlacer {
+            ids: workers.iter().map(|(wi, _)| wi.clone()).collect(),
+        }
+    }
+}
+
+impl DomainPlacementStrategy for ShardIdPlacer {
+    fn place_domain(&mut self, _: &domain::Index, si: usize) -> Option<WorkerIdentifier> {
+        self.ids.get(si % self.ids.len()).cloned()
+    }
+}
