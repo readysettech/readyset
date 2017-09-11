@@ -433,17 +433,17 @@ impl Materializations {
                 let cols = self.added.remove(&node).unwrap();
                 let n = &graph[node];
                 if self.partial.contains(&node) {
-                    error!(self.log, "asked to add index to partially materialized node";
+                    crit!(self.log, "asked to add index to partially materialized node";
                            "node" => node.index(),
                            "cols" => ?cols);
-                    unimplemented!();
+                    //unimplemented!();
                 }
                 if n.sharded_by() != Sharding::None {
                     // what do we even do here?!
-                    error!(self.log, "asked to add index to sharded node";
+                    crit!(self.log, "asked to add index to sharded node";
                            "node" => node.index(),
                            "cols" => ?cols);
-                    unimplemented!();
+                    //unimplemented!();
                 }
 
                 use flow::payload::InitialState;
