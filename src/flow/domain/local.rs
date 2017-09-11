@@ -427,14 +427,22 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         }
     }
 
-    pub fn insert(&mut self, r: Vec<T>) {
+    pub fn insert(&mut self, r: Vec<T>, partial_tag: Option<Tag>) {
         // we alias this box into every index, and then make sure that we carefully control how
         // records in KeyedStates are dropped (in particular, that we only drop *one* index).
         let r = Rc::new(r);
 
-        self.rows = self.rows.saturating_add(1);
-        for i in 0..self.state.len() {
-            State::insert_into(&mut self.state[i], Row(r.clone()));
+        if let Some(tag) = partial_tag {
+            let i = *self.by_tag
+                .get(&tag)
+                .expect("got tagged insert for unknown tag");
+            // FIXME: self.rows += ?
+            State::insert_into(&mut self.state[i], Row(r));
+        } else {
+            self.rows = self.rows.saturating_add(1);
+            for i in 0..self.state.len() {
+                State::insert_into(&mut self.state[i], Row(r.clone()));
+            }
         }
     }
 

@@ -362,7 +362,7 @@ pub mod test {
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(&*base) {
                 match data.into() {
-                    Record::Positive(r) => state.insert(r),
+                    Record::Positive(r) => state.insert(r, None),
                     Record::Negative(_) => unreachable!(),
                     Record::DeleteRequest(..) => unreachable!(),
                 }
@@ -399,6 +399,7 @@ pub mod test {
             let misses = node::materialize(
                 &mut u,
                 *self.nut.unwrap(),
+                None,
                 self.states.get_mut(&*self.nut.unwrap()),
             );
             assert_eq!(misses, vec![]);

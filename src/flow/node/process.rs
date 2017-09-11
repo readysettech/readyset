@@ -19,8 +19,9 @@ impl Node {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
                 let mut misses = Vec::new();
+                let tag = m.tag();
                 m.map_data(|rs| {
-                    misses = materialize(rs, addr, state.get_mut(&addr));
+                    misses = materialize(rs, addr, tag, state.get_mut(&addr));
                 });
                 misses
             }
@@ -118,8 +119,9 @@ impl Node {
                 // So: only materialize if either (1) the message we're processing is not a replay,
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
+                    let tag = m.tag();
                     m.map_data(|rs| {
-                        misses.extend(materialize(rs, addr, state.get_mut(&addr)));
+                        misses.extend(materialize(rs, addr, tag, state.get_mut(&addr)));
                     });
                 }
 
@@ -130,7 +132,12 @@ impl Node {
     }
 }
 
-pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut State>) -> Vec<Miss> {
+pub fn materialize(
+    rs: &mut Records,
+    node: LocalNodeIndex,
+    partial: Option<Tag>,
+    state: Option<&mut State>,
+) -> Vec<Miss> {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
@@ -154,7 +161,7 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
                 return false;
             }
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
+                Record::Positive(ref r) => state.insert(r.clone(), partial),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
@@ -164,7 +171,7 @@ pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut St
     } else {
         for r in rs.iter() {
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
+                Record::Positive(ref r) => state.insert(r.clone(), partial),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
