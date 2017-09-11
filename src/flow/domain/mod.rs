@@ -730,9 +730,9 @@ impl Domain {
                     Packet::PrepareState { node, state } => {
                         use flow::payload::InitialState;
                         match state {
-                            InitialState::PartialLocal(key) => {
+                            InitialState::PartialLocal(key, tags) => {
                                 let mut state = State::default();
-                                state.add_key(&[key], true);
+                                state.add_key(&[key], Some(tags));
                                 self.state.insert(node, state);
                             }
                             InitialState::IndexedLocal(index) => {
@@ -741,7 +741,7 @@ impl Domain {
                                 }
                                 let state = self.state.get_mut(&node).unwrap();
                                 for idx in index {
-                                    state.add_key(&idx[..], false);
+                                    state.add_key(&idx[..], None);
                                 }
                             }
                             InitialState::PartialGlobal {
@@ -1003,7 +1003,7 @@ impl Domain {
                                 }
                             };
                             for idx in index {
-                                s.add_key(&idx[..], false);
+                                s.add_key(&idx[..], None);
                             }
                             assert!(self.state.insert(node, s).is_none());
                         } else {

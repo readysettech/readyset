@@ -1041,7 +1041,7 @@ impl Materializations {
             .unwrap_or_else(|| if use_partial {
                 assert_eq!(index_on.len(), 1);
                 assert_eq!(index_on.iter().next().unwrap().len(), 1);
-                InitialState::PartialLocal(index_on.drain().next().unwrap()[0])
+                InitialState::PartialLocal(index_on.drain().next().unwrap()[0], Vec::from(tags))
             } else {
                 InitialState::IndexedLocal(mem::replace(index_on, HashSet::new()))
             });
