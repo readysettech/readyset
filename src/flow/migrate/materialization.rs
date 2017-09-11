@@ -707,9 +707,32 @@ impl Materializations {
         if partial_ok {
             warn!(self.log, "using partial materialization");
             self.partial.insert(ni);
+        } else {
+            // we can't have fully materialized nodes downstream of partially materialized nodes.
+            fn any_partial(
+                this: &Materializations,
+                graph: &Graph,
+                ni: NodeIndex,
+            ) -> Option<NodeIndex> {
+                if this.partial.contains(&ni) {
+                    return Some(ni);
+                }
+                for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    if let Some(ni) = any_partial(this, graph, ni) {
+                        return Some(ni);
+                    }
+                }
+                None
+            }
+
+            if let Some(pi) = any_partial(self, graph, ni) {
+                crit!(self.log, "partial materializations above full materialization";
+                      "full" => ni.index(),
+                      "partial" => pi.index());
+                //unimplemented!();
+            }
         }
 
-        // FIXME: we need to detect materialized nodes downstream of partially materialized nodes.
         // FIXME: what if we have two paths with the same source because of a fork-join? we'd need
         // to buffer somewhere to avoid splitting pieces...
 
