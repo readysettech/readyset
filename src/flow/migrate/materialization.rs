@@ -335,22 +335,32 @@ impl Materializations {
                     if let Err(_) = indices {
                         return (Vec::new(), false);
                     }
-                    let indices = indices.unwrap();
+                    let mut indices = indices.unwrap();
 
                     if let Some(m) = this.have.get(&ancestor) {
                         // is the existing materialization compatible with the partial replay
                         // opportunity that we'd like?
                         if this.partial.contains(&ancestor) {
-                            if indices.iter().any(|idx| !m.contains(idx)) {
-                                // no -- already partial on different key
-                                // FIXME
-                                return (Vec::new(), false);
-                            } else {
-                                // yes! partial on same key
-                                assert_eq!(indices.len(), 1);
-                                // no need to add an index, or to recurse further along this tree.
-                                // since a partial key is already there, we know the tree above it
-                                // must be compatible too.
+                            indices.retain(|index| {
+                                if m.contains(index) {
+                                    // yes! partial on same key
+                                    // no need to add an index, or to recurse further along this
+                                    // tree. since a partial key is already there, we know the tree
+                                    // above it must be compatible too.
+                                    false
+                                } else {
+                                    // already partial on different key -- need multi-partial
+                                    // also need to ensure partial further up!
+                                    true
+                                }
+                            });
+
+                            if indices.is_empty() {
+                                continue;
+                            }
+
+                            for index in &indices {
+                                add.push((ancestor, index.clone()));
                             }
                         } else {
                             // yes! full materialization, so no need to recurse.
@@ -359,15 +369,17 @@ impl Materializations {
                             for index in indices {
                                 add.push((ancestor, index));
                             }
+                            continue;
                         }
                     } else {
                         // unknown -- this node is not materialized, so we need to recurse.
-                        let (more, possible) = walk(this, graph, ancestor, indices);
-                        if !possible {
-                            return (Vec::new(), false);
-                        }
-                        add.extend(more);
                     }
+
+                    let (more, possible) = walk(this, graph, ancestor, indices);
+                    if !possible {
+                        return (Vec::new(), false);
+                    }
+                    add.extend(more);
                 }
 
                 // we haven't discovered any evidence that partial is *not* possible
