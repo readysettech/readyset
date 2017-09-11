@@ -242,14 +242,18 @@ impl Ingredient for Join {
                 ).unwrap();
                 if rc.is_none() {
                     // we got something from right, but that row's key is not in right??
-                    unreachable!();
+                    //
+                    // this *can* happen! imagine if you have two partial indices on right, one on
+                    // column a and one on column b. imagine that a is the join key. we get a
+                    // replay request for b = 4, which must then be replayed from right (since left
+                    // doesn't have b). say right replays (a=1,b=4). we will hit this case, since
+                    // a=1 is not in right. the correct thing to do here is to replay a=1 first,
+                    // and *then* replay b=4 again (possibly several times over for each a).
+                    continue;
                 }
                 let rc = rc.unwrap().count();
                 self.right_counts.insert(key.clone(), (adjust(rc), rc));
             }
-
-            self.right_counts
-                .retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
         let (other, from_key, other_key) = if from == *self.left {
@@ -285,17 +289,26 @@ impl Ingredient for Join {
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
                 if from == *self.right {
-                    let rc = if let Some(&mut (ref mut rc, _)) =
+                    let rc = if let Some(&mut (ref mut rc, after)) =
                         self.right_counts.get_mut(&row[self.on.0])
                     {
-                        if positive {
-                            *rc += 1;
+                        if (*rc == 0) == (after == 0) {
+                            // no changs to NULL rows
+                            None
                         } else {
-                            *rc -= 1;
+                            if positive {
+                                *rc += 1;
+                            } else {
+                                *rc -= 1;
+                            }
+                            Some(*rc)
                         }
-                        Some(*rc)
                     } else {
-                        None
+                        misses.push(Miss {
+                            node: from,
+                            key: vec![row[self.on.0].clone()],
+                        });
+                        continue;
                     };
 
                     if let Some(rc) = rc {
