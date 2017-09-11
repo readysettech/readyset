@@ -3,6 +3,7 @@ use std::ops::{Deref, Index, IndexMut};
 use std::iter::FromIterator;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::rc::Rc;
 
 #[derive(Serialize, Deserialize)]
 pub struct Map<T> {
@@ -169,14 +170,14 @@ use std::collections::hash_map;
 use fnv::FnvHashMap;
 use std::hash::Hash;
 
-pub struct Row<T>(*mut T);
+pub struct Row<T>(Rc<T>);
 
 unsafe impl<T> Send for Row<T> {}
 
 impl<T> Deref for Row<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.0 }
+        &*self.0
     }
 }
 
@@ -340,7 +341,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
 
             let (new, old) = self.state.split_last_mut().unwrap();
             let mut insert = move |rs: &Vec<Row<Vec<T>>>| for r in rs {
-                State::insert_into(new, Row(r.0));
+                State::insert_into(new, Row(r.0.clone()));
             };
             match old[0].state {
                 KeyedState::Single(ref map) => for rs in map.values() {
@@ -429,23 +430,21 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     pub fn insert(&mut self, r: Vec<T>) {
         // we alias this box into every index, and then make sure that we carefully control how
         // records in KeyedStates are dropped (in particular, that we only drop *one* index).
-        let r = Box::into_raw(Box::new(r));
+        let r = Rc::new(r);
 
         self.rows = self.rows.saturating_add(1);
         for i in 0..self.state.len() {
-            State::insert_into(&mut self.state[i], Row(r));
+            State::insert_into(&mut self.state[i], Row(r.clone()));
         }
     }
 
     pub fn remove(&mut self, r: &[T]) {
-        let mut removed = None;
-        let fix = |removed: &mut Option<_>, rs: &mut Vec<Row<Vec<T>>>| {
+        let mut removed = false;
+        let fix = |removed: &mut bool, rs: &mut Vec<Row<Vec<T>>>| {
             // rustfmt
             if let Some(i) = rs.iter().position(|rsr| &rsr[..] == r) {
-                let rm = rs.swap_remove(i);
-                if removed.is_none() {
-                    *removed = Some(rm);
-                }
+                rs.swap_remove(i);
+                *removed = true;
             }
         };
 
@@ -492,8 +491,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
             }
         }
 
-        if let Some(r) = removed {
-            drop(unsafe { Box::from_raw(r.0) });
+        if removed {
             self.rows = self.rows.saturating_sub(1);
         }
     }
@@ -657,25 +655,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         }
     }
 
-    fn free<'a, I: Iterator<Item = &'a Vec<Row<Vec<T>>>>>(it: I) {
-        for rs in it {
-            for r in rs {
-                drop(unsafe { Box::from_raw(r.0) })
-            }
-        }
-    }
-
     pub fn clear(&mut self) {
         self.rows = 0;
-        if !self.state.is_empty() {
-            match self.state[0].state {
-                KeyedState::Single(ref map) => State::free(map.values()),
-                KeyedState::Double(ref map) => State::free(map.values()),
-                KeyedState::Tri(ref map) => State::free(map.values()),
-                KeyedState::Quad(ref map) => State::free(map.values()),
-            }
-        }
-
         for s in &mut self.state {
             match s.state {
                 KeyedState::Single(ref mut map) => map.clear(),
@@ -704,17 +685,19 @@ impl<'a, T: Eq + Hash + Clone + 'static> Drop for State<T> {
 }
 
 impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
-    type Item = Vec<Box<Vec<T>>>;
+    type Item = Vec<Vec<T>>;
     type IntoIter = Box<Iterator<Item = Self::Item>>;
     fn into_iter(mut self) -> Self::IntoIter {
         // we need to make sure that the records eventually get dropped, so we need to ensure there
         // is only one index left (which therefore owns the records), and then cast back to the
         // original boxes.
         self.unalias_for_state();
-        let own = |rs: Vec<Row<Vec<T>>>| {
-            rs.into_iter()
-                .map(|r| unsafe { Box::from_raw(r.0) })
-                .collect()
+        let own = |rs: Vec<Row<Vec<T>>>| match rs.into_iter()
+            .map(|r| Rc::try_unwrap(r.0))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(rs) => rs,
+            Err(_) => unreachable!("rc still not owned after unaliasing"),
         };
         self.state
             .drain(..)
