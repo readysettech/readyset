@@ -8,7 +8,7 @@ use ops::join::JoinType;
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
+use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge, JoinRef};
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -991,6 +991,7 @@ impl SqlToMirConverter {
             let mut prev_node = None;
 
             {
+                // TODO(larat): something is buggy with picking the right columns
                 let pick_join_columns = |src: &String,
                                          dst: &String,
                                          prev_node: Option<MirNodeRef>,
@@ -1017,7 +1018,21 @@ impl SqlToMirConverter {
                     (left_node, right_node)
                 };
 
-                for (join_type, src, dst, jp) in qg.sorted_joins() {
+                let from_join_ref = |jref: &JoinRef| -> (JoinType, &ConditionTree) {
+                    let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
+                    match *edge {
+                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps.get(jref.index).unwrap()),
+                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps.get(jref.index).unwrap()),
+                        QueryGraphEdge::GroupBy(_) => unreachable!(),
+                    }
+                };
+
+                println!("join order {:?}",  qg.join_order);
+                println!("edges {:?}",  qg.edges);
+                for jref in qg.join_order.iter() {
+                    let src = jref.src.clone();
+                    let dst = jref.dst.clone();
+                    let (join_type, jp) = from_join_ref(jref);
                     let (left_node, right_node) =
                         pick_join_columns(&src, &dst, prev_node, &joined_tables);
 

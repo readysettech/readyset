@@ -10,7 +10,6 @@ use std::string::String;
 use std::vec::Vec;
 
 use sql::query_signature::QuerySignature;
-use ops::join::JoinType;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
@@ -98,6 +97,13 @@ impl PartialOrd for OutputColumn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct JoinRef {
+    pub src: String,
+    pub dst: String,
+    pub index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<ConditionExpression>,
@@ -123,7 +129,7 @@ pub struct QueryGraph {
     pub columns: Vec<OutputColumn>,
     /// Establishes an order for join predicates. Each join predicate can be identified by
     /// its (src, dst) pair, and its index in the array of predicates.
-    pub join_order: Vec<(String, String, usize)>,
+    pub join_order: Vec<JoinRef>,
 }
 
 impl QueryGraph {
@@ -145,26 +151,6 @@ impl QueryGraph {
                 acc.extend(qgn.parameters.iter());
                 acc
             })
-    }
-
-    /// Returns an array of join predicates sorted according to the query graph's join order.
-    pub fn sorted_joins<'a>(&'a self) -> Vec<(JoinType, String, String, &'a ConditionTree)> {
-        self.join_order.clone().into_iter()
-            .filter(|&(ref src, ref dst, _)| {
-                let edge = self.edges.get(&(src.clone(), dst.clone())).unwrap();
-                match *edge {
-                    QueryGraphEdge::Join(_) => true,
-                    QueryGraphEdge::LeftJoin(_) => true,
-                    QueryGraphEdge::GroupBy(_) => false,
-                }
-            }).map(|(src, dst, idx)| {
-                let edge = self.edges.get(&(src.clone(), dst.clone())).unwrap();
-                match *edge {
-                    QueryGraphEdge::Join(ref jp) => (JoinType::Inner, src, dst, jp.get(idx).unwrap()),
-                    QueryGraphEdge::LeftJoin(ref jp) => (JoinType::Left, src, dst, jp.get(idx).unwrap()),
-                    QueryGraphEdge::GroupBy(_) => unreachable!()
-                }
-            }).collect()
     }
 
     /// Used to get a concise signature for a query graph. The `hash` member can be used to check
@@ -703,6 +689,34 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     _ => unreachable!(),
                 }
             }
+        }
+    }
+
+    // create a random join order
+    // TODO(larat): make this deterministic
+    for (&(ref src, ref dst), edge) in qg.edges.iter() {
+        match *edge {
+            QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
+                                                    jps.iter()
+                                                    .enumerate()
+                                                    .map(|(idx, _)| JoinRef {
+                                                        src: src.clone(),
+                                                        dst: dst.clone(),
+                                                        index: idx
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                ),
+            QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
+                                                    jps.iter()
+                                                    .enumerate()
+                                                    .map(|(idx, _)| JoinRef {
+                                                        src: src.clone(),
+                                                        dst: dst.clone(),
+                                                        index: idx
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                ),
+            QueryGraphEdge::GroupBy(_) => continue
         }
     }
 
