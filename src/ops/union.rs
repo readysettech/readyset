@@ -215,6 +215,9 @@ impl Ingredient for Union {
                 RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s))
             }
             Some((key_col, key_val)) => {
+                // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
+                // replays!
+
                 if self.replay_key.is_none() {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs

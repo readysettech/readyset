@@ -321,7 +321,7 @@ impl Materializations {
 
                 if ancestors.len() != 1 {
                     if n.is_join() {
-                        // TODO:
+                        // FIXME:
                         // for joins, push only to the parent that we'll replay (how do we know?)
                         return (Vec::new(), false);
                     } else {
@@ -343,7 +343,7 @@ impl Materializations {
                         if this.partial.contains(&ancestor) {
                             if indices.iter().any(|idx| !m.contains(idx)) {
                                 // no -- already partial on different key
-                                // TODO
+                                // FIXME
                                 return (Vec::new(), false);
                             } else {
                                 // yes! partial on same key
@@ -624,7 +624,7 @@ impl Materializations {
         // to decide that, we need to find all our paths up the tree.
         let paths = {
             let mut on_join = self.cost_fn(graph, empty, domains);
-            // TODO: what if we're constructing multiple indices?
+            // FIXME: what if we're constructing multiple indices?
             // TODO: what if we have a compound index?
             let trace_col = index_on.iter().next().unwrap()[0];
             keys::provenance_of(graph, ni, trace_col, &mut *on_join)
@@ -667,7 +667,8 @@ impl Materializations {
         // would require per-index replay paths) and we don't support partial materialization on
         // compound keys (it would require more complex key provenance computation).
         //
-        // TODO: if !new, don't try to partially materialize something that is already full
+        // FIXME: if !new, don't try to partially materialize something that is already full
+        // FIXME: relax index_on.len() == 1!
         let partial_ok = self.partial_enabled && index_on.len() == 1 &&
             index_on.iter().next().unwrap().len() == 1;
         // we also require that `index_on[0][0]` of `ni` trace back to some `key` in the
@@ -698,7 +699,7 @@ impl Materializations {
                 })
                 .unwrap_or(false)
         });
-        // FIXME: if a reader has no materialized views between it and a union, we will end
+        // TODO: if a reader has no materialized views between it and a union, we will end
         // up in this case. we *can* solve that case by requesting replays across all
         // the tagged paths through the union, but since we at this point in the code don't
         // yet know about those paths, that's a bit inconvenient. we might be able to move
@@ -735,7 +736,7 @@ impl Materializations {
             }
         }
 
-        // FIXME: what if we have two paths with the same source because of a fork-join? we'd need
+        // TODO: what if we have two paths with the same source because of a fork-join? we'd need
         // to buffer somewhere to avoid splitting pieces...
 
         // inform domains about replay paths
