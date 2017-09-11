@@ -32,6 +32,12 @@ impl fmt::Debug for Link {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplayPathSegment {
+    pub node: LocalNodeIndex,
+    pub partial_key: Option<usize>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TriggerEndpoint {
     None,
@@ -194,7 +200,7 @@ pub enum Packet {
     SetupReplayPath {
         tag: Tag,
         source: Option<LocalNodeIndex>,
-        path: Vec<(LocalNodeIndex, Option<usize>)>,
+        path: Vec<ReplayPathSegment>,
         notify_done: bool,
         trigger: TriggerEndpoint,
     },

@@ -72,7 +72,7 @@ enum TriggerEndpoint {
 
 struct ReplayPath {
     source: Option<LocalNodeIndex>,
-    path: Vec<(LocalNodeIndex, Option<usize>)>,
+    path: Vec<ReplayPathSegment>,
     notify_done: bool,
     trigger: TriggerEndpoint,
 }
@@ -209,7 +209,7 @@ impl Domain {
             if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
                 continue;
             }
-            if self.replay_paths[&tag].path.last().unwrap().0 != miss {
+            if self.replay_paths[&tag].path.last().unwrap().node != miss {
                 continue;
             }
 
@@ -294,11 +294,11 @@ impl Domain {
                 // we just naively release one slot here, a union with two parents would mean that
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
-                let end = self.replay_paths[tag].path.last().unwrap().0;
+                let end = self.replay_paths[tag].path.last().unwrap().node;
                 let requests_satisfied = self.replay_paths
                     .iter()
                     .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
-                        p.path.last().unwrap().0 == end
+                        p.path.last().unwrap().node == end
                     } else {
                         false
                     })
@@ -585,7 +585,7 @@ impl Domain {
                 ..
             } => {
                 // a miss in a reader! make sure we don't re-do work
-                let addr = path.last().unwrap().0;
+                let addr = path.last().unwrap().node;
                 let n = self.nodes[&addr].borrow();
                 let mut already_replayed = false;
                 n.with_reader(|r| {
@@ -905,7 +905,7 @@ impl Domain {
                                "μs" => dur_to_ns!(start.elapsed()) / 1000
                         );
 
-                        let link = Link::new(from, self.replay_paths[&tag].path[0].0);
+                        let link = Link::new(from, self.replay_paths[&tag].path[0].node);
 
                         // we're been given an entire state snapshot, but we need to digest it
                         // piece by piece spawn off a thread to do that chunking. however, before
@@ -1123,7 +1123,7 @@ impl Domain {
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let m = Some(box Packet::ReplayPiece {
-                        link: Link::new(source, path[0].0),
+                        link: Link::new(source, path[0].node),
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
@@ -1137,7 +1137,7 @@ impl Domain {
                 } else if transaction_state.is_some() {
                     // we need to forward a ReplayPiece for the timestamp we claimed
                     let m = Some(box Packet::ReplayPiece {
-                        link: Link::new(source, path[0].0),
+                        link: Link::new(source, path[0].node),
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
@@ -1203,7 +1203,7 @@ impl Domain {
                     // applied them after all the state has been replayed, we would double-apply
                     // those changes, which is bad.
                     self.mode = DomainMode::Replaying {
-                        to: path.last().unwrap().0,
+                        to: path.last().unwrap().node,
                         buffered: VecDeque::new(),
                         passes: 0,
                     };
@@ -1221,7 +1221,7 @@ impl Domain {
                 ..
             } = m
             {
-                let mut n = self.nodes[&path.last().unwrap().0].borrow_mut();
+                let mut n = self.nodes[&path.last().unwrap().node].borrow_mut();
                 if n.is_egress() && n.is_transactional() {
                     // We need to propagate this replay even though it contains no data, so that
                     // downstream domains don't wait for its timestamp.  There is no need to set
@@ -1277,8 +1277,8 @@ impl Domain {
                             None
                         };
 
-                    for (i, &(ref ni, keyed_by)) in path.iter().enumerate() {
-                        let mut n = self.nodes[&ni].borrow_mut();
+                    for (i, segment) in path.iter().enumerate() {
+                        let mut n = self.nodes[&segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
                         if !n.is_transactional() {
@@ -1302,8 +1302,8 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target =
-                            partial_key.is_some() && (is_reader || self.waiting.contains_key(&ni));
+                        let target = partial_key.is_some() &&
+                            (is_reader || self.waiting.contains_key(&segment.node));
 
                         // targets better be last
                         assert!(!target || i == path.len() - 1);
@@ -1314,7 +1314,7 @@ impl Domain {
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
-                            if let Some(state) = self.state.get_mut(&ni) {
+                            if let Some(state) = self.state.get_mut(&segment.node) {
                                 state.mark_filled(partial_key.clone());
                             } else {
                                 n.with_reader_mut(|r| {
@@ -1329,7 +1329,7 @@ impl Domain {
                         // process the current message in this node
                         let mut misses = n.process(
                             &mut m,
-                            keyed_by,
+                            segment.partial_key,
                             &mut self.state,
                             &self.nodes,
                             self.shard,
@@ -1352,7 +1352,7 @@ impl Domain {
 
                             let partial_key = partial_key.unwrap();
                             if !hole_filled {
-                                if let Some(state) = self.state.get_mut(&ni) {
+                                if let Some(state) = self.state.get_mut(&segment.node) {
                                     state.mark_hole(&partial_key[..]);
                                 } else {
                                     n.with_reader_mut(|r| {
@@ -1365,7 +1365,9 @@ impl Domain {
                                     r.writer_mut().map(|wh| wh.swap());
                                 });
                                 // and also unmark the replay request
-                                if let Some(ref mut prev) = self.reader_triggered.get_mut(&ni) {
+                                if let Some(ref mut prev) =
+                                    self.reader_triggered.get_mut(&segment.node)
+                                {
                                     prev.remove(&partial_key[0]);
                                 }
                             }
@@ -1377,8 +1379,8 @@ impl Domain {
 
                         if let Some(box Packet::Captured) = m {
                             if partial_key.is_some() && is_transactional {
-                                let last_ni = path.last().unwrap().0;
-                                if last_ni != *ni {
+                                let last_ni = path.last().unwrap().node;
+                                if last_ni != segment.node {
                                     let mut n = self.nodes[&last_ni].borrow_mut();
                                     if n.is_egress() && n.is_transactional() {
                                         // The partial replay was captured, but we still need to
@@ -1447,13 +1449,13 @@ impl Domain {
                                 // we need to preserve the egress src
                                 // (which includes shard identifier)
                             } else {
-                                m.as_mut().unwrap().link_mut().src = *ni;
+                                m.as_mut().unwrap().link_mut().src = segment.node;
                             }
-                            m.as_mut().unwrap().link_mut().dst = path[i + 1].0;
+                            m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
                         }
                     }
 
-                    let dst = path.last().unwrap().0;
+                    let dst = path.last().unwrap().node;
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
                             debug!(self.log,

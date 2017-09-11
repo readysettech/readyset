@@ -15,7 +15,7 @@ pub use flow::Edge;
 pub type Graph = petgraph::Graph<Node, Edge>;
 
 // dataflow types
-pub use flow::payload::{Link, Packet, PacketEvent, Tracer, TransactionState};
+pub use flow::payload::{Link, Packet, PacketEvent, ReplayPathSegment, Tracer, TransactionState};
 pub use flow::migrate::materialization::Tag;
 pub use flow::migrate::sharding::Sharding;
 

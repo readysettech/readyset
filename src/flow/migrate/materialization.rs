@@ -872,7 +872,12 @@ impl Materializations {
             let locals: Vec<_> = nodes
                 .iter()
                 .skip(skip_first)
-                .map(|&(ni, key)| (*graph[ni].local_addr(), key))
+                .map(|&(ni, key)| {
+                    ReplayPathSegment {
+                        node: *graph[ni].local_addr(),
+                        partial_key: key,
+                    }
+                })
                 .collect();
 
             // the first domain in the chain may *only* have the source node
