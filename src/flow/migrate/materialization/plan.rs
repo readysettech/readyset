@@ -277,13 +277,18 @@ impl<'a> Plan<'a> {
                 ctx.wait_for_ack().unwrap();
             }
 
-            if let Some(p) = pending {
+            if !self.partial {
                 // this path requires doing a replay and then waiting for the replay to finish
-                self.pending.push(p);
+                self.pending
+                    .push(pending.expect("no replay for full materialization?"));
             }
             tags.push((tag, last_domain.unwrap()));
         }
-        self.tags.insert(index_on, tags);
+
+        self.tags
+            .entry(index_on)
+            .or_insert_with(Vec::new)
+            .extend(tags);
     }
 
     /// Instructs the target node to set up appropriate state for any new indices that have been
