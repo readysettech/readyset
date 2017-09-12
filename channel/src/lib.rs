@@ -174,7 +174,7 @@ impl<T: Write> NonBlockingWriter<T> {
         }
     }
 
-    pub fn needs_flush(&self) -> bool {
+    pub fn needs_flush_to_inner(&self) -> bool {
         self.buffer.len() != self.cursor
     }
 

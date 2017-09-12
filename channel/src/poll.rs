@@ -176,7 +176,9 @@ where
                 return;
             }
 
-            if self.inner.poll.poll(&mut self.events, timeout).unwrap_or(0) == 0 {
+            if self.inner.poll.poll(&mut self.events, timeout).unwrap_or(0) == 0 &&
+                timeout.is_some()
+            {
                 if let StopPolling = process_event(GeneralizedPollEvent::Timeout) {
                     return;
                 }

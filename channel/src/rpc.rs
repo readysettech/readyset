@@ -7,10 +7,10 @@ use bincode::{self, Infinite};
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use tcp::{SendError, TryRecvError};
-use super::{ReceiveError, DeserializeReceiver, NonBlockingWriter};
+use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
 pub struct RpcClient<Q, R> {
     stream: BufStream<std::net::TcpStream>,
@@ -70,7 +70,7 @@ pub enum RpcSendError {
 }
 
 pub struct RpcServiceEndpoint<Q, R> {
-    pub(crate) stream: NonBlockingWriter<mio::net::TcpStream>,
+    pub(crate) stream: NonBlockingWriter<BufStream<mio::net::TcpStream>>,
     deserialize_receiver: DeserializeReceiver<Q>,
     poisoned: bool,
     phantom: PhantomData<Q>,
@@ -83,7 +83,7 @@ where
 {
     pub fn new(stream: mio::net::TcpStream) -> Self {
         Self {
-            stream: NonBlockingWriter::new(stream),
+            stream: NonBlockingWriter::new(BufStream::new(stream)),
             deserialize_receiver: DeserializeReceiver::new(),
             poisoned: false,
             phantom: PhantomData,
@@ -97,7 +97,7 @@ where
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        self.stream.get_ref().local_addr()
+        self.stream.get_ref().get_ref().local_addr()
     }
 
     pub fn try_recv(&mut self) -> Result<Q, TryRecvError> {
@@ -116,7 +116,6 @@ where
                 self.poisoned = true;
                 Err(TryRecvError::DeserializationError)
             }
-
         }
     }
 
@@ -130,9 +129,11 @@ where
             return Err(RpcSendError::SerializationError);
         }
 
-        if self.stream.needs_flush() {
+        if self.stream.needs_flush_to_inner() {
             return Err(RpcSendError::StillNeedsFlush);
         }
+
+        self.stream.flush().unwrap();
 
         Ok(())
     }
@@ -155,7 +156,10 @@ impl<Q, R> Evented for RpcServiceEndpoint<Q, R> {
         interest: Ready,
         opts: PollOpt,
     ) -> io::Result<()> {
-        self.stream.get_ref().register(poll, token, interest, opts)
+        self.stream
+            .get_ref()
+            .get_ref()
+            .register(poll, token, interest, opts)
     }
 
     fn reregister(
@@ -167,10 +171,11 @@ impl<Q, R> Evented for RpcServiceEndpoint<Q, R> {
     ) -> io::Result<()> {
         self.stream
             .get_ref()
+            .get_ref()
             .reregister(poll, token, interest, opts)
     }
 
     fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        self.stream.get_ref().deregister(poll)
+        self.stream.get_ref().get_ref().deregister(poll)
     }
 }
