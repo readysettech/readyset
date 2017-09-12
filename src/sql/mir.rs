@@ -997,8 +997,6 @@ impl SqlToMirConverter {
             //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
             //    previously moved all predicates pertaining to src/dst joins onto a single edge.
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
-
-            let mut prev_node = None;
             {
                 let mut join_chains = Vec::new();
 
@@ -1060,7 +1058,7 @@ impl SqlToMirConverter {
                 }
             }
 
-            prev_node = match join_nodes.last() {
+            let mut prev_node = match join_nodes.last() {
                 Some(n) => Some(n.clone()),
                 None => None,
             };

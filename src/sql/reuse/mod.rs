@@ -75,6 +75,8 @@ impl ReuseConfig {
                 qg.join_order = new_join_order;
             }
         }
+
+        println!("query has {} matching joins", max);
     }
 
     fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
