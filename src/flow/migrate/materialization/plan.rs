@@ -300,6 +300,8 @@ impl<'a> Plan<'a> {
     pub fn finalize(mut self) -> Vec<PendingReplay> {
         use flow::payload::InitialState;
 
+        let tags: usize = self.tags.values().map(|ts| ts.len()).sum();
+
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
         let s = self.graph[self.node]
@@ -387,7 +389,6 @@ impl<'a> Plan<'a> {
             // TODO: I'm like 90% sure this is incorrect.
             // If we add multiple indices to a single view, we should still only replay once.
             // The only case where more than one replay per view is correct is when we have unions.
-            let tags: usize = self.tags.values().map(|ts| ts.len()).sum();
             assert_eq!(self.pending.len(), tags);
         } else {
             assert!(self.pending.is_empty());
