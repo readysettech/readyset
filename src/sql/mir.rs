@@ -41,6 +41,28 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
     c
 }
 
+struct JoinChain {
+    tables: HashSet<String>,
+    last_node: MirNodeRef
+}
+
+impl JoinChain {
+    pub fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
+        // assert_eq!(this.tables.intersection(&that.tables).collect().len(), 0);
+        let tables = self.tables.union(&other.tables).cloned().collect();
+        let last_node = last_node;
+
+        JoinChain {
+            tables: tables,
+            last_node: last_node,
+        }
+    }
+
+    pub fn has_table(&self, table: &String) -> bool {
+        self.tables.contains(table)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
@@ -931,7 +953,6 @@ impl SqlToMirConverter {
         st: &SelectStatement,
         qg: &QueryGraph,
     ) -> Vec<MirNodeRef> {
-        use std::cmp::Ordering;
         use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
@@ -976,46 +997,32 @@ impl SqlToMirConverter {
             //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
             //    previously moved all predicates pertaining to src/dst joins onto a single edge.
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut joined_tables = HashSet::new();
-            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                qg.edges.iter().collect();
-            // Sort the edges to ensure deterministic join order.
-            sorted_edges.sort_by(|&(a, _), &(b, _)| {
-                let src_ord = a.0.cmp(&b.0);
-                if src_ord == Ordering::Equal {
-                    a.1.cmp(&b.1)
-                } else {
-                    src_ord
-                }
-            });
-            let mut prev_node = None;
 
+            let mut prev_node = None;
             {
-                // TODO(larat): something is buggy with picking the right columns
-                let pick_join_columns = |src: &String,
+                let mut join_chains = Vec::new();
+
+                let pick_join_chains = |src: &String,
                                          dst: &String,
-                                         prev_node: Option<MirNodeRef>,
-                                         joined_tables: &HashSet<_>|
-                 -> (MirNodeRef, MirNodeRef) {
-                    let left_node;
-                    let right_node;
-                    if joined_tables.contains(src) {
-                        // join left against previous join, right against base
-                        left_node = prev_node.as_ref().unwrap().clone();
-                        right_node = base_nodes[dst.as_str()].clone();
-                    } else if joined_tables.contains(dst) {
-                        // join right against previous join, left against base
-                        left_node = base_nodes[src.as_str()].clone();
-                        right_node = prev_node.as_ref().unwrap().clone();
-                    } else {
-                        // We've seen neither of these tables before
-                        // If we already have a join in prev_ni, we must assume that some
-                        // future join will bring these unrelated join arms together.
-                        // TODO(malte): make that actually work out...
-                        left_node = base_nodes[src.as_str()].clone();
-                        right_node = base_nodes[dst.as_str()].clone();
-                    }
-                    (left_node, right_node)
+                                         join_chains: &mut Vec<JoinChain>|
+                 -> (JoinChain, JoinChain) {
+                    let left_chain = match join_chains.iter().position(|ref chain| chain.has_table(src)) {
+                        Some(idx) => join_chains.swap_remove(idx),
+                        None => JoinChain {
+                            tables: vec![src.clone()].into_iter().collect(),
+                            last_node: base_nodes[src.as_str()].clone()
+                        },
+                    };
+
+                    let right_chain = match join_chains.iter().position(|ref chain| chain.has_table(dst)) {
+                        Some(idx) => join_chains.swap_remove(idx),
+                        None => JoinChain {
+                            tables: vec![dst.clone()].into_iter().collect(),
+                            last_node: base_nodes[dst.as_str()].clone()
+                        },
+                    };
+
+                    (left_chain, right_chain)
                 };
 
                 let from_join_ref = |jref: &JoinRef| -> (JoinType, &ConditionTree) {
@@ -1028,34 +1035,35 @@ impl SqlToMirConverter {
                 };
 
                 println!("join order {:?}",  qg.join_order);
-                println!("edges {:?}",  qg.edges);
                 for jref in qg.join_order.iter() {
                     let src = jref.src.clone();
                     let dst = jref.dst.clone();
                     let (join_type, jp) = from_join_ref(jref);
-                    let (left_node, right_node) =
-                        pick_join_columns(&src, &dst, prev_node, &joined_tables);
+                    let (left_chain, right_chain) =
+                        pick_join_chains(&src, &dst, &mut join_chains);
 
                     let jn = self.make_join_node(
                         &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
                         jp,
-                        left_node,
-                        right_node,
+                        left_chain.last_node.clone(),
+                        right_chain.last_node.clone(),
                         join_type,
                     );
 
+                    // merge node chains
+                    let new_chain = left_chain.merge_chain(right_chain, jn.clone());
+                    join_chains.push(new_chain);
+
                     new_node_count += 1;
 
-                    // bookkeeping (shared between both join types)
-                    prev_node = Some(jn.clone());
                     join_nodes.push(jn);
-
-                    // we've now joined both tables
-                    joined_tables.insert(src);
-                    joined_tables.insert(dst);
                 }
             }
 
+            prev_node = match join_nodes.last() {
+                Some(n) => Some(n.clone()),
+                None => None,
+            };
 
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.

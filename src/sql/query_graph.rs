@@ -692,31 +692,44 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
         }
     }
 
-    // create a random join order
-    // TODO(larat): make this deterministic
-    for (&(ref src, ref dst), edge) in qg.edges.iter() {
-        match *edge {
-            QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
-                                                    jps.iter()
-                                                    .enumerate()
-                                                    .map(|(idx, _)| JoinRef {
-                                                        src: src.clone(),
-                                                        dst: dst.clone(),
-                                                        index: idx
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                ),
-            QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
-                                                    jps.iter()
-                                                    .enumerate()
-                                                    .map(|(idx, _)| JoinRef {
-                                                        src: src.clone(),
-                                                        dst: dst.clone(),
-                                                        index: idx
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                ),
-            QueryGraphEdge::GroupBy(_) => continue
+    // create initial join order
+    {
+        let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
+                    qg.edges.iter().collect();
+        // Sort the edges to ensure deterministic join order.
+        sorted_edges.sort_by(|&(a, _), &(b, _)| {
+            let src_ord = a.0.cmp(&b.0);
+            if src_ord == Ordering::Equal {
+                a.1.cmp(&b.1)
+            } else {
+                src_ord
+            }
+        });
+
+        for (&(ref src, ref dst), edge) in sorted_edges {
+            match *edge {
+                QueryGraphEdge::Join(ref jps) => qg.join_order.extend(
+                                                        jps.iter()
+                                                        .enumerate()
+                                                        .map(|(idx, _)| JoinRef {
+                                                            src: src.clone(),
+                                                            dst: dst.clone(),
+                                                            index: idx
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                    ),
+                QueryGraphEdge::LeftJoin(ref jps) => qg.join_order.extend(
+                                                        jps.iter()
+                                                        .enumerate()
+                                                        .map(|(idx, _)| JoinRef {
+                                                            src: src.clone(),
+                                                            dst: dst.clone(),
+                                                            index: idx
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                    ),
+                QueryGraphEdge::GroupBy(_) => continue
+            }
         }
     }
 

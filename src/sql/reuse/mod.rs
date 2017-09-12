@@ -25,7 +25,7 @@ enum ReuseConfigType {
 }
 
 // TODO(larat): make this a dynamic option
-const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Finkelstein;
+const REUSE_CONFIG: ReuseConfigType = ReuseConfigType::Full;
 
 pub struct ReuseConfig {
     config: ReuseConfigType,
@@ -78,9 +78,7 @@ impl ReuseConfig {
     }
 
     fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
-        println!("here1");
         let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
-        println!("here");
         match *edge {
             QueryGraphEdge::Join(ref jps) => jps.get(jref.index).unwrap(),
             QueryGraphEdge::LeftJoin(ref jps) => jps.get(jref.index).unwrap(),
