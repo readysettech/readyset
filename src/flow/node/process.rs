@@ -118,7 +118,21 @@ impl Node {
                 // So: only materialize if either (1) the message we're processing is not a replay,
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
-                    let tag = m.tag();
+                    let tag = match **m {
+                        Packet::ReplayPiece {
+                            tag,
+                            context: payload::ReplayPieceContext::Partial { .. },
+                            ..
+                        } => {
+                            // NOTE: non-partial replays shouldn't be materialized only for a
+                            // particular index, and so the tag shouldn't be forwarded to the
+                            // materialization code. this allows us to keep some asserts deeper in
+                            // the code to check that we don't do partial replays to non-partial
+                            // indices, or for unknown tags.
+                            Some(tag)
+                        }
+                        _ => None,
+                    };
                     m.map_data(|rs| {
                         materialize(rs, tag, state.get_mut(&addr));
                     });
