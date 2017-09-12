@@ -326,7 +326,10 @@ impl Materializations {
                     break;
                 }
 
-                for path in paths {
+                for mut path in paths {
+                    // we want the target node at the end
+                    path.reverse();
+
                     // keep walking until:
                     //
                     //  - col is None; key doesn't trace, partial not ok
