@@ -20,6 +20,7 @@ pub(crate) struct Plan<'a> {
     pending: Vec<PendingReplay>,
 }
 
+#[derive(Debug)]
 pub(crate) struct PendingReplay {
     pub tag: Tag,
     pub source: LocalNodeIndex,
