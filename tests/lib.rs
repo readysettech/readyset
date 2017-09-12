@@ -879,6 +879,66 @@ fn key_on_added() {
 }
 
 #[test]
+fn full_aggregation_with_bogokey() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let base = {
+        let mut mig = g.start_migration();
+        let base = mig.add_ingredient("base", &["x"], distributary::Base::new(vec![1.into()]));
+        mig.commit();
+        base
+    };
+
+    // add an aggregation over the base with a bogo key.
+    // in other words, the aggregation is across all rows.
+    let agg = {
+        let mut mig = g.start_migration();
+        let bogo = mig.add_ingredient(
+            "bogo",
+            &["x", "bogo"],
+            distributary::Project::new(base, &[0], Some(vec![0.into()])),
+        );
+        let agg = mig.add_ingredient(
+            "agg",
+            &["bogo", "count"],
+            distributary::Aggregation::COUNT.over(bogo, 0, &[1]),
+        );
+        mig.maintain(agg, 0);
+        mig.commit();
+        agg
+    };
+
+    let aggq = g.get_getter(agg).unwrap();
+    let mut base = g.get_mutator(base);
+
+    // insert some values
+    base.put(vec![1.into()]).unwrap();
+    base.put(vec![2.into()]).unwrap();
+    base.put(vec![3.into()]).unwrap();
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // send a query to aggregation materialization
+    assert_eq!(
+        aggq.lookup(&0.into(), true),
+        Ok(vec![vec![0.into(), 3.into()]])
+    );
+
+    // update value again
+    base.put(vec![4.into()]).unwrap();
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // check that value was updated again
+    assert_eq!(
+        aggq.lookup(&0.into(), true),
+        Ok(vec![vec![0.into(), 4.into()]])
+    );
+}
+
+#[test]
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
