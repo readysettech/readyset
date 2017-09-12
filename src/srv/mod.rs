@@ -1,4 +1,3 @@
-use flow::prelude::*;
 use flow;
 
 use bincode;
@@ -16,17 +15,15 @@ use std::thread;
 /// Available RPC methods
 #[derive(Serialize, Deserialize)]
 pub enum Method {
-    /// Query the given `view` for all records whose key column matches the given value.
-    Query {
-        /// The view to query
-        view: usize,
-        /// The key value to use for the given query's free parameter
-        key: DataType,
-    },
-
     /// Obtain a MutatorBuilder for the indicated view.
     GetMutatorBuilder {
         /// The view to get a mutator builder for.
+        view: usize,
+    },
+
+    /// Obtain a GetterBuilder for the indicated view.
+    GetGetterBuilder {
+        /// The view to query for.
         view: usize,
     },
 
@@ -50,7 +47,7 @@ pub fn make_server(soup: &flow::Blender) -> Server {
             )
         })
         .collect();
-    /*let outs = soup.outputs()
+    let outs = soup.outputs()
         .into_iter()
         .map(|(ni, n)| {
             (
@@ -58,12 +55,11 @@ pub fn make_server(soup: &flow::Blender) -> Server {
                 (
                     n.name().to_owned(),
                     n.fields().iter().cloned().collect(),
-                    soup.get_getter(ni).unwrap(),
+                    soup.get_remote_getter_builder(ni).unwrap(),
                 ),
             )
         })
-        .collect();*/
-    let outs = VecMap::new();
+        .collect();
 
     Server {
         put: ins,
@@ -76,7 +72,7 @@ pub struct Server {
     /// All put endpoints.
     pub put: VecMap<(String, Vec<String>, flow::MutatorBuilder)>,
     /// All get endpoints.
-    pub get: VecMap<(String, Vec<String>, flow::Getter)>,
+    pub get: VecMap<(String, Vec<String>, flow::RemoteGetterBuilder)>,
 }
 
 /// Handle RPCs from a single `TcpStream`
@@ -84,36 +80,15 @@ pub fn main(stream: TcpStream, s: Server) {
     let mut stream = BufStream::new(stream);
     loop {
         match bincode::deserialize_from(&mut stream, bincode::Infinite) {
-            Ok(Method::Query { view, key }) => {
-                let r = s.get[view]
-                    .2
-                    .lookup_map(
-                        &key,
-                        |rs| {
-                            bincode::serialize_into(
-                                &mut stream,
-                                &Ok::<_, ()>(rs),
-                                bincode::Infinite,
-                            )
-                        },
-                        true,
-                    )
-                    .map(|r| r.unwrap())
-                    .unwrap_or_else(|e| {
-                        bincode::serialize_into(
-                            &mut stream,
-                            &Err::<&[Arc<Vec<DataType>>], _>(e),
-                            bincode::Infinite,
-                        )
-                    });
-
+            Ok(Method::GetMutatorBuilder { view }) => {
+                let r = bincode::serialize_into(&mut stream, &s.put[view].2, bincode::Infinite);
                 if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;
                 }
             }
-            Ok(Method::GetMutatorBuilder { view }) => {
-                let r = bincode::serialize_into(&mut stream, &s.put[view].2, bincode::Infinite);
+            Ok(Method::GetGetterBuilder { view }) => {
+                let r = bincode::serialize_into(&mut stream, &s.get[view].2, bincode::Infinite);
                 if let Err(e) = r {
                     println!("client left prematurely: {:?}", e);
                     break;

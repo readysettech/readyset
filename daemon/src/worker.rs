@@ -1,22 +1,26 @@
 use channel::{self, TcpSender};
-use channel::poll::{PollEvent, PollingLoop, ProcessResult};
+use channel::poll::{PollEvent, PollingLoop, ProcessResult, RpcPollEvent, RpcPollingLoop};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 use std::sync::{Arc, Mutex};
 
 use distributary::{ChannelCoordinator, CoordinationMessage, CoordinationPayload, DomainBuilder,
-                   NodeIndex, SingleReadHandle};
+                   NodeIndex, ReadQuery, ReadReply, SingleReadHandle};
 use distributary::Index as DomainIndex;
 
 pub struct Worker {
     log: Logger,
 
+    // Controller connection
     controller_addr: String,
     listen_addr: String,
     listen_port: u16,
+
+    // Read RPC handling
+    read_listen_addr: SocketAddr,
 
     receiver: Option<PollingLoop<CoordinationMessage>>,
     sender: Option<TcpSender<CoordinationMessage>>,
@@ -30,6 +34,46 @@ pub struct Worker {
 }
 
 impl Worker {
+    fn serve_reads(
+        mut polling_loop: RpcPollingLoop<ReadQuery, ReadReply>,
+        readers: Arc<Mutex<HashMap<(NodeIndex, usize), SingleReadHandle>>>,
+    ) {
+        let mut readers_cache: HashMap<(NodeIndex, usize), SingleReadHandle> = HashMap::new();
+
+        polling_loop.run_polling_loop(|event| match event {
+            RpcPollEvent::ResumePolling(_) => ProcessResult::KeepPolling,
+            RpcPollEvent::Timeout => unreachable!(),
+            RpcPollEvent::Process(query, reply) => {
+                *reply = Some(ReadReply(
+                    query
+                        .keys
+                        .iter()
+                        .map(|key| {
+                            let reader = readers_cache.entry(query.target.clone()).or_insert_with(
+                                || readers.lock().unwrap().get(&query.target).unwrap().clone(),
+                            );
+
+                            reader
+                                .find_and(
+                                    key,
+                                    |rs| {
+                                        rs.into_iter()
+                                            .map(|r| r.iter().map(|v| v.deep_clone()).collect())
+                                            .collect()
+                                    },
+                                    query.block,
+                                )
+                                .map(|r| r.0)
+                                .map(|r| r.unwrap_or_else(Vec::new))
+                        })
+                        .collect(),
+                ));
+                ProcessResult::KeepPolling
+            }
+        });
+        unreachable!();
+    }
+
     pub fn new(
         controller: &str,
         listen_addr: &str,
@@ -37,6 +81,14 @@ impl Worker {
         heartbeat_every: Duration,
         log: Logger,
     ) -> Worker {
+        let readers = Arc::new(Mutex::new(HashMap::new()));
+
+        let readers_clone = readers.clone();
+        let read_polling_loop = RpcPollingLoop::new();
+        let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
+        thread::spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
+        println!("Listening for reads on {:?}", read_listen_addr);
+
         Worker {
             log: log,
 
@@ -44,11 +96,13 @@ impl Worker {
             listen_port: port,
             controller_addr: String::from(controller),
 
+            read_listen_addr,
+
             receiver: None,
             sender: None,
             channel_coordinator: Arc::new(ChannelCoordinator::new()),
             domain_threads: Vec::new(),
-            readers: Arc::new(Mutex::new(HashMap::new())),
+            readers,
 
             heartbeat_every: heartbeat_every,
             last_heartbeat: None,
@@ -89,8 +143,8 @@ impl Worker {
         }
     }
 
-    /// Main worker loop: waits for instructions from controller, and occasionally heartbeats to tell
-    /// the controller that we're still here
+    /// Main worker loop: waits for instructions from controller, and occasionally heartbeats to
+    /// tell the controller that we're still here
     pub fn handle(&mut self) {
         // needed to make the borrow checker happy, replaced later
         let mut receiver = self.receiver.take();
@@ -200,7 +254,10 @@ impl Worker {
     }
 
     fn register(&mut self, listen_addr: SocketAddr) -> Result<(), channel::tcp::SendError> {
-        let msg = self.wrap_payload(CoordinationPayload::Register(listen_addr));
+        let msg = self.wrap_payload(CoordinationPayload::Register {
+            addr: listen_addr,
+            read_listen_addr: self.read_listen_addr,
+        });
         self.sender.as_mut().unwrap().send(msg)
     }
 }

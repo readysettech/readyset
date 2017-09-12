@@ -42,7 +42,7 @@ mod transactions;
 use self::prelude::{Ingredient, WorkerEndpoint, WorkerIdentifier};
 
 pub use self::mutator::{Mutator, MutatorBuilder, MutatorError};
-pub use self::getter::Getter;
+pub use self::getter::{Getter, ReadQuery, ReadReply, RemoteGetter, RemoteGetterBuilder};
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
 macro_rules! dur_to_ns {
@@ -80,6 +80,7 @@ pub struct Blender {
 
     readers: Readers,
     workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
+    remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
 
     log: slog::Logger,
 }
@@ -117,6 +118,7 @@ impl Default for Blender {
 
             readers: Arc::default(),
             workers: HashMap::default(),
+            remote_readers: HashMap::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
@@ -143,7 +145,7 @@ impl Blender {
     pub fn add_worker(&mut self, addr: SocketAddr, sender: WorkerEndpoint) {
         if !self.workers.contains_key(&addr) {
             debug!(self.log, "added new worker {:?} to Blender", addr);
-            self.workers.insert(addr, sender);
+            self.workers.insert(addr.clone(), sender);
         } else {
             warn!(
                 self.log,
@@ -156,6 +158,31 @@ impl Blender {
     /// Return the number of workers currently registered.
     pub fn worker_count(&self) -> usize {
         self.workers.len()
+    }
+
+    /// Tell the blender about a remote domain so that reads can be routed to the worker that
+    /// maintains it.
+    pub fn register_remote_domain(
+        &mut self,
+        index: domain::Index,
+        shard: usize,
+        read_addr: SocketAddr,
+    ) {
+        if !self.remote_readers.contains_key(&(index, shard)) {
+            debug!(
+                self.log,
+                "added new remote domain {:?} with read_addr {:} to Blender",
+                (index, shard),
+                read_addr,
+            );
+            self.remote_readers.insert((index, shard), read_addr);
+        } else {
+            warn!(
+                self.log,
+                "remote domain {:?} already exists; ignoring request to add it!",
+                (index, shard)
+            );
+        }
     }
 
     /// Use a debug channel. This function may only be called once because the receiving end it
@@ -293,6 +320,22 @@ impl Blender {
         self.find_getter_for(node).and_then(|r| {
             let sharded = self.ingredients[r].sharded_by() != migrate::sharding::Sharding::None;
             Getter::new(r, sharded, &self.readers, &self.ingredients)
+        })
+    }
+
+    /// Obtain a `RemoteGetterBuilder` that can be sent to a client and then used to query a given
+    /// (already maintained) reader node.
+    pub fn get_remote_getter_builder(
+        &self,
+        node: prelude::NodeIndex,
+    ) -> Option<RemoteGetterBuilder> {
+        self.find_getter_for(node).map(|r| {
+            let domain = self.ingredients[r].domain();
+            let shards = (0..self.domains[&domain].shards())
+                .map(|i| self.remote_readers.get(&(domain, i)).unwrap().clone())
+                .collect();
+
+            RemoteGetterBuilder { node: r, shards }
         })
     }
 

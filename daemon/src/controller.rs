@@ -34,6 +34,9 @@ pub struct Controller {
     blender: Arc<Mutex<Blender>>,
     workers: HashMap<SocketAddr, WorkerStatus>,
 
+    /// Map from worker address to the address the worker is listening on for reads.
+    read_addrs: HashMap<SocketAddr, SocketAddr>,
+
     heartbeat_every: Duration,
     healthcheck_every: Duration,
     last_checked_workers: Instant,
@@ -56,6 +59,7 @@ impl Controller {
             log: log,
             blender: blender,
             workers: HashMap::new(),
+            read_addrs: HashMap::new(),
             heartbeat_every: heartbeat_every,
             healthcheck_every: healthcheck_every,
             last_checked_workers: Instant::now(),
@@ -111,7 +115,10 @@ impl Controller {
 
     fn handle(&mut self, msg: &CoordinationMessage) -> Result<(), io::Error> {
         match msg.payload {
-            CoordinationPayload::Register(ref remote) => self.handle_register(msg, remote),
+            CoordinationPayload::Register {
+                ref addr,
+                ref read_listen_addr,
+            } => self.handle_register(msg, addr, read_listen_addr.clone()),
             CoordinationPayload::Heartbeat => self.handle_heartbeat(msg),
             CoordinationPayload::DomainBooted(ref domain, ref addr) => {
                 self.handle_domain_booted(msg, domain, addr)
@@ -123,10 +130,19 @@ impl Controller {
     fn handle_domain_booted(
         &mut self,
         msg: &CoordinationMessage,
-        _domain: &(DomainIndex, usize),
+        domain: &(DomainIndex, usize),
         _addr: &SocketAddr,
     ) -> Result<(), io::Error> {
         use std::str::FromStr;
+
+        {
+            let mut b = self.blender.lock().unwrap();
+            b.register_remote_domain(
+                domain.0,
+                domain.1,
+                self.read_addrs.get(&msg.source).unwrap().clone(),
+            );
+        }
 
         // rewrite message source to be from the controller
         let mut fwd_msg = msg.clone();
@@ -150,6 +166,7 @@ impl Controller {
         &mut self,
         msg: &CoordinationMessage,
         remote: &SocketAddr,
+        read_listen_addr: SocketAddr,
     ) -> Result<(), io::Error> {
         info!(
             self.log,
@@ -161,6 +178,7 @@ impl Controller {
         let sender = Arc::new(Mutex::new(TcpSender::connect(remote, None)?));
         let ws = WorkerStatus::new(sender.clone());
         self.workers.insert(msg.source.clone(), ws);
+        self.read_addrs.insert(msg.source.clone(), read_listen_addr);
 
         let mut b = self.blender.lock().unwrap();
         b.add_worker(msg.source, sender);

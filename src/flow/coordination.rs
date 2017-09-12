@@ -14,8 +14,13 @@ pub struct CoordinationMessage {
 /// Coordination-layer message payloads.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CoordinationPayload {
-    /// Register a new worker at given `SocketAddr`.
-    Register(SocketAddr),
+    /// Register a new worker.
+    Register {
+        /// Address of the worker.
+        addr: SocketAddr,
+        /// Address the worker will be listening on to serve reads.
+        read_listen_addr: SocketAddr,
+    },
     /// Worker going offline.
     Deregister,
     /// Worker is still alive.

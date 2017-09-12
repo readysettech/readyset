@@ -1,9 +1,92 @@
+use channel::rpc::RpcClient;
+
 use flow::prelude::*;
 use flow;
 use checktable;
 use backlog::{self, ReadHandle};
+
 use std::sync::Arc;
+use std::net::SocketAddr;
+
 use arrayvec::ArrayVec;
+
+/// A request to read a specific key.
+#[derive(Serialize, Deserialize)]
+pub struct ReadQuery {
+    /// Where to read from
+    pub target: (NodeIndex, usize),
+    /// Keys to read with
+    pub keys: Vec<DataType>,
+    /// Whether to block of a partial reply is triggered
+    pub block: bool,
+}
+
+/// The contents of a specific key
+#[derive(Serialize, Deserialize)]
+pub struct ReadReply(pub Vec<Result<Vec<Vec<DataType>>, ()>>);
+
+/// Serializeable version of a `RemoteGetter`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RemoteGetterBuilder {
+    pub(crate) node: NodeIndex,
+    pub(crate) shards: Vec<SocketAddr>,
+}
+
+impl RemoteGetterBuilder {
+    /// Build a `RemoteGetter` out of a `RemoteGetterBuilder`
+    pub fn build(self) -> RemoteGetter {
+        RemoteGetter {
+            node: self.node,
+            shards: self.shards
+                .iter()
+                .map(|addr| RpcClient::connect(addr).unwrap())
+                .collect(),
+        }
+    }
+}
+
+/// Struct to query the contents of a materialized view.
+pub struct RemoteGetter {
+    node: NodeIndex,
+    shards: Vec<RpcClient<ReadQuery, ReadReply>>,
+}
+
+impl RemoteGetter {
+    /// Query for the results for the given key, optionally blocking if it is not yet available.
+    pub fn lookup(&mut self, keys: Vec<DataType>, block: bool) -> Vec<Result<Datas, ()>> {
+        if self.shards.len() == 1 {
+            let ReadReply(rows) = self.shards[0]
+                .send(&ReadQuery {
+                    target: (self.node, 0),
+                    keys,
+                    block,
+                })
+                .unwrap();
+            rows
+        } else {
+            let mut shard_queries = vec![Vec::new(); self.shards.len()];
+            for key in keys {
+                let shard = ::shard_by(&key, self.shards.len());
+                shard_queries[shard].push(key);
+            }
+
+            shard_queries
+                .into_iter()
+                .enumerate()
+                .flat_map(|(shard, keys)| {
+                    let ReadReply(rows) = self.shards[shard]
+                        .send(&ReadQuery {
+                            target: (self.node, shard),
+                            keys,
+                            block,
+                        })
+                        .unwrap();
+                    rows
+                })
+                .collect()
+        }
+    }
+}
 
 /// A handle for looking up results in a materialized view.
 pub struct Getter {
