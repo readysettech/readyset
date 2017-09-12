@@ -4,9 +4,9 @@ extern crate bincode;
 extern crate bufstream;
 extern crate byteorder;
 extern crate mio;
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde;
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -18,13 +18,13 @@ use std::ops::{Deref, DerefMut};
 use std::marker::PhantomData;
 
 use byteorder::{ByteOrder, NetworkEndian};
-use serde::{Serialize, Serializer, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod tcp;
 pub mod poll;
 pub mod rpc;
 
-pub use tcp::{channel, sync_channel, TcpSender, TcpReceiver};
+pub use tcp::{channel, sync_channel, TcpReceiver, TcpSender};
 
 #[derive(Debug)]
 pub enum ChannelSender<T> {
@@ -73,7 +73,7 @@ impl<T> ChannelSender<T> {
 }
 
 mod panic_serialize {
-    use serde::{Serializer, Deserializer};
+    use serde::{Deserializer, Serializer};
     pub fn serialize<S, T>(_t: &T, _serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -90,10 +90,7 @@ mod panic_serialize {
 
 /// A wrapper around TcpSender that appears to be Serializable, but panics if it is ever serialized.
 #[derive(Serialize, Deserialize)]
-pub struct STcpSender<T>(
-    #[serde(with = "panic_serialize")]
-    pub TcpSender<T>,
-);
+pub struct STcpSender<T>(#[serde(with = "panic_serialize")] pub TcpSender<T>);
 
 impl<T> Deref for STcpSender<T> {
     type Target = TcpSender<T>;

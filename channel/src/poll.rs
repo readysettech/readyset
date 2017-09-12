@@ -5,7 +5,7 @@ use std;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use mio::{Poll, Token, Events, Ready, PollOpt};
+use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::net::{TcpListener, TcpStream};
 
 use serde::Serialize;
@@ -201,7 +201,9 @@ where
                 } else if token < MAX_CHANNEL {
                     let channel = token - CHANNEL_OFFSET;
                     match self.inner.channels[channel].as_mut().unwrap().try_recv() {
-                        Ok(message) => stop = process_event(GeneralizedPollEvent::ProcessChannel(message)),
+                        Ok(message) => {
+                            stop = process_event(GeneralizedPollEvent::ProcessChannel(message))
+                        }
                         Err(TryRecvError::Disconnected) => {
                             self.inner.remove_channel(channel);
                         }
@@ -214,14 +216,18 @@ where
                     match self.inner.rpc_endpoints[endpoint]
                         .as_mut()
                         .unwrap()
-                        .try_recv() {
+                        .try_recv()
+                    {
                         Ok(message) => {
-                            stop = process_event(GeneralizedPollEvent::ProcessRpc(message, &mut reply));
+                            stop = process_event(
+                                GeneralizedPollEvent::ProcessRpc(message, &mut reply),
+                            );
                             if let Some(reply) = reply {
                                 match self.inner.rpc_endpoints[endpoint]
                                     .as_mut()
                                     .unwrap()
-                                    .send(&reply) {
+                                    .send(&reply)
+                                {
                                     Ok(_) => {}
                                     Err(RpcSendError::Disconnected) => {
                                         self.inner.remove_rpc_endpoint(endpoint)
@@ -282,9 +288,9 @@ impl<T: Serialize + DeserializeOwned> PollingLoop<T> {
         F: FnMut(PollEvent<T>) -> ProcessResult,
     {
         self.polling_loop.run_polling_loop(|event| match event {
-            GeneralizedPollEvent::ResumePolling(timeout) => process_event(
-                PollEvent::ResumePolling(timeout),
-            ),
+            GeneralizedPollEvent::ResumePolling(timeout) => {
+                process_event(PollEvent::ResumePolling(timeout))
+            }
             GeneralizedPollEvent::AcceptConnection(decision) => {
                 *decision = AcceptDecision::Channel;
                 KeepPolling
@@ -320,9 +326,9 @@ impl<Q: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned> RpcPollin
         F: FnMut(RpcPollEvent<Q, R>) -> ProcessResult,
     {
         self.polling_loop.run_polling_loop(|event| match event {
-            GeneralizedPollEvent::ResumePolling(timeout) => process_event(
-                RpcPollEvent::ResumePolling(timeout),
-            ),
+            GeneralizedPollEvent::ResumePolling(timeout) => {
+                process_event(RpcPollEvent::ResumePolling(timeout))
+            }
             GeneralizedPollEvent::AcceptConnection(decision) => {
                 *decision = AcceptDecision::Rpc;
                 KeepPolling
@@ -344,7 +350,7 @@ mod tests {
         let mut service = RpcPollingLoop::<i64, i64>::new();
         let addr = service.get_listener_addr().unwrap();
 
-        let t = thread::spawn(move||{
+        let t = thread::spawn(move || {
             service.run_polling_loop(|event| match event {
                 RpcPollEvent::ResumePolling(duration) => {
                     *duration = Some(Duration::from_millis(100));
@@ -370,7 +376,7 @@ mod tests {
         let mut service = RpcPollingLoop::<i64, i64>::new();
         let addr = service.get_listener_addr().unwrap();
 
-        let t = thread::spawn(move||{
+        let t = thread::spawn(move || {
             service.run_polling_loop(|event| match event {
                 RpcPollEvent::ResumePolling(duration) => {
                     *duration = Some(Duration::from_millis(100));
@@ -402,7 +408,7 @@ mod tests {
         let addr = service.get_listener_addr().unwrap();
         let addr2 = service2.get_listener_addr().unwrap();
 
-        let t = thread::spawn(move||{
+        let t = thread::spawn(move || {
             service.run_polling_loop(|event| match event {
                 RpcPollEvent::ResumePolling(duration) => {
                     *duration = Some(Duration::from_millis(100));
@@ -416,7 +422,7 @@ mod tests {
             });
         });
 
-        let t2 = thread::spawn(move||{
+        let t2 = thread::spawn(move || {
             service2.run_polling_loop(|event| match event {
                 RpcPollEvent::ResumePolling(duration) => {
                     *duration = Some(Duration::from_millis(100));

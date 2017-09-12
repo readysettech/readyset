@@ -7,9 +7,9 @@ use bincode::{self, Infinite};
 use bufstream::BufStream;
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use mio::{self, Evented, Poll, PollOpt, Ready, Token};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use super::{ReceiveError, DeserializeReceiver, NonBlockingWriter};
+use super::{DeserializeReceiver, NonBlockingWriter, ReceiveError};
 
 #[derive(Debug)]
 pub enum SendError {
@@ -247,7 +247,6 @@ where
                 self.poisoned = true;
                 Err(TryRecvError::DeserializationError)
             }
-
         }
     }
 
