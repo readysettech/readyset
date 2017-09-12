@@ -261,20 +261,22 @@ impl Materializations {
                           "columns" => ?columns,
                       );
 
-                // also add a replay obligation to enable partial
-                replay_obligations
+                if self.have
                     .entry(mi)
                     .or_insert_with(HashSet::new)
-                    .insert(columns.clone());
+                    .insert(columns.clone())
+                {
+                    // also add a replay obligation to enable partial
+                    replay_obligations
+                        .entry(mi)
+                        .or_insert_with(HashSet::new)
+                        .insert(columns.clone());
 
-                self.have
-                    .entry(mi)
-                    .or_insert_with(HashSet::new)
-                    .insert(columns.clone());
-                self.added
-                    .entry(mi)
-                    .or_insert_with(HashSet::new)
-                    .insert(columns);
+                    self.added
+                        .entry(mi)
+                        .or_insert_with(HashSet::new)
+                        .insert(columns);
+                }
             }
         }
 
