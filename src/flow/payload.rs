@@ -48,7 +48,7 @@ pub enum TriggerEndpoint {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum InitialState {
-    PartialLocal(usize, Vec<Tag>),
+    PartialLocal(Vec<(Vec<usize>, Vec<Tag>)>),
     IndexedLocal(HashSet<Vec<usize>>),
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,

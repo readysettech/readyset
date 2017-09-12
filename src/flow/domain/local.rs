@@ -314,8 +314,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
 
     pub fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
         if self.state_for(columns).is_some() {
-            // already keyed
-            return;
+            // already keyed by this key?
+            unreachable!();
         }
 
         let is_partial = partial.is_some();
@@ -335,8 +335,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         if !self.is_empty() {
             // we need to *construct* the index!
             if is_partial {
-                // would require multi-index partial view support
-                unimplemented!();
+                // partial views can start out empty
+                return;
             }
 
             let (new, old) = self.state.split_last_mut().unwrap();

@@ -730,10 +730,14 @@ impl Domain {
                     Packet::PrepareState { node, state } => {
                         use flow::payload::InitialState;
                         match state {
-                            InitialState::PartialLocal(key, tags) => {
-                                let mut state = State::default();
-                                state.add_key(&[key], Some(tags));
-                                self.state.insert(node, state);
+                            InitialState::PartialLocal(index) => {
+                                if !self.state.contains_key(&node) {
+                                    self.state.insert(node, State::default());
+                                }
+                                let state = self.state.get_mut(&node).unwrap();
+                                for (key, tags) in index {
+                                    state.add_key(&key[..], Some(tags));
+                                }
                             }
                             InitialState::IndexedLocal(index) => {
                                 if !self.state.contains_key(&node) {
