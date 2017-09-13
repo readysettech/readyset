@@ -35,7 +35,7 @@ impl DomainInputHandle {
         let txs: Result<Vec<_>, _> = txs.iter()
             .map(|addr| TcpSender::connect(addr, None))
             .collect();
-        let tx_reply = PollingLoop::new();
+        let tx_reply = PollingLoop::new("0.0.0.0:0".parse().unwrap());
         let tx_reply_addr = tx_reply.get_listener_addr().unwrap();
 
         Ok(Self {

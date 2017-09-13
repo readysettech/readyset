@@ -117,8 +117,8 @@ where
     Q: Serialize + DeserializeOwned,
     R: Serialize + DeserializeOwned,
 {
-    pub fn new() -> Self {
-        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+    pub fn new(listen_addr: SocketAddr) -> Self {
+        let listener = std::net::TcpListener::bind(listen_addr).unwrap();
         let addr = listener.local_addr().unwrap();
         Self::from_listener(TcpListener::from_listener(listener, &addr).unwrap())
     }
@@ -263,9 +263,9 @@ pub struct PollingLoop<T> {
     polling_loop: GeneralizedPollingLoop<T, (), ()>,
 }
 impl<T: Serialize + DeserializeOwned> PollingLoop<T> {
-    pub fn new() -> Self {
+    pub fn new(listen_addr: SocketAddr) -> Self {
         Self {
-            polling_loop: GeneralizedPollingLoop::new(),
+            polling_loop: GeneralizedPollingLoop::new(listen_addr),
         }
     }
     pub fn from_listener(listener: TcpListener) -> Self {
@@ -306,9 +306,9 @@ pub struct RpcPollingLoop<Q, R> {
     polling_loop: GeneralizedPollingLoop<(), Q, R>,
 }
 impl<Q: Serialize + DeserializeOwned, R: Serialize + DeserializeOwned> RpcPollingLoop<Q, R> {
-    pub fn new() -> Self {
+    pub fn new(listen_addr: SocketAddr) -> Self {
         Self {
-            polling_loop: GeneralizedPollingLoop::new(),
+            polling_loop: GeneralizedPollingLoop::new(listen_addr),
         }
     }
     pub fn from_listener(listener: TcpListener) -> Self {
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn simple_rpcs() {
-        let mut service = RpcPollingLoop::<i64, i64>::new();
+        let mut service = RpcPollingLoop::<i64, i64>::new("127.0.0.1:0".parse().unwrap());
         let addr = service.get_listener_addr().unwrap();
 
         let t = thread::spawn(move || {
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn multiclient_rpcs() {
-        let mut service = RpcPollingLoop::<i64, i64>::new();
+        let mut service = RpcPollingLoop::<i64, i64>::new("127.0.0.1:0".parse().unwrap());
         let addr = service.get_listener_addr().unwrap();
 
         let t = thread::spawn(move || {
@@ -403,8 +403,8 @@ mod tests {
 
     #[test]
     fn multiservice_rpcs() {
-        let mut service = RpcPollingLoop::<i64, i64>::new();
-        let mut service2 = RpcPollingLoop::<i64, i64>::new();
+        let mut service = RpcPollingLoop::<i64, i64>::new("127.0.0.1:0".parse().unwrap());
+        let mut service2 = RpcPollingLoop::<i64, i64>::new("127.0.0.1:0".parse().unwrap());
         let addr = service.get_listener_addr().unwrap();
         let addr2 = service2.get_listener_addr().unwrap();
 

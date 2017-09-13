@@ -81,10 +81,12 @@ impl Worker {
         heartbeat_every: Duration,
         log: Logger,
     ) -> Worker {
+        use std::str::FromStr;
+
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
         let readers_clone = readers.clone();
-        let read_polling_loop = RpcPollingLoop::new();
+        let read_polling_loop = RpcPollingLoop::new(SocketAddr::from_str(listen_addr).unwrap());
         let read_listen_addr = read_polling_loop.get_listener_addr().unwrap();
         thread::spawn(move || Self::serve_reads(read_polling_loop, readers_clone));
         println!("Listening for reads on {:?}", read_listen_addr);

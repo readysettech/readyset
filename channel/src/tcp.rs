@@ -290,30 +290,32 @@ impl<T> Evented for TcpReceiver<T> {
     }
 }
 
-fn connect() -> (std::net::TcpStream, mio::net::TcpStream) {
-    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = std::net::TcpListener::bind(&addr).unwrap();
+fn connect(listen_addr: SocketAddr) -> (std::net::TcpStream, mio::net::TcpStream) {
+    let listener = std::net::TcpListener::bind(&listen_addr).unwrap();
     let rx = mio::net::TcpStream::connect(&listener.local_addr().unwrap()).unwrap();
     let tx = listener.accept().unwrap().0;
 
     (tx, rx)
 }
 
-pub fn channel<T: Serialize>() -> (TcpSender<T>, TcpReceiver<T>)
+pub fn channel<T: Serialize>(listen_addr: SocketAddr) -> (TcpSender<T>, TcpReceiver<T>)
 where
     for<'de> T: Deserialize<'de>,
 {
-    let (tx, rx) = connect();
+    let (tx, rx) = connect(listen_addr);
     let tx = TcpSender::new(tx, None).unwrap();
     let rx = TcpReceiver::new(rx);
     (tx, rx)
 }
 
-pub fn sync_channel<T: Serialize>(size: u32) -> (TcpSender<T>, TcpReceiver<T>)
+pub fn sync_channel<T: Serialize>(
+    listen_addr: SocketAddr,
+    size: u32,
+) -> (TcpSender<T>, TcpReceiver<T>)
 where
     for<'de> T: Deserialize<'de>,
 {
-    let (tx, rx) = connect();
+    let (tx, rx) = connect(listen_addr);
     let tx = TcpSender::new(tx, Some(size)).unwrap();
     let rx = TcpReceiver::new(rx);
     (tx, rx)
@@ -327,7 +329,7 @@ mod tests {
 
     #[test]
     fn unbounded() {
-        let (mut sender, mut receiver) = channel::<u32>();
+        let (mut sender, mut receiver) = channel::<u32>("127.0.0.1:0".parse().unwrap());
 
         sender.send(12).unwrap();
         assert_eq!(receiver.recv().unwrap(), 12);
@@ -340,7 +342,7 @@ mod tests {
 
     #[test]
     fn bounded() {
-        let (mut sender, mut receiver) = sync_channel::<u32>(2);
+        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
 
         sender.send(12).unwrap();
         sender.send(65).unwrap();
@@ -353,7 +355,7 @@ mod tests {
 
     #[test]
     fn bounded_multithread() {
-        let (mut sender, mut receiver) = sync_channel::<u32>(2);
+        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -373,7 +375,7 @@ mod tests {
 
     #[test]
     fn poll() {
-        let (mut sender, mut receiver) = sync_channel::<u32>(2);
+        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 2);
 
         let t1 = thread::spawn(move || {
             sender.send(12).unwrap();
@@ -400,8 +402,8 @@ mod tests {
 
     #[test]
     fn ping_pong() {
-        let (mut sender, mut receiver) = sync_channel::<u32>(1);
-        let (mut sender2, mut receiver2) = sync_channel::<u32>(1);
+        let (mut sender, mut receiver) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 1);
+        let (mut sender2, mut receiver2) = sync_channel::<u32>("127.0.0.1:0".parse().unwrap(), 1);
 
         let t1 = thread::spawn(move || {
             let poll = Poll::new().unwrap();

@@ -151,7 +151,7 @@ impl DomainBuilder {
         let mut control_reply_tx = TcpSender::connect(&self.control_addr, None).unwrap();
 
         // Create polling loop and tell the controller what port we are listening on.
-        let polling_loop = PollingLoop::<Box<Packet>>::new();
+        let polling_loop = PollingLoop::<Box<Packet>>::new("127.0.0.1:0".parse().unwrap());
         let addr = polling_loop.get_listener_addr().unwrap();
         control_reply_tx
             .send(ControlReplyPacket::Booted(shard.unwrap_or(0), addr.clone()))
