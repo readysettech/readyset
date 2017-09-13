@@ -80,10 +80,11 @@ struct ReplayPath {
 /// When one node misses in another during a replay, a HoleSubscription will be registered with the
 /// target node, and a replay to the target node will be triggered for the key in question. When
 /// that replay eventually finishes, the subscription will cause the target node to notify this
-/// subscription, causing the replay to progress.
+/// subscription, causing the replay to run again.
 #[derive(Debug)]
 struct HoleSubscription {
-    key: Vec<DataType>,
+    miss_key: Vec<DataType>,
+    replay_key: Vec<DataType>,
     tag: Tag,
 }
 
@@ -183,21 +184,28 @@ impl Domain {
         }
     }
 
-    fn on_replay_miss(&mut self, miss: LocalNodeIndex, key: Vec<DataType>, needed_for: Tag) {
+    fn on_replay_miss(
+        &mut self,
+        miss_in: LocalNodeIndex,
+        replay_key: Vec<DataType>,
+        miss_key: Vec<DataType>,
+        needed_for: Tag,
+    ) {
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut already_filling = false;
-        let mut subscribed = match self.waiting.remove(&miss) {
+        let mut subscribed = match self.waiting.remove(&miss_in) {
             Some(Waiting { subscribed }) => {
-                already_filling = subscribed.iter().any(|s| s.key == key);
+                already_filling = subscribed.iter().any(|s| s.miss_key == miss_key);
                 subscribed
             }
             None => Vec::new(),
         };
         subscribed.push(HoleSubscription {
-            key: key.clone(),
+            miss_key: miss_key.clone(),
+            replay_key: replay_key,
             tag: needed_for,
         });
-        self.waiting.insert(miss, Waiting { subscribed });
+        self.waiting.insert(miss_in, Waiting { subscribed });
 
         if already_filling {
             // no need to trigger again
@@ -209,13 +217,13 @@ impl Domain {
             if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
                 continue;
             }
-            if self.replay_paths[&tag].path.last().unwrap().node != miss {
+            if self.replay_paths[&tag].path.last().unwrap().node != miss_in {
                 continue;
             }
 
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            let key = key.clone(); // :(
+            let key = miss_key.clone(); // :(
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 if self.already_requested(&tag, &key[..]) {
                     return;
@@ -1162,7 +1170,7 @@ impl Domain {
         if is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(source, Vec::from(key), tag);
+            self.on_replay_miss(source, Vec::from(key), Vec::from(key), tag);
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
@@ -1429,7 +1437,8 @@ impl Domain {
                                 miss.node == misses[0].node && miss.key == misses[0].key
                             }));
                             let miss = misses.swap_remove(0);
-                            need_replay = Some((miss.node, miss.key, tag));
+                            need_replay =
+                                Some((miss.node, partial_key.unwrap().clone(), miss.key, tag));
                             if let TriggerEndpoint::End(..) = *trigger {
                                 finished_partial = true;
                             }
@@ -1497,25 +1506,35 @@ impl Domain {
             self.finished_partial_replay(&tag);
         }
 
-        if let Some((node, key, tag)) = need_replay {
-            self.on_replay_miss(node, key, tag);
+        if let Some((node, while_replaying_key, miss_key, tag)) = need_replay {
+            trace!(self.log,
+                   "missed during replay processing";
+                   "tag" => tag.id(),
+                   "during" => ?while_replaying_key,
+                   "missed" => ?miss_key,
+                   "on" => %node,
+            );
+            self.on_replay_miss(node, while_replaying_key, miss_key, tag);
             return;
         }
 
         if let Some((tag, ni, for_key)) = finished {
             if let Some(Waiting { mut subscribed }) = self.waiting.remove(&ni) {
+                trace!(self.log, "partial replay finished to node with waiting backfills";
+                       "waiting" => subscribed.len(),
+                       "key" => ?for_key);
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
                 let for_key = for_key.unwrap();
                 subscribed.retain(|subscription| {
-                    if for_key != subscription.key {
+                    if for_key != subscription.miss_key {
                         // we didn't fulfill this subscription
                         return true;
                     }
 
                     // we've filled the hole that prevented the replay previously!
-                    self.seed_replay(subscription.tag, &subscription.key[..], None);
+                    self.seed_replay(subscription.tag, &subscription.replay_key[..], None);
                     false
                 });
 
