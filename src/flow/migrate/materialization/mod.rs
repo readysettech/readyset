@@ -395,7 +395,7 @@ impl Materializations {
                     crit!(self.log, "partial materializations above full materialization";
                           "full" => ni.index(),
                           "partial" => pi.index());
-                    //unimplemented!();
+                    unimplemented!();
                 }
                 continue;
             }
