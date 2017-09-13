@@ -410,12 +410,16 @@ impl Materializations {
                           "on" => mi.index(),
                           "for" => ni.index(),
                           "columns" => ?index,
-                    );
-                        self.added
-                            .entry(mi)
-                            .or_insert_with(HashSet::new)
-                            .insert(index);
+                        );
                     }
+
+                    // we actually need to communicate this to the domain even though it
+                    // already has the index, because it needs to be told about the new replay
+                    // tags associated with this index!
+                    self.added
+                        .entry(mi)
+                        .or_insert_with(HashSet::new)
+                        .insert(index);
                 }
             }
         }

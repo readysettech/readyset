@@ -313,17 +313,23 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
     }
 
     pub fn add_key(&mut self, columns: &[usize], partial: Option<Vec<Tag>>) {
-        if self.state_for(columns).is_some() {
-            // already keyed by this key?
-            unreachable!();
-        }
+        let (i, exists) = if let Some(i) = self.state_for(columns) {
+            // already keyed by this key; just adding tags
+            (i, true)
+        } else {
+            // will eventually be assigned
+            (self.state.len(), false)
+        };
 
         let is_partial = partial.is_some();
         if let Some(ref p) = partial {
-            let i = self.state.len();
             for &tag in p {
                 self.by_tag.insert(tag, i);
             }
+        }
+
+        if exists {
+            return;
         }
 
         self.state.push(SingleState {
