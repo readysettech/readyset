@@ -83,12 +83,7 @@ impl<'a> Plan<'a> {
                             return false;
                         }
 
-                        if self.m
-                            .have
-                            .get(&node)
-                            .map(|m| !m.is_empty())
-                            .unwrap_or(false)
-                        {
+                        if self.m.have.contains_key(&node) {
                             // we want to take this node, but not any later ones
                             found = true;
                         }

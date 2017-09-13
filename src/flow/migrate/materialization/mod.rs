@@ -326,9 +326,7 @@ impl Materializations {
                     break;
                 }
 
-                for mut path in paths {
-                    // we want the target node at the end
-                    path.reverse();
+                for path in paths {
 
                     // keep walking until:
                     //
@@ -336,7 +334,7 @@ impl Materializations {
                     //  - node is fully materialized; partial is ok
                     //  - node is partial on same key; partial is ok
                     //
-                    for (ni, col) in path {
+                    for (ni, col) in path.into_iter().skip(1) {
                         if col.is_none() {
                             able = false;
                             break 'try;
