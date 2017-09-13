@@ -983,6 +983,8 @@ fn replay_during_replay() {
     // u has a hole for a=2, but not for u=b, and so should forward this to both children
     mutu2.put(vec!["b".into(), 2.into()]).unwrap();
 
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
     // what happens if we now query for 2?
     assert_eq!(
         r.lookup(&2.into(), true),
