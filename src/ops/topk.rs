@@ -282,6 +282,7 @@ impl Ingredient for TopK {
                     LookupResult::Missing => {
                         misses.push(Miss {
                             node: *us,
+                            columns: Vec::from(group_by),
                             key: group.clone(),
                         });
                         None

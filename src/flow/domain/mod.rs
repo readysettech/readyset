@@ -187,6 +187,7 @@ impl Domain {
     fn on_replay_miss(
         &mut self,
         miss_in: LocalNodeIndex,
+        miss_columns: Vec<usize>,
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
         needed_for: Tag,
@@ -217,8 +218,16 @@ impl Domain {
             if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
                 continue;
             }
-            if self.replay_paths[&tag].path.last().unwrap().node != miss_in {
-                continue;
+            {
+                let p = self.replay_paths[&tag].path.last().unwrap();
+                if p.node != miss_in {
+                    continue;
+                }
+                assert!(p.partial_key.is_some());
+                assert_eq!(miss_columns.len(), 1);
+                if p.partial_key.unwrap() != miss_columns[0] {
+                    continue;
+                }
             }
 
             // send a message to the source domain(s) responsible
@@ -235,14 +244,22 @@ impl Domain {
                        "key" => format!("{:?}", key)
                 );
                 self.seed_replay(tag, &key[..], None);
-                continue;
+                return;
             }
 
             // NOTE: due to MAX_CONCURRENT_REPLAYS, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
             self.request_partial_replay(tag, key);
+            return;
         }
+
+        unreachable!(format!(
+            "no tag found to fill missing value {:?} in {}.{:?}",
+            miss_key,
+            miss_in,
+            miss_columns
+        ));
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
@@ -1145,7 +1162,7 @@ impl Domain {
                         data: Records::from_iter(rs.into_iter().map(|r| (**r).clone())),
                         transaction_state: transaction_state,
                     });
-                    (m, source, false)
+                    (m, source, None)
                 } else if transaction_state.is_some() {
                     // we need to forward a ReplayPiece for the timestamp we claimed
                     let m = Some(box Packet::ReplayPiece {
@@ -1159,18 +1176,18 @@ impl Domain {
                         data: Records::default(),
                         transaction_state: transaction_state,
                     });
-                    (m, source, true)
+                    (m, source, Some(cols.clone()))
                 } else {
-                    (None, source, true)
+                    (None, source, Some(cols.clone()))
                 }
             }
             _ => unreachable!(),
         };
 
-        if is_miss {
+        if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(source, Vec::from(key), Vec::from(key), tag);
+            self.on_replay_miss(source, cols, Vec::from(key), Vec::from(key), tag);
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
@@ -1437,8 +1454,13 @@ impl Domain {
                                 miss.node == misses[0].node && miss.key == misses[0].key
                             }));
                             let miss = misses.swap_remove(0);
-                            need_replay =
-                                Some((miss.node, partial_key.unwrap().clone(), miss.key, tag));
+                            need_replay = Some((
+                                miss.node,
+                                partial_key.unwrap().clone(),
+                                miss.key,
+                                miss.columns,
+                                tag,
+                            ));
                             if let TriggerEndpoint::End(..) = *trigger {
                                 finished_partial = true;
                             }
@@ -1506,7 +1528,7 @@ impl Domain {
             self.finished_partial_replay(&tag);
         }
 
-        if let Some((node, while_replaying_key, miss_key, tag)) = need_replay {
+        if let Some((node, while_replaying_key, miss_key, miss_cols, tag)) = need_replay {
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag.id(),
@@ -1514,7 +1536,7 @@ impl Domain {
                    "missed" => ?miss_key,
                    "on" => %node,
             );
-            self.on_replay_miss(node, while_replaying_key, miss_key, tag);
+            self.on_replay_miss(node, miss_cols, while_replaying_key, miss_key, tag);
             return;
         }
 

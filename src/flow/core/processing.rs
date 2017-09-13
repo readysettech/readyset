@@ -7,6 +7,7 @@ use flow::prelude;
 #[derive(PartialEq, Eq, Debug)]
 pub struct Miss {
     pub node: prelude::LocalNodeIndex,
+    pub columns: Vec<usize>,
     pub key: Vec<prelude::DataType>,
 }
 

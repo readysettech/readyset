@@ -280,6 +280,7 @@ impl Ingredient for Join {
             if other_rows.is_none() {
                 misses.push(Miss {
                     node: other,
+                    columns: vec![from_key],
                     key: vec![row[from_key].clone()],
                 });
                 continue;
@@ -306,6 +307,7 @@ impl Ingredient for Join {
                     } else {
                         misses.push(Miss {
                             node: from,
+                            columns: vec![self.on.1],
                             key: vec![row[self.on.1].clone()],
                         });
                         continue;

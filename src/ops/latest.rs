@@ -97,6 +97,7 @@ impl Ingredient for Latest {
                     // before processing!
                     misses.push(Miss{
                         node: *us,
+                        columns: vec![self.key[0]],
                         key: vec![r[self.key[0]].clone()],
                     });
                     None

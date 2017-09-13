@@ -184,6 +184,7 @@ where
                 LookupResult::Missing => {
                     misses.push(Miss {
                         node: *us,
+                        columns: self.out_key.clone(),
                         key: group,
                     });
                     continue;
