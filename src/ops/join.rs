@@ -235,7 +235,7 @@ impl Ingredient for Join {
 
                 let rc = self.lookup(
                     *self.right,
-                    &[self.on.0],
+                    &[self.on.1],
                     &KeyType::Single(&key),
                     nodes,
                     state,
@@ -306,7 +306,7 @@ impl Ingredient for Join {
                     } else {
                         misses.push(Miss {
                             node: from,
-                            key: vec![row[self.on.0].clone()],
+                            key: vec![row[self.on.1].clone()],
                         });
                         continue;
                     };
