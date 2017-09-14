@@ -213,6 +213,7 @@ impl Domain {
             return;
         }
 
+        let mut found = false;
         let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
         for tag in tags {
             if let TriggerEndpoint::Start(..) = self.replay_paths[&tag].trigger {
@@ -244,22 +245,26 @@ impl Domain {
                        "key" => format!("{:?}", key)
                 );
                 self.seed_replay(tag, &key[..], None);
-                return;
+                found = true;
+                continue;
             }
 
             // NOTE: due to MAX_CONCURRENT_REPLAYS, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
             self.request_partial_replay(tag, key);
-            return;
+            found = true;
+            continue;
         }
 
-        unreachable!(format!(
-            "no tag found to fill missing value {:?} in {}.{:?}",
-            miss_key,
-            miss_in,
-            miss_columns
-        ));
+        if !found {
+            unreachable!(format!(
+                "no tag found to fill missing value {:?} in {}.{:?}",
+                miss_key,
+                miss_in,
+                miss_columns
+            ));
+        }
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
