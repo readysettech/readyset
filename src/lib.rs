@@ -317,6 +317,7 @@
 #![feature(try_from)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
+#![feature(conservative_impl_trait)]
 #![deny(missing_docs)]
 
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
@@ -367,8 +368,6 @@ extern crate nom_sql;
 extern crate petgraph;
 extern crate regex;
 extern crate timekeeper;
-
-extern crate memcached;
 
 #[macro_use]
 #[cfg(feature = "web")]

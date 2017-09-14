@@ -72,28 +72,6 @@ impl Sharder {
 
         if m.tag().is_some() {
             // this is a replay packet, which we need to make sure we route correctly
-            // full replays need to be forwarded to all shards
-            if let Packet::FullReplay { .. } = *m {
-                let m = *m;
-                if let Packet::FullReplay { tag, state, .. } = m {
-                    for (_, &mut (dst, ref mut tx)) in self.txs.iter_mut().enumerate() {
-                        let m = box Packet::FullReplay {
-                            link: Link::new(index, dst),
-                            tag: tag,
-                            state: state.clone(),
-                        };
-
-                        if tx.send(m).is_err() {
-                            // we must be shutting down...
-                            break;
-                        }
-                    }
-                } else {
-                    unreachable!();
-                }
-                return;
-            }
-
             if let box Packet::ReplayPiece {
                 context: payload::ReplayPieceContext::Partial { .. },
                 ..

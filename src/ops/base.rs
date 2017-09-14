@@ -68,10 +68,6 @@ impl Base {
             .map(|&col| (col, self.defaults[col].clone()))
             .collect()
     }
-
-    pub(crate) fn is_unmodified(&self) -> bool {
-        self.unmodified
-    }
 }
 
 /// A Base clone must have a different unique_id so that no two copies write to the same file.
@@ -110,14 +106,6 @@ impl Ingredient for Base {
 
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![]
-    }
-
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized && self.primary_key.is_some()
     }
 
     fn on_connected(&mut self, _: &Graph) {}
@@ -182,9 +170,9 @@ impl Ingredient for Base {
         }
     }
 
-    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         if self.primary_key.is_some() {
-            Some((n, self.primary_key.as_ref().unwrap().clone()))
+            Some((n, (self.primary_key.as_ref().unwrap().clone(), true)))
                 .into_iter()
                 .collect()
         } else {

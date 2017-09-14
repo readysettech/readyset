@@ -14,7 +14,6 @@ impl fmt::Debug for Node {
             NodeType::Sharder { .. } => write!(f, "sharder"),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description()),
-            NodeType::Hook(..) => write!(f, "hook node"),
         }
     }
 }
@@ -49,7 +48,6 @@ impl Node {
             NodeType::Ingress => write!(f, "{{ {} | (ingress) }}", addr),
             NodeType::Egress { .. } => write!(f, "{{ {} | (egress) }}", addr),
             NodeType::Sharder { .. } => write!(f, "{{ {} | (sharder) }}", addr),
-            NodeType::Hook(..) => write!(f, "{{ {} | (hook) }}", addr),
             NodeType::Reader(ref r) => {
                 let key = match r.key() {
                     None => String::from("none"),

@@ -18,22 +18,14 @@ impl Node {
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
-                let mut misses = Vec::new();
+                let tag = m.tag();
                 m.map_data(|rs| {
-                    misses = materialize(rs, addr, state.get_mut(&addr));
+                    materialize(rs, tag, state.get_mut(&addr));
                 });
-                misses
+                vec![]
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
-                vec![]
-            }
-            NodeType::Hook(ref mut h) => {
-                if let &mut Some(ref mut h) = h {
-                    h.on_input(m.take().unwrap().take_data());
-                } else {
-                    unreachable!();
-                }
                 vec![]
             }
             NodeType::Egress(None) => unreachable!(),
@@ -126,8 +118,23 @@ impl Node {
                 // So: only materialize if either (1) the message we're processing is not a replay,
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
+                    let tag = match **m {
+                        Packet::ReplayPiece {
+                            tag,
+                            context: payload::ReplayPieceContext::Partial { .. },
+                            ..
+                        } => {
+                            // NOTE: non-partial replays shouldn't be materialized only for a
+                            // particular index, and so the tag shouldn't be forwarded to the
+                            // materialization code. this allows us to keep some asserts deeper in
+                            // the code to check that we don't do partial replays to non-partial
+                            // indices, or for unknown tags.
+                            Some(tag)
+                        }
+                        _ => None,
+                    };
                     m.map_data(|rs| {
-                        misses.extend(materialize(rs, addr, state.get_mut(&addr)));
+                        materialize(rs, tag, state.get_mut(&addr));
                     });
                 }
 
@@ -138,45 +145,50 @@ impl Node {
     }
 }
 
-pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut State>) -> Vec<Miss> {
+pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut State>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
-        return Vec::new();
+        return;
     }
 
     // yes!
     let state = state.unwrap();
     if state.is_partial() {
-        let mut holes = Vec::new();
         rs.retain(|r| {
-            // we need to check that we're not hitting any holes
-            if let Some(columns) = state.hits_hole(r) {
-                // we would need a replay of this update.
-                holes.push(Miss {
-                    node: node,
-                    key: columns.into_iter().map(|&c| r[c].clone()).collect(),
-                });
-
-                // we don't want to propagate records that miss
-                return false;
-            }
+            // we need to check that we're not erroneously filling any holes
+            // there are two cases here:
+            //
+            //  - if the incoming record is a partial replay (i.e., partial.is_some()), then we
+            //    *know* that we are the target of the replay, and therefore we *know* that the
+            //    materialization must already have marked the given key as "not a hole".
+            //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
+            //    need to be careful. since this materialization is partial, it may be that we
+            //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
+            //    record! if all of our indices have holes for this record, there's no need for us
+            //    to forward it. it would just be wasted work.
+            //
+            //    XXX: we could potentially save come computation here in joins by not forcing
+            //    `right` to backfill the lookup key only to then throw the record away
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
+                Record::Positive(ref r) => state.insert(r.clone(), partial),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
-            true
         });
-        holes
     } else {
         for r in rs.iter() {
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
-                Record::Negative(ref r) => state.remove(r),
+                Record::Positive(ref r) => {
+                    let hit = state.insert(r.clone(), partial);
+                    debug_assert!(hit);
+                }
+                Record::Negative(ref r) => {
+                    let hit = state.remove(r);
+                    debug_assert!(hit);
+                }
                 Record::DeleteRequest(..) => unreachable!(),
             }
         }
-        Vec::new()
     }
 }

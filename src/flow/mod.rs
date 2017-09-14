@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::time;
 use std::fmt;
-use std::io;
 
 use slog;
 use petgraph;
@@ -19,7 +18,6 @@ use petgraph::graph::NodeIndex;
 pub mod core;
 pub mod debug;
 pub mod domain;
-pub mod hook;
 pub mod keys;
 pub mod migrate;
 pub mod node;
@@ -46,7 +44,7 @@ macro_rules! dur_to_ns {
 }
 
 type Readers = Arc<Mutex<HashMap<NodeIndex, backlog::ReadHandle>>>;
-pub type Edge = bool; // should the edge be materialized?
+pub type Edge = ();
 
 /// `Blender` is the core component of the alternate Soup implementation.
 ///
@@ -59,12 +57,11 @@ pub struct Blender {
     source: NodeIndex,
     ndomains: usize,
     checktable: Arc<Mutex<checktable::CheckTable>>,
-    partial: HashSet<NodeIndex>,
-    partial_enabled: bool,
     sharding_enabled: bool,
 
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
+    materializations: migrate::materialization::Materializations,
 
     domains: HashMap<domain::Index, domain::DomainHandle>,
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
@@ -84,14 +81,18 @@ impl Default for Blender {
             node::special::Source,
             true,
         ));
+
+        let readers = Readers::default();
+        let log = slog::Logger::root(slog::Discard, o!());
+        let materializations = migrate::materialization::Materializations::new(&log, &readers);
+
         Blender {
             ingredients: g,
             source: source,
             ndomains: 0,
             checktable: Arc::new(Mutex::new(checktable::CheckTable::new())),
-            partial: Default::default(),
-            partial_enabled: true,
             sharding_enabled: true,
+            materializations: materializations,
 
             persistence: persistence::Parameters::default(),
 
@@ -99,9 +100,9 @@ impl Default for Blender {
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
-            readers: Arc::default(),
+            readers: readers,
 
-            log: slog::Logger::root(slog::Discard, o!()),
+            log: log,
         }
     }
 }
@@ -114,7 +115,7 @@ impl Blender {
 
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
-        self.partial_enabled = false;
+        self.materializations.disable_partial();
     }
 
     /// Disable sharding for all subsequent migrations
@@ -156,6 +157,7 @@ impl Blender {
     /// By default, all log messages are discarded.
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
+        self.materializations.set_logger(&self.log);
     }
 
     /// Start setting up a new `Migration`.
@@ -166,7 +168,6 @@ impl Blender {
             mainline: self,
             added: Default::default(),
             columns: Default::default(),
-            materialize: Default::default(),
             readers: Default::default(),
 
             start: time::Instant::now(),
@@ -265,6 +266,7 @@ impl Blender {
         let mut key = self.ingredients[base]
             .suggest_indexes(base)
             .remove(&base)
+            .map(|(c, _)| c)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
@@ -345,12 +347,7 @@ impl fmt::Display for Blender {
         for (_, edge) in self.ingredients.raw_edges().iter().enumerate() {
             indentln(f)?;
             write!(f, "{} -> {}", edge.source().index(), edge.target().index())?;
-            if !edge.weight {
-                // not materialized
-                writeln!(f, " [style=\"dashed\"]")?;
-            } else {
-                writeln!(f, "")?;
-            }
+            writeln!(f, "")?;
         }
 
         // Output footer.
@@ -374,7 +371,6 @@ pub struct Migration<'a> {
     added: Vec<NodeIndex>,
     columns: Vec<(NodeIndex, ColumnChange)>,
     readers: HashMap<NodeIndex, NodeIndex>,
-    materialize: HashSet<(NodeIndex, NodeIndex)>,
 
     start: time::Instant,
     log: slog::Logger,
@@ -425,10 +421,10 @@ impl<'a> Migration<'a> {
         if parents.is_empty() {
             self.mainline
                 .ingredients
-                .add_edge(self.mainline.source, ni, false);
+                .add_edge(self.mainline.source, ni, ());
         } else {
             for parent in parents {
-                self.mainline.ingredients.add_edge(parent, ni, false);
+                self.mainline.ingredients.add_edge(parent, ni, ());
             }
         }
         // and tell the caller its id
@@ -465,7 +461,7 @@ impl<'a> Migration<'a> {
         // insert it into the graph
         self.mainline
             .ingredients
-            .add_edge(self.mainline.source, ni, false);
+            .add_edge(self.mainline.source, ni, ());
         // and tell the caller its id
         ni.into()
     }
@@ -527,42 +523,13 @@ impl<'a> Migration<'a> {
         self.mainline.graph()
     }
 
-    /// Mark the edge between `src` and `dst` in the graph as requiring materialization.
-    ///
-    /// The reason this is placed per edge rather than per node is that only some children of a
-    /// node may require materialization of their inputs (i.e., only those that will query along
-    /// this edge). Since we must materialize the output of a node in a foreign domain once for
-    /// every receiving domain, this can save us some space if a child that doesn't require
-    /// materialization is in its own domain. If multiple nodes in the same domain require
-    /// materialization of the same parent, that materialized state will be shared.
-    pub fn materialize(&mut self, src: prelude::NodeIndex, dst: prelude::NodeIndex) {
-        // TODO
-        // what about if a user tries to materialize a cross-domain edge that has already been
-        // converted to an egress/ingress pair?
-        let e = self.mainline
-            .ingredients
-            .find_edge(src, dst)
-            .expect("asked to materialize non-existing edge");
-
-        debug!(self.log, "told to materialize"; "node" => src.index());
-
-        let e = self.mainline.ingredients.edge_weight_mut(e).unwrap();
-        if !*e {
-            *e = true;
-            // it'd be nice if we could just store the EdgeIndex here, but unfortunately that's not
-            // guaranteed by petgraph to be stable in the presence of edge removals (which we do in
-            // commit())
-            self.materialize.insert((src, dst));
-        }
-    }
-
     fn ensure_reader_for(&mut self, n: prelude::NodeIndex) {
         if !self.readers.contains_key(&n) {
             // make a reader
             let r = node::special::Reader::new(n);
             let r = self.mainline.ingredients[n].mirror(r);
             let r = self.mainline.ingredients.add_node(r);
-            self.mainline.ingredients.add_edge(n, r, false);
+            self.mainline.ingredients.add_edge(n, r, ());
             self.readers.insert(n, r);
         }
     }
@@ -580,7 +547,7 @@ impl<'a> Migration<'a> {
         // this node's column to cause a conflict. Is None for a given base node if any write to
         // that base node might cause a conflict.
         let base_columns: Vec<(_, Option<_>)> =
-            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _| None)
+            keys::provenance_of(&self.mainline.ingredients, n, key, |_, _, _| None)
                 .into_iter()
                 .map(|path| {
                     // we want the base node corresponding to each path
@@ -665,21 +632,6 @@ impl<'a> Migration<'a> {
             .unwrap();
 
         rx
-    }
-
-    /// Set up the given node such that its output is stored in Memcached.
-    pub fn memcached_hook(
-        &mut self,
-        n: prelude::NodeIndex,
-        name: String,
-        servers: &[(&str, usize)],
-        key: usize,
-    ) -> io::Result<prelude::NodeIndex> {
-        let h = try!(hook::Hook::new(name, servers, vec![key]));
-        let h = self.mainline.ingredients[n].mirror(h);
-        let h = self.mainline.ingredients.add_node(h);
-        self.mainline.ingredients.add_edge(n, h, false);
-        Ok(h.into())
     }
 
     /// Commit the changes introduced by this `Migration` to the master `Soup`.
@@ -872,17 +824,12 @@ impl<'a> Migration<'a> {
         // NOTE: index will also contain the materialization information for *existing* domains
         // TODO: this should re-use materialization decisions across shard domains
         debug!(log, "calculating materializations");
-        let index = domain_nodes
-            .iter()
-            .map(|(domain, nodes)| {
-                use self::migrate::materialization::{index, pick};
-                debug!(log, "picking materializations"; "domain" => domain.index());
-                let mat = pick(&log, &mainline.ingredients, &nodes[..]);
-                debug!(log, "deriving indices"; "domain" => domain.index());
-                let idx = index(&log, &mainline.ingredients, &nodes[..], mat);
-                (*domain, idx)
-            })
-            .collect();
+        for (&domain, nodes) in &domain_nodes {
+            debug!(log, "picking materializations"; "domain" => domain.index());
+            mainline
+                .materializations
+                .extend(&mainline.ingredients, &nodes[..]);
+        }
 
         let mut uninformed_domain_nodes = domain_nodes.clone();
         let deps = migrate::transactions::analyze_graph(
@@ -958,7 +905,9 @@ impl<'a> Migration<'a> {
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
-        let domains_on_path = migrate::materialization::initialize(&log, mainline, &new, index);
+        mainline
+            .materializations
+            .commit(&mainline.ingredients, &new, &mut mainline.domains);
 
         info!(log, "finalizing migration");
 
@@ -969,7 +918,7 @@ impl<'a> Migration<'a> {
             .checktable
             .lock()
             .unwrap()
-            .add_replay_paths(domains_on_path);
+            .add_replay_paths(&mut mainline.materializations.domains_on_path);
 
         migrate::transactions::finalize(deps, &log, &mut mainline.domains, end_ts);
 

@@ -11,7 +11,7 @@ use flow::statistics;
 use flow::prelude::*;
 
 use std::fmt;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +32,12 @@ impl fmt::Debug for Link {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplayPathSegment {
+    pub node: LocalNodeIndex,
+    pub partial_key: Option<usize>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TriggerEndpoint {
     None,
@@ -42,8 +48,8 @@ pub enum TriggerEndpoint {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum InitialState {
-    PartialLocal(usize),
-    IndexedLocal(Vec<Vec<usize>>),
+    PartialLocal(Vec<(Vec<usize>, Vec<Tag>)>),
+    IndexedLocal(HashSet<Vec<usize>>),
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
@@ -126,9 +132,6 @@ pub enum Packet {
     },
 
     /// Update that is part of a tagged data-flow replay path.
-    FullReplay { link: Link, tag: Tag, state: State },
-
-    /// Update that is part of a tagged data-flow replay path.
     ReplayPiece {
         link: Link,
         tag: Tag,
@@ -197,7 +200,7 @@ pub enum Packet {
     SetupReplayPath {
         tag: Tag,
         source: Option<LocalNodeIndex>,
-        path: Vec<(LocalNodeIndex, Option<usize>)>,
+        path: Vec<ReplayPathSegment>,
         notify_done: bool,
         trigger: TriggerEndpoint,
     },
@@ -212,7 +215,7 @@ pub enum Packet {
     /// updates.
     Ready {
         node: LocalNodeIndex,
-        index: Vec<Vec<usize>>,
+        index: HashSet<Vec<usize>>,
     },
 
     /// Notification from Blender for domain to terminate
@@ -252,7 +255,6 @@ impl Packet {
         match *self {
             Packet::Message { ref link, .. } => link,
             Packet::Transaction { ref link, .. } => link,
-            Packet::FullReplay { ref link, .. } => link,
             Packet::ReplayPiece { ref link, .. } => link,
             _ => unreachable!(),
         }
@@ -262,7 +264,6 @@ impl Packet {
         match *self {
             Packet::Message { ref mut link, .. } => link,
             Packet::Transaction { ref mut link, .. } => link,
-            Packet::FullReplay { ref mut link, .. } => link,
             Packet::ReplayPiece { ref mut link, .. } => link,
             _ => unreachable!(),
         }
@@ -272,7 +273,6 @@ impl Packet {
         match *self {
             Packet::Message { ref data, .. } => data.is_empty(),
             Packet::Transaction { ref data, .. } => data.is_empty(),
-            Packet::FullReplay { .. } => false,
             Packet::ReplayPiece { ref data, .. } => data.is_empty(),
             _ => unreachable!(),
         }
@@ -304,7 +304,6 @@ impl Packet {
 
     pub fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::FullReplay { tag, .. } => Some(tag),
             Packet::ReplayPiece { tag, .. } => Some(tag),
             _ => None,
         }
@@ -430,17 +429,6 @@ impl fmt::Debug for Packet {
                 link,
                 tag.id(),
                 data.len()
-            ),
-            Packet::FullReplay {
-                ref link,
-                ref tag,
-                ref state,
-            } => write!(
-                f,
-                "Packet::FullReplay({:?}, {}, {} row state)",
-                link,
-                tag.id(),
-                state.len()
             ),
             _ => write!(f, "Packet::Control"),
         }

@@ -97,14 +97,6 @@ where
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src.as_global()];
 
@@ -192,6 +184,7 @@ where
                 LookupResult::Missing => {
                     misses.push(Miss {
                         node: *us,
+                        columns: self.out_key.clone(),
                         key: group,
                     });
                     continue;
@@ -235,9 +228,11 @@ where
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index by our primary key
-        Some((this, self.out_key.clone())).into_iter().collect()
+        Some((this, (self.out_key.clone(), true)))
+            .into_iter()
+            .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
