@@ -192,7 +192,7 @@ impl Worker {
             self.log.clone(),
             self.readers.clone(),
             self.channel_coordinator.clone(),
-            SocketAddr::from_str(&self.listen_addr).unwrap(),
+            SocketAddr::new(self.listen_addr.parse().unwrap(), 0),
         );
         self.domain_threads.push(jh);
 
