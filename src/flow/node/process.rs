@@ -180,7 +180,7 @@ pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut St
         for r in rs.iter() {
             match *r {
                 Record::Positive(ref r) => {
-                    let hit = state.insert(r.clone(), partial);
+                    let hit = state.insert(r.clone(), None);
                     debug_assert!(hit);
                 }
                 Record::Negative(ref r) => {
