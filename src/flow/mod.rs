@@ -89,6 +89,18 @@ pub struct Blender {
 
 impl Default for Blender {
     fn default() -> Self {
+        Blender::with_listen("127.0.0.1".parse().unwrap())
+    }
+}
+
+impl Blender {
+    /// Construct a new, empty `Blender`
+    pub fn new() -> Self {
+        Blender::default()
+    }
+
+    /// Construct `Blender` with a specified listening interface
+    pub fn with_listen(addr: IpAddr) -> Self {
         let mut g = petgraph::Graph::new();
         let source = g.add_node(node::Node::new(
             "source",
@@ -97,7 +109,8 @@ impl Default for Blender {
             true,
         ));
 
-        let checktable_addr = checktable::service::CheckTableServer::start();
+        let checktable_addr =
+            checktable::service::CheckTableServer::start(SocketAddr::new(addr.clone(), 0));
         let checktable =
             checktable::CheckTableClient::connect(checktable_addr, client::Options::default())
                 .unwrap();
@@ -118,27 +131,13 @@ impl Default for Blender {
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
-            listen_addr: "127.0.0.1".parse().unwrap(),
+            listen_addr: addr,
             readers: Arc::default(),
             workers: HashMap::default(),
             remote_readers: HashMap::default(),
 
             log: slog::Logger::root(slog::Discard, o!()),
         }
-    }
-}
-
-impl Blender {
-    /// Construct a new, empty `Blender`
-    pub fn new() -> Self {
-        Blender::default()
-    }
-
-    /// Construct `Blender` with a specified listening interface
-    pub fn with_listen(addr: IpAddr) -> Self {
-        let mut b = Blender::default();
-        b.listen_addr = addr;
-        b
     }
 
     /// Disable partial materialization for all subsequent migrations

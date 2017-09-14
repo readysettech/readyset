@@ -4,7 +4,7 @@ use std::thread;
 
 use petgraph::graph::NodeIndex;
 use tarpc::future::server;
-use tarpc::util::{FirstSocketAddr, Never};
+use tarpc::util::Never;
 use tokio_core::reactor;
 
 use super::*;
@@ -42,7 +42,7 @@ pub struct CheckTableServer {
     checktable: Arc<Mutex<CheckTable>>,
 }
 impl CheckTableServer {
-    pub fn start() -> SocketAddr {
+    pub fn start(listen_addr: SocketAddr) -> SocketAddr {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let server = CheckTableServer {
@@ -51,11 +51,7 @@ impl CheckTableServer {
 
             let mut reactor = reactor::Core::new().unwrap();
             let (handle, server) = server
-                .listen(
-                    "localhost:0".first_socket_addr(),
-                    &reactor.handle(),
-                    server::Options::default(),
-                )
+                .listen(listen_addr, &reactor.handle(), server::Options::default())
                 .unwrap();
             tx.send(handle.addr()).unwrap();
             reactor.run(server)
