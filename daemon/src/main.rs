@@ -4,7 +4,6 @@ extern crate distributary;
 extern crate hostname;
 #[macro_use]
 extern crate rustful;
-extern crate serde;
 #[macro_use]
 extern crate serde_json;
 #[macro_use]

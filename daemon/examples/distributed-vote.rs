@@ -2,7 +2,6 @@ extern crate distributary;
 extern crate gulaschkanone;
 #[macro_use]
 extern crate slog;
-extern crate slog_term;
 
 use std::thread;
 use std::sync::{Arc, Mutex};

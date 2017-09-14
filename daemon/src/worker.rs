@@ -81,8 +81,6 @@ impl Worker {
         heartbeat_every: Duration,
         log: Logger,
     ) -> Worker {
-        use std::str::FromStr;
-
         let readers = Arc::new(Mutex::new(HashMap::new()));
 
         let readers_clone = readers.clone();
