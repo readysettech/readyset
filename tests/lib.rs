@@ -400,6 +400,7 @@ fn transactional_vote() {
 
     // set up graph
     let mut g = distributary::Blender::new();
+    g.disable_partial(); // because end_votes forces full below partial
     let validate = g.get_validator();
 
     let (article1, article2, vote, article, vc, end, end_title, end_votes) = {
