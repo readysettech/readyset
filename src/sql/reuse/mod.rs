@@ -1,15 +1,17 @@
-use nom_sql::{Table, ConditionTree};
-use sql::query_graph::{QueryGraph, QueryGraphEdge, JoinRef};
+use nom_sql::Table;
+use sql::query_graph::QueryGraph;
 use mir::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;
-use sql::reuse::helpers::predicate_implication::predicate_is_equivalent;
+
+use sql::reuse::join_order::reorder_joins;
 
 mod finkelstein;
 mod relaxed;
 mod full;
 mod helpers;
+mod join_order;
 
 #[derive(Clone, Debug)]
 pub enum ReuseType {
@@ -51,41 +53,7 @@ impl ReuseConfig {
     }
 
     pub fn reorder_joins(&self, qg: &mut QueryGraph, reuse_candidates: &Vec<(ReuseType, &QueryGraph)>) {
-
-        let mut max = 0;
-        for &(_, eqg) in reuse_candidates {
-            let mut new_join_order = qg.join_order.clone();
-            let mut matched = 0;
-            for (i, existing_jref) in eqg.join_order.iter().enumerate() {
-                if i > qg.join_order.len() || matched < i { break; }
-
-                let ejp = Self::from_join_ref(existing_jref, eqg);
-                for j in i..qg.join_order.len() {
-                    let njp = Self::from_join_ref(&qg.join_order[j], qg);
-                    if predicate_is_equivalent(njp, ejp) {
-                        new_join_order.swap(i, j);
-                        matched = matched + 1;
-                        break;
-                    }
-                }
-            }
-
-            if matched > max {
-                max = matched;
-                qg.join_order = new_join_order;
-            }
-        }
-
-        println!("query has {} matching joins", max);
-    }
-
-    fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a ConditionTree {
-        let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
-        match *edge {
-            QueryGraphEdge::Join(ref jps) => jps.get(jref.index).unwrap(),
-            QueryGraphEdge::LeftJoin(ref jps) => jps.get(jref.index).unwrap(),
-            QueryGraphEdge::GroupBy(_) => unreachable!(),
-        }
+        reorder_joins(qg, reuse_candidates);
     }
 
     pub fn default() -> ReuseConfig {
