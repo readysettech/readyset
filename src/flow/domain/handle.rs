@@ -12,7 +12,7 @@ use flow::statistics::{DomainStats, NodeStats};
 
 use std::{self, cell, io, thread};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use mio;
@@ -112,6 +112,7 @@ impl DomainHandle {
         readers: &flow::Readers,
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &persistence::Parameters,
+        listen_addr: &IpAddr,
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
@@ -145,7 +146,8 @@ impl DomainHandle {
                 nodes.clone().unwrap()
             };
 
-            let control_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let control_listener =
+                std::net::TcpListener::bind(SocketAddr::new(listen_addr.clone(), 0)).unwrap();
             let domain = domain::DomainBuilder {
                 index: idx,
                 shard: i,
@@ -179,7 +181,12 @@ impl DomainHandle {
                     }).unwrap();
                 }
                 None => {
-                    let (jh, _) = domain.boot(logger, readers.clone(), channel_coordinator.clone());
+                    let (jh, _) = domain.boot(
+                        logger,
+                        readers.clone(),
+                        channel_coordinator.clone(),
+                        "127.0.0.1:0".parse().unwrap(),
+                    );
                     threads.push(jh);
                 }
             }

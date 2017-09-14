@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
+use std::net::IpAddr;
 use std::time;
 use std::fmt;
 use std::io;
@@ -78,6 +79,7 @@ pub struct Blender {
     channel_coordinator: Arc<prelude::ChannelCoordinator>,
     debug_channel: Option<SocketAddr>,
 
+    listen_addr: IpAddr,
     readers: Readers,
     workers: HashMap<WorkerIdentifier, WorkerEndpoint>,
     remote_readers: HashMap<(domain::Index, usize), SocketAddr>,
@@ -116,6 +118,7 @@ impl Default for Blender {
             channel_coordinator: Arc::new(prelude::ChannelCoordinator::new()),
             debug_channel: None,
 
+            listen_addr: "127.0.0.1".parse().unwrap(),
             readers: Arc::default(),
             workers: HashMap::default(),
             remote_readers: HashMap::default(),
@@ -129,6 +132,13 @@ impl Blender {
     /// Construct a new, empty `Blender`
     pub fn new() -> Self {
         Blender::default()
+    }
+
+    /// Construct `Blender` with a specified listening interface
+    pub fn with_listen(addr: IpAddr) -> Self {
+        let mut b = Blender::default();
+        b.listen_addr = addr;
+        b
     }
 
     /// Disable partial materialization for all subsequent migrations
@@ -1006,6 +1016,7 @@ impl<'a> Migration<'a> {
                 &mainline.readers,
                 nodes,
                 &mainline.persistence,
+                &mainline.listen_addr,
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
