@@ -221,6 +221,9 @@ pub enum Packet {
     /// Notification from Blender for domain to terminate
     Quit,
 
+    /// A packet used solely to drive the event loop forward.
+    Spin,
+
     // Transaction time messages
     //
     /// Instruct domain to flush pending transactions and notify upon completion. `prev_ts` is the

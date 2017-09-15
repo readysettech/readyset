@@ -126,7 +126,8 @@ pub struct Domain {
     control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    buffered_replay_requests: HashMap<Tag, Vec<Vec<DataType>>>,
+    buffered_replay_requests: HashMap<Tag, (time::Instant, Vec<Vec<DataType>>)>,
+    has_buffered_replay_requests: bool,
     replay_batch_size: usize,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -177,7 +178,8 @@ impl Domain {
             channel_coordinator,
 
             buffered_replay_requests: HashMap::new(),
-            replay_batch_size: 1,
+            has_buffered_replay_requests: false,
+            replay_batch_size: 128,
 
             concurrent_replays: 0,
             replay_request_queue: Default::default(),
@@ -899,26 +901,24 @@ impl Domain {
                         );
                     }
                     Packet::RequestPartialReplay { tag, key } => {
-                        if self.already_requested(&tag, &key) {
-                            return;
-                        }
-
-                        if let ReplayPath {
-                            trigger: TriggerEndpoint::End(..),
-                            ..
-                        } = self.replay_paths[&tag]
-                        {
-                            // request came in from reader -- forward
-                            self.request_partial_replay(tag, key);
-                            return;
-                        }
-
-                        trace!(self.log,
+                        if !self.already_requested(&tag, &key) {
+                            if let ReplayPath {
+                                trigger: TriggerEndpoint::End(..),
+                                ..
+                            } = self.replay_paths[&tag]
+                            {
+                                // request came in from reader -- forward
+                                self.request_partial_replay(tag, key);
+                                return;
+                            } else {
+                                trace!(self.log,
                                "got replay request";
                                "tag" => tag.id(),
                                "key" => format!("{:?}", key)
                         );
-                        self.seed_replay(tag, &key[..], None);
+                                self.seed_replay(tag, &key[..], None);
+                            }
+                        }
                     }
                     Packet::StartReplay { tag, from } => {
                         use std::thread;
@@ -1115,8 +1115,36 @@ impl Domain {
                         unreachable!("captured packets should never be sent around")
                     }
                     Packet::Quit => unreachable!("Quit messages are handled by event loop"),
+                    Packet::Spin => {
+                        // spinning as instructed
+                    }
                     _ => unreachable!(),
                 }
+            }
+        }
+
+        if self.has_buffered_replay_requests {
+            let now = time::Instant::now();
+            let to = time::Duration::from_millis(1);
+            self.has_buffered_replay_requests = false;
+            let elapsed_replays: Vec<_> = {
+                let has = &mut self.has_buffered_replay_requests;
+                self.buffered_replay_requests
+                    .iter_mut()
+                    .filter_map(|(&tag, &mut (first, ref mut keys))| {
+                        if !keys.is_empty() && now.duration_since(first) > to {
+                            Some((tag, keys.split_off(0)))
+                        } else {
+                            if !keys.is_empty() {
+                                *has = true;
+                            }
+                            None
+                        }
+                    })
+                    .collect()
+            };
+            for (tag, keys) in elapsed_replays {
+                self.seed_all(tag, keys);
             }
         }
     }
@@ -1228,20 +1256,25 @@ impl Domain {
                 let key = Vec::from(key);
                 let full = match self.buffered_replay_requests.entry(tag) {
                     Entry::Occupied(mut o) => {
-                        let l = o.get().len();
+                        let l = o.get().1.len();
                         if l == self.replay_batch_size - 1 {
-                            let mut o = o.get_mut().split_off(0);
+                            let mut o = o.get_mut().1.split_off(0);
                             o.push(key);
                             Some(o)
                         } else {
-                            o.into_mut().push(key);
+                            if l == 0 {
+                                o.get_mut().0 = time::Instant::now();
+                            }
+                            o.into_mut().1.push(key);
+                            self.has_buffered_replay_requests = true;
                             None
                         }
                     }
                     Entry::Vacant(v) => if self.replay_batch_size == 1 {
                         Some(vec![key])
                     } else {
-                        v.insert(vec![key]);
+                        v.insert((time::Instant::now(), vec![key]));
+                        self.has_buffered_replay_requests = true;
                         None
                     },
                 };
@@ -1907,6 +1940,9 @@ impl Domain {
 
                         if start.elapsed() >= spin_duration {
                             packet = group_commit_queues.flush_if_necessary(&self.nodes);
+                            if packet.is_none() && self.has_buffered_replay_requests {
+                                packet = Some(box Packet::Spin);
+                            }
                             break;
                         }
                     }
