@@ -67,7 +67,7 @@ pub enum InitialState {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
-        for_key: Vec<DataType>,
+        for_keys: Vec<Vec<DataType>>,
         ignore: bool,
     },
     Regular { last: bool },
@@ -356,7 +356,7 @@ impl Packet {
                 ref tag,
                 ref data,
                 ref nshards,
-                context: ref context @ ReplayPieceContext::Regular { .. },
+                ref context,
                 ref transaction_state,
             } => Packet::ReplayPiece {
                 link: link.clone(),

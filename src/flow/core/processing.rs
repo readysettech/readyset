@@ -8,6 +8,7 @@ use flow::prelude;
 pub struct Miss {
     pub node: prelude::LocalNodeIndex,
     pub columns: Vec<usize>,
+    pub replay_key: Option<Vec<prelude::DataType>>,
     pub key: Vec<prelude::DataType>,
 }
 
@@ -18,7 +19,7 @@ pub struct ProcessingResult {
 
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
-    ReplayPiece(prelude::Records),
+    ReplayPiece(prelude::Records, Vec<Vec<prelude::DataType>>),
     Captured,
 }
 
@@ -104,6 +105,7 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
+        replay_key_col: Option<usize>,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> ProcessingResult;
@@ -113,14 +115,20 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        is_replay_of: Option<(usize, prelude::DataType)>,
+        is_replay_of: Option<(usize, &[Vec<prelude::DataType>])>,
         nshards: usize,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> RawProcessingResult {
-        let _ = is_replay_of;
         let _ = nshards;
-        RawProcessingResult::Regular(self.on_input(from, data, tracer, domain, states))
+        RawProcessingResult::Regular(self.on_input(
+            from,
+            data,
+            tracer,
+            is_replay_of.map(|(k, _)| k),
+            domain,
+            states,
+        ))
     }
 
     fn can_query_through(&self) -> bool {

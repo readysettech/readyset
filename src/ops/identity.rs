@@ -36,6 +36,7 @@ impl Ingredient for Identity {
         _: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {

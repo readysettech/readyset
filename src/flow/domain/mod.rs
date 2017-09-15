@@ -1161,7 +1161,7 @@ impl Domain {
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
-                            for_key: Vec::from(key),
+                            for_keys: vec![Vec::from(key)],
                             ignore: false,
                         },
                         data: Records::from_iter(rs.into_iter().map(|r| (**r).clone())),
@@ -1175,7 +1175,7 @@ impl Domain {
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
-                            for_key: Vec::from(key),
+                            for_keys: vec![Vec::from(key)],
                             ignore: true,
                         },
                         data: Records::default(),
@@ -1214,7 +1214,7 @@ impl Domain {
     fn handle_replay(&mut self, m: Box<Packet>) {
         let tag = m.tag().unwrap();
         let mut finished = None;
-        let mut need_replay = None;
+        let mut need_replay = Vec::new();
         let mut finished_partial = false;
         'outer: loop {
             // this loop is just here so we have a way of giving up the borrow of self.replay_paths
@@ -1303,17 +1303,19 @@ impl Domain {
                     };
                     let mut m = Some(m);
 
-                    // keep track of whether we're filling any partial holes
-                    let partial_key =
-                        if let ReplayPieceContext::Partial { ref for_key, .. } = context {
-                            Some(for_key)
-                        } else {
-                            None
-                        };
-
                     for (i, segment) in path.iter().enumerate() {
                         let mut n = self.nodes[&segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
+
+                        // keep track of whether we're filling any partial holes
+                        let partial_key_cols = segment.partial_key.as_ref();
+                        let backfill_keys =
+                            if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
+                                debug_assert!(partial_key_cols.is_some());
+                                Some(for_keys)
+                            } else {
+                                None
+                            };
 
                         if !n.is_transactional() {
                             if let Some(box Packet::ReplayPiece {
@@ -1336,7 +1338,7 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = partial_key.is_some() &&
+                        let target = backfill_keys.is_some() &&
                             (is_reader || self.waiting.contains_key(&segment.node));
 
                         // targets better be last
@@ -1344,24 +1346,28 @@ impl Domain {
 
                         // are we about to fill a hole?
                         if target {
-                            let partial_key = partial_key.unwrap();
+                            let backfill_keys = backfill_keys.unwrap();
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(&segment.node) {
-                                state.mark_filled(partial_key.clone(), &tag);
+                                for key in backfill_keys {
+                                    state.mark_filled(key.clone(), &tag);
+                                }
                             } else {
                                 n.with_reader_mut(|r| {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|wh| wh.mark_filled(&partial_key[0]));
+                                    r.writer_mut().map(|wh| for key in backfill_keys {
+                                        wh.mark_filled(&key[0]);
+                                    });
                                 });
                             }
                         }
 
                         // process the current message in this node
-                        let mut misses = n.process(
+                        let misses = n.process(
                             &mut m,
                             segment.partial_key,
                             &mut self.state,
@@ -1371,26 +1377,18 @@ impl Domain {
                         );
 
                         if target {
-                            let hole_filled = if let Some(box Packet::Captured) = m {
-                                // the node captured our replay. in the latter case, there is
-                                // nothing more for us to do. it will eventually release, and then
-                                // all the other things will happen. for now though, we need to
-                                // reset the hole we opened up. crucially though, the hole was
-                                // *not* filled.
-                                false
-                            } else {
-                                // we produced some output, but did we also miss?
-                                // if we did, we don't want to consider the hole filled.
-                                misses.is_empty()
-                            };
-
-                            let partial_key = partial_key.unwrap();
-                            if !hole_filled {
+                            if !misses.is_empty() {
+                                // we missed while processing
+                                // it's important that we clear out any partially-filled holes.
                                 if let Some(state) = self.state.get_mut(&segment.node) {
-                                    state.mark_hole(&partial_key[..], &tag);
+                                    for miss in &misses {
+                                        state.mark_hole(&miss.replay_key.as_ref().unwrap()[..], &tag);
+                                    }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|wh| wh.mark_hole(&partial_key[0]));
+                                        r.writer_mut().map(|wh| for miss in &misses {
+                                            wh.mark_hole(&miss.replay_key.as_ref().unwrap()[0]);
+                                        });
                                     });
                                 }
                             } else if is_reader {
@@ -1402,7 +1400,9 @@ impl Domain {
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(&segment.node)
                                 {
-                                    prev.remove(&partial_key[0]);
+                                    for key in backfill_keys.unwrap() {
+                                        prev.remove(&key[0]);
+                                    }
                                 }
                             }
                         }
@@ -1412,7 +1412,7 @@ impl Domain {
                         drop(n);
 
                         if let Some(box Packet::Captured) = m {
-                            if partial_key.is_some() && is_transactional {
+                            if backfill_keys.is_some() && is_transactional {
                                 let last_ni = path.last().unwrap().node;
                                 if last_ni != segment.node {
                                     let mut n = self.nodes[&last_ni].borrow_mut();
@@ -1427,7 +1427,7 @@ impl Domain {
                                             data: Vec::<Record>::new().into(),
                                             nshards: self.nshards,
                                             context: ReplayPieceContext::Partial {
-                                                for_key: partial_key.unwrap().clone(),
+                                                for_keys: backfill_keys.unwrap().clone(),
                                                 ignore: true,
                                             },
                                             transaction_state,
@@ -1452,21 +1452,39 @@ impl Domain {
                             break 'outer;
                         }
 
-                        // if we missed during replay, we need to do a replay
-                        if partial_key.is_some() && !misses.is_empty() {
-                            // replays are always for just one key
-                            assert!(misses.iter().all(|miss| {
-                                miss.node == misses[0].node && miss.key == misses[0].key
-                            }));
-                            let miss = misses.swap_remove(0);
-                            need_replay = Some((
-                                miss.node,
-                                partial_key.unwrap().clone(),
-                                miss.key,
-                                miss.columns,
-                                tag,
-                            ));
+                        // if we missed during replay, we need to do another replay
+                        if backfill_keys.is_some() && !misses.is_empty() {
+                            let mut missed = HashMap::new();
+                            for miss in misses {
+                                missed
+                                    .entry(miss.node)
+                                    .or_insert_with(HashMap::new)
+                                    .entry(miss.columns)
+                                    .or_insert_with(HashMap::new)
+                                    .entry(miss.key)
+                                    .or_insert_with(HashSet::new)
+                                    .insert(miss.replay_key.unwrap());
+                            }
+
+                            for (node, misses) in missed {
+                                for (columns, values) in misses {
+                                    for (miss_key, replay_keys) in values {
+                                        for while_replaying in replay_keys {
+                                            need_replay.push((
+                                                node,
+                                                while_replaying,
+                                                miss_key.clone(),
+                                                columns.clone(),
+                                                tag,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+
                             if let TriggerEndpoint::End(..) = *trigger {
+                                // a request we sent was satisfied -- make sure we allow another
+                                // request to be sent out!
                                 finished_partial = true;
                             }
                             break 'outer;
@@ -1510,11 +1528,11 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!(self.log, "batch processed");
                         }
-                        ReplayPieceContext::Partial { for_key, ignore } => {
+                        ReplayPieceContext::Partial { for_keys, ignore } => {
                             assert!(!ignore);
                             if self.waiting.contains_key(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
-                                finished = Some((tag, dst, Some(for_key)));
+                                finished = Some((tag, dst, Some(for_keys)));
                                 finished_partial = true;
                             } else if self.nodes[&dst].borrow().is_reader() {
                                 finished_partial = true;
@@ -1533,7 +1551,7 @@ impl Domain {
             self.finished_partial_replay(&tag);
         }
 
-        if let Some((node, while_replaying_key, miss_key, miss_cols, tag)) = need_replay {
+        for (node, while_replaying_key, miss_key, miss_cols, tag) in need_replay {
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag.id(),
@@ -1545,17 +1563,17 @@ impl Domain {
             return;
         }
 
-        if let Some((tag, ni, for_key)) = finished {
+        if let Some((tag, ni, for_keys)) = finished {
             if let Some(Waiting { mut subscribed }) = self.waiting.remove(&ni) {
                 trace!(self.log, "partial replay finished to node with waiting backfills";
                        "waiting" => subscribed.len(),
-                       "key" => ?for_key);
+                       "keys" => ?for_keys);
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
-                let for_key = for_key.unwrap();
+                let for_keys: HashSet<_> = for_keys.unwrap().into_iter().collect();
                 subscribed.retain(|subscription| {
-                    if for_key != subscription.miss_key {
+                    if !for_keys.contains(&subscription.miss_key) {
                         // we didn't fulfill this subscription
                         return true;
                     }
@@ -1575,7 +1593,7 @@ impl Domain {
                 return;
             }
 
-            assert!(for_key.is_none());
+            assert!(for_keys.is_none());
 
             // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
             // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but

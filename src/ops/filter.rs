@@ -48,6 +48,7 @@ impl Ingredient for Filter {
         _: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {

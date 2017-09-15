@@ -136,17 +136,27 @@ impl Ingredient for NodeOperator {
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
+        replay_key_col: Option<usize>,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> ProcessingResult {
-        impl_ingredient_fn_mut!(self, on_input, from, data, tracer, domain, states)
+        impl_ingredient_fn_mut!(
+            self,
+            on_input,
+            from,
+            data,
+            tracer,
+            replay_key_col,
+            domain,
+            states
+        )
     }
     fn on_input_raw(
         &mut self,
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
-        is_replay_of: Option<(usize, DataType)>,
+        is_replay_of: Option<(usize, &[Vec<DataType>])>,
         nshards: usize,
         domain: &DomainNodes,
         states: &StateMap,
@@ -387,7 +397,7 @@ pub mod test {
             let mut u = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[&*id].borrow_mut();
-                let m = n.on_input(*src, u.into(), &mut None, &self.nodes, &self.states);
+                let m = n.on_input(*src, u.into(), &mut None, None, &self.nodes, &self.states);
                 assert_eq!(m.misses, vec![]);
                 m.results
             };
