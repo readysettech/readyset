@@ -126,6 +126,9 @@ pub struct Domain {
     control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
+    buffered_replay_requests: HashMap<Tag, Vec<Vec<DataType>>>,
+    replay_batch_size: usize,
+
     total_time: Timer<SimpleTracker, RealTime>,
     total_ptime: Timer<SimpleTracker, ThreadTime>,
     wait_time: Timer<SimpleTracker, RealTime>,
@@ -173,6 +176,9 @@ impl Domain {
             control_reply_tx: None,
             channel_coordinator,
 
+            buffered_replay_requests: HashMap::new(),
+            replay_batch_size: 1,
+
             concurrent_replays: 0,
             replay_request_queue: Default::default(),
 
@@ -187,7 +193,7 @@ impl Domain {
     fn on_replay_miss(
         &mut self,
         miss_in: LocalNodeIndex,
-        miss_columns: Vec<usize>,
+        miss_columns: &[usize],
         replay_key: Vec<DataType>,
         miss_key: Vec<DataType>,
         needed_for: Tag,
@@ -1115,6 +1121,88 @@ impl Domain {
         }
     }
 
+    fn seed_all(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
+        let (m, source, is_miss) = match self.replay_paths[&tag] {
+            ReplayPath {
+                source: Some(source),
+                trigger: TriggerEndpoint::Start(ref cols),
+                ref path,
+                ..
+            } => {
+                let state = self.state
+                    .get(&source)
+                    .expect("migration replay path started with non-materialized node");
+
+                let mut rs = Vec::new();
+                let (keys, misses): (Vec<_>, _) = keys.into_iter().partition(|key| {
+                    match state.lookup(&cols[..], &KeyType::Single(&key[0])) {
+                        LookupResult::Some(res) => {
+                            rs.extend(res.into_iter().map(|r| (**r).clone()));
+                            true
+                        }
+                        LookupResult::Missing => false,
+                    }
+                });
+
+                let m = if !keys.is_empty() {
+                    Some(box Packet::ReplayPiece {
+                        link: Link::new(source, path[0].node),
+                        tag: tag,
+                        nshards: 1,
+                        context: ReplayPieceContext::Partial {
+                            for_keys: keys,
+                            ignore: false,
+                        },
+                        data: rs.into(),
+                        transaction_state: None,
+                    })
+                } else {
+                    None
+                };
+
+                let miss = if !misses.is_empty() {
+                    Some((cols.clone(), misses))
+                } else {
+                    None
+                };
+
+                (m, source, miss)
+            }
+            _ => unreachable!(),
+        };
+
+        if let Some((cols, misses)) = is_miss {
+            // we have missed in our lookup, so we have a partial replay through a partial replay
+            // trigger a replay to source node, and enqueue this request.
+            for key in misses {
+                trace!(self.log,
+                       "missed during replay request";
+                       "tag" => tag.id(),
+                       "key" => ?key);
+                self.on_replay_miss(source, &cols[..], key.clone(), key, tag);
+            }
+        }
+
+        if let Some(m) = m {
+            if let box Packet::ReplayPiece {
+                context: ReplayPieceContext::Partial { ref for_keys, .. },
+                ..
+            } = m
+            {
+                trace!(self.log,
+                       "satisfied replay request";
+                       "tag" => tag.id(),
+                       //"data" => ?m.as_ref().unwrap().data(),
+                       "keys" => ?for_keys,
+                );
+            } else {
+                unreachable!();
+            }
+
+            self.handle_replay(m);
+        }
+    }
+
     fn seed_replay(
         &mut self,
         tag: Tag,
@@ -1133,6 +1221,35 @@ impl Domain {
                     self.process_transactions();
                     return;
                 }
+
+                // maybe delay this seed request so that we can batch respond later?
+                // TODO
+                use std::collections::hash_map::Entry;
+                let key = Vec::from(key);
+                let full = match self.buffered_replay_requests.entry(tag) {
+                    Entry::Occupied(mut o) => {
+                        let l = o.get().len();
+                        if l == self.replay_batch_size - 1 {
+                            let mut o = o.get_mut().split_off(0);
+                            o.push(key);
+                            Some(o)
+                        } else {
+                            o.into_mut().push(key);
+                            None
+                        }
+                    }
+                    Entry::Vacant(v) => if self.replay_batch_size == 1 {
+                        Some(vec![key])
+                    } else {
+                        v.insert(vec![key]);
+                        None
+                    },
+                };
+
+                if let Some(all) = full {
+                    self.seed_all(tag, all);
+                }
+                return;
             }
         }
 
@@ -1192,7 +1309,7 @@ impl Domain {
         if let Some(cols) = is_miss {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            self.on_replay_miss(source, cols, Vec::from(key), Vec::from(key), tag);
+            self.on_replay_miss(source, &cols[..], Vec::from(key), Vec::from(key), tag);
             trace!(self.log,
                    "missed during replay request";
                    "tag" => tag.id(),
@@ -1559,7 +1676,7 @@ impl Domain {
                    "missed" => ?miss_key,
                    "on" => %node,
             );
-            self.on_replay_miss(node, miss_cols, while_replaying_key, miss_key, tag);
+            self.on_replay_miss(node, &miss_cols[..], while_replaying_key, miss_key, tag);
             return;
         }
 
