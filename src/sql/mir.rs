@@ -48,9 +48,7 @@ struct JoinChain {
 
 impl JoinChain {
     pub fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
-        // assert_eq!(this.tables.intersection(&that.tables).collect().len(), 0);
         let tables = self.tables.union(&other.tables).cloned().collect();
-        let last_node = last_node;
 
         JoinChain {
             tables: tables,
@@ -991,11 +989,14 @@ impl SqlToMirConverter {
                 base_nodes.insert(*rel, base_for_rel);
             }
 
-            // 1. Generate join nodes for the query. This starts out by joining two of the base
-            //    nodes corresponding to relations in the first join predicate, and then continues
-            //    to join the result against previously unseen tables from the remaining
-            //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
-            //    previously moved all predicates pertaining to src/dst joins onto a single edge.
+            // 1. Generate join nodes for the query.
+            // This is done by creating/merging join chains as each predicate is added.
+            // If a predicate's parent tables appear in a previous predicate, the
+            // current predicate is added to the on-going join chain of the previous
+            // predicate.
+            // If a predicate's parent tables haven't been used by any previous predicate,
+            // a new join chain is started for the current predicate. And we assume that
+            // a future predicate will bring these chains together.
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
             {
                 let mut join_chains = Vec::new();
@@ -1032,13 +1033,10 @@ impl SqlToMirConverter {
                     }
                 };
 
-                println!("join order {:?}",  qg.join_order);
                 for jref in qg.join_order.iter() {
-                    let src = jref.src.clone();
-                    let dst = jref.dst.clone();
                     let (join_type, jp) = from_join_ref(jref);
                     let (left_chain, right_chain) =
-                        pick_join_chains(&src, &dst, &mut join_chains);
+                        pick_join_chains(&jref.src, &jref.dst, &mut join_chains);
 
                     let jn = self.make_join_node(
                         &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
