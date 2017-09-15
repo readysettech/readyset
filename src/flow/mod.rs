@@ -350,7 +350,8 @@ impl Blender {
 
     /// Convience method that obtains a MutatorBuilder and then calls build() on it.
     pub fn get_mutator(&self, base: prelude::NodeIndex) -> Mutator {
-        self.get_mutator_builder(base).build()
+        self.get_mutator_builder(base)
+            .build(SocketAddr::new(self.listen_addr, 0))
     }
 
     /// Obtain a MutatorBuild that can be used to construct a Mutator to perform writes and deletes

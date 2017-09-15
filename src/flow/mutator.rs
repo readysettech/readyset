@@ -28,9 +28,9 @@ pub struct MutatorBuilder {
 
 impl MutatorBuilder {
     /// Construct a `Mutator`.
-    pub fn build(self) -> Mutator {
+    pub fn build(self, listen_addr: SocketAddr) -> Mutator {
         Mutator {
-            domain_input_handle: DomainInputHandle::new(self.txs).unwrap(),
+            domain_input_handle: DomainInputHandle::new(listen_addr, self.txs).unwrap(),
             addr: self.addr,
             key: self.key,
             key_is_primary: self.key_is_primary,
