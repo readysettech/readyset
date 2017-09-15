@@ -214,9 +214,9 @@ impl DomainHandle {
                 // with the migration waiting for a domain to become ready when trying to send
                 // the information. (We used to do this in the controller thread, with the
                 // result of a nasty deadlock.)
-                for (worker, endpoint) in workers.iter_mut() {
+                for (_worker, endpoint) in workers.iter_mut() {
                     let mut s = endpoint.lock().unwrap();
-                    let mut msg = CoordinationMessage {
+                    let msg = CoordinationMessage {
                         source: s.local_addr().unwrap(),
                         payload: CoordinationPayload::DomainBooted((idx, shard), addr),
                     };
