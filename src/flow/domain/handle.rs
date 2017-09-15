@@ -116,7 +116,7 @@ impl DomainHandle {
         checktable_addr: &SocketAddr,
         channel_coordinator: &Arc<ChannelCoordinator>,
         debug_addr: &Option<SocketAddr>,
-        workers: &HashMap<WorkerIdentifier, WorkerEndpoint>,
+        workers: &mut HashMap<WorkerIdentifier, WorkerEndpoint>,
         placer: &mut placement::DomainPlacementStrategy,
         ts: i64,
     ) -> Self {
@@ -202,6 +202,27 @@ impl DomainHandle {
             PollEvent::Process(ControlReplyPacket::Booted(shard, addr)) => {
                 channel_coordinator.insert_addr((idx, shard), addr.clone());
                 txs.push(channel_coordinator.get_tx(&(idx, shard)).unwrap());
+
+                // TODO(malte): this is a hack, and not an especially neat one. In response to a
+                // domain boot message, we broadcast information about this new domain to all
+                // workers, which inform their ChannelCoordinators about it. This is required so
+                // that domains can find each other when starting up.
+                // Moreover, it is required for us to do this *here*, since this code runs on
+                // the thread that initiated the migration, and which will query domains to ask
+                // if they're ready. No domain will be ready until it has found its neighbours,
+                // so by sending out the information here, we ensure that we cannot deadlock
+                // with the migration waiting for a domain to become ready when trying to send
+                // the information. (We used to do this in the controller thread, with the
+                // result of a nasty deadlock.)
+                for (worker, endpoint) in workers.iter_mut() {
+                    let mut s = endpoint.lock().unwrap();
+                    let mut msg = CoordinationMessage {
+                        source: s.local_addr().unwrap(),
+                        payload: CoordinationPayload::DomainBooted((idx, shard), addr),
+                    };
+
+                    s.send(msg).unwrap();
+                }
 
                 if txs.len() == num_shards {
                     StopPolling

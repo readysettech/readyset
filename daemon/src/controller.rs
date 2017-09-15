@@ -144,21 +144,6 @@ impl Controller {
             );
         }
 
-        // rewrite message source to be from the controller
-        let mut fwd_msg = msg.clone();
-        fwd_msg.source =
-            SocketAddr::from_str(&format!("{}:{}", self.listen_addr, self.listen_port)).unwrap();
-
-        // notify ChannelCoordinators on other workers about this new domain
-        for (worker, status) in &mut self.workers {
-            if *worker == msg.source {
-                continue;
-            }
-            if status.healthy {
-                let mut s = status.sender.as_mut().unwrap().lock().unwrap();
-                s.send(fwd_msg.clone()).unwrap();
-            }
-        }
         Ok(())
     }
 

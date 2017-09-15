@@ -995,8 +995,9 @@ impl<'a> Migration<'a> {
 
         // take snapshow of workers that are currently around; for type and lifetime reasons, we
         // have to copy the HashMap here, it seems.
-        let workers = mainline.workers.clone();
-        let mut placer = placement::RoundRobinPlacer::new(&workers);
+        let mut workers = mainline.workers.clone();
+        let placer_workers = workers.clone(); // XXX unnecessary clone
+        let mut placer = placement::RoundRobinPlacer::new(&placer_workers);
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
@@ -1019,7 +1020,7 @@ impl<'a> Migration<'a> {
                 &mainline.checktable_addr,
                 &mainline.channel_coordinator,
                 &mainline.debug_channel,
-                &workers,
+                &mut workers,
                 &mut placer,
                 start_ts,
             );
