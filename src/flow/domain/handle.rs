@@ -172,7 +172,7 @@ impl DomainHandle {
                         "sending domain {}.{} to worker {:?}",
                         domain.index.index(),
                         domain.shard,
-                        w.local_addr()
+                        w.peer_addr()
                     );
                     let src = w.local_addr().unwrap();
                     w.send(CoordinationMessage {

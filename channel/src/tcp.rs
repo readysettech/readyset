@@ -76,6 +76,10 @@ impl<T: Serialize> TcpSender<T> {
         self.stream.get_ref().local_addr()
     }
 
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.get_ref().peer_addr()
+    }
+
     /// Send a message on this channel. Ownership isn't actually required, but is taken anyway to
     /// conform to the same api as mpsc::Sender.
     pub fn send(&mut self, t: T) -> Result<(), SendError> {
