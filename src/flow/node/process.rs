@@ -61,7 +61,9 @@ impl Node {
                     {
                         assert!(!ignore);
                         assert!(keyed_by.is_some());
-                        assert_eq!(for_keys.len(), 1);
+                        for key in &*for_keys {
+                            assert_eq!(key.len(), 1);
+                        }
                         Some((keyed_by.unwrap(), for_keys.split_off(0)))
                     } else {
                         None
