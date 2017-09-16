@@ -1786,12 +1786,14 @@ impl Domain {
                     false
                 });
 
-                if !subscribed.is_empty() {
-                    // we still have more things waiting on us
-                    if let Some(_) = self.waiting.insert(ni, Waiting { subscribed }) {
-                        // seed_replay *could* cause us to start waiting again
-                        unimplemented!();
-                    }
+                if self.waiting.contains_key(&ni) {
+                    self.waiting
+                        .get_mut(&ni)
+                        .unwrap()
+                        .subscribed
+                        .extend(subscribed);
+                } else {
+                    self.waiting.insert(ni, Waiting { subscribed });
                 }
                 return;
             }
