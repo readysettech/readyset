@@ -1710,7 +1710,6 @@ impl Domain {
                    "on" => %node,
             );
             self.on_replay_miss(node, &miss_cols[..], while_replaying_key, miss_key, tag);
-            return;
         }
 
         if let Some((tag, ni, for_keys)) = finished {
