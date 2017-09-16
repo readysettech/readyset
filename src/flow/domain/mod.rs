@@ -322,7 +322,7 @@ impl Domain {
         }
     }
 
-    fn finished_partial_replay(&mut self, tag: &Tag) {
+    fn finished_partial_replay(&mut self, tag: &Tag, num: usize) {
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End(..) => {
                 // A backfill request we made to another domain was just satisfied!
@@ -333,7 +333,7 @@ impl Domain {
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
                 let end = self.replay_paths[tag].path.last().unwrap().node;
-                let requests_satisfied = self.replay_paths
+                let mut requests_satisfied = self.replay_paths
                     .iter()
                     .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
                         p.path.last().unwrap().node == end
@@ -341,6 +341,9 @@ impl Domain {
                         false
                     })
                     .count();
+
+                // we also sent that many requests *per key*.
+                requests_satisfied *= num;
 
                 self.concurrent_replays -= requests_satisfied;
                 trace!(self.log, "notified of finished replay";
@@ -1365,7 +1368,7 @@ impl Domain {
         let tag = m.tag().unwrap();
         let mut finished = None;
         let mut need_replay = Vec::new();
-        let mut finished_partial = false;
+        let mut finished_partial = 0;
         'outer: loop {
             // this loop is just here so we have a way of giving up the borrow of self.replay_paths
 
@@ -1638,6 +1641,7 @@ impl Domain {
                             }
 
                             // we still need to finish the replays for any keys that *didn't* miss
+                            let fulfilled = backfill_keys.as_ref().unwrap().len();
                             backfill_keys.unwrap().retain(|k| !missed_on.contains(k));
                             let partial_col = *partial_key_cols.unwrap();
                             m.as_mut().unwrap().map_data(|rs| {
@@ -1651,7 +1655,7 @@ impl Domain {
                                 if let TriggerEndpoint::End(..) = *trigger {
                                     // a request we sent was satisfied -- make sure we allow another
                                     // request to be sent out!
-                                    finished_partial = true;
+                                    finished_partial = fulfilled;
                                 }
                                 break 'outer;
                             }
@@ -1699,10 +1703,16 @@ impl Domain {
                             assert!(!ignore);
                             if self.waiting.contains_key(&dst) {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
+                                if finished_partial == 0 {
+                                    // may already have been set if we missed
+                                    finished_partial = for_keys.len();
+                                }
                                 finished = Some((tag, dst, Some(for_keys)));
-                                finished_partial = true;
                             } else if self.nodes[&dst].borrow().is_reader() {
-                                finished_partial = true;
+                                if finished_partial == 0 {
+                                    // may already have been set if we missed
+                                    finished_partial = for_keys.len();
+                                }
                             } else {
                                 // we're just on the replay path
                             }
@@ -1714,8 +1724,8 @@ impl Domain {
             break;
         }
 
-        if finished_partial {
-            self.finished_partial_replay(&tag);
+        if finished_partial != 0 {
+            self.finished_partial_replay(&tag, finished_partial);
         }
 
         for (node, while_replaying_key, miss_key, miss_cols, tag) in need_replay {
