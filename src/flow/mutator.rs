@@ -180,6 +180,22 @@ impl Mutator {
         Ok(self.send(data.into()))
     }
 
+    /// Perform some non-transactional writes to the base node this Mutator was generated for.
+    pub fn multi_put<V>(&mut self, u: V) -> Result<(), MutatorError>
+    where
+        V: Into<Vec<Vec<DataType>>>,
+    {
+        let data = u.into();
+        if data[0].len() != self.expected_columns {
+            return Err(MutatorError::WrongColumnCount(
+                self.expected_columns,
+                data[0].len(),
+            ));
+        }
+
+        Ok(self.send(data.into()))
+    }
+
     /// Perform a transactional write to the base node this Mutator was generated for.
     pub fn transactional_put<V>(&mut self, u: V, t: checktable::Token) -> Result<i64, MutatorError>
     where

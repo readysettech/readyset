@@ -45,7 +45,7 @@ impl DomainInputHandle {
         })
     }
 
-    pub fn base_send(&mut self, p: Box<Packet>, key: &[usize]) -> Result<(), tcp::SendError> {
+    pub fn base_send(&mut self, mut p: Box<Packet>, key: &[usize]) -> Result<(), tcp::SendError> {
         if self.txs.len() == 1 {
             self.txs[0].send(p)
         } else {
@@ -57,21 +57,20 @@ impl DomainInputHandle {
                 unimplemented!();
             }
             let key_col = key[0];
-            let shard = {
-                let key = match p.data()[0] {
-                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
-                    Record::DeleteRequest(ref k) => &k[0],
-                };
-                if !p.data().iter().all(|r| match *r {
-                    Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col] == key,
-                    Record::DeleteRequest(ref k) => k.len() == 1 && &k[0] == key,
-                }) {
-                    // batch with different keys to sharded base
-                    unimplemented!();
-                }
-                ::shard_by(key, self.txs.len())
-            };
-            self.txs[shard].send(p)
+
+            let mut shard_writes = vec![Vec::new(); self.txs.len()];
+            let mut data = p.take_data();
+            for r in data.drain(..) {
+                let shard = ::shard_by(&r[key_col], self.txs.len());
+                shard_writes[shard].push(r);
+            }
+
+            for (s, rs) in shard_writes.drain(..).enumerate() {
+                let mut p = p.clone_data(); // ok here, as data previously emptied
+                p.swap_data(rs.into());
+                self.txs[s].send(box p)?;
+            }
+            Ok(())
         }
     }
 

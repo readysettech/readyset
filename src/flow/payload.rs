@@ -317,6 +317,17 @@ impl Packet {
         }
     }
 
+    pub fn swap_data(&mut self, new_data: Records) -> Records {
+        use std::mem;
+        let inner = match *self {
+            Packet::Message { ref mut data, .. } => data,
+            Packet::Transaction { ref mut data, .. } => data,
+            Packet::ReplayPiece { ref mut data, .. } => data,
+            _ => unreachable!(),
+        };
+        mem::replace(inner, new_data)
+    }
+
     pub fn take_data(&mut self) -> Records {
         use std::mem;
         let inner = match *self {
