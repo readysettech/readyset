@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 pub struct WorkerStatus {
     healthy: bool,
     last_heartbeat: Instant,
-    sender: Option<Arc<Mutex<TcpSender<CoordinationMessage>>>>,
+    _sender: Option<Arc<Mutex<TcpSender<CoordinationMessage>>>>,
 }
 
 impl WorkerStatus {
@@ -20,7 +20,7 @@ impl WorkerStatus {
         WorkerStatus {
             healthy: true,
             last_heartbeat: Instant::now(),
-            sender: Some(sender),
+            _sender: Some(sender),
         }
     }
 }
@@ -133,8 +133,6 @@ impl Controller {
         domain: &(DomainIndex, usize),
         _addr: &SocketAddr,
     ) -> Result<(), io::Error> {
-        use std::str::FromStr;
-
         {
             let mut b = self.blender.lock().unwrap();
             b.register_remote_domain(

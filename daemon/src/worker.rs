@@ -184,8 +184,6 @@ impl Worker {
     }
 
     fn handle_domain_assign(&mut self, d: DomainBuilder) -> Result<(), channel::tcp::SendError> {
-        use std::str::FromStr;
-
         let idx = d.index;
         let shard = d.shard;
         let (jh, addr) = d.boot(
