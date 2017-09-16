@@ -332,15 +332,18 @@ impl Domain {
                 // we just naively release one slot here, a union with two parents would mean that
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
-                let end = self.replay_paths[tag].path.last().unwrap().node;
-                let mut requests_satisfied = self.replay_paths
-                    .iter()
-                    .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
-                        p.path.last().unwrap().node == end
-                    } else {
-                        false
-                    })
-                    .count();
+                let mut requests_satisfied = {
+                    let last = self.replay_paths[tag].path.last().unwrap();
+                    self.replay_paths
+                        .iter()
+                        .filter(|&(_, p)| if let TriggerEndpoint::End(..) = p.trigger {
+                            let p = p.path.last().unwrap();
+                            p.node == last.node && p.partial_key == last.partial_key
+                        } else {
+                            false
+                        })
+                        .count()
+                };
 
                 // we also sent that many requests *per key*.
                 requests_satisfied *= num;
