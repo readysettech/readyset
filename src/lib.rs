@@ -327,7 +327,7 @@ const SHARDS: usize = 2;
 ///
 /// Note that this number *must* be greater than the width (in terms of number of ancestors) of the
 /// widest union in the graph, otherwise a deadlock will occur.
-const MAX_CONCURRENT_REPLAYS: usize = 128;
+const MAX_CONCURRENT_REPLAYS: usize = 256;
 
 #[inline]
 fn shard_by(dt: &DataType, shards: usize) -> usize {
