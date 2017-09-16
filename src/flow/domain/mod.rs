@@ -345,7 +345,8 @@ impl Domain {
                 // we also sent that many requests *per key*.
                 requests_satisfied *= num;
 
-                self.concurrent_replays -= requests_satisfied;
+                // TODO: figure out why this can underflow
+                self.concurrent_replays.saturating_sub(requests_satisfied);
                 trace!(self.log, "notified of finished replay";
                        "#done" => requests_satisfied,
                        "ongoing" => self.concurrent_replays,
