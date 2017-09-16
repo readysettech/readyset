@@ -61,7 +61,13 @@ impl DomainInputHandle {
             let mut shard_writes = vec![Vec::new(); self.txs.len()];
             let mut data = p.take_data();
             for r in data.drain(..) {
-                let shard = ::shard_by(&r[key_col], self.txs.len());
+                let shard = {
+                    let key = match r {
+                        Record::Positive(ref r) | Record::Negative(ref r) => &r[key_col],
+                        Record::DeleteRequest(ref k) => &k[0],
+                    };
+                    ::shard_by(key, self.txs.len())
+                };
                 shard_writes[shard].push(r);
             }
 
