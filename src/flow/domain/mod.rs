@@ -1431,7 +1431,7 @@ impl Domain {
                     link,
                     data,
                     nshards,
-                    context,
+                    mut context,
                     transaction_state,
                 } => {
                     if let ReplayPieceContext::Partial { .. } = context {
@@ -1459,13 +1459,16 @@ impl Domain {
 
                         // keep track of whether we're filling any partial holes
                         let partial_key_cols = segment.partial_key.as_ref();
-                        let backfill_keys =
-                            if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
-                                debug_assert!(partial_key_cols.is_some());
-                                Some(for_keys)
-                            } else {
-                                None
-                            };
+                        let backfill_keys = if let ReplayPieceContext::Partial {
+                            ref mut for_keys,
+                            ..
+                        } = context
+                        {
+                            debug_assert!(partial_key_cols.is_some());
+                            Some(for_keys)
+                        } else {
+                            None
+                        };
 
                         if !n.is_transactional() {
                             if let Some(box Packet::ReplayPiece {
@@ -1496,12 +1499,12 @@ impl Domain {
 
                         // are we about to fill a hole?
                         if target {
-                            let backfill_keys = backfill_keys.unwrap();
+                            let backfill_keys = backfill_keys.as_ref().unwrap();
                             // mark the state for the key being replayed as *not* a hole otherwise
                             // we'll just end up with the same "need replay" response that
                             // triggered this replay initially.
                             if let Some(state) = self.state.get_mut(&segment.node) {
-                                for key in backfill_keys {
+                                for key in backfill_keys.iter() {
                                     state.mark_filled(key.clone(), &tag);
                                 }
                             } else {
@@ -1509,7 +1512,7 @@ impl Domain {
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    r.writer_mut().map(|wh| for key in backfill_keys {
+                                    r.writer_mut().map(|wh| for key in backfill_keys.iter() {
                                         wh.mark_filled(&key[0]);
                                     });
                                 });
@@ -1550,7 +1553,7 @@ impl Domain {
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(&segment.node)
                                 {
-                                    for key in backfill_keys.unwrap() {
+                                    for key in backfill_keys.as_ref().unwrap().iter() {
                                         prev.remove(&key[0]);
                                     }
                                 }
@@ -1605,7 +1608,9 @@ impl Domain {
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
                             let mut missed = HashMap::new();
+                            let mut missed_on = HashSet::new();
                             for miss in misses {
+                                missed_on.insert(miss.replay_key.clone().unwrap());
                                 missed
                                     .entry(miss.node)
                                     .or_insert_with(HashMap::new)
@@ -1632,12 +1637,24 @@ impl Domain {
                                 }
                             }
 
-                            if let TriggerEndpoint::End(..) = *trigger {
-                                // a request we sent was satisfied -- make sure we allow another
-                                // request to be sent out!
-                                finished_partial = true;
+                            // we still need to finish the replays for any keys that *didn't* miss
+                            backfill_keys.unwrap().retain(|k| !missed_on.contains(k));
+                            let partial_col = *partial_key_cols.unwrap();
+                            m.as_mut().unwrap().map_data(|rs| {
+                                rs.retain(|r| {
+                                    let r = r.rec();
+                                    !missed_on.contains(&vec![r[partial_col].clone()])
+                                })
+                            });
+
+                            if m.as_ref().unwrap().is_empty() {
+                                if let TriggerEndpoint::End(..) = *trigger {
+                                    // a request we sent was satisfied -- make sure we allow another
+                                    // request to be sent out!
+                                    finished_partial = true;
+                                }
+                                break 'outer;
                             }
-                            break 'outer;
                         }
 
                         // we're all good -- continue propagating
