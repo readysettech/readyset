@@ -1380,7 +1380,6 @@ impl Domain {
             let &mut ReplayPath {
                 ref path,
                 notify_done,
-                ref trigger,
                 ..
             } = self.replay_paths.get_mut(&tag).unwrap();
 
@@ -1460,6 +1459,14 @@ impl Domain {
                         transaction_state: transaction_state.clone(),
                     };
                     let mut m = Some(m);
+
+                    // let's collect some informationn about the destination of this replay
+                    let dst = path.last().unwrap().node;
+                    let dst_is_reader = self.nodes[&dst]
+                        .borrow()
+                        .with_reader(|r| r.is_materialized())
+                        .unwrap_or(false);
+                    let dst_is_target = self.waiting.contains_key(&dst);
 
                     for (i, segment) in path.iter().enumerate() {
                         let mut n = self.nodes[&segment.node].borrow_mut();
@@ -1573,6 +1580,7 @@ impl Domain {
                         drop(n);
 
                         if let Some(box Packet::Captured) = m {
+                            assert_eq!(misses.len(), 0);
                             if backfill_keys.is_some() && is_transactional {
                                 let last_ni = path.last().unwrap().node;
                                 if last_ni != segment.node {
@@ -1613,6 +1621,26 @@ impl Domain {
                             break 'outer;
                         }
 
+                        // we need to track how many replays we completed, and we need to do so
+                        // *before* we prune keys that missed. these conditions are all important,
+                        // so let's walk through them
+                        //
+                        //  1. this applies only to partial backfills
+                        //  2. we should only set finished_partial if it hasn't already been set.
+                        //     this is important, as misses will cause backfill_keys to be pruned
+                        //     over time, which would cause finished_partial to hold the wrong
+                        //     value!
+                        //  3. if the last node on this path is a reader, or is a ::End (so we
+                        //     triggered the replay) then we need to decrement the concurrent
+                        //     replay count! note that it's *not* sufficient to check if the
+                        //     *current* node is a target/reader, because we could miss during a
+                        //     join along the path.
+                        if backfill_keys.is_some() && finished_partial == 0 &&
+                            (dst_is_reader || dst_is_target)
+                        {
+                            finished_partial = backfill_keys.as_ref().unwrap().len();
+                        }
+
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
                             let mut missed = HashMap::new();
@@ -1646,24 +1674,23 @@ impl Domain {
                             }
 
                             // we still need to finish the replays for any keys that *didn't* miss
-                            let fulfilled = backfill_keys.as_ref().unwrap().len();
-                            backfill_keys.unwrap().retain(|k| !missed_on.contains(k));
+                            let backfill_keys = backfill_keys.map(|backfill_keys| {
+                                backfill_keys.retain(|k| !missed_on.contains(k));
+                                backfill_keys
+                            });
+                            if backfill_keys.as_ref().unwrap().is_empty() {
+                                break 'outer;
+                            }
+
                             let partial_col = *partial_key_cols.unwrap();
                             m.as_mut().unwrap().map_data(|rs| {
                                 rs.retain(|r| {
+                                    // XXX: don't we technically need to translate the columns a
+                                    // bunch here? what if two key columns are reordered?
                                     let r = r.rec();
                                     !missed_on.contains(&vec![r[partial_col].clone()])
                                 })
                             });
-
-                            if m.as_ref().unwrap().is_empty() {
-                                if let TriggerEndpoint::End(..) = *trigger {
-                                    // a request we sent was satisfied -- make sure we allow another
-                                    // request to be sent out!
-                                    finished_partial = fulfilled;
-                                }
-                                break 'outer;
-                            }
                         }
 
                         // we're all good -- continue propagating
@@ -1689,7 +1716,6 @@ impl Domain {
                         }
                     }
 
-                    let dst = path.last().unwrap().node;
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
                             debug!(self.log,
@@ -1706,18 +1732,14 @@ impl Domain {
                         }
                         ReplayPieceContext::Partial { for_keys, ignore } => {
                             assert!(!ignore);
-                            if self.waiting.contains_key(&dst) {
+                            if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 if finished_partial == 0 {
-                                    // may already have been set if we missed
-                                    finished_partial = for_keys.len();
+                                    assert_eq!(for_keys, Vec::<Vec<DataType>>::new());
                                 }
                                 finished = Some((tag, dst, Some(for_keys)));
-                            } else if self.nodes[&dst].borrow().is_reader() {
-                                if finished_partial == 0 {
-                                    // may already have been set if we missed
-                                    finished_partial = for_keys.len();
-                                }
+                            } else if dst_is_reader {
+                                assert_ne!(finished_partial, 0);
                             } else {
                                 // we're just on the replay path
                             }
