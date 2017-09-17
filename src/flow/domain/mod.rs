@@ -84,24 +84,22 @@ struct ReplayPath {
     trigger: TriggerEndpoint,
 }
 
-/// When one node misses in another during a replay, a HoleSubscription will be registered with the
-/// target node, and a replay to the target node will be triggered for the key in question. When
-/// that replay eventually finishes, the subscription will cause the target node to notify this
-/// subscription, causing the replay to run again.
-#[derive(Debug)]
-struct HoleSubscription {
-    miss_key: Vec<DataType>,
-    replay_key: Vec<DataType>,
-    tag: Tag,
-}
-
 /// A waiting node is one that is waiting for at least one incoming replay.
 ///
 /// Upon receiving a replay message, the node should attempt to re-process replays for any
 /// downstream nodes that missed in on the key that was just filled.
+///
+/// When one node misses in another during a replay, that miss will be registered with the target
+/// node, and a replay to the target node will be triggered for the key in question. When that
+/// replay eventually finishes, the subscription will cause the target node to notify this
+/// subscription, causing the replay to run again.
+///
+/// The map is from miss_key -> Set(tag + replay_key).
+/// TODO: this can result in false positives, since we can think that we've filled a key on a node,
+/// but we did it with the wrong tag. probably doesn't matter though.
 #[derive(Debug)]
 struct Waiting {
-    subscribed: Vec<HoleSubscription>,
+    subscribed: HashMap<Vec<DataType>, HashSet<(Tag, Vec<DataType>)>>,
 }
 
 pub struct Domain {
@@ -213,19 +211,14 @@ impl Domain {
         needed_for: Tag,
     ) {
         // when the replay eventually succeeds, we want to re-do the replay.
-        let mut already_filling = false;
         let mut subscribed = match self.waiting.remove(&miss_in) {
-            Some(Waiting { subscribed }) => {
-                already_filling = subscribed.iter().any(|s| s.miss_key == miss_key);
-                subscribed
-            }
-            None => Vec::new(),
+            Some(Waiting { subscribed }) => subscribed,
+            None => HashMap::new(),
         };
-        subscribed.push(HoleSubscription {
-            miss_key: miss_key.clone(),
-            replay_key: replay_key,
-            tag: needed_for,
-        });
+        let already_filling = !subscribed
+            .entry(miss_key.clone())
+            .or_insert_with(HashSet::new)
+            .insert((needed_for, replay_key));
         self.waiting.insert(miss_in, Waiting { subscribed });
 
         if already_filling {
@@ -1783,27 +1776,30 @@ impl Domain {
                 trace!(self.log, "partial replay finished to node with waiting backfills";
                        "waiting" => subscribed.len(),
                        "keys" => ?for_keys);
+
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
-                let for_keys: HashSet<_> = for_keys.unwrap().into_iter().collect();
-                subscribed.retain(|subscription| {
-                    if !for_keys.contains(&subscription.miss_key) {
-                        // we didn't fulfill this subscription
-                        return true;
+                for key in for_keys.unwrap() {
+                    match subscribed.remove(&key) {
+                        None => {
+                            // no subscriptions for this key (why are we filling it?)
+                        }
+                        Some(replay) => {
+                            for (tag, replay_key) in replay {
+                                // we've filled the hole that prevented the replay previously!
+                                self.seed_replay(tag, &replay_key[..], None);
+                            }
+                        }
                     }
-
-                    // we've filled the hole that prevented the replay previously!
-                    self.seed_replay(subscription.tag, &subscription.replay_key[..], None);
-                    false
-                });
+                }
 
                 if self.waiting.contains_key(&ni) {
-                    self.waiting
-                        .get_mut(&ni)
-                        .unwrap()
-                        .subscribed
-                        .extend(subscribed);
+                    let old = subscribed;
+                    let &mut Waiting { ref mut subscribed } = self.waiting.get_mut(&ni).unwrap();
+                    for (k, rs) in old {
+                        subscribed.entry(k).or_insert_with(HashSet::new).extend(rs);
+                    }
                 } else {
                     self.waiting.insert(ni, Waiting { subscribed });
                 }
