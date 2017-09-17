@@ -1795,15 +1795,13 @@ impl Domain {
                     }
                 }
 
-                if self.waiting.contains_key(&ni) {
-                    let old = subscribed;
-                    let &mut Waiting { ref mut subscribed } = self.waiting.get_mut(&ni).unwrap();
-                    for (k, rs) in old {
+                if let Some(Waiting { subscribed: new }) = self.waiting.remove(&ni) {
+                    for (k, rs) in new {
                         subscribed.entry(k).or_insert_with(HashSet::new).extend(rs);
                     }
-                } else {
-                    self.waiting.insert(ni, Waiting { subscribed });
                 }
+
+                self.waiting.insert(ni, Waiting { subscribed });
                 return;
             }
 
