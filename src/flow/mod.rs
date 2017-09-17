@@ -97,7 +97,7 @@ impl Default for Blender {
             materializations: materializations,
 
             domain_config: domain::Config {
-                concurrent_replays: 2048,
+                concurrent_replays: 512,
                 replay_batch_timeout: time::Duration::from_millis(1),
                 replay_batch_size: 32,
             },
