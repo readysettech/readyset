@@ -187,10 +187,6 @@ impl Ingredient for Join {
         vec![self.left.as_global(), self.right.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
     fn is_join(&self) -> bool {
         true
     }
@@ -204,10 +200,6 @@ impl Ingredient for Join {
                     .collect(),
             ),
         }
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        true
     }
 
     fn on_connected(&mut self, _g: &Graph) {}
@@ -243,21 +235,25 @@ impl Ingredient for Join {
 
                 let rc = self.lookup(
                     *self.right,
-                    &[self.on.0],
+                    &[self.on.1],
                     &KeyType::Single(&key),
                     nodes,
                     state,
                 ).unwrap();
                 if rc.is_none() {
                     // we got something from right, but that row's key is not in right??
-                    unreachable!();
+                    //
+                    // this *can* happen! imagine if you have two partial indices on right, one on
+                    // column a and one on column b. imagine that a is the join key. we get a
+                    // replay request for b = 4, which must then be replayed from right (since left
+                    // doesn't have b). say right replays (a=1,b=4). we will hit this case, since
+                    // a=1 is not in right. the correct thing to do here is to replay a=1 first,
+                    // and *then* replay b=4 again (possibly several times over for each a).
+                    continue;
                 }
                 let rc = rc.unwrap().count();
                 self.right_counts.insert(key.clone(), (adjust(rc), rc));
             }
-
-            self.right_counts
-                .retain(|_, &mut (before, after)| (before == 0) != (after == 0));
         }
 
         let (other, from_key, other_key) = if from == *self.left {
@@ -284,6 +280,7 @@ impl Ingredient for Join {
             if other_rows.is_none() {
                 misses.push(Miss {
                     node: other,
+                    columns: vec![other_key],
                     key: vec![row[from_key].clone()],
                 });
                 continue;
@@ -293,17 +290,27 @@ impl Ingredient for Join {
             if self.kind == JoinType::Left {
                 // emit null rows if necessary for left join
                 if from == *self.right {
-                    let rc = if let Some(&mut (ref mut rc, _)) =
+                    let rc = if let Some(&mut (ref mut rc, after)) =
                         self.right_counts.get_mut(&row[self.on.0])
                     {
-                        if positive {
-                            *rc += 1;
+                        if (*rc == 0) == (after == 0) {
+                            // no changs to NULL rows
+                            None
                         } else {
-                            *rc -= 1;
+                            if positive {
+                                *rc += 1;
+                            } else {
+                                *rc -= 1;
+                            }
+                            Some(*rc)
                         }
-                        Some(*rc)
                     } else {
-                        None
+                        misses.push(Miss {
+                            node: from,
+                            columns: vec![self.on.1],
+                            key: vec![row[self.on.1].clone()],
+                        });
+                        continue;
                     };
 
                     if let Some(rc) = rc {
@@ -346,10 +353,10 @@ impl Ingredient for Join {
         }
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         vec![
-            (self.left.as_global(), vec![self.on.0]),
-            (self.right.as_global(), vec![self.on.1]),
+            (self.left.as_global(), (vec![self.on.0], true)),
+            (self.right.as_global(), (vec![self.on.1], true)),
         ].into_iter()
             .collect()
     }
@@ -545,8 +552,8 @@ mod tests {
         let me = 2.into();
         let (g, l, r) = setup();
         let hm: HashMap<_, _> = vec![
-            (l.as_global(), vec![0]), /* join column for left */
-            (r.as_global(), vec![0]), /* join column for right */
+            (l.as_global(), (vec![0], true)), /* join column for left */
+            (r.as_global(), (vec![0], true)), /* join column for right */
         ].into_iter()
             .collect();
         assert_eq!(g.node().suggest_indexes(me), hm);

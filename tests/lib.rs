@@ -400,6 +400,7 @@ fn transactional_vote() {
 
     // set up graph
     let mut g = distributary::Blender::new();
+    g.disable_partial(); // because end_votes forces full below partial
     let validate = g.get_validator();
 
     let (article1, article2, vote, article, vc, end, end_title, end_votes) = {
@@ -876,6 +877,180 @@ fn key_on_added() {
     // make sure we can read (may trigger a replay)
     let bq = g.get_getter(b).unwrap();
     assert!(bq.lookup(&3.into(), true).unwrap().is_empty());
+}
+
+#[test]
+fn replay_during_replay() {
+    // what we're trying to set up here is a case where a join receives a record with a value for
+    // the join key that does not exist in the view the record was sent from. since joins only do
+    // lookups into the origin view during forward processing when it receives things from the
+    // right in a left join, that's what we have to construct.
+    let mut g = distributary::Blender::new();
+    g.disable_sharding();
+    let (a, u1, u2) = {
+        let mut mig = g.start_migration();
+        // we need three bases:
+        //
+        //  - a will be the left side of the left join
+        //  - u1 and u2 will be joined together with a regular one-to-one join to produce a partial
+        //    view (remember, we need to miss in the source of the replay, so it must be partial).
+        let a = mig.add_ingredient("a", &["a"], distributary::Base::new(vec![1.into()]));
+        let u1 = mig.add_ingredient("u1", &["u"], distributary::Base::new(vec![1.into()]));
+        let u2 = mig.add_ingredient(
+            "u2",
+            &["u", "a"],
+            distributary::Base::new(vec![1.into(), 2.into()]),
+        );
+        mig.commit();
+        (a, u1, u2)
+    };
+
+    // add our joins
+    let (u, target) = {
+        let mut mig = g.start_migration();
+        use distributary::{Join, JoinType};
+        use distributary::JoinSource::*;
+        // u = u1 * u2
+        let j = Join::new(u1, u2, JoinType::Inner, vec![B(0, 0), R(1)]);
+        let u = mig.add_ingredient("u", &["u", "a"], j);
+        let j = Join::new(a, u, JoinType::Left, vec![B(0, 1), R(0)]);
+        let end = mig.add_ingredient("end", &["a", "u"], j);
+        mig.maintain(end, 0);
+        mig.commit();
+        (u, end)
+    };
+
+    // at this point, there's no secondary index on `u`, so any records that are forwarded from `u`
+    // must already be present in the one index that `u` has. let's do some writes and check that
+    // nothing crashes.
+
+    let mut muta = g.get_mutator(a);
+    let mut mutu1 = g.get_mutator(u1);
+    let mut mutu2 = g.get_mutator(u2);
+
+    // as are numbers
+    muta.put(vec![1.into()]).unwrap();
+    muta.put(vec![2.into()]).unwrap();
+    muta.put(vec![3.into()]).unwrap();
+
+    // us are strings
+    mutu1.put(vec!["a".into()]).unwrap();
+    mutu1.put(vec!["b".into()]).unwrap();
+    mutu1.put(vec!["c".into()]).unwrap();
+
+    // we want there to be data for all keys
+    mutu2.put(vec!["a".into(), 1.into()]).unwrap();
+    mutu2.put(vec!["b".into(), 2.into()]).unwrap();
+    mutu2.put(vec!["c".into(), 3.into()]).unwrap();
+
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // since u and target are both partial, the writes should not actually have propagated through
+    // yet. do a read to see that one makes it through correctly:
+    let r = g.get_getter(target).unwrap();
+
+    assert_eq!(
+        r.lookup(&1.into(), true),
+        Ok(vec![vec![1.into(), "a".into()]])
+    );
+
+    // we now know that u has key a=1 in its index
+    // now we add a secondary index on u.u
+    {
+        let mut mig = g.start_migration();
+        mig.maintain(u, 0);
+        mig.commit();
+    }
+
+    let second = g.get_getter(u).unwrap();
+
+    // second is partial and empty, so any read should trigger a replay.
+    // though that shouldn't interact with target in any way.
+    assert_eq!(
+        second.lookup(&"a".into(), true),
+        Ok(vec![vec!["a".into(), 1.into()]])
+    );
+
+    // now we get to the funky part.
+    // we're going to request a second key from the secondary index on `u`, which causes that hole
+    // to disappear. then we're going to do a write to `u2` that has that second key, but has an
+    // "a" value for which u has a hole. that record is then going to be forwarded to *both*
+    // children, and it'll be interesting to see what the join then does.
+    assert_eq!(
+        second.lookup(&"b".into(), true),
+        Ok(vec![vec!["b".into(), 2.into()]])
+    );
+
+    // u has a hole for a=2, but not for u=b, and so should forward this to both children
+    mutu2.put(vec!["b".into(), 2.into()]).unwrap();
+
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // what happens if we now query for 2?
+    assert_eq!(
+        r.lookup(&2.into(), true),
+        Ok(vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]])
+    );
+}
+
+#[test]
+fn full_aggregation_with_bogokey() {
+    // set up graph
+    let mut g = distributary::Blender::new();
+    let base = {
+        let mut mig = g.start_migration();
+        let base = mig.add_ingredient("base", &["x"], distributary::Base::new(vec![1.into()]));
+        mig.commit();
+        base
+    };
+
+    // add an aggregation over the base with a bogo key.
+    // in other words, the aggregation is across all rows.
+    let agg = {
+        let mut mig = g.start_migration();
+        let bogo = mig.add_ingredient(
+            "bogo",
+            &["x", "bogo"],
+            distributary::Project::new(base, &[0], Some(vec![0.into()])),
+        );
+        let agg = mig.add_ingredient(
+            "agg",
+            &["bogo", "count"],
+            distributary::Aggregation::COUNT.over(bogo, 0, &[1]),
+        );
+        mig.maintain(agg, 0);
+        mig.commit();
+        agg
+    };
+
+    let aggq = g.get_getter(agg).unwrap();
+    let mut base = g.get_mutator(base);
+
+    // insert some values
+    base.put(vec![1.into()]).unwrap();
+    base.put(vec![2.into()]).unwrap();
+    base.put(vec![3.into()]).unwrap();
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // send a query to aggregation materialization
+    assert_eq!(
+        aggq.lookup(&0.into(), true),
+        Ok(vec![vec![0.into(), 3.into()]])
+    );
+
+    // update value again
+    base.put(vec![4.into()]).unwrap();
+
+    // give it some time to propagate
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // check that value was updated again
+    assert_eq!(
+        aggq.lookup(&0.into(), true),
+        Ok(vec![vec![0.into(), 4.into()]])
+    );
 }
 
 #[test]

@@ -104,16 +104,10 @@ impl Ingredient for NodeOperator {
     fn ancestors(&self) -> Vec<NodeIndex> {
         impl_ingredient_fn_ref!(self, ancestors,)
     }
-    fn should_materialize(&self) -> bool {
-        impl_ingredient_fn_ref!(self, should_materialize,)
-    }
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self, must_replay_among,)
     }
-    fn will_query(&self, materialized: bool) -> bool {
-        impl_ingredient_fn_ref!(self, will_query, materialized)
-    }
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
     fn resolve(&self, i: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -251,7 +245,7 @@ pub mod test {
             i.on_connected(&self.graph);
             let i: NodeOperator = i.into();
             let global = self.graph.add_node(Node::new(name, fields, i, false));
-            self.graph.add_edge(self.source, global, false);
+            self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             let mut ip: IndexPair = global.into();
@@ -288,7 +282,7 @@ pub mod test {
                 self.states.insert(local, State::default());
             }
             for parent in parents {
-                self.graph.add_edge(parent, global, false);
+                self.graph.add_edge(parent, global, ());
             }
             let mut ip: IndexPair = global.into();
             ip.set_local(local);
@@ -304,9 +298,9 @@ pub mod test {
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);
-            for (tbl, col) in idx {
+            for (tbl, (col, _)) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
-                    s.add_key(&col[..], false);
+                    s.add_key(&col[..], None);
                 }
             }
             // and get rid of states we don't need
@@ -368,10 +362,10 @@ pub mod test {
             // if the base node has state, keep it
             if let Some(ref mut state) = self.states.get_mut(&*base) {
                 match data.into() {
-                    Record::Positive(r) => state.insert(r),
+                    Record::Positive(r) => state.insert(r, None),
                     Record::Negative(_) => unreachable!(),
                     Record::DeleteRequest(..) => unreachable!(),
-                }
+                };
             } else {
                 assert!(
                     false,
@@ -402,12 +396,7 @@ pub mod test {
                 return u;
             }
 
-            let misses = node::materialize(
-                &mut u,
-                *self.nut.unwrap(),
-                self.states.get_mut(&*self.nut.unwrap()),
-            );
-            assert_eq!(misses, vec![]);
+            node::materialize(&mut u, None, self.states.get_mut(&*self.nut.unwrap()));
             u
         }
 

@@ -126,7 +126,7 @@ pub fn add(
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
-                graph.add_edge(parent, ingress, false);
+                graph.add_edge(parent, ingress, ());
 
                 // we also now need to deal with this ingress node
                 new.insert(ingress);
@@ -222,7 +222,7 @@ pub fn add(
                 egress.add_to(graph[sender].domain());
                 egress.shard_by(graph[sender].sharded_by());
                 let egress = graph.add_node(egress);
-                graph.add_edge(sender, egress, false);
+                graph.add_edge(sender, egress, ());
 
                 // we also now need to deal with this egress node
                 new.insert(egress);

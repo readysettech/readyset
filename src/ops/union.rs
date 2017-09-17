@@ -85,14 +85,6 @@ impl Ingredient for Union {
         }
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        false
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         if let Emit::Project {
             ref mut cols,
@@ -223,6 +215,9 @@ impl Ingredient for Union {
                 RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s))
             }
             Some((key_col, key_val)) => {
+                // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
+                // replays!
+
                 if self.replay_key.is_none() {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
@@ -275,7 +270,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index nothing (?)
         HashMap::new()
     }
