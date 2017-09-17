@@ -323,12 +323,6 @@
 /// The number of domain threads to spin up for each sharded subtree of the data-flow graph.
 const SHARDS: usize = 2;
 
-/// The maximum number of backfill requests any domain can have outstanding to other domains.
-///
-/// Note that this number *must* be greater than the width (in terms of number of ancestors) of the
-/// widest union in the graph, otherwise a deadlock will occur.
-const MAX_CONCURRENT_REPLAYS: usize = 256;
-
 #[inline]
 fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {

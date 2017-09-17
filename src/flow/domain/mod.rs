@@ -17,6 +17,13 @@ use checktable;
 use slog::Logger;
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 
+#[derive(Clone)]
+pub struct Config {
+    pub concurrent_replays: usize,
+    pub replay_batch_timeout: time::Duration,
+    pub replay_batch_size: usize,
+}
+
 const BATCH_SIZE: usize = 256;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
@@ -117,6 +124,7 @@ pub struct Domain {
     reader_triggered: local::Map<HashSet<DataType>>,
 
     concurrent_replays: usize,
+    max_concurrent_replays: usize,
     replay_request_queue: VecDeque<(Tag, Vec<DataType>)>,
 
     readers: flow::Readers,
@@ -128,6 +136,7 @@ pub struct Domain {
 
     buffered_replay_requests: HashMap<Tag, (time::Instant, Vec<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
+    replay_batch_timeout: time::Duration,
     replay_batch_size: usize,
 
     total_time: Timer<SimpleTracker, RealTime>,
@@ -144,6 +153,7 @@ impl Domain {
         shard: usize,
         nshards: usize,
         nodes: DomainNodes,
+        config: Config,
         readers: &flow::Readers,
         persistence_parameters: persistence::Parameters,
         checktable: Arc<Mutex<checktable::CheckTable>>,
@@ -179,9 +189,11 @@ impl Domain {
 
             buffered_replay_requests: HashMap::new(),
             has_buffered_replay_requests: false,
-            replay_batch_size: 128,
+            replay_batch_size: config.replay_batch_size,
+            replay_batch_timeout: config.replay_batch_timeout,
 
             concurrent_replays: 0,
+            max_concurrent_replays: config.concurrent_replays,
             replay_request_queue: Default::default(),
 
             total_time: Timer::new(),
@@ -257,7 +269,7 @@ impl Domain {
                 continue;
             }
 
-            // NOTE: due to MAX_CONCURRENT_REPLAYS, it may be that we only replay from *some* of
+            // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
             self.request_partial_replay(tag, key);
@@ -276,7 +288,7 @@ impl Domain {
     }
 
     fn send_partial_replay_request(&mut self, tag: Tag, key: Vec<DataType>) {
-        debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
+        debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         if let TriggerEndpoint::End(ref mut triggers) =
             self.replay_paths.get_mut(&tag).unwrap().trigger
         {
@@ -309,7 +321,7 @@ impl Domain {
     }
 
     fn request_partial_replay(&mut self, tag: Tag, key: Vec<DataType>) {
-        if self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
+        if self.concurrent_replays < self.max_concurrent_replays {
             assert_eq!(self.replay_request_queue.len(), 0);
             self.send_partial_replay_request(tag, key);
         } else {
@@ -355,8 +367,8 @@ impl Domain {
                        "#done" => requests_satisfied,
                        "ongoing" => self.concurrent_replays,
                        );
-                debug_assert!(self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS);
-                while self.concurrent_replays < ::MAX_CONCURRENT_REPLAYS {
+                debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+                while self.concurrent_replays < self.max_concurrent_replays {
                     if let Some((tag, key)) = self.replay_request_queue.pop_front() {
                         trace!(self.log, "releasing replay request";
                                "tag" => ?tag,
@@ -1133,7 +1145,7 @@ impl Domain {
 
         if self.has_buffered_replay_requests {
             let now = time::Instant::now();
-            let to = time::Duration::from_millis(1);
+            let to = self.replay_batch_timeout;
             self.has_buffered_replay_requests = false;
             let elapsed_replays: Vec<_> = {
                 let has = &mut self.has_buffered_replay_requests;

@@ -327,7 +327,6 @@ impl Materializations {
                 }
 
                 for path in paths {
-
                     // keep walking until:
                     //
                     //  - col is None; key doesn't trace, partial not ok
