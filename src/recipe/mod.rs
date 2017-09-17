@@ -333,6 +333,8 @@ impl Recipe {
             new.expression_order.push(qid);
         }
 
+        new.aliases.extend(add_rp.aliases);
+
         // return new recipe as replacement for self
         Ok(new)
     }
