@@ -64,7 +64,7 @@ impl<'a> Plan<'a> {
         };
 
         // cut paths so they only reach to the the closest materialized node
-        let paths: Vec<_> = paths
+        let mut paths: Vec<_> = paths
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
@@ -95,6 +95,12 @@ impl<'a> Plan<'a> {
                 path
             })
             .collect();
+
+        // since we cut off part of each path, we *may* now have multiple paths that are the same
+        // (i.e., if there was a union above the nearest materialization). this would be bad, as it
+        // would cause a domain to request replays *twice* for a key from one view!
+        paths.sort();
+        paths.dedup();
 
         // all columns better resolve if we're doing partial
         assert!(!self.partial || paths.iter().all(|p| p[0].1.is_some()));
