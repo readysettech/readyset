@@ -1648,34 +1648,35 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let mut missed = HashMap::new();
-                            let mut missed_on = HashSet::new();
+                            let mut misses = misses;
+                            let mut missed_on = HashSet::with_capacity(misses.len());
+                            misses.sort_unstable_by(|a, b| {
+                                use std::cmp::Ordering;
+                                let mut x = a.node.cmp(&b.node);
+                                if x != Ordering::Equal {
+                                    return x;
+                                }
+                                x = a.columns.cmp(&b.columns);
+                                if x != Ordering::Equal {
+                                    return x;
+                                }
+                                x = a.key.cmp(&b.key);
+                                if x != Ordering::Equal {
+                                    return x;
+                                }
+                                a.replay_key.cmp(&b.replay_key)
+                            });
+                            misses.dedup();
+
                             for miss in misses {
                                 missed_on.insert(miss.replay_key.clone().unwrap());
-                                missed
-                                    .entry(miss.node)
-                                    .or_insert_with(HashMap::new)
-                                    .entry(miss.columns)
-                                    .or_insert_with(HashMap::new)
-                                    .entry(miss.key)
-                                    .or_insert_with(HashSet::new)
-                                    .insert(miss.replay_key.unwrap());
-                            }
-
-                            for (node, misses) in missed {
-                                for (columns, values) in misses {
-                                    for (miss_key, replay_keys) in values {
-                                        for while_replaying in replay_keys {
-                                            need_replay.push((
-                                                node,
-                                                while_replaying,
-                                                miss_key.clone(),
-                                                columns.clone(),
-                                                tag,
-                                            ));
-                                        }
-                                    }
-                                }
+                                need_replay.push((
+                                    miss.node,
+                                    miss.replay_key.unwrap(),
+                                    miss.key,
+                                    miss.columns,
+                                    tag,
+                                ));
                             }
 
                             // we still need to finish the replays for any keys that *didn't* miss
