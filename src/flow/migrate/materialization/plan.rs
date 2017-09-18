@@ -422,13 +422,18 @@ impl<'a> Plan<'a> {
                 // we could be cleverer here when we have a choice
                 match graph[node].must_replay_among() {
                     Some(anc) => {
-                        for p in parents {
-                            if anc.contains(p) {
-                                return Some(*p);
-                            }
-                        }
-                        // must_replay_among did not include any ancestor?
-                        unreachable!();
+                        // it is *extremely* important that this choice is deterministic.
+                        // if it is not, the code that decides what indices to create could choose
+                        // a *different* parent than the code that sets up the replay paths, which
+                        // would be *bad*.
+                        let mut parents = parents
+                            .iter()
+                            .filter(|p| anc.contains(p))
+                            .map(|&p| p)
+                            .collect::<Vec<_>>();
+                        assert!(!parents.is_empty());
+                        parents.sort_by_key(|p| p.index());
+                        Some(parents[0])
                     }
                     None => Some(parents[0]),
                 }
