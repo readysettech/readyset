@@ -17,6 +17,7 @@ pub(crate) struct Plan<'a> {
     partial: bool,
 
     tags: HashMap<Vec<usize>, Vec<(Tag, domain::Index)>>,
+    paths: HashMap<Tag, Vec<NodeIndex>>,
     pending: Vec<PendingReplay>,
 }
 
@@ -48,6 +49,7 @@ impl<'a> Plan<'a> {
 
             pending: Vec::new(),
             tags: Default::default(),
+            paths: Default::default(),
         }
     }
 
@@ -119,6 +121,8 @@ impl<'a> Plan<'a> {
         let mut tags = Vec::new();
         for path in self.paths(&index_on[..]) {
             let tag = self.m.next_tag();
+            self.paths
+                .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
 
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
@@ -301,8 +305,6 @@ impl<'a> Plan<'a> {
     pub fn finalize(mut self) -> Vec<PendingReplay> {
         use flow::payload::InitialState;
 
-        let tags: usize = self.tags.values().map(|ts| ts.len()).sum();
-
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
         let s = self.graph[self.node]
@@ -387,10 +389,23 @@ impl<'a> Plan<'a> {
             .unwrap();
 
         if !self.partial {
-            // TODO: I'm like 90% sure this is incorrect.
-            // If we add multiple indices to a single view, we should still only replay once.
-            // The only case where more than one replay per view is correct is when we have unions.
-            assert_eq!(self.pending.len(), tags);
+            // we know that this must be a *new* fully materialized node:
+            //
+            //  - finalize() is only called by setup()
+            //  - setup() is only called for existing nodes if they are partial
+            //  - this branch has !self.partial
+            //
+            // if we're constructing a new view, there is no reason to replay any given path more
+            // than once. we do need to be careful here though: the fact that the source and
+            // destination of a path are the same does *not* mean that the path is the same (b/c of
+            // unions), and we do not want to eliminate different paths!
+            let mut distinct_paths = HashSet::new();
+            let paths = &self.paths;
+            self.pending.retain(|p| {
+                // keep if this path is different
+                distinct_paths.insert(&paths[&p.tag])
+            });
+            assert!(!self.pending.is_empty());
         } else {
             assert!(self.pending.is_empty());
         }
