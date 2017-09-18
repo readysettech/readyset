@@ -422,7 +422,7 @@ impl Ingredient for Join {
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         let pcol = self.emit[col];
-        if (pcol.0 && pcol.1 == self.on.0) || (pcol.0 && pcol.1 == self.on.1) {
+        if (pcol.0 && pcol.1 == self.on.0) || (!pcol.0 && pcol.1 == self.on.1) {
             // Join column comes from both parents
             vec![
                 (self.left.as_global(), Some(self.on.0)),
