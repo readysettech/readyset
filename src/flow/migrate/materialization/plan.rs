@@ -64,7 +64,7 @@ impl<'a> Plan<'a> {
         };
 
         // cut paths so they only reach to the the closest materialized node
-        let paths: Vec<_> = paths
+        let mut paths: Vec<_> = paths
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
@@ -96,6 +96,12 @@ impl<'a> Plan<'a> {
             })
             .collect();
 
+        // since we cut off part of each path, we *may* now have multiple paths that are the same
+        // (i.e., if there was a union above the nearest materialization). this would be bad, as it
+        // would cause a domain to request replays *twice* for a key from one view!
+        paths.sort();
+        paths.dedup();
+
         // all columns better resolve if we're doing partial
         assert!(!self.partial || paths.iter().all(|p| p[0].1.is_some()));
 
@@ -113,7 +119,6 @@ impl<'a> Plan<'a> {
         let mut tags = Vec::new();
         for path in self.paths(&index_on[..]) {
             let tag = self.m.next_tag();
-            trace!(self.m.log, "setting up replay path {:?}", path; "tag" => tag.id());
 
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
@@ -146,7 +151,7 @@ impl<'a> Plan<'a> {
                 segments.last_mut().unwrap().1.push((node, key));
             }
 
-            debug!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
+            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;
@@ -417,13 +422,18 @@ impl<'a> Plan<'a> {
                 // we could be cleverer here when we have a choice
                 match graph[node].must_replay_among() {
                     Some(anc) => {
-                        for p in parents {
-                            if anc.contains(p) {
-                                return Some(*p);
-                            }
-                        }
-                        // must_replay_among did not include any ancestor?
-                        unreachable!();
+                        // it is *extremely* important that this choice is deterministic.
+                        // if it is not, the code that decides what indices to create could choose
+                        // a *different* parent than the code that sets up the replay paths, which
+                        // would be *bad*.
+                        let mut parents = parents
+                            .iter()
+                            .filter(|p| anc.contains(p))
+                            .map(|&p| p)
+                            .collect::<Vec<_>>();
+                        assert!(!parents.is_empty());
+                        parents.sort_by_key(|p| p.index());
+                        Some(parents[0])
                     }
                     None => Some(parents[0]),
                 }

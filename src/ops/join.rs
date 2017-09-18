@@ -214,6 +214,7 @@ impl Ingredient for Join {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -262,6 +263,27 @@ impl Ingredient for Join {
             (*self.left, self.on.1, self.on.0)
         };
 
+        let replay_key_col = replay_key_col.map(|col| {
+            match self.emit[col] {
+                (true, l) if from == *self.left => l,
+                (false, r) if from == *self.right => r,
+                (true, l) if l == self.on.0 => {
+                    // since we didn't hit the case above, we know that the message
+                    // *isn't* from left.
+                    self.on.1
+                }
+                (false, r) if r == self.on.1 => {
+                    // same
+                    self.on.0
+                }
+                _ => {
+                    // we're getting a partial replay, but the replay key doesn't exist
+                    // in the parent we're getting the replay from?!
+                    unreachable!()
+                }
+            }
+        });
+
         // okay, so here's what's going on:
         // the record(s) we receive are all from one side of the join. we need to query the
         // other side(s) for records matching the incoming records on that side's join
@@ -281,6 +303,7 @@ impl Ingredient for Join {
                 misses.push(Miss {
                     node: other,
                     columns: vec![other_key],
+                    replay_key: replay_key_col.map(|col| vec![row[col].clone()]),
                     key: vec![row[from_key].clone()],
                 });
                 continue;
@@ -308,6 +331,7 @@ impl Ingredient for Join {
                         misses.push(Miss {
                             node: from,
                             columns: vec![self.on.1],
+                            replay_key: replay_key_col.map(|col| vec![row[col].clone()]),
                             key: vec![row[self.on.1].clone()],
                         });
                         continue;
@@ -398,7 +422,7 @@ impl Ingredient for Join {
 
     fn parent_columns(&self, col: usize) -> Vec<(NodeIndex, Option<usize>)> {
         let pcol = self.emit[col];
-        if (pcol.0 && pcol.1 == self.on.0) || (pcol.0 && pcol.1 == self.on.1) {
+        if (pcol.0 && pcol.1 == self.on.0) || (!pcol.0 && pcol.1 == self.on.1) {
             // Join column comes from both parents
             vec![
                 (self.left.as_global(), Some(self.on.0)),

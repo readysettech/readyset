@@ -59,6 +59,8 @@ pub struct Blender {
     checktable: Arc<Mutex<checktable::CheckTable>>,
     sharding_enabled: bool,
 
+    domain_config: domain::Config,
+
     /// Parameters for persistence code.
     persistence: persistence::Parameters,
     materializations: migrate::materialization::Materializations,
@@ -94,6 +96,12 @@ impl Default for Blender {
             sharding_enabled: true,
             materializations: materializations,
 
+            domain_config: domain::Config {
+                concurrent_replays: 512,
+                replay_batch_timeout: time::Duration::from_millis(1),
+                replay_batch_size: 32,
+            },
+
             persistence: persistence::Parameters::default(),
 
             domains: Default::default(),
@@ -111,6 +119,26 @@ impl Blender {
     /// Construct a new, empty `Blender`
     pub fn new() -> Self {
         Blender::default()
+    }
+
+    /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
+    /// at any given time.
+    ///
+    /// Note that this number *must* be greater than the width (in terms of number of ancestors) of
+    /// the widest union in the graph, otherwise a deadlock will occur.
+    pub fn set_max_concurrent_replay(&mut self, n: usize) {
+        self.domain_config.concurrent_replays = n;
+    }
+
+    /// Set the maximum number of partial replay responses that can be aggregated into a single
+    /// replay batch.
+    pub fn set_partial_replay_batch_size(&mut self, n: usize) {
+        self.domain_config.replay_batch_size = n;
+    }
+
+    /// Set the longest time a partial replay response can be delayed.
+    pub fn set_partial_replay_batch_timeout(&mut self, t: time::Duration) {
+        self.domain_config.replay_batch_timeout = t;
     }
 
     /// Disable partial materialization for all subsequent migrations
@@ -820,17 +848,6 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        // Determine what nodes to materialize
-        // NOTE: index will also contain the materialization information for *existing* domains
-        // TODO: this should re-use materialization decisions across shard domains
-        debug!(log, "calculating materializations");
-        for (&domain, nodes) in &domain_nodes {
-            debug!(log, "picking materializations"; "domain" => domain.index());
-            mainline
-                .materializations
-                .extend(&mainline.ingredients, &nodes[..]);
-        }
-
         let mut uninformed_domain_nodes = domain_nodes.clone();
         let deps = migrate::transactions::analyze_graph(
             &mainline.ingredients,
@@ -856,6 +873,7 @@ impl<'a> Migration<'a> {
             d.boot(
                 &log,
                 &mut mainline.ingredients,
+                &mainline.domain_config,
                 &mainline.readers,
                 nodes,
                 &mainline.persistence,

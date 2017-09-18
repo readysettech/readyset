@@ -1,6 +1,7 @@
 use flow::prelude::*;
 use flow::node::NodeType;
 use flow::payload;
+use std::collections::HashSet;
 
 impl Node {
     pub fn process(
@@ -51,18 +52,21 @@ impl Node {
                         _ => 1,
                     };
 
-                    let replay = if let Packet::ReplayPiece {
+                    let mut replay = if let (&mut Packet::ReplayPiece {
                         context: payload::ReplayPieceContext::Partial {
-                            ref for_key,
+                            ref mut for_keys,
                             ignore,
                         },
                         ..
-                    } = **m
+                    },) = (&mut **m,)
                     {
+                        use std::mem;
                         assert!(!ignore);
                         assert!(keyed_by.is_some());
-                        assert_eq!(for_key.len(), 1);
-                        Some((keyed_by.unwrap(), for_key[0].clone()))
+                        for key in &*for_keys {
+                            assert_eq!(key.len(), 1);
+                        }
+                        Some((keyed_by.unwrap(), mem::replace(for_keys, HashSet::new())))
                     } else {
                         None
                     };
@@ -78,7 +82,7 @@ impl Node {
                             from,
                             old_data,
                             &mut tracer,
-                            replay,
+                            replay.as_ref().map(|&(c, ref vs)| (c, vs)),
                             nshards,
                             nodes,
                             state,
@@ -87,16 +91,27 @@ impl Node {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
                             }
-                            RawProcessingResult::ReplayPiece(rs) => {
+                            RawProcessingResult::ReplayPiece(rs, keys) => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
                                 mem::replace(data, rs);
+                                replay = replay.as_ref().map(|&(c, _)| (c, keys));
                             }
                             RawProcessingResult::Captured => {
                                 captured = true;
                             }
                         }
                     });
+
+                    if let Packet::ReplayPiece {
+                        context: payload::ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
+                        ..
+                    } = **m
+                    {
+                        *for_keys = replay.unwrap().1;
+                    }
                 }
 
                 if captured {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use flow::prelude::*;
 
@@ -133,6 +133,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -171,11 +172,13 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         tracer: &mut Tracer,
-        is_replay_of: Option<(usize, DataType)>,
+        is_replay_of: Option<(usize, &HashSet<Vec<DataType>>)>,
         nshards: usize,
         n: &DomainNodes,
         s: &StateMap,
     ) -> RawProcessingResult {
+        use std::mem;
+
         // NOTE: in the special case of us being a shard merge node (i.e., when
         // self.emit.is_empty()), `from` will *actually* hold the shard index of
         // the sharded egress that sent us this record. this should make everything
@@ -184,7 +187,9 @@ impl Ingredient for Union {
             None => {
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
-                    return RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s));
+                    return RawProcessingResult::Regular(
+                        self.on_input(from, rs, tracer, None, n, s),
+                    );
                 }
 
                 // partial replays are flowing through us, and at least one piece is being waited
@@ -212,9 +217,9 @@ impl Ingredient for Union {
                     }
                 }
 
-                RawProcessingResult::Regular(self.on_input(from, rs, tracer, n, s))
+                RawProcessingResult::Regular(self.on_input(from, rs, tracer, None, n, s))
             }
-            Some((key_col, key_val)) => {
+            Some((key_col, key_vals)) => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
@@ -236,32 +241,79 @@ impl Ingredient for Union {
                     }
                 }
 
-                let finished = {
-                    // store this replay piece
-                    let pieces = self.replay_pieces
-                        .entry(key_val.clone())
-                        .or_insert_with(Map::new);
-                    // there better be only one replay from each ancestor
-                    assert!(!pieces.contains_key(&from));
-                    pieces.insert(from, rs);
-                    // does this release the replay?
-                    match self.emit {
-                        Emit::AllFrom(_) => pieces.len() == nshards,
-                        Emit::Project { ref emit, .. } => pieces.len() == emit.len(),
-                    }
+                let mut rs_by_key = rs.into_iter().map(|r| (r[key_col].clone(), r)).fold(
+                    HashMap::new(),
+                    |mut hm, (key, r)| {
+                        hm.entry(key).or_insert_with(Records::default).push(r);
+                        hm
+                    },
+                );
+
+
+                let required = match self.emit {
+                    Emit::AllFrom(_) => nshards,
+                    Emit::Project { ref emit, .. } => emit.len(),
                 };
 
-                if finished {
-                    // yes! construct the final replay records.
-                    // TODO: should we use a stolen tracer if none is given?
-                    let rs = self.replay_pieces
-                        .remove(&key_val)
-                        .unwrap()
-                        .into_iter()
-                        .flat_map(|(from, rs)| self.on_input(from, rs, tracer, n, s).results)
-                        .collect();
+                // we're going to pull a little hack here for the sake of performance.
+                // (heard that before...)
+                // we can't borrow self in both closures below, even though `self.on_input` doesn't
+                // access `self.replay_pieces`. if only the compiler was more clever. we get around
+                // this by mem::swapping a temporary (empty) HashMap (which doesn't allocate).
+                let mut replay_pieces_tmp = HashMap::with_capacity(0);
+                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
-                    RawProcessingResult::ReplayPiece(rs)
+                let mut released = HashSet::new();
+                let rs = {
+                    key_vals
+                        .iter()
+                        .filter_map(|key| {
+                            debug_assert_eq!(key.len(), 1);
+                            let key = &key[0];
+                            let rs = rs_by_key.remove(key).unwrap_or_else(Records::default);
+
+                            // store this replay piece
+                            use std::collections::hash_map::Entry;
+                            match replay_pieces_tmp.entry(key.clone()) {
+                                Entry::Occupied(e) => {
+                                    assert!(!e.get().contains_key(&from));
+                                    if e.get().len() == required - 1 {
+                                        // release!
+                                        let mut m = e.remove();
+                                        m.insert(from, rs);
+                                        Some((key, m))
+                                    } else {
+                                        e.into_mut().insert(from, rs);
+                                        None
+                                    }
+                                }
+                                Entry::Vacant(h) => {
+                                    let mut m = Map::new();
+                                    m.insert(from, rs);
+                                    if required == 1 {
+                                        Some((key, m))
+                                    } else {
+                                        h.insert(m);
+                                        None
+                                    }
+                                }
+                            }
+                        })
+                        .flat_map(|(key, map)| {
+                            released.insert(vec![key.clone()]);
+                            map.into_iter()
+                        })
+                        .flat_map(|(from, rs)| {
+                            self.on_input(from, rs, tracer, Some(key_col), n, s).results
+                        })
+                        .collect()
+                };
+
+                // and swap back replay pieces
+                mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
+
+                if !released.is_empty() {
+                    RawProcessingResult::ReplayPiece(rs, released)
                 } else {
                     // no. need to keep buffering (and emit nothing)
                     RawProcessingResult::Captured

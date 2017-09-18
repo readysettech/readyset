@@ -442,9 +442,15 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         let r = Rc::new(r);
 
         if let Some(tag) = partial_tag {
-            let i = *self.by_tag
-                .get(&tag)
-                .expect("got tagged insert for unknown tag");
+            let i = match self.by_tag.get(&tag) {
+                Some(i) => *i,
+                None => {
+                    // got tagged insert for unknown tag. this will happen if a node on an old
+                    // replay path is now materialized. must return true to avoid any records
+                    // (which are destined for a downstream materialization) from being pruned.
+                    return true;
+                }
+            };
             // FIXME: self.rows += ?
             State::insert_into(&mut self.state[i], Row(r))
         } else {
