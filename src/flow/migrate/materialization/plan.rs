@@ -119,7 +119,6 @@ impl<'a> Plan<'a> {
         let mut tags = Vec::new();
         for path in self.paths(&index_on[..]) {
             let tag = self.m.next_tag();
-            trace!(self.m.log, "setting up replay path {:?}", path; "tag" => tag.id());
 
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
@@ -152,7 +151,7 @@ impl<'a> Plan<'a> {
                 segments.last_mut().unwrap().1.push((node, key));
             }
 
-            debug!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
+            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;

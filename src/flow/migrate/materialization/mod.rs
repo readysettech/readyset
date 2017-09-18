@@ -456,6 +456,14 @@ impl Materializations {
         // first, we add any new indices to existing nodes
         for node in reindex {
             let mut index_on = self.added.remove(&node).unwrap();
+
+            // are they trying to make a non-materialized node materialized?
+            if self.have[&node] == index_on {
+                warn!(self.log, "materializing existing non-materialized node";
+                      "node" => node.index(),
+                      "cols" => ?index_on);
+            }
+
             let n = &graph[node];
             if self.partial.contains(&node) {
                 info!(self.log, "adding partial index to existing {:?}", n);

@@ -787,6 +787,9 @@ impl Domain {
                                 }
                                 let state = self.state.get_mut(&node).unwrap();
                                 for (key, tags) in index {
+                                    info!(self.log, "told to prepare partial state";
+                                           "key" => ?key,
+                                           "tags" => ?tags);
                                     state.add_key(&key[..], Some(tags));
                                 }
                             }
@@ -796,6 +799,8 @@ impl Domain {
                                 }
                                 let state = self.state.get_mut(&node).unwrap();
                                 for idx in index {
+                                    info!(self.log, "told to prepare full state";
+                                           "key" => ?idx);
                                     state.add_key(&idx[..], None);
                                 }
                             }
