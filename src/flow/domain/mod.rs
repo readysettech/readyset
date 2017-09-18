@@ -61,6 +61,7 @@ pub mod local;
 mod handle;
 pub use self::handle::{DomainHandle, DomainInputHandle};
 
+#[derive(Debug)]
 enum DomainMode {
     Forwarding,
     Replaying {
@@ -68,6 +69,15 @@ enum DomainMode {
         buffered: VecDeque<Box<Packet>>,
         passes: usize,
     },
+}
+
+impl PartialEq for DomainMode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (&DomainMode::Forwarding, &DomainMode::Forwarding) => true,
+            _ => false,
+        }
+    }
 }
 
 enum TriggerEndpoint {
@@ -1046,10 +1056,7 @@ impl Domain {
                         self.finish_replay(tag, ni);
                     }
                     Packet::Ready { node, index } => {
-                        if let DomainMode::Forwarding = self.mode {
-                        } else {
-                            unreachable!();
-                        }
+                        assert_eq!(self.mode, DomainMode::Forwarding);
 
                         if !index.is_empty() {
                             let mut s = {
