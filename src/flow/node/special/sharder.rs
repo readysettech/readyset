@@ -2,6 +2,7 @@ use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
 use channel::ChannelSender;
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
@@ -85,15 +86,16 @@ impl Sharder {
                     ..
                 } = m
                 {
+                    let keys = for_keys.len();
                     for_keys
-                        .drain(..)
+                        .drain()
                         .map(|key| {
                             assert_eq!(key.len(), 1);
                             let shard = self.shard(&key[0]);
                             (shard, key)
                         })
                         .fold(VecMap::new(), |mut hm, (shard, key)| {
-                            hm.entry(shard).or_insert_with(Vec::new).push(key);
+                            hm.entry(shard).or_insert_with(|| HashSet::with_capacity(keys)).insert(key);
                             hm
                         })
                 } else {

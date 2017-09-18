@@ -132,7 +132,7 @@ pub struct Domain {
     control_reply_tx: Option<mpsc::SyncSender<ControlReplyPacket>>,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    buffered_replay_requests: HashMap<Tag, (time::Instant, Vec<Vec<DataType>>)>,
+    buffered_replay_requests: HashMap<Tag, (time::Instant, HashSet<Vec<DataType>>)>,
     has_buffered_replay_requests: bool,
     replay_batch_timeout: time::Duration,
     replay_batch_size: usize,
@@ -1146,7 +1146,9 @@ impl Domain {
                     .iter_mut()
                     .filter_map(|(&tag, &mut (first, ref mut keys))| {
                         if !keys.is_empty() && now.duration_since(first) > to {
-                            Some((tag, keys.split_off(0)))
+                            use std::mem;
+                            let l = keys.len();
+                            Some((tag, mem::replace(keys, HashSet::with_capacity(l))))
                         } else {
                             if !keys.is_empty() {
                                 *has = true;
@@ -1162,7 +1164,7 @@ impl Domain {
         }
     }
 
-    fn seed_all(&mut self, tag: Tag, keys: Vec<Vec<DataType>>) {
+    fn seed_all(&mut self, tag: Tag, keys: HashSet<Vec<DataType>>) {
         let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
@@ -1175,7 +1177,7 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node");
 
                 let mut rs = Vec::new();
-                let (keys, misses): (Vec<_>, _) = keys.into_iter().partition(|key| {
+                let (keys, misses): (HashSet<_>, _) = keys.into_iter().partition(|key| {
                     match state.lookup(&cols[..], &KeyType::Single(&key[0])) {
                         LookupResult::Some(res) => {
                             rs.extend(res.into_iter().map(|r| (**r).clone()));
@@ -1271,25 +1273,31 @@ impl Domain {
                     Entry::Occupied(mut o) => {
                         let l = o.get().1.len();
                         if l == self.replay_batch_size - 1 {
-                            let mut o = o.get_mut().1.split_off(0);
-                            o.push(key);
+                            use std::mem;
+                            let mut o =
+                                mem::replace(&mut o.get_mut().1, HashSet::with_capacity(l + 1));
+                            o.insert(key);
                             Some(o)
                         } else {
                             if l == 0 {
                                 o.get_mut().0 = time::Instant::now();
                             }
-                            o.into_mut().1.push(key);
+                            o.into_mut().1.insert(key);
                             self.has_buffered_replay_requests = true;
                             None
                         }
                     }
-                    Entry::Vacant(v) => if self.replay_batch_size == 1 {
-                        Some(vec![key])
-                    } else {
-                        v.insert((time::Instant::now(), vec![key]));
-                        self.has_buffered_replay_requests = true;
-                        None
-                    },
+                    Entry::Vacant(v) => {
+                        let mut ks = HashSet::new();
+                        ks.insert(key);
+                        if self.replay_batch_size == 1 {
+                            Some(ks)
+                        } else {
+                            v.insert((time::Instant::now(), ks));
+                            self.has_buffered_replay_requests = true;
+                            None
+                        }
+                    }
                 };
 
                 if let Some(all) = full {
@@ -1317,6 +1325,8 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .lookup(&cols[..], &KeyType::Single(&key[0]));
 
+                let mut k = HashSet::new();
+                k.insert(Vec::from(key));
                 if let LookupResult::Some(rs) = rs {
                     use std::iter::FromIterator;
                     let m = Some(box Packet::ReplayPiece {
@@ -1324,7 +1334,7 @@ impl Domain {
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
-                            for_keys: vec![Vec::from(key)],
+                            for_keys: k,
                             ignore: false,
                         },
                         data: Records::from_iter(rs.into_iter().map(|r| (**r).clone())),
@@ -1338,7 +1348,7 @@ impl Domain {
                         tag: tag,
                         nshards: 1,
                         context: ReplayPieceContext::Partial {
-                            for_keys: vec![Vec::from(key)],
+                            for_keys: k,
                             ignore: true,
                         },
                         data: Records::default(),
@@ -1540,7 +1550,7 @@ impl Domain {
                         }
 
                         // process the current message in this node
-                        let misses = n.process(
+                        let mut misses = n.process(
                             &mut m,
                             segment.partial_key,
                             &mut self.state,
@@ -1548,6 +1558,25 @@ impl Domain {
                             self.shard,
                             false,
                         );
+
+                        // ignore duplicate misses
+                        misses.sort_unstable_by(|a, b| {
+                            use std::cmp::Ordering;
+                            let mut x = a.node.cmp(&b.node);
+                            if x != Ordering::Equal {
+                                return x;
+                            }
+                            x = a.columns.cmp(&b.columns);
+                            if x != Ordering::Equal {
+                                return x;
+                            }
+                            x = a.key.cmp(&b.key);
+                            if x != Ordering::Equal {
+                                return x;
+                            }
+                            a.replay_key.cmp(&b.replay_key)
+                        });
+                        misses.dedup();
 
                         if target {
                             if !misses.is_empty() {
@@ -1648,26 +1677,8 @@ impl Domain {
 
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
-                            let mut misses = misses;
+                            let misses = misses;
                             let mut missed_on = HashSet::with_capacity(misses.len());
-                            misses.sort_unstable_by(|a, b| {
-                                use std::cmp::Ordering;
-                                let mut x = a.node.cmp(&b.node);
-                                if x != Ordering::Equal {
-                                    return x;
-                                }
-                                x = a.columns.cmp(&b.columns);
-                                if x != Ordering::Equal {
-                                    return x;
-                                }
-                                x = a.key.cmp(&b.key);
-                                if x != Ordering::Equal {
-                                    return x;
-                                }
-                                a.replay_key.cmp(&b.replay_key)
-                            });
-                            misses.dedup();
-
                             for miss in misses {
                                 missed_on.insert(miss.replay_key.clone().unwrap());
                                 need_replay.push((
@@ -1741,7 +1752,7 @@ impl Domain {
                             if dst_is_target {
                                 trace!(self.log, "partial replay completed"; "local" => dst.id());
                                 if finished_partial == 0 {
-                                    assert_eq!(for_keys, Vec::<Vec<DataType>>::new());
+                                    assert_eq!(for_keys, HashSet::<Vec<DataType>>::new());
                                 }
                                 finished = Some((tag, dst, Some(for_keys)));
                             } else if dst_is_reader {

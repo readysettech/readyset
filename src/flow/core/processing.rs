@@ -19,7 +19,7 @@ pub struct ProcessingResult {
 
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
-    ReplayPiece(prelude::Records, Vec<Vec<prelude::DataType>>),
+    ReplayPiece(prelude::Records, HashSet<Vec<prelude::DataType>>),
     Captured,
 }
 
@@ -115,7 +115,7 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        is_replay_of: Option<(usize, &[Vec<prelude::DataType>])>,
+        is_replay_of: Option<(usize, &HashSet<Vec<prelude::DataType>>)>,
         nshards: usize,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,

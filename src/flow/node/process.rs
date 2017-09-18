@@ -1,6 +1,7 @@
 use flow::prelude::*;
 use flow::node::NodeType;
 use flow::payload;
+use std::collections::HashSet;
 
 impl Node {
     pub fn process(
@@ -59,12 +60,13 @@ impl Node {
                         ..
                     },) = (&mut **m,)
                     {
+                        use std::mem;
                         assert!(!ignore);
                         assert!(keyed_by.is_some());
                         for key in &*for_keys {
                             assert_eq!(key.len(), 1);
                         }
-                        Some((keyed_by.unwrap(), for_keys.split_off(0)))
+                        Some((keyed_by.unwrap(), mem::replace(for_keys, HashSet::new())))
                     } else {
                         None
                     };
@@ -80,7 +82,7 @@ impl Node {
                             from,
                             old_data,
                             &mut tracer,
-                            replay.as_ref().map(|&(c, ref vs)| (c, &vs[..])),
+                            replay.as_ref().map(|&(c, ref vs)| (c, vs)),
                             nshards,
                             nodes,
                             state,

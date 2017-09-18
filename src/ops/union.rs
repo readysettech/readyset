@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use flow::prelude::*;
 
@@ -172,7 +172,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         tracer: &mut Tracer,
-        is_replay_of: Option<(usize, &[Vec<DataType>])>,
+        is_replay_of: Option<(usize, &HashSet<Vec<DataType>>)>,
         nshards: usize,
         n: &DomainNodes,
         s: &StateMap,
@@ -263,7 +263,7 @@ impl Ingredient for Union {
                 let mut replay_pieces_tmp = HashMap::with_capacity(0);
                 mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
-                let mut released = Vec::new();
+                let mut released = HashSet::new();
                 let rs = {
                     key_vals
                         .iter()
@@ -300,7 +300,7 @@ impl Ingredient for Union {
                             }
                         })
                         .flat_map(|(key, map)| {
-                            released.push(vec![key.clone()]);
+                            released.insert(vec![key.clone()]);
                             map.into_iter()
                         })
                         .flat_map(|(from, rs)| {

@@ -156,7 +156,7 @@ impl Ingredient for NodeOperator {
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
-        is_replay_of: Option<(usize, &[Vec<DataType>])>,
+        is_replay_of: Option<(usize, &HashSet<Vec<DataType>>)>,
         nshards: usize,
         domain: &DomainNodes,
         states: &StateMap,

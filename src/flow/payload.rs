@@ -67,7 +67,7 @@ pub enum InitialState {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
-        for_keys: Vec<Vec<DataType>>,
+        for_keys: HashSet<Vec<DataType>>,
         ignore: bool,
     },
     Regular { last: bool },
