@@ -1521,7 +1521,7 @@ impl Domain {
                         // this is the case either if the current node is waiting for a replay,
                         // *or* if the target is a reader. the last case is special in that when a
                         // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = backfill_keys.is_some() &&
+                        let target = backfill_keys.is_some() && i == path.len() - 1 &&
                             (is_reader || self.waiting.contains_key(&segment.node));
 
                         // targets better be last
