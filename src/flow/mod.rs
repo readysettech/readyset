@@ -848,17 +848,6 @@ impl<'a> Migration<'a> {
         // etc.
         // println!("{}", mainline);
 
-        // Determine what nodes to materialize
-        // NOTE: index will also contain the materialization information for *existing* domains
-        // TODO: this should re-use materialization decisions across shard domains
-        debug!(log, "calculating materializations");
-        for (&domain, nodes) in &domain_nodes {
-            debug!(log, "picking materializations"; "domain" => domain.index());
-            mainline
-                .materializations
-                .extend(&mainline.ingredients, &nodes[..]);
-        }
-
         let mut uninformed_domain_nodes = domain_nodes.clone();
         let deps = migrate::transactions::analyze_graph(
             &mainline.ingredients,
