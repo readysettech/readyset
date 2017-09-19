@@ -6,7 +6,7 @@ use flow::core;
 pub use flow::core::{IndexPair, LocalNodeIndex};
 pub use petgraph::graph::NodeIndex;
 pub use flow::core::{DataType, Datas, Record, Records};
-pub use flow::core::{Ingredient, Miss, ProcessingResult, RawProcessingResult};
+pub use flow::core::{Ingredient, Miss, ProcessingResult, RawProcessingResult, ReplayContext};
 pub use ops::NodeOperator;
 
 // graph types

@@ -47,30 +47,34 @@ impl Node {
                     let m = m.as_mut().unwrap();
                     let from = m.link().src;
 
-                    let nshards = match **m {
-                        Packet::ReplayPiece { ref nshards, .. } => *nshards,
-                        _ => 1,
-                    };
-
-                    let mut replay = if let (&mut Packet::ReplayPiece {
-                        context: payload::ReplayPieceContext::Partial {
-                            ref mut for_keys,
-                            ignore,
-                        },
-                        ..
-                    },) = (&mut **m,)
-                    {
-                        use std::mem;
-                        assert!(!ignore);
-                        assert!(keyed_by.is_some());
-                        for key in &*for_keys {
-                            assert_eq!(key.len(), 1);
+                    let replay = match (&mut **m,) {
+                        (&mut Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Partial {
+                                ref mut for_keys,
+                                ignore,
+                            },
+                            ..
+                        },) => {
+                            use std::mem;
+                            assert!(!ignore);
+                            assert!(keyed_by.is_some());
+                            for key in &*for_keys {
+                                assert_eq!(key.len(), 1);
+                            }
+                            ReplayContext::Partial {
+                                key_col: keyed_by.unwrap(),
+                                keys: mem::replace(for_keys, HashSet::new()),
+                            }
                         }
-                        Some((keyed_by.unwrap(), mem::replace(for_keys, HashSet::new())))
-                    } else {
-                        None
+                        (&mut Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Regular { last },
+                            ..
+                        },) => ReplayContext::Full { last: last },
+                        _ => ReplayContext::None,
                     };
 
+                    let mut set_replay_last = None;
+                    let mut restore_partial_key = None;
                     tracer = m.tracer().and_then(|t| t.take());
                     m.map_data(|data| {
                         use std::mem;
@@ -78,15 +82,7 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(
-                            from,
-                            old_data,
-                            &mut tracer,
-                            replay.as_ref().map(|&(c, ref vs)| (c, vs)),
-                            nshards,
-                            nodes,
-                            state,
-                        ) {
+                        match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
@@ -95,22 +91,44 @@ impl Node {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
                                 mem::replace(data, rs);
-                                replay = replay.as_ref().map(|&(c, _)| (c, keys));
+                                restore_partial_key = Some(keys);
                             }
                             RawProcessingResult::Captured => {
                                 captured = true;
                             }
+                            RawProcessingResult::FullReplay(rs, last) => {
+                                // we already know that m must be a (full) ReplayPiece since only a
+                                // (full) ReplayPiece can release a FullReplay
+                                mem::replace(data, rs);
+                                set_replay_last = Some(last);
+                            }
                         }
                     });
 
-                    if let Packet::ReplayPiece {
-                        context: payload::ReplayPieceContext::Partial {
-                            ref mut for_keys, ..
-                        },
-                        ..
-                    } = **m
-                    {
-                        *for_keys = replay.unwrap().1;
+                    if let Some(new_last) = set_replay_last {
+                        if let Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Regular { ref mut last },
+                            ..
+                        } = **m
+                        {
+                            *last = new_last;
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
+                    if let Some(keys) = restore_partial_key {
+                        if let Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Partial {
+                                ref mut for_keys, ..
+                            },
+                            ..
+                        } = **m
+                        {
+                            *for_keys = keys;
+                        } else {
+                            unreachable!();
+                        }
                     }
                 }
 
