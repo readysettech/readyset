@@ -1855,7 +1855,7 @@ impl Domain {
                                     // restore Waiting in case seeding triggers more replays
                                     self.waiting.insert(ni, waiting);
                                     self.seed_replay(tag, &replay_key[..], None);
-                                    waiting = self.waiting.remove(&ni).unwrap();
+                                    waiting = self.waiting.remove(&ni).unwrap_or_default();
                                 } else {
                                     trace!(self.log, "filled hole for key, not triggering replay";
                                            "k" => ?tagged_replay_key,
