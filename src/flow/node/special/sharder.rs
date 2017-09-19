@@ -95,7 +95,9 @@ impl Sharder {
                             (shard, key)
                         })
                         .fold(VecMap::new(), |mut hm, (shard, key)| {
-                            hm.entry(shard).or_insert_with(|| HashSet::with_capacity(keys)).insert(key);
+                            hm.entry(shard)
+                                .or_insert_with(|| HashSet::with_capacity(keys))
+                                .insert(key);
                             hm
                         })
                 } else {
