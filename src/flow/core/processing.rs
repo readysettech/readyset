@@ -19,8 +19,28 @@ pub struct ProcessingResult {
 
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
+    FullReplay(prelude::Records, bool),
     ReplayPiece(prelude::Records, HashSet<Vec<prelude::DataType>>),
     Captured,
+}
+
+pub enum ReplayContext {
+    None,
+    Partial {
+        key_col: usize,
+        keys: HashSet<Vec<prelude::DataType>>,
+    },
+    Full { last: bool },
+}
+
+impl ReplayContext {
+    fn key(&self) -> Option<usize> {
+        if let ReplayContext::Partial { key_col, .. } = *self {
+            Some(key_col)
+        } else {
+            None
+        }
+    }
 }
 
 pub trait Ingredient
@@ -115,17 +135,15 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        is_replay_of: Option<(usize, &HashSet<Vec<prelude::DataType>>)>,
-        nshards: usize,
+        replay: &ReplayContext,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> RawProcessingResult {
-        let _ = nshards;
         RawProcessingResult::Regular(self.on_input(
             from,
             data,
             tracer,
-            is_replay_of.map(|(k, _)| k),
+            replay.key(),
             domain,
             states,
         ))

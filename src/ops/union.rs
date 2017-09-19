@@ -15,21 +15,37 @@ enum Emit {
     },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+enum FullWait {
+    None,
+    Ongoing {
+        started: HashSet<LocalNodeIndex>,
+        finished: usize,
+        buffered: Records,
+    },
+}
+
 /// A union of a set of views.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
     replay_key: Option<Map<usize>>,
     replay_pieces: HashMap<DataType, Map<Records>>,
+
+    required: usize,
+
+    full_wait_state: FullWait,
 }
 
 impl Clone for Union {
     fn clone(&self) -> Self {
         Union {
             emit: self.emit.clone(),
+            required: self.required,
             // nothing can have been received yet
             replay_key: None,
             replay_pieces: HashMap::new(),
+            full_wait_state: FullWait::None,
         }
     }
 }
@@ -50,7 +66,8 @@ impl Union {
                 last = i;
             }
         }
-        let emit = emit.into_iter().map(|(k, v)| (k.into(), v)).collect();
+        let emit: HashMap<_, _> = emit.into_iter().map(|(k, v)| (k.into(), v)).collect();
+        let parents = emit.len();
         Union {
             emit: Emit::Project {
                 emit,
@@ -58,17 +75,21 @@ impl Union {
                 cols: HashMap::new(),
                 cols_l: Map::new(),
             },
+            required: parents,
             replay_key: None,
             replay_pieces: HashMap::new(),
+            full_wait_state: FullWait::None,
         }
     }
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
-    pub fn new_deshard(parent: NodeIndex) -> Union {
+    pub fn new_deshard(parent: NodeIndex, shards: usize) -> Union {
         Union {
             emit: Emit::AllFrom(parent.into()),
+            required: shards,
             replay_key: None,
             replay_pieces: HashMap::new(),
+            full_wait_state: FullWait::None,
         }
     }
 }
@@ -172,8 +193,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         tracer: &mut Tracer,
-        is_replay_of: Option<(usize, &HashSet<Vec<DataType>>)>,
-        nshards: usize,
+        replay: &ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
     ) -> RawProcessingResult {
@@ -183,8 +203,52 @@ impl Ingredient for Union {
         // self.emit.is_empty()), `from` will *actually* hold the shard index of
         // the sharded egress that sent us this record. this should make everything
         // below just work out.
-        match is_replay_of {
-            None => {
+        match *replay {
+            ReplayContext::None => {
+                // prepare for a little song-and-dance for the borrow-checker
+                let mut absorb_for_full = false;
+                if let FullWait::Ongoing { ref started, .. } = self.full_wait_state {
+                    // ongoing full replay. is this a record we need to not disappear (i.e.,
+                    // message 2 in the explanation)?
+                    if started.len() != self.required && started.contains(&from) {
+                        // yes! keep it.
+                        // but we can't borrow self mutably here to call on_input, since we
+                        // borrowed started immutably above...
+                        absorb_for_full = true;
+                    }
+                }
+
+                if absorb_for_full {
+                    // we shouldn't be stepping on any partial materialization toes, but let's
+                    // make sure. i'm not 100% sure at this time if it's true.
+                    //
+                    // hello future self. clearly, i was correct that i might be incorrect. let me
+                    // help: the only reason this assert is here is because we consume rs so that
+                    // we can process it. the replay code below seems to require rs to be
+                    // *unprocessed* (not sure why), and so once we add it to our buffer, we can't
+                    // also execute the code below. if you fix that, you should be all good!
+                    assert!(self.replay_key.is_none() || self.replay_pieces.is_empty());
+
+                    // process the results (self is okay to have mutably borrowed here)
+                    let rs = self.on_input(from, rs, tracer, None, n, s).results;
+
+                    // *then* borrow self.full_wait_state again
+                    if let FullWait::Ongoing {
+                        ref mut buffered, ..
+                    } = self.full_wait_state
+                    {
+                        // absorb into the buffer
+                        buffered.extend(rs.iter().cloned());
+                        // we clone above so that we can also return the processed results
+                        return RawProcessingResult::Regular(ProcessingResult {
+                            results: rs,
+                            misses: Vec::new(),
+                        });
+                    } else {
+                        unreachable!();
+                    }
+                }
+
                 if self.replay_key.is_none() || self.replay_pieces.is_empty() {
                     // no replay going on, so we're done.
                     return RawProcessingResult::Regular(
@@ -219,7 +283,128 @@ impl Ingredient for Union {
 
                 RawProcessingResult::Regular(self.on_input(from, rs, tracer, None, n, s))
             }
-            Some((key_col, key_vals)) => {
+            ReplayContext::Full { last } => {
+                // this part is actually surpringly straightforward, but the *reason* it is
+                // straightforward is not. let's walk through what we know first:
+                //
+                //  - we know that there is only exactly one full replay going on
+                //  - we know that the target domain buffers any messages not tagged as
+                //    replays once it has seen the *first* replay
+                //  - we know that the target domain will apply all bufferd messages after it sees
+                //    last = true
+                //
+                // we therefore have two jobs to do:
+                //
+                //  1. ensure that we only send one message with last = true.
+                //  2. ensure that all messages we forward after we allow the first replay message
+                //     through logically follow the replay.
+                //
+                // step 1 is pretty easy -- we only set last = true when we've seen last = true
+                // from all our ancestors. until that is the case, we just set last = false in all
+                // our outgoing messages (even if they had last set).
+                //
+                // step 2 is trickier. consider the following in a union U
+                // across two ancestors, L and R:
+                //
+                //  1. L sends first replay
+                //  2. L sends a normal message
+                //  3. R sends a normal message
+                //  4. R sends first replay
+                //  5. U receives L's replay
+                //  6. U receives R's message
+                //  7. U receives R's replay
+                //
+                // when should U emit the first replay? if it does it eagerly (i.e., at 1), then
+                // R's normal message at 3 (which is also present in R's replay) will be buffered
+                // and replayed at the target domain, since it comes after the first replay
+                // message. instead, we must delay sending the first replay until we have seen the
+                // first replay from *every* ancestor. in other words, 1 must be captured, and only
+                // emitted at 5. unfortunately, 2 also wants to cause us pain. it must *not* be
+                // sent until after 5 either, because otherwise it would be dropped by the target
+                // domain, which is *not* okay since it is not included in L's replay.
+                //
+                // phew.
+                //
+                // first, how do we emit *two* replay messages at 5? it turns out that we're in
+                // luck. because only one replay can be going on at a time, the target domain
+                // doesn't actually care about which tag we use for the forward (well, as long as
+                // it is *one* of the full replay tags). and since we're a union, we can simply
+                // fold 1 and 4 into a single update, and then emit that!
+                //
+                // second, how do we ensure that 2 also gets sent *after* the replay has started.
+                // again, we're in luck. we can simply absorb 2 into the replay when we detect that
+                // there's a replay which hasn't started yet! we do that above (in the other match
+                // arm). feel free to go check. interestingly enough, it's also fine for us to
+                // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
+                // domain.
+                let mut rs = self.on_input(from, rs, tracer, None, n, s).results;
+                if let FullWait::None = self.full_wait_state {
+                    if self.required == 1 {
+                        // no need to ever buffer
+                        return RawProcessingResult::FullReplay(rs, last);
+                    }
+
+                    // we need to hold this back until we've received one from every ancestor
+                    let mut s = HashSet::new();
+                    s.insert(from);
+                    self.full_wait_state = FullWait::Ongoing {
+                        started: s,
+                        finished: if last { 1 } else { 0 },
+                        buffered: rs,
+                    };
+                    return RawProcessingResult::Captured;
+                }
+
+                let exit;
+                match self.full_wait_state {
+                    FullWait::Ongoing {
+                        ref mut started,
+                        ref mut finished,
+                        ref mut buffered,
+                    } => {
+                        if last {
+                            *finished += 1;
+                        }
+
+                        if *finished == self.required {
+                            // we can just send everything and we're done!
+                            // make sure to include what's in *this* replay.
+                            buffered.append(&mut *rs);
+                            exit =
+                                RawProcessingResult::FullReplay(buffered.split_off(0).into(), true);
+                        // fall through to below match where we'll set FullWait::None
+                        } else {
+                            if started.len() != self.required {
+                                if started.insert(from) && started.len() == self.required {
+                                    // we can release all buffered replays!
+                                    buffered.append(&mut *rs);
+                                    return RawProcessingResult::FullReplay(
+                                        buffered.split_off(0).into(),
+                                        false,
+                                    );
+                                }
+                            } else {
+                                // common case: replay has started, and not yet finished
+                                // no need to buffer, nothing to see here, move along
+                                debug_assert_eq!(buffered.len(), 0);
+                                return RawProcessingResult::FullReplay(rs, false);
+                            }
+
+                            // if we fell through here, it means we're still missing the first
+                            // replay from at least one ancestor, so we need to buffer
+                            buffered.append(&mut *rs);
+                            return RawProcessingResult::Captured;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                // we only fall through here if we're done!
+                // and it's only because we can't change self.full_wait_state while matching on it
+                self.full_wait_state = FullWait::None;
+                exit
+            }
+            ReplayContext::Partial { key_col, ref keys } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 
@@ -250,11 +435,6 @@ impl Ingredient for Union {
                 );
 
 
-                let required = match self.emit {
-                    Emit::AllFrom(_) => nshards,
-                    Emit::Project { ref emit, .. } => emit.len(),
-                };
-
                 // we're going to pull a little hack here for the sake of performance.
                 // (heard that before...)
                 // we can't borrow self in both closures below, even though `self.on_input` doesn't
@@ -263,10 +443,10 @@ impl Ingredient for Union {
                 let mut replay_pieces_tmp = HashMap::with_capacity(0);
                 mem::swap(&mut self.replay_pieces, &mut replay_pieces_tmp);
 
+                let required = self.required; // can't borrow self in closures below
                 let mut released = HashSet::new();
                 let rs = {
-                    key_vals
-                        .iter()
+                    keys.iter()
                         .filter_map(|key| {
                             debug_assert_eq!(key.len(), 1);
                             let key = &key[0];
