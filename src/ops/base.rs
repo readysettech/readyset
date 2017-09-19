@@ -34,6 +34,10 @@ impl Base {
         self
     }
 
+    pub(crate) fn key(&self) -> Option<&[usize]> {
+        self.primary_key.as_ref().map(|cols| &cols[..])
+    }
+
     /// Add a new column to this base node.
     pub fn add_column(&mut self, default: DataType) -> usize {
         assert!(

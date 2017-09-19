@@ -365,6 +365,13 @@ pub fn shard(
                     continue;
                 }
 
+                // we can't shard compound bases (yet)
+                if let Some(k) = graph[p].get_base().unwrap().key() {
+                    if k.len() != 1 {
+                        continue;
+                    }
+                }
+
                 // if the base has other children, sharding it may have other effects
                 if graph
                     .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
