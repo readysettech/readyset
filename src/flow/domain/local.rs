@@ -605,8 +605,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 key[3].clone(),
             )),
         };
+        // mark_hole should only be called on keys we called mark_filled on
         assert!(removed.is_some());
-        assert!(removed.unwrap().is_empty());
     }
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {

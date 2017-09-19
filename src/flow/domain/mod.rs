@@ -107,9 +107,10 @@ struct ReplayPath {
 /// The map is from miss_key -> Set(tag + replay_key).
 /// TODO: this can result in false positives, since we can think that we've filled a key on a node,
 /// but we did it with the wrong tag. probably doesn't matter though.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Waiting {
     subscribed: HashMap<Vec<DataType>, HashSet<(Tag, Vec<DataType>)>>,
+    filling: HashMap<(Tag, Vec<DataType>), usize>,
 }
 
 pub struct Domain {
@@ -220,21 +221,29 @@ impl Domain {
         miss_key: Vec<DataType>,
         needed_for: Tag,
     ) {
-        // when the replay eventually succeeds, we want to re-do the replay.
-        let mut subscribed = match self.waiting.remove(&miss_in) {
-            Some(Waiting { subscribed }) => subscribed,
-            None => HashMap::new(),
-        };
-        let already_filling = !subscribed
-            .entry(miss_key.clone())
-            .or_insert_with(HashSet::new)
-            .insert((needed_for, replay_key));
-        self.waiting.insert(miss_in, Waiting { subscribed });
+        use std::ops::AddAssign;
 
-        if already_filling {
-            // no need to trigger again
+        // when the replay eventually succeeds, we want to re-do the replay.
+        let mut w = self.waiting.remove(&miss_in).unwrap_or_default();
+
+        if !w.subscribed
+            .entry(miss_key.clone())
+            .or_default()
+            .insert((needed_for, replay_key.clone()))
+        {
+            // we're already replaying the missing key, so no need to do it again
+            self.waiting.insert(miss_in, w);
             return;
         }
+
+        // we missed while replaying `replay_key`, but some other miss may also have occurred
+        // while processing that same replay key. we need to ensure that a replay of `replay_key`
+        // is only triggered when *all* the holes it hit this time have been filled!
+        w.filling
+            .entry((needed_for, replay_key))
+            .or_insert(0)
+            .add_assign(1);
+        self.waiting.insert(miss_in, w);
 
         let mut found = false;
         let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
@@ -1574,7 +1583,7 @@ impl Domain {
                         // ignore duplicate misses
                         misses.sort_unstable_by(|a, b| {
                             use std::cmp::Ordering;
-                            let mut x = a.node.cmp(&b.node);
+                            let mut x = a.replay_key.cmp(&b.replay_key);
                             if x != Ordering::Equal {
                                 return x;
                             }
@@ -1586,22 +1595,37 @@ impl Domain {
                             if x != Ordering::Equal {
                                 return x;
                             }
-                            a.replay_key.cmp(&b.replay_key)
+                            a.node.cmp(&b.node)
                         });
                         misses.dedup();
+
+                        let missed_on = if backfill_keys.is_some() {
+                            let mut prev = None;
+                            let mut missed_on = Vec::with_capacity(misses.len());
+                            for miss in &misses {
+                                let k = miss.replay_key.as_ref().unwrap();
+                                if prev.is_none() || k != prev.unwrap() {
+                                    missed_on.push(k.clone());
+                                    prev = Some(k);
+                                }
+                            }
+                            missed_on
+                        } else {
+                            Vec::new()
+                        };
 
                         if target {
                             if !misses.is_empty() {
                                 // we missed while processing
                                 // it's important that we clear out any partially-filled holes.
                                 if let Some(state) = self.state.get_mut(&segment.node) {
-                                    for miss in &misses {
-                                        state.mark_hole(&miss.replay_key.as_ref().unwrap()[..], &tag);
+                                    for miss in &missed_on {
+                                        state.mark_hole(&miss[..], &tag);
                                     }
                                 } else {
                                     n.with_reader_mut(|r| {
-                                        r.writer_mut().map(|wh| for miss in &misses {
-                                            wh.mark_hole(&miss.replay_key.as_ref().unwrap()[0]);
+                                        r.writer_mut().map(|wh| for miss in &missed_on {
+                                            wh.mark_hole(&miss[0]);
                                         });
                                     });
                                 }
@@ -1690,9 +1714,7 @@ impl Domain {
                         // if we missed during replay, we need to do another replay
                         if backfill_keys.is_some() && !misses.is_empty() {
                             let misses = misses;
-                            let mut missed_on = HashSet::with_capacity(misses.len());
                             for miss in misses {
-                                missed_on.insert(miss.replay_key.clone().unwrap());
                                 need_replay.push((
                                     miss.node,
                                     miss.replay_key.unwrap(),
@@ -1796,35 +1818,57 @@ impl Domain {
         }
 
         if let Some((tag, ni, for_keys)) = finished {
-            if let Some(Waiting { mut subscribed }) = self.waiting.remove(&ni) {
+            trace!(self.log, "partial replay finished";
+                   "node" => ?ni,
+                   "keys" => ?for_keys);
+            if let Some(mut waiting) = self.waiting.remove(&ni) {
                 trace!(self.log, "partial replay finished to node with waiting backfills";
-                       "waiting" => subscribed.len(),
-                       "keys" => ?for_keys);
+                       "waiting" => waiting.subscribed.len(),
+                       "filling" => waiting.filling.len());
 
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
                 for key in for_keys.unwrap() {
-                    match subscribed.remove(&key) {
+                    match waiting.subscribed.remove(&key) {
                         None => {
                             // no subscriptions for this key (why are we filling it?)
                         }
                         Some(replay) => {
-                            for (tag, replay_key) in replay {
-                                // we've filled the hole that prevented the replay previously!
-                                self.seed_replay(tag, &replay_key[..], None);
+                            for tagged_replay_key in replay {
+                                // we may need more holes to be filled before this particular
+                                // replay is going to succeed:
+                                let left = {
+                                    let left = waiting.filling.get_mut(&tagged_replay_key).unwrap();
+                                    *left -= 1;
+                                    *left
+                                };
+
+                                if left == 0 {
+                                    trace!(self.log, "filled last hole for key, triggering replay";
+                                           "k" => ?tagged_replay_key);
+
+                                    // we've filled all holes that prevented the replay previously!
+                                    waiting.filling.remove(&tagged_replay_key);
+                                    let (tag, replay_key) = tagged_replay_key;
+
+                                    // restore Waiting in case seeding triggers more replays
+                                    self.waiting.insert(ni, waiting);
+                                    self.seed_replay(tag, &replay_key[..], None);
+                                    waiting = self.waiting.remove(&ni).unwrap();
+                                } else {
+                                    trace!(self.log, "filled hole for key, not triggering replay";
+                                           "k" => ?tagged_replay_key,
+                                           "left" => left);
+                                }
                             }
                         }
                     }
                 }
 
-                if let Some(Waiting { subscribed: new }) = self.waiting.remove(&ni) {
-                    for (k, rs) in new {
-                        subscribed.entry(k).or_insert_with(HashSet::new).extend(rs);
-                    }
+                if !waiting.subscribed.is_empty() {
+                    self.waiting.insert(ni, waiting);
                 }
-
-                self.waiting.insert(ni, Waiting { subscribed });
                 return;
             }
 
