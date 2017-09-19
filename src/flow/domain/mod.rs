@@ -228,7 +228,7 @@ impl Domain {
 
         if !w.subscribed
             .entry(miss_key.clone())
-            .or_default()
+            .or_insert_with(HashSet::new)
             .insert((needed_for, replay_key.clone()))
         {
             // we're already replaying the missing key, so no need to do it again
