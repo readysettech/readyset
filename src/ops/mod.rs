@@ -156,7 +156,7 @@ impl Ingredient for NodeOperator {
         from: LocalNodeIndex,
         data: Records,
         tracer: &mut Tracer,
-        replay: ReplayContext,
+        replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> RawProcessingResult {

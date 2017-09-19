@@ -193,7 +193,7 @@ impl Ingredient for Union {
         from: LocalNodeIndex,
         rs: Records,
         tracer: &mut Tracer,
-        replay: ReplayContext,
+        replay: &ReplayContext,
         n: &DomainNodes,
         s: &StateMap,
     ) -> RawProcessingResult {
@@ -203,7 +203,7 @@ impl Ingredient for Union {
         // self.emit.is_empty()), `from` will *actually* hold the shard index of
         // the sharded egress that sent us this record. this should make everything
         // below just work out.
-        match replay {
+        match *replay {
             ReplayContext::None => {
                 // prepare for a little song-and-dance for the borrow-checker
                 let mut absorb_for_full = false;
@@ -404,7 +404,7 @@ impl Ingredient for Union {
                 self.full_wait_state = FullWait::None;
                 exit
             }
-            ReplayContext::Partial { key_col, keys } => {
+            ReplayContext::Partial { key_col, ref keys } => {
                 // FIXME: with multi-partial indices, we may now need to track *multiple* ongoing
                 // replays!
 

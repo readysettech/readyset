@@ -47,7 +47,7 @@ impl Node {
                     let m = m.as_mut().unwrap();
                     let from = m.link().src;
 
-                    let replay = match (&mut **m,) {
+                    let mut replay = match (&mut **m,) {
                         (&mut Packet::ReplayPiece {
                             context: payload::ReplayPieceContext::Partial {
                                 ref mut for_keys,
@@ -74,7 +74,6 @@ impl Node {
                     };
 
                     let mut set_replay_last = None;
-                    let mut restore_partial_key = None;
                     tracer = m.tracer().and_then(|t| t.take());
                     m.map_data(|data| {
                         use std::mem;
@@ -82,16 +81,20 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(from, old_data, &mut tracer, replay, nodes, state) {
+                        match i.on_input_raw(from, old_data, &mut tracer, &replay, nodes, state) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
                             }
-                            RawProcessingResult::ReplayPiece(rs, keys) => {
+                            RawProcessingResult::ReplayPiece(rs, emitted_keys) => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
                                 mem::replace(data, rs);
-                                restore_partial_key = Some(keys);
+                                if let ReplayContext::Partial { ref mut keys, .. } = replay {
+                                    *keys = emitted_keys;
+                                } else {
+                                    unreachable!();
+                                }
                             }
                             RawProcessingResult::Captured => {
                                 captured = true;
@@ -117,7 +120,7 @@ impl Node {
                         }
                     }
 
-                    if let Some(keys) = restore_partial_key {
+                    if let ReplayContext::Partial { keys, .. } = replay {
                         if let Packet::ReplayPiece {
                             context: payload::ReplayPieceContext::Partial {
                                 ref mut for_keys, ..

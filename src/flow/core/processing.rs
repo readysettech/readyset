@@ -135,7 +135,7 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        replay: ReplayContext,
+        replay: &ReplayContext,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> RawProcessingResult {
