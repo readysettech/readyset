@@ -32,7 +32,6 @@ pub struct Union {
     replay_key: Option<Map<usize>>,
     replay_pieces: HashMap<DataType, Map<Records>>,
 
-    shards: usize,
     required: usize,
 
     full_wait_state: FullWait,
@@ -42,7 +41,6 @@ impl Clone for Union {
     fn clone(&self) -> Self {
         Union {
             emit: self.emit.clone(),
-            shards: self.shards,
             required: self.required,
             // nothing can have been received yet
             replay_key: None,
@@ -77,7 +75,6 @@ impl Union {
                 cols: HashMap::new(),
                 cols_l: Map::new(),
             },
-            shards: 1,
             required: parents,
             replay_key: None,
             replay_pieces: HashMap::new(),
@@ -89,7 +86,6 @@ impl Union {
     pub fn new_deshard(parent: NodeIndex, shards: usize) -> Union {
         Union {
             emit: Emit::AllFrom(parent.into()),
-            shards: shards,
             required: shards,
             replay_key: None,
             replay_pieces: HashMap::new(),
