@@ -702,34 +702,33 @@ impl Materializations {
             plan.finalize()
         };
 
-        trace!(self.log, "all domains ready for replay");
+        if !pending.is_empty() {
+            trace!(self.log, "all domains ready for replay");
 
-        // prepare for, start, and wait for replays
-        for pending in pending {
-            // tell the first domain to start playing
-            trace!(self.log, "telling root domain to start replay";
+            // prepare for, start, and wait for replays
+            for pending in pending {
+                // tell the first domain to start playing
+                trace!(self.log, "telling root domain to start replay";
                    "domain" => pending.source_domain.index());
 
-            domains
-                .get_mut(&pending.source_domain)
-                .unwrap()
-                .send(box Packet::StartReplay {
-                    tag: pending.tag,
-                    from: pending.source,
-                })
-                .unwrap();
+                domains
+                    .get_mut(&pending.source_domain)
+                    .unwrap()
+                    .send(box Packet::StartReplay {
+                        tag: pending.tag,
+                        from: pending.source,
+                    })
+                    .unwrap();
+            }
 
             // and then wait for the last domain to receive all the records
+            let target = graph[ni].domain();
             trace!(self.log,
-               "waiting for done message from target";
-               "domain" => pending.target_domain.index()
-            );
+           "waiting for done message from target";
+           "domain" => target.index(),
+        );
 
-            domains
-                .get_mut(&pending.target_domain)
-                .unwrap()
-                .wait_for_ack()
-                .unwrap();
+            domains.get_mut(&target).unwrap().wait_for_ack().unwrap();
         }
     }
 }

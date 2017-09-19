@@ -1054,7 +1054,6 @@ fn full_aggregation_with_bogokey() {
 }
 
 #[test]
-#[ignore]
 fn transactional_migration() {
     // set up graph
     let mut g = distributary::Blender::new();
