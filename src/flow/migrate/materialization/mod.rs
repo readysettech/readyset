@@ -724,9 +724,9 @@ impl Materializations {
             // and then wait for the last domain to receive all the records
             let target = graph[ni].domain();
             trace!(self.log,
-           "waiting for done message from target";
-           "domain" => target.index(),
-        );
+               "waiting for done message from target";
+               "domain" => target.index(),
+            );
 
             domains.get_mut(&target).unwrap().wait_for_ack().unwrap();
         }
