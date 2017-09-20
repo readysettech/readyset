@@ -114,8 +114,13 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     pub fn add(&mut self, index_on: Vec<usize>) {
-        // TODO: what if we have two paths with the same source because of a fork-join? we'd need
-        // to buffer somewhere to avoid splitting pieces...
+        if !self.partial && !self.paths.is_empty() {
+            // non-partial views should not have one replay path per index. that would cause us to
+            // replay several times, even though one full replay should always be sufficient.
+            // we do need to keep track of the fact that there should be an index here though.
+            self.tags.entry(index_on).or_insert_with(Vec::new);
+            return;
+        }
 
         // inform domains about replay paths
         let mut tags = Vec::new();
