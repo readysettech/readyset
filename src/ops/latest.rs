@@ -52,14 +52,6 @@ impl Ingredient for Latest {
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        true // because the latest may be retracted
-    }
-
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
@@ -72,6 +64,7 @@ impl Ingredient for Latest {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -105,6 +98,13 @@ impl Ingredient for Latest {
                     // before processing!
                     misses.push(Miss{
                         node: *us,
+                        columns: vec![self.key[0]],
+                        replay_key: replay_key_col.map(|col| {
+                            debug_assert_eq!(col, self.key[0]);
+                            // since latest is an identity, we don't need to map this output column
+                            // to an input column.
+                            vec![r[col].clone()]
+                        }),
                         key: vec![r[self.key[0]].clone()],
                     });
                     None
@@ -131,9 +131,9 @@ impl Ingredient for Latest {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index all key columns
-        Some((this, self.key.clone())).into_iter().collect()
+        Some((this, (self.key.clone(), true))).into_iter().collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
@@ -282,7 +282,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], vec![1]);
+        assert_eq!(idx[&me], (vec![1], true));
     }
 
 

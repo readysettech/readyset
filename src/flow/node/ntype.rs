@@ -1,5 +1,4 @@
 use ops;
-use flow::hook;
 use flow::node::special;
 use flow::core::processing::Ingredient;
 
@@ -10,7 +9,6 @@ pub enum NodeType {
     Egress(Option<special::Egress>),
     Sharder(special::Sharder),
     Reader(special::Reader),
-    Hook(Option<hook::Hook>),
     Source,
     Dropped,
 }
@@ -23,7 +21,6 @@ impl NodeType {
             NodeType::Sharder(ref mut s) => NodeType::Sharder(s.take()),
             NodeType::Ingress => NodeType::Ingress,
             NodeType::Internal(ref mut i) => NodeType::Internal(i.take()),
-            NodeType::Hook(ref mut h) => NodeType::Hook(h.take()),
             NodeType::Source => unreachable!(),
             NodeType::Dropped => unreachable!(),
         }
@@ -57,12 +54,6 @@ impl From<special::Ingress> for NodeType {
 impl From<special::Source> for NodeType {
     fn from(_: special::Source) -> Self {
         NodeType::Source
-    }
-}
-
-impl From<hook::Hook> for NodeType {
-    fn from(h: hook::Hook) -> Self {
-        NodeType::Hook(Some(h))
     }
 }
 

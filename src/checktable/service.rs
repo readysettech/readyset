@@ -96,10 +96,10 @@ impl FutureService for CheckTableServer {
     type AddReplayPathsFut = Result<(), Never>;
     fn add_replay_paths(
         &self,
-        additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
+        mut additional_replay_paths: HashMap<ReplayPath, Vec<domain::Index>>,
     ) -> Self::AddReplayPathsFut {
         let mut checktable = self.checktable.lock().unwrap();
-        Ok(checktable.add_replay_paths(additional_replay_paths))
+        Ok(checktable.add_replay_paths(&mut additional_replay_paths))
     }
 
     type ValidateTokenFut = Result<bool, Never>;

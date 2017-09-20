@@ -34,6 +34,10 @@ impl Base {
         self
     }
 
+    pub(crate) fn key(&self) -> Option<&[usize]> {
+        self.primary_key.as_ref().map(|cols| &cols[..])
+    }
+
     /// Add a new column to this base node.
     pub fn add_column(&mut self, default: DataType) -> usize {
         assert!(
@@ -67,10 +71,6 @@ impl Base {
             .iter()
             .map(|&col| (col, self.defaults[col].clone()))
             .collect()
-    }
-
-    pub(crate) fn is_unmodified(&self) -> bool {
-        self.unmodified
     }
 }
 
@@ -112,14 +112,6 @@ impl Ingredient for Base {
         vec![]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized && self.primary_key.is_some()
-    }
-
     fn on_connected(&mut self, _: &Graph) {}
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
@@ -131,6 +123,7 @@ impl Ingredient for Base {
         _: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -182,9 +175,9 @@ impl Ingredient for Base {
         }
     }
 
-    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         if self.primary_key.is_some() {
-            Some((n, self.primary_key.as_ref().unwrap().clone()))
+            Some((n, (self.primary_key.as_ref().unwrap().clone(), true)))
                 .into_iter()
                 .collect()
         } else {

@@ -7,6 +7,8 @@ use flow::prelude;
 #[derive(PartialEq, Eq, Debug)]
 pub struct Miss {
     pub node: prelude::LocalNodeIndex,
+    pub columns: Vec<usize>,
+    pub replay_key: Option<Vec<prelude::DataType>>,
     pub key: Vec<prelude::DataType>,
 }
 
@@ -17,8 +19,28 @@ pub struct ProcessingResult {
 
 pub enum RawProcessingResult {
     Regular(ProcessingResult),
-    ReplayPiece(prelude::Records),
+    FullReplay(prelude::Records, bool),
+    ReplayPiece(prelude::Records, HashSet<Vec<prelude::DataType>>),
     Captured,
+}
+
+pub enum ReplayContext {
+    None,
+    Partial {
+        key_col: usize,
+        keys: HashSet<Vec<prelude::DataType>>,
+    },
+    Full { last: bool },
+}
+
+impl ReplayContext {
+    fn key(&self) -> Option<usize> {
+        if let ReplayContext::Partial { key_col, .. } = *self {
+            Some(key_col)
+        } else {
+            None
+        }
+    }
 }
 
 pub trait Ingredient
@@ -30,7 +52,6 @@ where
     fn take(&mut self) -> ops::NodeOperator;
 
     fn ancestors(&self) -> Vec<prelude::NodeIndex>;
-    fn should_materialize(&self) -> bool;
 
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
@@ -38,14 +59,16 @@ where
         None
     }
 
-    /// Should return true if this ingredient will ever query the state of an ancestor.
-    fn will_query(&self, materialized: bool) -> bool;
-
     /// Suggest fields of this view, or its ancestors, that would benefit from having an index.
     ///
     /// Note that a vector of length > 1 for any one node means that that node should be given a
-    /// *compound* key, *not* that multiple columns should be independently indexed.
-    fn suggest_indexes(&self, you: prelude::NodeIndex) -> HashMap<prelude::NodeIndex, Vec<usize>>;
+    /// *compound* key, *not* that multiple columns should be independently indexed. The bool in
+    /// the return value specifies if the node wants to do *lookups* on that key; false would imply
+    /// that this index will only be used for partial replay.
+    fn suggest_indexes(
+        &self,
+        you: prelude::NodeIndex,
+    ) -> HashMap<prelude::NodeIndex, (Vec<usize>, bool)>;
 
     /// Resolve where the given field originates from. If the view is materialized, or the value is
     /// otherwise created by this view, None should be returned.
@@ -102,6 +125,7 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
+        replay_key_col: Option<usize>,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> ProcessingResult;
@@ -111,14 +135,18 @@ where
         from: prelude::LocalNodeIndex,
         data: prelude::Records,
         tracer: &mut prelude::Tracer,
-        is_replay_of: Option<(usize, prelude::DataType)>,
-        nshards: usize,
+        replay: &ReplayContext,
         domain: &prelude::DomainNodes,
         states: &prelude::StateMap,
     ) -> RawProcessingResult {
-        let _ = is_replay_of;
-        let _ = nshards;
-        RawProcessingResult::Regular(self.on_input(from, data, tracer, domain, states))
+        RawProcessingResult::Regular(self.on_input(
+            from,
+            data,
+            tracer,
+            replay.key(),
+            domain,
+            states,
+        ))
     }
 
     fn can_query_through(&self) -> bool {

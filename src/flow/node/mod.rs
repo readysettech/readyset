@@ -369,10 +369,7 @@ impl Node {
     /// its domain.
     pub fn is_output(&self) -> bool {
         match self.inner {
-            NodeType::Egress { .. } |
-            NodeType::Reader(..) |
-            NodeType::Sharder(..) |
-            NodeType::Hook(..) => true,
+            NodeType::Egress { .. } | NodeType::Reader(..) | NodeType::Sharder(..) => true,
             _ => false,
         }
     }

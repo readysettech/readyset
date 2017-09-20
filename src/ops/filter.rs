@@ -32,14 +32,6 @@ impl Ingredient for Filter {
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        false
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src.as_global()];
         // N.B.: <= because the adjacent node might be a base with a suffix of removed columns.
@@ -56,6 +48,7 @@ impl Ingredient for Filter {
         _: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -86,7 +79,7 @@ impl Ingredient for Filter {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         HashMap::new()
     }
 
