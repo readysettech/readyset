@@ -13,6 +13,12 @@ CREATE TABLE orders ( o_id int not null, o_c_id int, o_date date, o_sub_total do
 CREATE TABLE shopping_cart ( sc_id int not null, sc_time timestamp, PRIMARY KEY(sc_id));
 CREATE TABLE shopping_cart_line ( scl_sc_id int not null, scl_qty int, scl_i_id int not null, PRIMARY KEY(scl_sc_id, scl_i_id));
 
+# modified getBestSellers
+getBestSellers: SELECT i_id, i_title, a_fname, a_lname, SUM(ol_qty) AS total_qty FROM item, author, order_line WHERE item.i_id = order_line.ol_i_id AND item.i_a_id = author.a_id AND order_line.ol_o_id > 2588667 GROUP BY i_id, i_title, a_fname, a_lname ORDER BY total_qty DESC limit 50;
+
+# getMostRecentOrder.lines
+getMostRecentOrderLines: SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
+
 # getName
 getName: SELECT c_fname,c_lname FROM customer WHERE c_id = ?;
 
@@ -64,9 +70,6 @@ getMostRecentOrderId: SELECT o_id FROM customer, orders WHERE customer.c_id = or
 
 # getMostRecentOrder.order
 getMostRecentOrderOrder: SELECT orders.*, customer.*, cc_xacts.cx_type, ship.addr_street1 AS ship_addr_street1, ship.addr_street2 AS ship_addr_street2, ship.addr_state AS ship_addr_state, ship.addr_zip AS ship_addr_zip, ship_co.co_name AS ship_co_name, bill.addr_street1 AS bill_addr_street1, bill.addr_street2 AS bill_addr_street2, bill.addr_state AS bill_addr_state, bill.addr_zip AS bill_addr_zip, bill_co.co_name AS bill_co_name FROM customer, orders, cc_xacts, address AS ship, country AS ship_co, bill, bill_co WHERE orders.o_id = ? AND cx_o_id = orders.o_id AND customer.c_id = orders.o_c_id AND orders.o_bill_addr_id = bill.addr_id AND bill.addr_co_id = bill_co.co_id AND orders.o_ship_addr_id = ship.addr_id AND ship.addr_co_id = ship_co.co_id;
-
-# getMostRecentOrder.lines
-getMostRecentOrderLines: SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
 
 # createEmptyCart
 createEmptyCart: SELECT COUNT(*) FROM shopping_cart;

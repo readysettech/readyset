@@ -698,7 +698,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| {
-            let src_ord = a.0.cmp(&b.0);
+            let src_ord = b.0.cmp(&a.0);
             if src_ord == Ordering::Equal {
                 a.1.cmp(&b.1)
             } else {
