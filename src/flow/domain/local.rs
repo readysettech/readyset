@@ -187,6 +187,8 @@ pub enum KeyType<'a, T: 'a> {
     Double((T, T)),
     Tri((T, T, T)),
     Quad((T, T, T, T)),
+    Quin((T, T, T, T, T)),
+    Sex((T, T, T, T, T, T)),
 }
 
 enum KeyedState<T: Eq + Hash> {
@@ -194,6 +196,8 @@ enum KeyedState<T: Eq + Hash> {
     Double(FnvHashMap<(T, T), Vec<Row<Vec<T>>>>),
     Tri(FnvHashMap<(T, T, T), Vec<Row<Vec<T>>>>),
     Quad(FnvHashMap<(T, T, T, T), Vec<Row<Vec<T>>>>),
+    Quin(FnvHashMap<(T, T, T, T, T), Vec<Row<Vec<T>>>>),
+    Sex(FnvHashMap<(T, T, T, T, T, T), Vec<Row<Vec<T>>>>),
 }
 
 impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
@@ -208,6 +212,21 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [T]> for KeyType<'a, T> {
                 other[1].clone(),
                 other[2].clone(),
                 other[3].clone(),
+            )),
+            5 => KeyType::Quin((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+                other[4].clone(),
+            )),
+            6 => KeyType::Sex((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+                other[4].clone(),
+                other[5].clone(),
             )),
             _ => unimplemented!(),
         }
@@ -227,6 +246,21 @@ impl<'a, T: 'static + Eq + Hash + Clone> From<&'a [&'a T]> for KeyType<'a, T> {
                 other[2].clone(),
                 other[3].clone(),
             )),
+            5 => KeyType::Quin((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+                other[4].clone(),
+            )),
+            6 => KeyType::Sex((
+                other[0].clone(),
+                other[1].clone(),
+                other[2].clone(),
+                other[3].clone(),
+                other[4].clone(),
+                other[5].clone(),
+            )),
             _ => unimplemented!(),
         }
     }
@@ -239,6 +273,8 @@ impl<T: Eq + Hash> KeyedState<T> {
             KeyedState::Double(ref m) => m.is_empty(),
             KeyedState::Tri(ref m) => m.is_empty(),
             KeyedState::Quad(ref m) => m.is_empty(),
+            KeyedState::Quin(ref m) => m.is_empty(),
+            KeyedState::Sex(ref m) => m.is_empty(),
         }
     }
 
@@ -248,6 +284,8 @@ impl<T: Eq + Hash> KeyedState<T> {
             KeyedState::Double(ref m) => m.len(),
             KeyedState::Tri(ref m) => m.len(),
             KeyedState::Quad(ref m) => m.len(),
+            KeyedState::Quin(ref m) => m.len(),
+            KeyedState::Sex(ref m) => m.len(),
         }
     }
 
@@ -257,6 +295,8 @@ impl<T: Eq + Hash> KeyedState<T> {
             (&KeyedState::Double(ref m), &KeyType::Double(ref k)) => m.get(k),
             (&KeyedState::Tri(ref m), &KeyType::Tri(ref k)) => m.get(k),
             (&KeyedState::Quad(ref m), &KeyType::Quad(ref k)) => m.get(k),
+            (&KeyedState::Quin(ref m), &KeyType::Quin(ref k)) => m.get(k),
+            (&KeyedState::Sex(ref m), &KeyType::Sex(ref k)) => m.get(k),
             _ => unreachable!(),
         }
     }
@@ -270,6 +310,8 @@ impl<'a, T: Eq + Hash> Into<KeyedState<T>> for &'a [usize] {
             2 => KeyedState::Double(FnvHashMap::default()),
             3 => KeyedState::Tri(FnvHashMap::default()),
             4 => KeyedState::Quad(FnvHashMap::default()),
+            5 => KeyedState::Quin(FnvHashMap::default()),
+            6 => KeyedState::Sex(FnvHashMap::default()),
             x => panic!("invalid compound key of length: {}", x),
         }
     }
@@ -362,6 +404,12 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 KeyedState::Quad(ref map) => for rs in map.values() {
                     insert(rs);
                 },
+                KeyedState::Quin(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
+                KeyedState::Sex(ref map) => for rs in map.values() {
+                    insert(rs);
+                },
             }
         }
     }
@@ -431,6 +479,35 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                         rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
                     }
                 }
+                KeyedState::Quin(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                        r[s.key[3]].clone(),
+                        r[s.key[4]].clone(),
+                    );
+                    match map.entry(key) {
+                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                        Entry::Vacant(..) if s.partial.is_some() => return false,
+                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                    }
+                }
+                KeyedState::Sex(ref mut map) => {
+                    let key = (
+                        r[s.key[0]].clone(),
+                        r[s.key[1]].clone(),
+                        r[s.key[2]].clone(),
+                        r[s.key[3]].clone(),
+                        r[s.key[4]].clone(),
+                        r[s.key[5]].clone(),
+                    );
+                    match map.entry(key) {
+                        Entry::Occupied(mut rs) => rs.get_mut().push(r),
+                        Entry::Vacant(..) if s.partial.is_some() => return false,
+                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                    }
+                }
                 KeyedState::Single(..) => unreachable!(),
             },
         }
@@ -442,9 +519,15 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
         let r = Rc::new(r);
 
         if let Some(tag) = partial_tag {
-            let i = *self.by_tag
-                .get(&tag)
-                .expect("got tagged insert for unknown tag");
+            let i = match self.by_tag.get(&tag) {
+                Some(i) => *i,
+                None => {
+                    // got tagged insert for unknown tag. this will happen if a node on an old
+                    // replay path is now materialized. must return true to avoid any records
+                    // (which are destined for a downstream materialization) from being pruned.
+                    return true;
+                }
+            };
             // FIXME: self.rows += ?
             State::insert_into(&mut self.state[i], Row(r))
         } else {
@@ -503,6 +586,33 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                                 r[s.key[1]].clone(),
                                 r[s.key[2]].clone(),
                                 r[s.key[3]].clone(),
+                            );
+                            if let Some(ref mut rs) = map.get_mut(&key) {
+                                fix(&mut removed, rs);
+                                hit = true;
+                            }
+                        }
+                        KeyedState::Quin(ref mut map) => {
+                            let key = (
+                                r[s.key[0]].clone(),
+                                r[s.key[1]].clone(),
+                                r[s.key[2]].clone(),
+                                r[s.key[3]].clone(),
+                                r[s.key[4]].clone(),
+                            );
+                            if let Some(ref mut rs) = map.get_mut(&key) {
+                                fix(&mut removed, rs);
+                                hit = true;
+                            }
+                        }
+                        KeyedState::Sex(ref mut map) => {
+                            let key = (
+                                r[s.key[0]].clone(),
+                                r[s.key[1]].clone(),
+                                r[s.key[2]].clone(),
+                                r[s.key[3]].clone(),
+                                r[s.key[4]].clone(),
+                                r[s.key[5]].clone(),
                             );
                             if let Some(ref mut rs) = map.get_mut(&key) {
                                 fix(&mut removed, rs);
@@ -578,6 +688,27 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 ),
                 Vec::new(),
             ),
+            KeyedState::Quin(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Vec::new(),
+            ),
+            KeyedState::Sex(ref mut map) => map.insert(
+                (
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                    key.next().unwrap(),
+                ),
+                Vec::new(),
+            ),
         };
         assert!(replaced.is_none());
     }
@@ -598,9 +729,24 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 key[2].clone(),
                 key[3].clone(),
             )),
+            KeyedState::Quin(ref mut map) => map.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+                key[4].clone(),
+            )),
+            KeyedState::Sex(ref mut map) => map.remove(&(
+                key[0].clone(),
+                key[1].clone(),
+                key[2].clone(),
+                key[3].clone(),
+                key[4].clone(),
+                key[5].clone(),
+            )),
         };
+        // mark_hole should only be called on keys we called mark_filled on
         assert!(removed.is_some());
-        assert!(removed.unwrap().is_empty());
     }
 
     pub fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType<T>) -> LookupResult<'a, T> {
@@ -629,6 +775,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
             KeyedState::Double(ref map) => map.values().flat_map(State::fix).collect(),
             KeyedState::Tri(ref map) => map.values().flat_map(State::fix).collect(),
             KeyedState::Quad(ref map) => map.values().flat_map(State::fix).collect(),
+            KeyedState::Quin(ref map) => map.values().flat_map(State::fix).collect(),
+            KeyedState::Sex(ref map) => map.values().flat_map(State::fix).collect(),
         }
     }
 
@@ -640,6 +788,8 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                 KeyedState::Double(ref mut map) => map.clear(),
                 KeyedState::Tri(ref mut map) => map.clear(),
                 KeyedState::Quad(ref mut map) => map.clear(),
+                KeyedState::Quin(ref mut map) => map.clear(),
+                KeyedState::Sex(ref mut map) => map.clear(),
             }
         }
     }
@@ -685,6 +835,8 @@ impl<T: Hash + Eq + Clone + 'static> IntoIterator for State<T> {
                     KeyedState::Double(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
                     KeyedState::Tri(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
                     KeyedState::Quad(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
+                    KeyedState::Quin(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
+                    KeyedState::Sex(map) => Box::new(map.into_iter().map(move |(_, v)| own(v))),
                 }
             })
             .unwrap()

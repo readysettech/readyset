@@ -17,6 +17,7 @@ pub(crate) struct Plan<'a> {
     partial: bool,
 
     tags: HashMap<Vec<usize>, Vec<(Tag, domain::Index)>>,
+    paths: HashMap<Tag, Vec<NodeIndex>>,
     pending: Vec<PendingReplay>,
 }
 
@@ -48,6 +49,7 @@ impl<'a> Plan<'a> {
 
             pending: Vec::new(),
             tags: Default::default(),
+            paths: Default::default(),
         }
     }
 
@@ -64,7 +66,7 @@ impl<'a> Plan<'a> {
         };
 
         // cut paths so they only reach to the the closest materialized node
-        let paths: Vec<_> = paths
+        let mut paths: Vec<_> = paths
             .into_iter()
             .map(|path| -> Vec<_> {
                 let mut found = false;
@@ -96,6 +98,12 @@ impl<'a> Plan<'a> {
             })
             .collect();
 
+        // since we cut off part of each path, we *may* now have multiple paths that are the same
+        // (i.e., if there was a union above the nearest materialization). this would be bad, as it
+        // would cause a domain to request replays *twice* for a key from one view!
+        paths.sort();
+        paths.dedup();
+
         // all columns better resolve if we're doing partial
         assert!(!self.partial || paths.iter().all(|p| p[0].1.is_some()));
 
@@ -106,14 +114,20 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     pub fn add(&mut self, index_on: Vec<usize>) {
-        // TODO: what if we have two paths with the same source because of a fork-join? we'd need
-        // to buffer somewhere to avoid splitting pieces...
+        if !self.partial && !self.paths.is_empty() {
+            // non-partial views should not have one replay path per index. that would cause us to
+            // replay several times, even though one full replay should always be sufficient.
+            // we do need to keep track of the fact that there should be an index here though.
+            self.tags.entry(index_on).or_insert_with(Vec::new);
+            return;
+        }
 
         // inform domains about replay paths
         let mut tags = Vec::new();
         for path in self.paths(&index_on[..]) {
             let tag = self.m.next_tag();
-            trace!(self.m.log, "setting up replay path {:?}", path; "tag" => tag.id());
+            self.paths
+                .insert(tag, path.iter().map(|&(ni, _)| ni).collect());
 
             // what key are we using for partial materialization (if any)?
             let mut partial = None;
@@ -146,7 +160,7 @@ impl<'a> Plan<'a> {
                 segments.last_mut().unwrap().1.push((node, key));
             }
 
-            debug!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
+            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag.id());
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;
@@ -296,8 +310,6 @@ impl<'a> Plan<'a> {
     pub fn finalize(mut self) -> Vec<PendingReplay> {
         use flow::payload::InitialState;
 
-        let tags: usize = self.tags.values().map(|ts| ts.len()).sum();
-
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
         let s = self.graph[self.node]
@@ -382,10 +394,23 @@ impl<'a> Plan<'a> {
             .unwrap();
 
         if !self.partial {
-            // TODO: I'm like 90% sure this is incorrect.
-            // If we add multiple indices to a single view, we should still only replay once.
-            // The only case where more than one replay per view is correct is when we have unions.
-            assert_eq!(self.pending.len(), tags);
+            // we know that this must be a *new* fully materialized node:
+            //
+            //  - finalize() is only called by setup()
+            //  - setup() is only called for existing nodes if they are partial
+            //  - this branch has !self.partial
+            //
+            // if we're constructing a new view, there is no reason to replay any given path more
+            // than once. we do need to be careful here though: the fact that the source and
+            // destination of a path are the same does *not* mean that the path is the same (b/c of
+            // unions), and we do not want to eliminate different paths!
+            let mut distinct_paths = HashSet::new();
+            let paths = &self.paths;
+            self.pending.retain(|p| {
+                // keep if this path is different
+                distinct_paths.insert(&paths[&p.tag])
+            });
+            assert!(!self.pending.is_empty());
         } else {
             assert!(self.pending.is_empty());
         }
@@ -417,13 +442,18 @@ impl<'a> Plan<'a> {
                 // we could be cleverer here when we have a choice
                 match graph[node].must_replay_among() {
                     Some(anc) => {
-                        for p in parents {
-                            if anc.contains(p) {
-                                return Some(*p);
-                            }
-                        }
-                        // must_replay_among did not include any ancestor?
-                        unreachable!();
+                        // it is *extremely* important that this choice is deterministic.
+                        // if it is not, the code that decides what indices to create could choose
+                        // a *different* parent than the code that sets up the replay paths, which
+                        // would be *bad*.
+                        let mut parents = parents
+                            .iter()
+                            .filter(|p| anc.contains(p))
+                            .map(|&p| p)
+                            .collect::<Vec<_>>();
+                        assert!(!parents.is_empty());
+                        parents.sort_by_key(|p| p.index());
+                        Some(parents[0])
                     }
                     None => Some(parents[0]),
                 }

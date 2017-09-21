@@ -140,6 +140,7 @@ where
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -185,6 +186,13 @@ where
                     misses.push(Miss {
                         node: *us,
                         columns: self.out_key.clone(),
+                        replay_key: replay_key_col.map(|col| {
+                            // since group columns go first in our output, and the replay key must
+                            // be on our group by column (partial can't go through generated
+                            // columns), this column should be < group.len()
+                            debug_assert!(col < group.len());
+                            vec![group[col].clone()]
+                        }),
                         key: group,
                     });
                     continue;

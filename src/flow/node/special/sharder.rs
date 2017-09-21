@@ -2,6 +2,7 @@ use flow::prelude::*;
 use flow::payload;
 use vec_map::VecMap;
 use channel::ChannelSender;
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
@@ -77,31 +78,67 @@ impl Sharder {
                 ..
             } = m
             {
-                // we only need to send this to the shard responsible for the key being replayed!
-                // ugh, I'm sad about this double destruct, but it's necessary for borrowing :(
-                let shard = if let box Packet::ReplayPiece {
-                    context: payload::ReplayPieceContext::Partial { ref for_key, .. },
+                // we need to send one message to each shard in for_keys
+                let shards = if let box Packet::ReplayPiece {
+                    context: payload::ReplayPieceContext::Partial {
+                        ref mut for_keys, ..
+                    },
                     ..
                 } = m
                 {
-                    assert_eq!(for_key.len(), 1);
-                    self.shard(&for_key[0])
+                    let keys = for_keys.len();
+                    for_keys
+                        .drain()
+                        .map(|key| {
+                            assert_eq!(key.len(), 1);
+                            let shard = self.shard(&key[0]);
+                            (shard, key)
+                        })
+                        .fold(VecMap::new(), |mut hm, (shard, key)| {
+                            hm.entry(shard)
+                                .or_insert_with(|| HashSet::with_capacity(keys))
+                                .insert(key);
+                            hm
+                        })
                 } else {
                     unreachable!()
                 };
 
-                if let box Packet::ReplayPiece {
-                    ref mut nshards, ..
-                } = m
-                {
-                    *nshards = 1;
+                let records = m.take_data();
+                let mut shards: VecMap<_> = shards
+                    .into_iter()
+                    .map(|(shard, keys)| {
+                        let mut p = m.clone_data();
+                        if let Packet::ReplayPiece {
+                            ref mut nshards,
+                            context: payload::ReplayPieceContext::Partial {
+                                ref mut for_keys, ..
+                            },
+                            ..
+                        } = p
+                        {
+                            *nshards = 1;
+                            *for_keys = keys;
+                        } else {
+                            unreachable!();
+                        }
+
+                        (shard, box p)
+                    })
+                    .collect();
+
+                for record in records {
+                    let shard = self.to_shard(&record);
+                    shards[shard].map_data(|rs| rs.push(record));
                 }
 
-                let tx = &mut self.txs[shard];
-                m.link_mut().src = index;
-                m.link_mut().dst = tx.0;
-                if tx.1.send(m).is_err() {
-                    // we must be shutting down...
+                for (shard, p) in shards {
+                    let tx = &mut self.txs[shard];
+                    m.link_mut().src = index;
+                    m.link_mut().dst = tx.0;
+                    if tx.1.send(p).is_err() {
+                        // we must be shutting down...
+                    }
                 }
                 return;
             }

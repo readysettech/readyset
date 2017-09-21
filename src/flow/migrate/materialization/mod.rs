@@ -91,7 +91,7 @@ impl Materializations {
 
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
-    pub fn extend(&mut self, graph: &Graph, nodes: &[(NodeIndex, bool)]) {
+    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) {
         // this code used to be a mess, and will likely be a mess this time around too.
         // but, let's try to start out in a principled way...
         //
@@ -131,13 +131,7 @@ impl Materializations {
         let mut replay_obligations = HashMap::new();
 
         // Find indices we need to add.
-        for &(ni, new) in nodes {
-            if !new {
-                // we only construct obligations from new nodes, since existing nodes cannot
-                // suddenly require additional indices.
-                continue;
-            }
-
+        for &ni in new {
             let n = &graph[ni];
             let mut indices = if n.is_reader() {
                 let key = n.with_reader(|r| r.key()).unwrap();
@@ -224,6 +218,12 @@ impl Materializations {
         // lookup obligations are fairly rigid, in that they require a materialization, and can
         // only be pushed through query-through nodes, and never across domains. so, we deal with
         // those first.
+        //
+        // it's also *important* that we do these first, because these are the only ones that can
+        // force non-materialized nodes to become materialized. if we didn't do this first, a
+        // partial node may add indices to only a subset of the intermediate partial views between
+        // it and the nearest full materialization (because the intermediate ones haven't been
+        // marked as materialized yet).
         for (ni, mut indices) in lookup_obligations {
             // we want to find the closest materialization that allows lookups (i.e., counting
             // query-through operators).
@@ -280,27 +280,76 @@ impl Materializations {
             }
         }
 
-        // we're now going to walk the replay obligations, and try to apply them to enable more
-        // partial materialization opportunities. this is a little tricky, because there are fairly
-        // strict restrictions on when we can use partial replay. in particular, it is required
-        // that the key traces all the way back to some existing materialization, and that that
-        // materialization has a key for the same columns. this means that a single replay
-        // obligation is *really* a set of replay obligations going all the way up to the nearest
-        // full materialization.
-        for (ni, indices) in replay_obligations {
-            // we first want to find out if it's even *possible* to partially materialize this
-            // node. for that to be the case, we need to keep moving up the ancestor tree of `ni`,
-            // and check at each stage that we can continue tracing the key column back until we
-            // reach a full materialization (or one that's already partially materialized on the
-            // same key, which inductively must mean that the path above works out).
+        // we need to compute which views can be partial, and which can not.
+        // in addition, we need to figure out what indexes each view should have.
+        // this is surprisingly difficult to get right.
+        //
+        // the approach we are going to take is to require walking the graph bottom-up:
+        let mut ordered = Vec::with_capacity(graph.node_count());
+        let mut topo = petgraph::visit::Topo::new(graph);
+        while let Some(node) = topo.next(graph) {
+            if graph[node].is_source() {
+                continue;
+            }
+            if graph[node].is_dropped() {
+                continue;
+            }
+
+            // unfortunately, we may end up adding indexes to existing views, and we need to walk
+            // them *all* in reverse topological order.
+            ordered.push(node);
+        }
+        ordered.reverse();
+        // for each node, we will check if it has any *new* indexes (i.e., in self.added).
+        // if it does, see if the indexed columns resolve into its nearest ancestor
+        // materializations. if they do, we mark this view as partial. if not, we, well, don't.
+        // if the view was marked as partial, we add the necessary indexes to self.added for the
+        // parent views, and keep walking. this is the reason we need the reverse topological
+        // order: if we didn't, a node could receive additional indexes after we've checked it!
+        for ni in ordered {
+            let indexes = match replay_obligations.remove(&ni) {
+                Some(idxs) => idxs,
+                None => continue,
+            };
+
+            // we want to find out if it's possible to partially materialize this node. for that to
+            // be the case, we need to keep moving up the ancestor tree of `ni`, and check at each
+            // stage that we can trace the key column back into each of our nearest
+            // materializations.
             let mut able = self.partial_enabled;
             let mut add = HashMap::new();
 
+            // bases can't be partial
             if graph[ni].is_internal() && graph[ni].get_base().is_some() {
                 able = false;
             }
 
-            'try: for index in &indices {
+            // we are already fully materialized, so can't be made partial
+            if !new.contains(&ni) && self.have.contains_key(&ni) && !self.partial.contains(&ni) {
+                able = false;
+            }
+
+            // we have a full materialization below us
+            let mut stack: Vec<_> = graph
+                .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
+                .collect();
+            while let Some(child) = stack.pop() {
+                if self.have.contains_key(&child) {
+                    // materialized child -- don't need to keep walking along this path
+                    if !self.partial.contains(&child) {
+                        // child is full, so we can't be partial
+                        stack.clear();
+                        able = false
+                    }
+                } else {
+                    // non-materialized child -- keep walking
+                    stack.extend(
+                        graph.neighbors_directed(child, petgraph::EdgeDirection::Outgoing),
+                    );
+                }
+            }
+
+            'try: for index in &indexes {
                 if !able {
                     break;
                 }
@@ -327,13 +376,6 @@ impl Materializations {
                 }
 
                 for path in paths {
-
-                    // keep walking until:
-                    //
-                    //  - col is None; key doesn't trace, partial not ok
-                    //  - node is fully materialized; partial is ok
-                    //  - node is partial on same key; partial is ok
-                    //
                     for (ni, col) in path.into_iter().skip(1) {
                         if col.is_none() {
                             able = false;
@@ -341,88 +383,58 @@ impl Materializations {
                         }
                         let index = vec![col.unwrap()];
                         if let Some(m) = self.have.get(&ni) {
-                            if self.partial.contains(&ni) {
-                                // already keyed on the right thing?
-                                if m.contains(&index) {
-                                    // no index needed, and no need to walk further!
-                                    // we're all good as far as this path is concerned.
-                                    break;
-                                } else {
-                                    // we'd need to add an index to this view
-                                    // we also need to keep walking, since we may need more
-                                    if !add.entry(ni).or_insert_with(HashSet::new).insert(index) {
-                                        // we've already added that obligation, so the rest of this
-                                        // path must be ok
-                                        break;
-                                    }
-                                }
-                            } else {
-                                // full materialization! as long as we add an index, we're all good
-                                add.entry(ni).or_insert_with(HashSet::new).insert(index);
-                                break;
+                            if !m.contains(&index) {
+                                // we'd need to add an index to this view,
+                                add.entry(ni)
+                                    .or_insert_with(HashSet::new)
+                                    .insert(index.clone());
                             }
+                            break;
                         }
                     }
                 }
             }
 
-            if !able {
-                // no reason to add all these indices; partial replay is impossible anyway.
-                //
-                // FIXME: we must take this path if this is an existing node that is not already
-                // partial!
-                //
-                // we can't have fully materialized nodes downstream of partially materialized nodes.
-                fn any_partial(
-                    this: &Materializations,
-                    graph: &Graph,
-                    ni: NodeIndex,
-                ) -> Option<NodeIndex> {
-                    if this.partial.contains(&ni) {
-                        return Some(ni);
+            if able {
+                // we can do partial if we add all those indices!
+                self.partial.insert(ni);
+                warn!(self.log, "using partial materialization for {}", ni.index());
+                for (mi, indices) in add {
+                    let m = replay_obligations.entry(mi).or_insert_with(HashSet::new);
+                    for index in indices {
+                        m.insert(index);
                     }
-                    for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                        if let Some(ni) = any_partial(this, graph, ni) {
-                            return Some(ni);
-                        }
-                    }
-                    None
                 }
-
-                if let Some(pi) = any_partial(self, graph, ni) {
-                    crit!(self.log, "partial materializations above full materialization";
-                          "full" => ni.index(),
-                          "partial" => pi.index());
-                    unimplemented!();
-                }
-                continue;
             }
 
-            // we can do partial if we add all these indices!
-            self.partial.insert(ni);
-            warn!(self.log, "using partial materialization for {}", ni.index());
-            for (mi, indices) in add {
-                let m = self.have.entry(mi).or_insert_with(HashSet::new);
-                for index in indices {
-                    if m.insert(index.clone()) {
+            // no matter what happens, we're going to have to fulfill our replay obligations.
+            if let Some(m) = self.have.get_mut(&ni) {
+                for index in indexes {
+                    let new_index = m.insert(index.clone());
+
+                    if new_index {
                         info!(self.log,
                           "adding index to view to enable partial";
-                          "on" => mi.index(),
-                          "for" => ni.index(),
+                          "on" => ni.index(),
                           "columns" => ?index,
                         );
                     }
 
-                    // we actually need to communicate this to the domain even though it
-                    // already has the index, because it needs to be told about the new replay
-                    // tags associated with this index!
-                    self.added
-                        .entry(mi)
-                        .or_insert_with(HashSet::new)
-                        .insert(index);
+                    if new_index || self.partial.contains(&ni) {
+                        // we need to add to self.added even if we didn't explicitly add any new
+                        // indices if we're partial, because existing domains will need to be told
+                        // about new partial replay paths sourced from this node.
+                        self.added
+                            .entry(ni)
+                            .or_insert_with(HashSet::new)
+                            .insert(index);
+                    }
                 }
+            } else {
+                assert!(graph[ni].is_reader());
             }
         }
+        assert!(replay_obligations.is_empty());
     }
 
     /// Commit to all materialization decisions since the last time `commit` was called.
@@ -435,6 +447,43 @@ impl Materializations {
         new: &HashSet<NodeIndex>,
         domains: &mut HashMap<domain::Index, domain::DomainHandle>,
     ) {
+        self.extend(graph, new);
+
+        // check that we don't have fully materialized nodes downstream of partially materialized
+        // nodes.
+        {
+            fn any_partial(
+                this: &Materializations,
+                graph: &Graph,
+                ni: NodeIndex,
+            ) -> Option<NodeIndex> {
+                if this.partial.contains(&ni) {
+                    return Some(ni);
+                }
+                for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    if let Some(ni) = any_partial(this, graph, ni) {
+                        return Some(ni);
+                    }
+                }
+                None
+            }
+
+            // TODO: technically this is insufficient, because we could have made an existing
+            // node fully materialized (I think).
+            for &ni in new {
+                if self.partial.contains(&ni) || !self.have.contains_key(&ni) {
+                    continue;
+                }
+
+                if let Some(pi) = any_partial(self, graph, ni) {
+                    crit!(self.log, "partial materializations above full materialization";
+                              "full" => ni.index(),
+                              "partial" => pi.index());
+                    unimplemented!();
+                }
+            }
+        }
+
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(graph);
@@ -457,6 +506,14 @@ impl Materializations {
         // first, we add any new indices to existing nodes
         for node in reindex {
             let mut index_on = self.added.remove(&node).unwrap();
+
+            // are they trying to make a non-materialized node materialized?
+            if self.have[&node] == index_on {
+                warn!(self.log, "materializing existing non-materialized node";
+                      "node" => node.index(),
+                      "cols" => ?index_on);
+            }
+
             let n = &graph[node];
             if self.partial.contains(&node) {
                 info!(self.log, "adding partial index to existing {:?}", n);
@@ -645,34 +702,33 @@ impl Materializations {
             plan.finalize()
         };
 
-        trace!(self.log, "all domains ready for replay");
+        if !pending.is_empty() {
+            trace!(self.log, "all domains ready for replay");
 
-        // prepare for, start, and wait for replays
-        for pending in pending {
-            // tell the first domain to start playing
-            trace!(self.log, "telling root domain to start replay";
+            // prepare for, start, and wait for replays
+            for pending in pending {
+                // tell the first domain to start playing
+                trace!(self.log, "telling root domain to start replay";
                    "domain" => pending.source_domain.index());
 
-            domains
-                .get_mut(&pending.source_domain)
-                .unwrap()
-                .send(box Packet::StartReplay {
-                    tag: pending.tag,
-                    from: pending.source,
-                })
-                .unwrap();
+                domains
+                    .get_mut(&pending.source_domain)
+                    .unwrap()
+                    .send(box Packet::StartReplay {
+                        tag: pending.tag,
+                        from: pending.source,
+                    })
+                    .unwrap();
+            }
 
             // and then wait for the last domain to receive all the records
+            let target = graph[ni].domain();
             trace!(self.log,
                "waiting for done message from target";
-               "domain" => pending.target_domain.index()
+               "domain" => target.index(),
             );
 
-            domains
-                .get_mut(&pending.target_domain)
-                .unwrap()
-                .wait_for_ack()
-                .unwrap();
+            domains.get_mut(&target).unwrap().wait_for_ack().unwrap();
         }
     }
 }

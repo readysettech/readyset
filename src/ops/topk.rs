@@ -233,6 +233,7 @@ impl Ingredient for TopK {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -283,6 +284,11 @@ impl Ingredient for TopK {
                         misses.push(Miss {
                             node: *us,
                             columns: Vec::from(group_by),
+                            replay_key: replay_key_col.map(|col| {
+                                // since topk is an identity, we don't need to map this output
+                                // column to an input column.
+                                vec![diffs[0][col].clone()]
+                            }),
                             key: group.clone(),
                         });
                         None

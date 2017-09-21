@@ -365,6 +365,13 @@ pub fn shard(
                     continue;
                 }
 
+                // we can't shard compound bases (yet)
+                if let Some(k) = graph[p].get_base().unwrap().key() {
+                    if k.len() != 1 {
+                        continue;
+                    }
+                }
+
                 // if the base has other children, sharding it may have other effects
                 if graph
                     .neighbors_directed(p, petgraph::EdgeDirection::Outgoing)
@@ -543,7 +550,7 @@ fn reshard(
     let node = match to {
         Sharding::None => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
-            let n: NodeOperator = ops::union::Union::new_deshard(src.into()).into();
+            let n: NodeOperator = ops::union::Union::new_deshard(src.into(), ::SHARDS).into();
             let mut n = graph[src].mirror(n);
             n.shard_by(Sharding::None);
             n.mark_as_shard_merger(true);

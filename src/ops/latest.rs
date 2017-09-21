@@ -64,6 +64,7 @@ impl Ingredient for Latest {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -98,6 +99,12 @@ impl Ingredient for Latest {
                     misses.push(Miss{
                         node: *us,
                         columns: vec![self.key[0]],
+                        replay_key: replay_key_col.map(|col| {
+                            debug_assert_eq!(col, self.key[0]);
+                            // since latest is an identity, we don't need to map this output column
+                            // to an input column.
+                            vec![r[col].clone()]
+                        }),
                         key: vec![r[self.key[0]].clone()],
                     });
                     None

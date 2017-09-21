@@ -159,3 +159,8 @@ required-features = ["binaries"]
 name = "vote-new-fraction"
 path = "benchmarks/vote/vote-new-fraction.rs"
 required-features = ["binaries"]
+
+[[bin]]
+name = "vote-stress"
+path = "benchmarks/vote/stress.rs"
+required-features = ["binaries"]

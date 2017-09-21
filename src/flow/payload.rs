@@ -67,7 +67,7 @@ pub enum InitialState {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum ReplayPieceContext {
     Partial {
-        for_key: Vec<DataType>,
+        for_keys: HashSet<Vec<DataType>>,
         ignore: bool,
     },
     Regular { last: bool },
@@ -221,6 +221,9 @@ pub enum Packet {
     /// Notification from Blender for domain to terminate
     Quit,
 
+    /// A packet used solely to drive the event loop forward.
+    Spin,
+
     // Transaction time messages
     //
     /// Instruct domain to flush pending transactions and notify upon completion. `prev_ts` is the
@@ -356,7 +359,7 @@ impl Packet {
                 ref tag,
                 ref data,
                 ref nshards,
-                context: ref context @ ReplayPieceContext::Regular { .. },
+                ref context,
                 ref transaction_state,
             } => Packet::ReplayPiece {
                 link: link.clone(),
