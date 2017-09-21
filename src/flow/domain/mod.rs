@@ -1770,6 +1770,7 @@ impl Domain {
                         // we're all good -- continue propagating
                         if m.as_ref().map(|m| m.is_empty()).unwrap_or(true) {
                             if let ReplayPieceContext::Regular { last: false } = context {
+                                trace!(self.log, "dropping empty non-terminal full replay packet");
                                 // don't continue processing empty updates, *except* if this is the
                                 // last replay batch. in that case we need to send it so that the
                                 // next domain knows that we're done
