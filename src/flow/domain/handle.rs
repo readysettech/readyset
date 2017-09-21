@@ -234,9 +234,16 @@ impl DomainHandle {
                 node: node.clone(),
                 parents: parents.clone(),
             },
-            Packet::AddBaseColumn { .. } | Packet::DropBaseColumn { .. } => {
-                unreachable!("sharded base node")
-            }
+            Packet::AddBaseColumn {
+                node,
+                ref field,
+                ref default,
+            } => box Packet::AddBaseColumn {
+                node: node,
+                field: field.clone(),
+                default: default.clone(),
+            },
+            Packet::DropBaseColumn { node, column } => box Packet::DropBaseColumn { node, column },
             Packet::UpdateEgress {
                 ref node,
                 ref new_tx,
