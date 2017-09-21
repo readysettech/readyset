@@ -376,7 +376,14 @@ impl MirNode {
     }
 
     pub fn add_column(&mut self, c: Column) {
-        self.columns.push(c.clone());
+        match self.inner {
+            // the aggregation column must always be the last column
+            MirNodeType::Aggregation { .. } => {
+                let pos = self.columns.len() - 1;
+                self.columns.insert(pos, c.clone());
+            }
+            _ => self.columns.push(c.clone()),
+        }
         self.inner.add_column(c);
     }
 
