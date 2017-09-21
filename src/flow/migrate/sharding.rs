@@ -547,6 +547,14 @@ fn reshard(
 ) {
     assert!(!graph[src].is_source());
 
+    if graph[src].sharded_by() == Sharding::None && to == Sharding::None {
+        trace!(log, "no need to shuffle";
+               "src" => ?src,
+               "dst" => ?dst,
+               "sharding" => ?to);
+        return;
+    }
+
     let node = match to {
         Sharding::None => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
