@@ -403,7 +403,7 @@ impl MirNode {
             MirNodeType::Base {
                 ref column_specs, ..
             } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                None => panic!("tried to look up non-existent column {:?}", c),
+                None => panic!("tried to look up non-existent column {:?} in {}", c, self.name),
                 Some(id) => column_specs[id]
                     .1
                     .expect("must have an absolute column ID on base"),

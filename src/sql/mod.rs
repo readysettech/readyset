@@ -188,9 +188,10 @@ impl SqlIncorporator {
                     // QGs are identical, except for parameters (or their order)
                     info!(
                         self.log,
-                        "Query '{}' has an exact match modulo parameters, \
+                        "Query '{}' has an exact match modulo parameters in {}, \
                          so making a new reader",
-                        query_name
+                        query_name,
+                        mir_query.name,
                     );
 
                     // We want to hang the new leaf off the last non-leaf node of the query that has the
