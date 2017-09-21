@@ -185,60 +185,75 @@ impl SqlIncorporator {
                     );
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
-                    // QGs are identical, except for parameters (or their order)
-                    info!(
-                        self.log,
-                        "Query '{}' has an exact match modulo parameters in {}, \
-                         so making a new reader",
-                        query_name,
-                        mir_query.name,
-                    );
+                    use self::query_graph::OutputColumn;
 
-                    // We want to hang the new leaf off the last non-leaf node of the query that has the
-                    // parameter columns we need, so backtrack until we find this place. Typically, this
-                    // unwinds only two steps, above the final projection.
-                    // However, there might be cases in which a parameter column needed is not present
-                    // in the query graph (because a later migration added the column to a base schema
-                    // after the query was added to the graph). In this case, we move on to other reuse
-                    // options.
-                    let params = qg.parameters().into_iter().cloned().collect();
-                    match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params) {
-                        Some(mn) => {
-                            use mir::MirNodeType;
-                            let project_columns = match mn.borrow().inner {
-                                MirNodeType::Project { .. } => None,
-                                _ => {
-                                    // N.B.: we can't just add an identity here, since we might have
-                                    // backtracked above a projection in order to get the new
-                                    // parameter column(s). In this case, we need to add a new
-                                    // projection that includes the same columns as the one for the
-                                    // existing query, but also additional parameter columns. The
-                                    // latter get added later; here we simply extract the columns
-                                    // that need reprojecting and pass them along with the reuse
-                                    // instruction.
-                                    let existing_projection = mir_query
-                                        .leaf
-                                        .borrow()
-                                        .ancestors()
-                                        .iter()
-                                        .next()
-                                        .unwrap()
-                                        .clone();
-                                    let project_columns = existing_projection
-                                        .borrow()
-                                        .columns()
-                                        .into_iter()
-                                        .cloned()
-                                        .collect();
-                                    Some(project_columns)
-                                }
-                            };
-                            return (
-                                qg,
-                                QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
-                            );
+                    // if any of our columns are grouped expressions, we can't reuse here, since
+                    // the difference in parameters means that there is a difference in the implied
+                    // GROUP BY clause
+                    if qg.columns.iter().all(|c| match *c {
+                        OutputColumn::Literal(_) => true,
+                        OutputColumn::Data(ref dc) => dc.function.is_none(),
+                    }) {
+                        // QGs are identical, except for parameters (or their order)
+                        info!(
+                            self.log,
+                            "Query '{}' has an exact match modulo parameters in {}, \
+                             so making a new reader",
+                            query_name,
+                            mir_query.name,
+                        );
+
+                        // We want to hang the new leaf off the last non-leaf node of the query that
+                        // has the parameter columns we need, so backtrack until we find this place.
+                        // Typically, this unwinds only two steps, above the final projection.
+                        // However, there might be cases in which a parameter column needed is not
+                        // present in the query graph (because a later migration added the column to
+                        // a base schema after the query was added to the graph). In this case, we
+                        // move on to other reuse options.
+                        let params = qg.parameters().into_iter().cloned().collect();
+                        match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
+                        {
+                            Some(mn) => {
+                                use mir::MirNodeType;
+                                let project_columns = match mn.borrow().inner {
+                                    MirNodeType::Project { .. } => None,
+                                    _ => {
+                                        // N.B.: we can't just add an identity here, since we might
+                                        // have backtracked above a projection in order to get the
+                                        // new parameter column(s). In this case, we need to add a
+                                        // new projection that includes the same columns as the one
+                                        // for the existing query, but also additional parameter
+                                        // columns. The latter get added later; here we simply
+                                        // extract the columns that need reprojecting and pass them
+                                        // along with the reuse instruction.
+                                        let existing_projection = mir_query
+                                            .leaf
+                                            .borrow()
+                                            .ancestors()
+                                            .iter()
+                                            .next()
+                                            .unwrap()
+                                            .clone();
+                                        let project_columns = existing_projection
+                                            .borrow()
+                                            .columns()
+                                            .into_iter()
+                                            .cloned()
+                                            .collect();
+                                        Some(project_columns)
+                                    }
+                                };
+                                return (
+                                    qg,
+                                    QueryGraphReuse::ReaderOntoExisting(
+                                        mn,
+                                        project_columns,
+                                        params,
+                                    ),
+                                );
+                            }
+                            None => (),
                         }
-                        None => (),
                     }
                 }
             }
