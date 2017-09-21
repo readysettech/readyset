@@ -240,6 +240,7 @@ impl Domain {
         assert_eq!(replay_key.len(), 1);
         assert_eq!(miss_key.len(), 1);
 
+        let mut redundant = false;
         let redo = (needed_for, replay_key[0].clone());
         match w.redos.entry((miss_columns[0], miss_key[0].clone())) {
             Entry::Occupied(e) => {
@@ -249,7 +250,7 @@ impl Domain {
                     // this Redo should wait for this backfill to complete before redoing
                     w.holes.entry(redo).or_insert(0).add_assign(1);
                 }
-                return;
+                redundant = true;
             }
             Entry::Vacant(e) => {
                 // we haven't already requested backfill of this key
@@ -263,6 +264,9 @@ impl Domain {
         }
 
         self.waiting.insert(miss_in, w);
+        if redundant {
+            return;
+        }
 
         let mut found = false;
         let tags: Vec<Tag> = self.replay_paths.keys().cloned().collect();
