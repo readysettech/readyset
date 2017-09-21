@@ -244,7 +244,7 @@ where
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        if col == self.cols - 1 {
+        if col == self.colfix.len() {
             return None;
         }
         Some(vec![(self.src.as_global(), self.colfix[col])])
