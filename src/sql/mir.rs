@@ -1153,13 +1153,14 @@ impl SqlToMirConverter {
                             // get any parameter columns that aren't also in the group-by
                             // column set
                             let param_cols: Vec<_> = qg.relations
-                                .get(over_table)
-                                .as_ref()
-                                .unwrap()
-                                .parameters
-                                .iter()
-                                .filter(|ref c| !gb_cols.contains(c))
-                                .collect();
+                                .values()
+                                .fold(vec![], |acc, rel| {
+                                    acc.into_iter().chain(
+                                        rel.parameters
+                                        .iter()
+                                        .filter(|ref c| !gb_cols.contains(c))
+                                    ).collect()
+                                });
                             // combine
                             let gb_and_param_cols: Vec<_> =
                                 gb_cols.into_iter().chain(param_cols.into_iter()).collect();

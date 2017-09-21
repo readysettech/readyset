@@ -14,7 +14,7 @@ CREATE TABLE shopping_cart ( sc_id int not null, sc_time timestamp, PRIMARY KEY(
 CREATE TABLE shopping_cart_line ( scl_sc_id int not null, scl_qty int, scl_i_id int not null, PRIMARY KEY(scl_sc_id, scl_i_id));
 
 # modified getBestSellers
-getBestSellers: SELECT i_id, i_title, a_fname, a_lname, SUM(ol_qty) AS total_qty FROM item, author, order_line WHERE item.i_id = order_line.ol_i_id AND item.i_a_id = author.a_id AND order_line.ol_o_id > 2588667 GROUP BY i_id, i_title, a_fname, a_lname ORDER BY total_qty DESC limit 50;
+getBestSellers: SELECT i_id, i_title, a_fname, a_lname, SUM(ol_qty) AS total_qty FROM item, author, order_line WHERE item.i_id = order_line.ol_i_id AND item.i_a_id = author.a_id AND order_line.ol_o_id > 2588667 AND item.i_subject = ? GROUP BY i_id, i_title, a_fname, a_lname ORDER BY total_qty DESC limit 50;
 
 # getMostRecentOrder.lines
 getMostRecentOrderLines: SELECT * FROM order_line, item WHERE ol_o_id = ? AND ol_i_id = i_id;
