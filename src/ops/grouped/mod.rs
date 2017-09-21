@@ -255,7 +255,7 @@ where
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        if column == self.cols - 1 {
+        if column == self.colfix.len() {
             return vec![(self.src.as_global(), None)];
         }
         vec![(self.src.as_global(), Some(self.colfix[column]))]
