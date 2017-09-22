@@ -72,6 +72,28 @@ where
     }
 }
 
+pub fn predicate_is_equivalent(np: &ConditionTree, ep: &ConditionTree) -> bool {
+    let nl_col = match *np.left {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+    let nr_col = match *np.right {
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
+
+    let el_col = match *ep.left {
+            ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+            _ => unimplemented!(),
+        };
+    let er_col = match *ep.right {
+        ConditionExpression::Base(ConditionBase::Field(ref f)) => f.clone(),
+        _ => unimplemented!(),
+    };
+
+    (nl_col == el_col && nr_col == er_col) || (nl_col == er_col && nr_col == el_col)
+}
+
 /// Direct elimination for complex predicates with nested `and` and `or` expressions
 pub fn complex_predicate_implies(np: &ConditionExpression, ep: &ConditionExpression) -> bool {
     match *ep {

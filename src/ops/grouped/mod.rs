@@ -244,7 +244,7 @@ where
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        if col == self.cols - 1 {
+        if col == self.colfix.len() {
             return None;
         }
         Some(vec![(self.src.as_global(), self.colfix[col])])
@@ -255,7 +255,7 @@ where
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        if column == self.cols - 1 {
+        if column == self.colfix.len() {
             return vec![(self.src.as_global(), None)];
         }
         vec![(self.src.as_global(), Some(self.colfix[column]))]

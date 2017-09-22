@@ -315,26 +315,23 @@ impl<'a> Plan<'a> {
         let s = self.graph[self.node]
             .with_reader(|r| {
                 // we need to make sure there's an entry in readers for this reader!
-                match self.graph[self.node].sharded_by() {
-                    Sharding::None => {
-                        self.m
-                            .readers
-                            .lock()
-                            .unwrap()
-                            .insert(self.node, ReadHandle::Singleton(None));
+                if self.graph[self.node].sharded_by().is_none() {
+                    self.m
+                        .readers
+                        .lock()
+                        .unwrap()
+                        .insert(self.node, ReadHandle::Singleton(None));
+                } else {
+                    use arrayvec::ArrayVec;
+                    let mut shards = ArrayVec::new();
+                    for _ in 0..::SHARDS {
+                        shards.push(None);
                     }
-                    _ => {
-                        use arrayvec::ArrayVec;
-                        let mut shards = ArrayVec::new();
-                        for _ in 0..::SHARDS {
-                            shards.push(None);
-                        }
-                        self.m
-                            .readers
-                            .lock()
-                            .unwrap()
-                            .insert(self.node, ReadHandle::Sharded(shards));
-                    }
+                    self.m
+                        .readers
+                        .lock()
+                        .unwrap()
+                        .insert(self.node, ReadHandle::Sharded(shards));
                 }
 
                 if self.partial {

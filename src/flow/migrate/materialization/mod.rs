@@ -522,7 +522,7 @@ impl Materializations {
                 self.setup(node, &mut index_on, graph, &empty, domains);
                 mem::replace(&mut self.log, log);
                 index_on.clear();
-            } else if n.sharded_by() != Sharding::None {
+            } else if !n.sharded_by().is_none() {
                 // what do we even do here?!
                 crit!(self.log, "asked to add index to sharded node";
                            "node" => node.index(),

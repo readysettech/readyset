@@ -104,17 +104,14 @@ impl DomainHandle {
                 boot_args.push((rx, in_rx, back_rx, cr_tx));
             };
             add();
-            match sharded_by {
-                Sharding::None => {}
-                _ => {
-                    // NOTE: warning to future self
-                    // the code currently relies on the fact that the domains that are sharded by
-                    // the same key *also* have the same number of shards. if this no longer holds,
-                    // we actually need to do a shuffle, otherwise writes will end up on the wrong
-                    // shard. keep that in mind.
-                    for _ in 1..::SHARDS {
-                        add();
-                    }
+            if !sharded_by.is_none() {
+                // NOTE: warning to future self
+                // the code currently relies on the fact that the domains that are sharded by
+                // the same key *also* have the same number of shards. if this no longer holds,
+                // we actually need to do a shuffle, otherwise writes will end up on the wrong
+                // shard. keep that in mind.
+                for _ in 1..::SHARDS {
+                    add();
                 }
             }
         }

@@ -9,8 +9,18 @@ use ops;
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {
     None,
+    ForcedNone,
     Random,
     ByColumn(usize),
+}
+
+impl Sharding {
+    pub fn is_none(&self) -> bool {
+        match *self {
+            Sharding::None | Sharding::ForcedNone => true,
+            _ => false,
+        }
+    }
 }
 
 pub fn shard(
@@ -50,7 +60,7 @@ pub fn shard(
         } else if graph[node].is_reader() {
             assert_eq!(input_shardings.len(), 1);
             let ni = input_shardings.keys().next().cloned().unwrap();
-            if let Sharding::None = input_shardings[&ni] {
+            if input_shardings[&ni].is_none() {
                 continue;
             }
 
@@ -58,8 +68,8 @@ pub fn shard(
                 .with_reader(|r| r.key())
                 .unwrap()
                 .map(Sharding::ByColumn)
-                .unwrap_or(Sharding::None);
-            if s == Sharding::None {
+                .unwrap_or(Sharding::ForcedNone);
+            if s.is_none() {
                 info!(log, "de-sharding prior to stream-only reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
@@ -77,10 +87,15 @@ pub fn shard(
             HashMap::new()
         };
         if need_sharding.is_empty() &&
-            (input_shardings.len() == 1 ||
-                input_shardings.iter().all(|(_, &s)| s == Sharding::None))
+            (input_shardings.len() == 1 || input_shardings.iter().all(|(_, &s)| s.is_none()))
         {
-            let s = input_shardings.into_iter().map(|(_, s)| s).next().unwrap();
+            let mut s = input_shardings.iter().map(|(_, &s)| s).next().unwrap();
+            if input_shardings
+                .iter()
+                .any(|(_, &s)| s == Sharding::ForcedNone)
+            {
+                s = Sharding::ForcedNone;
+            }
             info!(log, "preserving sharding of pass-through node";
                   "node" => ?node,
                   "sharding" => ?s);
@@ -101,7 +116,7 @@ pub fn shard(
                 // of that key, we can probably re-use the existing sharding?
                 error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
                 for (&ni, _) in &input_shardings {
-                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::None);
+                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::ForcedNone);
                 }
             }
             continue;
@@ -138,8 +153,8 @@ pub fn shard(
                     info!(log, "de-sharding node that partitions by output key";
                           "node" => ?node);
                     for (ni, s) in input_shardings.iter_mut() {
-                        reshard(log, new, &mut swaps, graph, *ni, node, Sharding::None);
-                        *s = Sharding::None;
+                        reshard(log, new, &mut swaps, graph, *ni, node, Sharding::ForcedNone);
+                        *s = Sharding::ForcedNone;
                     }
                     // ok to continue since standard shard_by is None
                     continue;
@@ -207,17 +222,6 @@ pub fn shard(
                     }
                 }
             }
-        }
-
-        if false && input_shardings.values().all(|s| s == &Sharding::None) {
-            // none of our inputs are sharded, so we are also not sharded
-            // disabled because we want to eagerly reshard our inputs
-            //
-            // TODO: we kind of want to know if any of our children (transitively) *want* us to
-            // sharded by a particular key. if they do, we could shard more of the computation,
-            // which is probably good for us.
-            info!(log, "preserving non-sharding of node"; "node" => ?node);
-            continue;
         }
 
         // the safe thing to do here is to simply force all our ancestors to be unsharded. however,
@@ -314,7 +318,7 @@ pub fn shard(
 
         // we couldn't use our heuristic :(
         // force everything to be unsharded...
-        let sharding = Sharding::None;
+        let sharding = Sharding::ForcedNone;
         warn!(log, "forcing de-sharding"; "node" => ?node);
         for &ni in need_sharding.keys() {
             if input_shardings[&ni] != sharding {
@@ -476,8 +480,8 @@ pub fn shard(
                 while let Some((_, gc)) = grandc.next(&graph) {
                     let e = graph.find_edge(c, gc).unwrap();
                     let w = graph.remove_edge(e).unwrap();
-                    // undo the swap as well
-                    swaps.remove(&(gc, p)).unwrap();
+                    // undo any swaps as well
+                    swaps.remove(&(gc, p));
                     // add back the original edge
                     graph.add_edge(p, gc, w);
                 }
@@ -489,6 +493,15 @@ pub fn shard(
                 }
             }
 
+            let mut grandp = grandp;
+            let mut real_grandp = grandp;
+            if let Some(current_grandp) = swaps.get(&(p, grandp)) {
+                // so, this is interesting... the parent of p has *already* been swapped, most
+                // likely by another (hoisted) sharder. it doesn't really matter to us here, but we
+                // will want to remove the duplication of sharders (whcih we'll do below).
+                grandp = *current_grandp;
+            }
+
             // then wire us (n) above the parent instead
             warn!(log, "hoisting sharder above new unsharded node"; "sharder" => ?n, "node" => ?p);
             let new = graph[grandp].mirror(node::special::Sharder::new(src_col));
@@ -497,7 +510,8 @@ pub fn shard(
             let w = graph.remove_edge(e).unwrap();
             graph.add_edge(grandp, n, ());
             graph.add_edge(n, p, w);
-            swaps.insert((p, grandp), n);
+            swaps.remove(&(p, grandp)); // may be None
+            swaps.insert((p, real_grandp), n);
 
             // mark p as now being sharded
             graph[p].shard_by(by);
@@ -514,7 +528,7 @@ pub fn shard(
     // correctly.
     let sharded_sharders: Vec<_> = new.iter()
         .filter(|&&n| {
-            graph[n].is_sharder() && graph[n].sharded_by() != Sharding::None
+            graph[n].is_sharder() && !graph[n].sharded_by().is_none()
         })
         .cloned()
         .collect();
@@ -527,8 +541,11 @@ pub fn shard(
             p
         };
         error!(log, "preventing unsupported sharded shuffle"; "sharder" => ?n);
-        reshard(log, new, &mut swaps, graph, p, n, Sharding::None);
-        graph.node_weight_mut(n).unwrap().shard_by(Sharding::None);
+        reshard(log, new, &mut swaps, graph, p, n, Sharding::ForcedNone);
+        graph
+            .node_weight_mut(n)
+            .unwrap()
+            .shard_by(Sharding::ForcedNone);
     }
 
     swaps
@@ -547,7 +564,7 @@ fn reshard(
 ) {
     assert!(!graph[src].is_source());
 
-    if graph[src].sharded_by() == Sharding::None && to == Sharding::None {
+    if graph[src].sharded_by().is_none() && to.is_none() {
         trace!(log, "no need to shuffle";
                "src" => ?src,
                "dst" => ?dst,
@@ -556,11 +573,11 @@ fn reshard(
     }
 
     let node = match to {
-        Sharding::None => {
+        Sharding::None | Sharding::ForcedNone => {
             // NOTE: this *must* be a union so that we correctly buffer partial replays
             let n: NodeOperator = ops::union::Union::new_deshard(src.into(), ::SHARDS).into();
             let mut n = graph[src].mirror(n);
-            n.shard_by(Sharding::None);
+            n.shard_by(to);
             n.mark_as_shard_merger(true);
             n
         }

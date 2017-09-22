@@ -376,7 +376,14 @@ impl MirNode {
     }
 
     pub fn add_column(&mut self, c: Column) {
-        self.columns.push(c.clone());
+        match self.inner {
+            // the aggregation column must always be the last column
+            MirNodeType::Aggregation { .. } => {
+                let pos = self.columns.len() - 1;
+                self.columns.insert(pos, c.clone());
+            }
+            _ => self.columns.push(c.clone()),
+        }
         self.inner.add_column(c);
     }
 
@@ -410,8 +417,11 @@ impl MirNode {
             },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => match self.columns.iter().position(|cc| cc == c) {
-                None => panic!("tried to look up non-existent column {:?}", c.name),
+            _ => match self.columns.iter().position(|cc| cc.name == c.name && cc.table == c.table) {
+                None => {
+                        println!("{:?}, {:?}", c, self.columns );
+                        panic!("tried to look up non-existent column {:?}", c.name);
+                }
                 Some(id) => id,
             },
         }
@@ -1359,9 +1369,9 @@ fn make_grouped_node(
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
-        group_by.len() <= 4,
+        group_by.len() <= 6,
         format!(
-            "can't have >4 group columns due to compound key restrictions, {} needs {}",
+            "can't have >6 group columns due to compound key restrictions, {} needs {}",
             name,
             group_by.len()
         )

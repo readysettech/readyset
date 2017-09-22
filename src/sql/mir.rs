@@ -8,7 +8,7 @@ use ops::join::JoinType;
 use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
-use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
+use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge, JoinRef};
 
 use slog;
 use std::collections::{HashMap, HashSet};
@@ -39,6 +39,26 @@ fn sanitize_leaf_column(mut c: Column, view_name: &str) -> Column {
         c.alias = None;
     }
     c
+}
+
+struct JoinChain {
+    tables: HashSet<String>,
+    last_node: MirNodeRef
+}
+
+impl JoinChain {
+    pub fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
+        let tables = self.tables.union(&other.tables).cloned().collect();
+
+        JoinChain {
+            tables: tables,
+            last_node: last_node,
+        }
+    }
+
+    pub fn has_table(&self, table: &String) -> bool {
+        self.tables.contains(table)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -931,7 +951,6 @@ impl SqlToMirConverter {
         st: &SelectStatement,
         qg: &QueryGraph,
     ) -> Vec<MirNodeRef> {
-        use std::cmp::Ordering;
         use std::collections::HashMap;
 
         let mut nodes_added: Vec<MirNodeRef>;
@@ -970,97 +989,77 @@ impl SqlToMirConverter {
                 base_nodes.insert(*rel, base_for_rel);
             }
 
-            // 1. Generate join nodes for the query. This starts out by joining two of the base
-            //    nodes corresponding to relations in the first join predicate, and then continues
-            //    to join the result against previously unseen tables from the remaining
-            //    predicates. Note that no (src, dst) pair ever occurs twice, since we've already
-            //    previously moved all predicates pertaining to src/dst joins onto a single edge.
+            // 1. Generate join nodes for the query.
+            // This is done by creating/merging join chains as each predicate is added.
+            // If a predicate's parent tables appear in a previous predicate, the
+            // current predicate is added to the on-going join chain of the previous
+            // predicate.
+            // If a predicate's parent tables haven't been used by any previous predicate,
+            // a new join chain is started for the current predicate. And we assume that
+            // a future predicate will bring these chains together.
             let mut join_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut joined_tables = HashSet::new();
-            let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> =
-                qg.edges.iter().collect();
-            // Sort the edges to ensure deterministic join order.
-            sorted_edges.sort_by(|&(a, _), &(b, _)| {
-                let src_ord = a.0.cmp(&b.0);
-                if src_ord == Ordering::Equal {
-                    a.1.cmp(&b.1)
-                } else {
-                    src_ord
-                }
-            });
-            let mut prev_node = None;
-
             {
-                let pick_join_columns = |src: &String,
-                                         dst: &String,
-                                         prev_node: Option<MirNodeRef>,
-                                         joined_tables: &HashSet<_>|
-                 -> (MirNodeRef, MirNodeRef) {
-                    let left_node;
-                    let right_node;
-                    if joined_tables.contains(src) && joined_tables.contains(dst) {
-                        // We have already handled *both* tables that are part of the join.
-                        // This should never occur, because their join predicates must be
-                        // associated with the same query graph edge.
-                        unreachable!();
-                    } else if joined_tables.contains(src) {
-                        // join left against previous join, right against base
-                        left_node = prev_node.as_ref().unwrap().clone();
-                        right_node = base_nodes[dst.as_str()].clone();
-                    } else if joined_tables.contains(dst) {
-                        // join right against previous join, left against base
-                        left_node = base_nodes[src.as_str()].clone();
-                        right_node = prev_node.as_ref().unwrap().clone();
-                    } else {
-                        // We've seen neither of these tables before
-                        // If we already have a join in prev_ni, we must assume that some
-                        // future join will bring these unrelated join arms together.
-                        // TODO(malte): make that actually work out...
-                        left_node = base_nodes[src.as_str()].clone();
-                        right_node = base_nodes[dst.as_str()].clone();
-                    }
-                    (left_node, right_node)
-                };
+                let mut join_chains = Vec::new();
 
-                for &(&(ref src, ref dst), edge) in &sorted_edges {
-                    let mut jns = Vec::new();
-                    let (join_type, jps) = match *edge {
-                        // Edge represents a LEFT JOIN
-                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
-                        // Edge represents a JOIN
-                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
-                        // Edge represents a GROUP BY, which we handle later
-                        QueryGraphEdge::GroupBy(_) => continue,
+                let pick_join_chains = |src: &String,
+                                         dst: &String,
+                                         join_chains: &mut Vec<JoinChain>|
+                 -> (JoinChain, JoinChain) {
+                    let left_chain = match join_chains.iter().position(|ref chain| chain.has_table(src)) {
+                        Some(idx) => join_chains.swap_remove(idx),
+                        None => JoinChain {
+                            tables: vec![src.clone()].into_iter().collect(),
+                            last_node: base_nodes[src.as_str()].clone()
+                        },
                     };
 
-                    let (left_node, right_node) =
-                        pick_join_columns(src, dst, prev_node, &joined_tables);
+                    let right_chain = match join_chains.iter().position(|ref chain| chain.has_table(dst)) {
+                        Some(idx) => join_chains.swap_remove(idx),
+                        None => JoinChain {
+                            tables: vec![dst.clone()].into_iter().collect(),
+                            last_node: base_nodes[dst.as_str()].clone()
+                        },
+                    };
 
-                    let mut prev_join = right_node;
-                    for jp in jps.into_iter() {
-                        let cur_join = self.make_join_node(
-                            &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
-                            jp,
-                            left_node.clone(),
-                            prev_join.clone(),
-                            join_type.clone(),
-                        );
+                    (left_chain, right_chain)
+                };
 
-                        prev_join = cur_join.clone();
-                        new_node_count += 1;
-                        jns.push(cur_join);
+                let from_join_ref = |jref: &JoinRef| -> (JoinType, &ConditionTree) {
+                    let edge = qg.edges.get(&(jref.src.clone(), jref.dst.clone())).unwrap();
+                    match *edge {
+                        QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps.get(jref.index).unwrap()),
+                        QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps.get(jref.index).unwrap()),
+                        QueryGraphEdge::GroupBy(_) => unreachable!(),
                     }
+                };
 
-                    // bookkeeping (shared between both join types)
-                    prev_node = Some(jns.last().unwrap().clone());
-                    join_nodes.extend(jns);
+                for jref in qg.join_order.iter() {
+                    let (join_type, jp) = from_join_ref(jref);
+                    let (left_chain, right_chain) =
+                        pick_join_chains(&jref.src, &jref.dst, &mut join_chains);
 
-                    // we've now joined both tables
-                    joined_tables.insert(src);
-                    joined_tables.insert(dst);
+                    let jn = self.make_join_node(
+                        &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
+                        jp,
+                        left_chain.last_node.clone(),
+                        right_chain.last_node.clone(),
+                        join_type,
+                    );
+
+                    // merge node chains
+                    let new_chain = left_chain.merge_chain(right_chain, jn.clone());
+                    join_chains.push(new_chain);
+
+                    new_node_count += 1;
+
+                    join_nodes.push(jn);
                 }
             }
 
+            let mut prev_node = match join_nodes.last() {
+                Some(n) => Some(n.clone()),
+                None => None,
+            };
 
             // 2. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
@@ -1154,13 +1153,14 @@ impl SqlToMirConverter {
                             // get any parameter columns that aren't also in the group-by
                             // column set
                             let param_cols: Vec<_> = qg.relations
-                                .get(over_table)
-                                .as_ref()
-                                .unwrap()
-                                .parameters
-                                .iter()
-                                .filter(|ref c| !gb_cols.contains(c))
-                                .collect();
+                                .values()
+                                .fold(vec![], |acc, rel| {
+                                    acc.into_iter().chain(
+                                        rel.parameters
+                                        .iter()
+                                        .filter(|ref c| !gb_cols.contains(c))
+                                    ).collect()
+                                });
                             // combine
                             let gb_and_param_cols: Vec<_> =
                                 gb_cols.into_iter().chain(param_cols.into_iter()).collect();
