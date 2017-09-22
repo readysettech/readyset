@@ -249,7 +249,11 @@ impl Node {
         match self.domain {
             Some(domain) => domain,
             None => {
-                unreachable!("asked for unset domain for {:?}", self);
+                unreachable!(
+                    "asked for unset domain for {:?} {}",
+                    self,
+                    self.global_addr().index()
+                );
             }
         }
     }
