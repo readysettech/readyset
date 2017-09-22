@@ -21,7 +21,7 @@ named!(pub insertion<&[u8], InsertStatement>,
         caseless_tag!("into") ~
         multispace ~
         table: table_reference ~
-        multispace ~
+        multispace? ~
         fields: opt!(chain!(
                 tag!("(") ~
                 multispace? ~
@@ -33,7 +33,7 @@ named!(pub insertion<&[u8], InsertStatement>,
                 )
             ) ~
         caseless_tag!("values") ~
-        multispace ~
+        multispace? ~
         tag!("(") ~
         values: value_list ~
         tag!(")") ~
@@ -109,6 +109,25 @@ mod tests {
     #[test]
     fn insert_with_field_names() {
         let qstring = "INSERT INTO users (id, name) VALUES (42, \"test\");";
+
+        let res = insertion(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            InsertStatement {
+                table: Table::from("users"),
+                fields: vec![
+                    (Column::from("id"), 42.into()),
+                    (Column::from("name"), "test".into()),
+                ],
+                ..Default::default()
+            }
+        );
+    }
+
+    // Issue #3
+    #[test]
+    fn insert_without_spaces() {
+        let qstring = "INSERT INTO users(id, name) VALUES(42, \"test\");";
 
         let res = insertion(qstring.as_bytes());
         assert_eq!(
