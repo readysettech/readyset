@@ -916,6 +916,22 @@ impl MirNodeType {
                     _ => false,
                 }
             }
+            MirNodeType::Extremum {
+                on: ref our_on,
+                group_by: ref our_group_by,
+                kind: ref our_kind,
+            } => {
+                match *other {
+                    MirNodeType::Extremum {
+                        ref on,
+                        ref group_by,
+                        ref kind,
+                    } => {
+                        our_on == on && our_group_by == group_by && our_kind == kind
+                    }
+                    _ => false,
+                }
+            }
             MirNodeType::Filter {
                 conditions: ref our_conditions,
             } => match *other {

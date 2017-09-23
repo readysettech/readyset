@@ -4,7 +4,7 @@ use ops::grouped::GroupedOperator;
 use flow::prelude::*;
 
 /// Supported kinds of extremum operators.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Extremum {
     /// The minimum value that occurs in the `over` column in each group.
     MIN,
