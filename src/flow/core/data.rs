@@ -67,28 +67,6 @@ impl DataType {
             ref dt => dt.clone(),
         }
     }
-
-    /// Returns a formatted string representation of the DataType.
-    pub fn format(&self) -> String {
-        match *self {
-            DataType::None => "*".to_string(),
-            DataType::Text(..) | DataType::TinyText(..) => {
-                let text: Cow<str> = self.into();
-                format!("\"{}\"", text)
-            }
-            DataType::Int(n) => n.to_string(),
-            DataType::BigInt(n) => n.to_string(),
-            DataType::Real(i, frac) => {
-                if i == 0 && frac < 0 {
-                    // We have to insert the negative sign ourselves.
-                    format!("-0.{:09}", frac.abs())
-                } else {
-                    format!("{}.{:09}", i, frac.abs())
-                }
-            }
-            DataType::Timestamp(ts) => format!("{}", ts.format("%c")),
-        }
-    }
 }
 
 impl PartialEq for DataType {
@@ -249,24 +227,44 @@ impl<'a> From<&'a str> for DataType {
 
 impl fmt::Debug for DataType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let enum_type = match *self {
-            DataType::None => "None",
-            DataType::Text(..) => "Text",
-            DataType::TinyText(..) => "TinyText",
-            DataType::Int(..) => "Int",
-            DataType::BigInt(..) => "BigInt",
-            DataType::Real(..) => "Real",
-            DataType::Timestamp(..) => "Timestamp",
-        };
-
-        // Output e.g. Int (5):
-        write!(f, "{} ({})", enum_type, self.format())
+        match *self {
+            DataType::None => write!(f, "None"),
+            DataType::Text(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "Text ({:?})", text)
+            }
+            DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "TinyText ({:?})", text)
+            }
+            DataType::Int(n) => write!(f, "Int ({:?})", n),
+            DataType::BigInt(n) => write!(f, "BigInt ({:?})", n),
+            DataType::Timestamp(ts) => write!(f, "Timestamp ({:?})", ts),
+            DataType::Real(..) => write!(f, "Real ({})", self),
+        }
     }
 }
 
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.format())
+        match *self {
+            DataType::None => write!(f, "*"),
+            DataType::Text(..) | DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "\"{}\"", text)
+            }
+            DataType::Int(n) => write!(f, "{}", n),
+            DataType::BigInt(n) => write!(f, "{}", n),
+            DataType::Real(i, frac) => {
+                if i == 0 && frac < 0 {
+                    // We have to insert the negative sign ourselves.
+                    write!(f, "{}", format!("-0.{:09}", frac.abs()))
+                } else {
+                    write!(f, "{}", format!("{}.{:09}", i, frac.abs()))
+                }
+            }
+            DataType::Timestamp(ts) => write!(f, "{}", format!("{}", ts.format("%c"))),
+        }
     }
 }
 
@@ -447,13 +445,15 @@ mod tests {
     #[test]
     fn data_type_debug() {
         let tiny_text: DataType = "hi".into();
-        let text: DataType = "this is a very long text indeed".into();
+        let text: DataType = "I contain ' and \"".into();
         let real: DataType = (-0.05).into();
+        let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         assert_eq!(format!("{:?}", tiny_text), "TinyText (\"hi\")");
-        assert_eq!(format!("{:?}", text), "Text (\"this is a very long text indeed\")");
+        assert_eq!(format!("{:?}", text), "Text (\"I contain \\' and \\\"\")");
         assert_eq!(format!("{:?}", real), "Real (-0.050000000)");
+        assert_eq!(format!("{:?}", timestamp), "Timestamp (1970-01-01T00:00:00.042)");
         assert_eq!(format!("{:?}", int), "Int (5)");
         assert_eq!(format!("{:?}", big_int), "BigInt (5)");
     }
@@ -463,11 +463,13 @@ mod tests {
         let tiny_text: DataType = "hi".into();
         let text: DataType = "this is a very long text indeed".into();
         let real: DataType = (-0.05).into();
+        let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         assert_eq!(format!("{}", tiny_text), "\"hi\"");
         assert_eq!(format!("{}", text), "\"this is a very long text indeed\"");
         assert_eq!(format!("{}", real), "-0.050000000");
+        assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
     }
