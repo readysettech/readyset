@@ -55,7 +55,6 @@ fn main() {
     }
 
     web::run(Arc::new(Mutex::new(g))).unwrap();
-    loop {}
 }
 
 #[cfg(not(feature = "web"))]
