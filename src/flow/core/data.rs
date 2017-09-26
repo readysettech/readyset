@@ -231,16 +231,16 @@ impl fmt::Debug for DataType {
             DataType::None => write!(f, "None"),
             DataType::Text(..) => {
                 let text: Cow<str> = self.into();
-                write!(f, "Text ({:?})", text)
+                write!(f, "Text({:?})", text)
             }
             DataType::TinyText(..) => {
                 let text: Cow<str> = self.into();
-                write!(f, "TinyText ({:?})", text)
+                write!(f, "TinyText({:?})", text)
             }
-            DataType::Int(n) => write!(f, "Int ({:?})", n),
-            DataType::BigInt(n) => write!(f, "BigInt ({:?})", n),
-            DataType::Timestamp(ts) => write!(f, "Timestamp ({:?})", ts),
-            DataType::Real(..) => write!(f, "Real ({})", self),
+            DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
+            DataType::Real(..) => write!(f, "Real({})", self),
+            DataType::Int(n) => write!(f, "Int({})", n),
+            DataType::BigInt(n) => write!(f, "BigInt({})", n),
         }
     }
 }
@@ -450,12 +450,12 @@ mod tests {
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
-        assert_eq!(format!("{:?}", tiny_text), "TinyText (\"hi\")");
-        assert_eq!(format!("{:?}", text), "Text (\"I contain \\' and \\\"\")");
-        assert_eq!(format!("{:?}", real), "Real (-0.050000000)");
-        assert_eq!(format!("{:?}", timestamp), "Timestamp (1970-01-01T00:00:00.042)");
-        assert_eq!(format!("{:?}", int), "Int (5)");
-        assert_eq!(format!("{:?}", big_int), "BigInt (5)");
+        assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
+        assert_eq!(format!("{:?}", text), "Text(\"I contain \\' and \\\"\")");
+        assert_eq!(format!("{:?}", real), "Real(-0.050000000)");
+        assert_eq!(format!("{:?}", timestamp), "Timestamp(1970-01-01T00:00:00.042)");
+        assert_eq!(format!("{:?}", int), "Int(5)");
+        assert_eq!(format!("{:?}", big_int), "BigInt(5)");
     }
 
     #[test]
