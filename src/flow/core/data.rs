@@ -21,7 +21,7 @@ const TINYTEXT_WIDTH: usize = 15;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
-#[derive(Eq, PartialOrd, Ord, Debug, Clone, Serialize, Deserialize)]
+#[derive(Eq, PartialOrd, Ord, Clone, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
@@ -225,6 +225,26 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
+impl fmt::Debug for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            DataType::None => write!(f, "None"),
+            DataType::Text(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "Text({:?})", text)
+            }
+            DataType::TinyText(..) => {
+                let text: Cow<str> = self.into();
+                write!(f, "TinyText({:?})", text)
+            }
+            DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
+            DataType::Real(..) => write!(f, "Real({})", self),
+            DataType::Int(n) => write!(f, "Int({})", n),
+            DataType::BigInt(n) => write!(f, "BigInt({})", n),
+        }
+    }
+}
+
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -420,5 +440,37 @@ mod tests {
         assert_eq!(a.to_json(), json!(2.5));
         assert_eq!(b.to_json(), json!(-2.01));
         assert_eq!(c.to_json(), json!(-0.012345678));
+    }
+
+    #[test]
+    fn data_type_debug() {
+        let tiny_text: DataType = "hi".into();
+        let text: DataType = "I contain ' and \"".into();
+        let real: DataType = (-0.05).into();
+        let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let int = DataType::Int(5);
+        let big_int = DataType::BigInt(5);
+        assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
+        assert_eq!(format!("{:?}", text), "Text(\"I contain \\' and \\\"\")");
+        assert_eq!(format!("{:?}", real), "Real(-0.050000000)");
+        assert_eq!(format!("{:?}", timestamp), "Timestamp(1970-01-01T00:00:00.042)");
+        assert_eq!(format!("{:?}", int), "Int(5)");
+        assert_eq!(format!("{:?}", big_int), "BigInt(5)");
+    }
+
+    #[test]
+    fn data_type_display() {
+        let tiny_text: DataType = "hi".into();
+        let text: DataType = "this is a very long text indeed".into();
+        let real: DataType = (-0.05).into();
+        let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let int = DataType::Int(5);
+        let big_int = DataType::BigInt(5);
+        assert_eq!(format!("{}", tiny_text), "\"hi\"");
+        assert_eq!(format!("{}", text), "\"this is a very long text indeed\"");
+        assert_eq!(format!("{}", real), "-0.050000000");
+        assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
+        assert_eq!(format!("{}", int), "5");
+        assert_eq!(format!("{}", big_int), "5");
     }
 }
