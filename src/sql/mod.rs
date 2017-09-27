@@ -1281,7 +1281,7 @@ mod tests {
         // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
         // views
         // leaf view
-        let leaf_view = get_node(&inc, &mig, "q_3");
+        let leaf_view = get_node(&inc, &mig, &q.unwrap().name);
         assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
 
@@ -1348,7 +1348,7 @@ mod tests {
             &["aid", "title", "author", "id", "name", "aid", "uid"]
         );
         // leaf view
-        let leaf_view = get_node(&inc, &mig, "q_3");
+        let leaf_view = get_node(&inc, &mig, &q.unwrap().name);
         assert_eq!(leaf_view.fields(), &["name", "title", "uid"]);
     }
 
