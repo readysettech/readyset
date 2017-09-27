@@ -1,7 +1,6 @@
 use sql::reuse::helpers::predicate_implication::complex_predicate_implies;
 use sql::reuse::{ReuseConfiguration, ReuseType};
 use sql::query_graph::{QueryGraph, QueryGraphEdge};
-use mir::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;
@@ -28,9 +27,9 @@ use std::collections::HashMap;
 pub struct Relaxed;
 
 impl ReuseConfiguration for Relaxed {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>{
+    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, QueryGraph>) -> Vec<(ReuseType, &'a QueryGraph)>{
         let mut reuse_candidates = Vec::new();
-        for &(ref existing_qg, _) in query_graphs.values() {
+        for existing_qg in query_graphs.values() {
             if existing_qg
                 .signature()
                 .is_weak_generalization_of(&qg.signature())

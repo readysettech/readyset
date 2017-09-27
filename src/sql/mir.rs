@@ -1080,40 +1080,29 @@ impl SqlToMirConverter {
 
             // handles joins against UserContext table
             for &(&(ref src, ref dst), edge) in &sorted_edges {
-                let jn = match *edge {
-                    // Edge represents a LEFT JOIN
-                    QueryGraphEdge::LeftJoin(ref jps) => {
-                        let (left_node, right_node) =
-                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &local_node_for_rel);
-                        self.make_join_node(
-                            &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                            jps,
-                            left_node,
-                            right_node,
-                            JoinType::Left,
-                        )
-                    }
-                    // Edge represents a JOIN
-                    QueryGraphEdge::Join(ref jps) => {
-                        let (left_node, right_node) =
-                            self.pick_join_columns(src, dst, prev_node, &joined_tables, &local_node_for_rel);
-                        self.make_join_node(
-                            &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
-                            jps,
-                            left_node,
-                            right_node,
-                            JoinType::Inner,
-                        )
-                    }
+                let (join_type, jps) = match *edge {
+                    QueryGraphEdge::LeftJoin(ref jps) => (JoinType::Left, jps),
+                    QueryGraphEdge::Join(ref jps) => (JoinType::Inner, jps),
                     _ => continue,
                 };
 
-                join_nodes.push(jn.clone());
-                prev_node = Some(jn);
+                for jp in jps.iter() {
+                    let (left_node, right_node) =
+                        self.pick_join_columns(src, dst, prev_node, &joined_tables, &local_node_for_rel);
+                    let jn = self.make_join_node(
+                        &format!("sp_{:x}_n{:x}", qg.signature().hash, node_count),
+                        jp,
+                        left_node,
+                        right_node,
+                        join_type.clone(),
+                    );
+                    join_nodes.push(jn.clone());
+                    prev_node = Some(jn);
 
-                joined_tables.insert(src);
-                joined_tables.insert(dst);
-                node_count += 1;
+                    joined_tables.insert(src);
+                    joined_tables.insert(dst);
+                    node_count += 1;
+                }
             }
 
             // handles predicate nodes
@@ -1286,7 +1275,7 @@ impl SqlToMirConverter {
                         Some(idx) => join_chains.swap_remove(idx),
                         None => JoinChain {
                             tables: vec![src.clone()].into_iter().collect(),
-                            last_node: base_nodes[src.as_str()].clone()
+                            last_node: node_for_rel[src.as_str()].clone()
                         },
                     };
 
@@ -1294,7 +1283,7 @@ impl SqlToMirConverter {
                         Some(idx) => join_chains.swap_remove(idx),
                         None => JoinChain {
                             tables: vec![dst.clone()].into_iter().collect(),
-                            last_node: base_nodes[dst.as_str()].clone()
+                            last_node: node_for_rel[dst.as_str()].clone()
                         },
                     };
 

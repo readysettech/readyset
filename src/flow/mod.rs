@@ -197,7 +197,6 @@ impl Blender {
             mainline: self,
             added: Default::default(),
             columns: Default::default(),
-            materialize: Default::default(),
             readers: Default::default(),
 
             start: time::Instant::now(),

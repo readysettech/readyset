@@ -246,6 +246,7 @@ impl fmt::Debug for DataType {
             DataType::Real(..) => write!(f, "Real({})", self),
             DataType::Int(n) => write!(f, "Int({})", n),
             DataType::BigInt(n) => write!(f, "BigInt({})", n),
+            DataType::ContextKey(ref n) => write!(f, "ContextKey({})", n),
         }
     }
 }

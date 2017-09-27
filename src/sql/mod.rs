@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
+type UniverseId = DataType;
+
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
 /// the query, and the leaf node that represents the query result (and off whom we've hung a
@@ -53,7 +55,7 @@ pub struct SqlIncorporator {
     leaf_addresses: HashMap<String, NodeIndex>,
     num_queries: usize,
     query_graphs: HashMap<u64, QueryGraph>,
-    mir_queries: HashMap<(u64, DataType), MirQuery>,
+    mir_queries: HashMap<(u64, UniverseId), MirQuery>,
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
@@ -340,7 +342,7 @@ impl SqlIncorporator {
 
             let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
             .map(|c| {
-                self.query_graphs[&c.1.signature().hash].1.clone()
+                self.mir_queries[&(c.1.signature().hash, universe.clone())].clone()
             })
             .collect();
 
@@ -553,11 +555,12 @@ impl SqlIncorporator {
         for sq in fq.extract_subqueries() {
             use sql::passes::subqueries::{field_with_table_name, query_from_condition_base,
                                           Subquery};
+            use nom_sql::{JoinRightSide, Table};
             match sq {
                 Subquery::InComparison(cond_base) => {
                     let (sq, column) = query_from_condition_base(&cond_base);
 
-                    let qfp = self.add_parsed_query(sq, None, mig)
+                    let qfp = self.add_parsed_query(sq, None, policy_enhanced, mig)
                         .expect("failed to add subquery");
                     *cond_base = field_with_table_name(qfp.name.clone(), column);
                 }
@@ -567,6 +570,7 @@ impl SqlIncorporator {
                             let qfp = self.add_parsed_query(
                                 SqlQuery::Select(ns.clone()),
                                 alias.clone(),
+                                policy_enhanced,
                                 mig,
                             ).expect("failed to add subquery in join");
                             JoinRightSide::Table(Table {

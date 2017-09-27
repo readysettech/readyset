@@ -1,6 +1,5 @@
 use nom_sql::Table;
 use sql::query_graph::QueryGraph;
-use mir::MirQuery;
 
 use std::vec::Vec;
 use std::collections::HashMap;
@@ -38,7 +37,7 @@ impl ReuseConfig {
     pub fn reuse_candidates<'a>(
         &self,
         qg: &mut QueryGraph,
-        query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>,
+        query_graphs: &'a HashMap<u64, QueryGraph>,
     ) -> Vec<(ReuseType, &'a QueryGraph)> {
         let reuse_candidates = match self.config {
             ReuseConfigType::Finkelstein => {
@@ -87,5 +86,5 @@ impl ReuseConfig {
 }
 
 pub trait ReuseConfiguration {
-    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, (QueryGraph, MirQuery)>) -> Vec<(ReuseType, &'a QueryGraph)>;
+    fn reuse_candidates<'a>(qg: &QueryGraph, query_graphs: &'a HashMap<u64, QueryGraph>) -> Vec<(ReuseType, &'a QueryGraph)>;
 }
