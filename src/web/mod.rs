@@ -116,6 +116,10 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
 
     insert_routes! {
         &mut router => {
+            "/" => Get: Box::new(move |_ctx: Context, mut res: Response| {
+                res.headers_mut().set(ContentType::html());
+                res.send(include_str!("graph.html"));
+            }) as Box<Handler>,
             "graph" => Get: Box::new(move |ctx: Context, mut res: Response| {
                 let m: &Arc<Mutex<Blender>> = ctx.global.get().unwrap();
                 res.headers_mut().set(ContentType::plaintext());
@@ -144,10 +148,17 @@ pub fn run(soup: Arc<Mutex<Blender>>) -> HttpResult<Listening> {
         }
     };
 
-    Server {
+    let port = 8080;
+    let result = Server {
         handlers: router,
-        host: 8080.into(),
+        host: port.into(),
         global: Global::from(Box::new(soup)),
         ..Server::default()
-    }.run()
+    }.run();
+
+    if let Ok(..) = result {
+        println!("Listening to port {}", port);
+    }
+
+    result
 }
