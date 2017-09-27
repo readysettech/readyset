@@ -342,7 +342,7 @@ impl SqlIncorporator {
 
             let mir_queries: Vec<MirQuery> = reuse_candidates.iter()
             .map(|c| {
-                self.mir_queries[&(c.1.signature().hash, universe.clone())].clone()
+                self.mir_queries[&(c.1.signature().hash, "global".into())].clone()
             })
             .collect();
 
