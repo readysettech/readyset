@@ -45,14 +45,6 @@ impl Ingredient for Project {
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        false
-    }
-
-    fn will_query(&self, _materialized: bool) -> bool {
-        false
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         self.cols = g[self.src.as_global()].fields().len();
     }
@@ -80,6 +72,7 @@ impl Ingredient for Project {
         from: LocalNodeIndex,
         mut rs: Records,
         _: &mut Tracer,
+        _: Option<usize>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ProcessingResult {
@@ -113,7 +106,7 @@ impl Ingredient for Project {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         HashMap::new()
     }
 

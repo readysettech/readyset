@@ -97,14 +97,6 @@ where
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, materialized: bool) -> bool {
-        !materialized
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src.as_global()];
 
@@ -148,6 +140,7 @@ where
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -192,6 +185,14 @@ where
                 LookupResult::Missing => {
                     misses.push(Miss {
                         node: *us,
+                        columns: self.out_key.clone(),
+                        replay_key: replay_key_col.map(|col| {
+                            // since group columns go first in our output, and the replay key must
+                            // be on our group by column (partial can't go through generated
+                            // columns), this column should be < group.len()
+                            debug_assert!(col < group.len());
+                            vec![group[col].clone()]
+                        }),
                         key: group,
                     });
                     continue;
@@ -235,13 +236,15 @@ where
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         // index by our primary key
-        Some((this, self.out_key.clone())).into_iter().collect()
+        Some((this, (self.out_key.clone(), true)))
+            .into_iter()
+            .collect()
     }
 
     fn resolve(&self, col: usize) -> Option<Vec<(NodeIndex, usize)>> {
-        if col == self.cols - 1 {
+        if col == self.colfix.len() {
             return None;
         }
         Some(vec![(self.src.as_global(), self.colfix[col])])
@@ -252,7 +255,7 @@ where
     }
 
     fn parent_columns(&self, column: usize) -> Vec<(NodeIndex, Option<usize>)> {
-        if column == self.cols - 1 {
+        if column == self.colfix.len() {
             return vec![(self.src.as_global(), None)];
         }
         vec![(self.src.as_global(), Some(self.colfix[column]))]

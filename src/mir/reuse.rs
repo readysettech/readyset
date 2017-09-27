@@ -154,6 +154,7 @@ pub fn merge_mir_for_queries(
             })
             .cloned()
             .collect();
+        let original_children: Vec<_> = n.borrow().children().iter().cloned().collect();
         let children: Vec<_> = n.borrow()
             .children()
             .iter()
@@ -181,7 +182,7 @@ pub fn merge_mir_for_queries(
         real_n.borrow_mut().ancestors = ancestors;
         real_n.borrow_mut().children = children;
 
-        for c in &n.borrow().children {
+        for c in original_children {
             let cid = c.borrow().versioned_name();
             let in_edges = if in_edge_counts.contains_key(&cid) {
                 in_edge_counts[&cid]

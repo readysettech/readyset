@@ -378,7 +378,14 @@ impl MirNode {
     }
 
     pub fn add_column(&mut self, c: Column) {
-        self.columns.push(c.clone());
+        match self.inner {
+            // the aggregation column must always be the last column
+            MirNodeType::Aggregation { .. } => {
+                let pos = self.columns.len() - 1;
+                self.columns.insert(pos, c.clone());
+            }
+            _ => self.columns.push(c.clone()),
+        }
         self.inner.add_column(c);
     }
 
@@ -402,24 +409,20 @@ impl MirNode {
             // Note that `rposition` is required because multiple columns of the same name might
             // exist if a column has been removed and re-added. We always use the latest column,
             // and assume that only one column of the same name ever exists at the same time.
-            MirNodeType::Base { ref column_specs, .. } => {
-                match column_specs.iter().rposition(|cs| cs.0.column == *c) {
-                    None => panic!("tried to look up non-existent column {:?}", c),
-                    Some(id) => {
-                        column_specs[id]
-                            .1
-                            .expect("must have an absolute column ID on base")
-                    }
-                }
-            }
+            MirNodeType::Base {
+                ref column_specs, ..
+            } => match column_specs.iter().rposition(|cs| cs.0.column == *c) {
+                None => panic!("tried to look up non-existent column {:?} in {}", c, self.name),
+                Some(id) => column_specs[id]
+                    .1
+                    .expect("must have an absolute column ID on base"),
+            },
             MirNodeType::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
-            _ => {
-                match self.columns.iter().position(|cc| cc == c) {
-                    None => panic!("tried to look up non-existent column {:?}", c.name),
-                    Some(id) => id,
-                }
-            }
+            _ => match self.columns.iter().position(|cc| cc.name == c.name && cc.table == c.table) {
+                None => panic!("tried to look up non-existent column {:?}", c.name),
+                Some(id) => id,
+            },
         }
     }
 
@@ -917,12 +920,28 @@ impl MirNodeType {
                     _ => false,
                 }
             }
-            MirNodeType::Filter { conditions: ref our_conditions } => {
+            MirNodeType::Extremum {
+                on: ref our_on,
+                group_by: ref our_group_by,
+                kind: ref our_kind,
+            } => {
                 match *other {
-                    MirNodeType::Filter { ref conditions } => our_conditions == conditions,
+                    MirNodeType::Extremum {
+                        ref on,
+                        ref group_by,
+                        ref kind,
+                    } => {
+                        our_on == on && our_group_by == group_by && our_kind == kind
+                    }
                     _ => false,
                 }
             }
+            MirNodeType::Filter {
+                conditions: ref our_conditions,
+            } => match *other {
+                MirNodeType::Filter { ref conditions } => our_conditions == conditions,
+                _ => false,
+            },
             MirNodeType::Join {
                 on_left: ref our_on_left,
                 on_right: ref our_on_right,
@@ -1385,9 +1404,9 @@ fn make_grouped_node(
 ) -> FlowNode {
     assert!(group_by.len() > 0);
     assert!(
-        group_by.len() <= 4,
+        group_by.len() <= 6,
         format!(
-            "can't have >4 group columns due to compound key restrictions, {} needs {}",
+            "can't have >6 group columns due to compound key restrictions, {} needs {}",
             name,
             group_by.len()
         )

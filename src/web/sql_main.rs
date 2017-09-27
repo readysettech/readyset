@@ -9,60 +9,29 @@ fn main() {
 
     // set up graph
     let mut g = distributary::Blender::new();
+    g.log_with(distributary::logger_pls());
 
     // let's add SQL queries, rather than building the graph by hand
-    let mut inc = SqlIncorporator::default();
+    let sql = "
+        # Base tables:
+        CREATE TABLE article (id int, user int, title varchar(255), url text);
+        CREATE TABLE vote (user int, id int);
+        CREATE TABLE user (id int, username varchar(40), hash varchar(64));
+
+        # Queries:
+        vc: SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;
+        awvc: SELECT article.id, article.user, title, url, vc.votes \
+              FROM article, vc WHERE article.id = vc.id;
+        karma: SELECT awvc.user, SUM(awvc.votes) AS votes \
+               FROM awvc GROUP BY awvc.user;
+    ";
 
     {
         // migrate from the empty recipe to below
         let mut mig = g.start_migration();
-
-        // add article base node
-        let _article = inc.add_query(
-            "CREATE TABLE article \
-             (id int, user int, title varchar(255), url text);",
-            None,
-            &mut mig,
-        ).unwrap();
-
-        // add vote base table
-        let _vote = inc.add_query("CREATE TABLE vote (user int, id int);", None, &mut mig)
-            .unwrap();
-
-        // add a user account base table
-        let _user = inc.add_query(
-            "CREATE TABLE user \
-             (id int, username varchar(40), hash varchar(64));",
-            None,
-            &mut mig,
-        ).unwrap();
-
-        // add vote count
-        inc.add_query(
-            "SELECT vote.id, COUNT(vote.user) AS votes FROM vote GROUP BY vote.id;",
-            Some("vc".into()),
-            &mut mig,
-        ).unwrap();
-
-        println!("done vc");
-
-        // add final join -- joins on first field of each input
-        inc.add_query(
-            "SELECT article.id, article.user, title, url, vc.votes FROM article, \
-             vc WHERE article.id = vc.id;",
-            Some("awvc".into()),
-            &mut mig,
-        ).unwrap();
-
-        println!("done awvc");
-
-        // add user karma
-        let _karma = inc.add_query(
-            "SELECT awvc.user, SUM(awvc.votes) AS votes FROM awvc GROUP BY \
-             awvc.user;",
-            Some("karma".into()),
-            &mut mig,
-        ).unwrap();
+        let mut recipe = Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(&mut mig, false).unwrap();
+        mig.commit();
     }
 
     println!("{}", g);

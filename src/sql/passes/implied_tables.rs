@@ -94,7 +94,10 @@ impl ImpliedTableExpansion for SqlQuery {
                 );
                 Some(matches.pop().unwrap())
             } else if matches.is_empty() {
-                panic!("Failed to resolve table for column named {}", f.name);
+                // This might be an alias for a computed column, which has no
+                // implied table. So, we allow it to pass and our code should
+                // crash in the future if this is not the case.
+                None
             } else {
                 // exactly one match
                 Some(matches.pop().unwrap())

@@ -12,7 +12,7 @@ pub fn provenance_of<F>(
     mut on_join: F,
 ) -> Vec<Vec<(NodeIndex, Option<usize>)>>
 where
-    F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>,
+    F: FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex>,
 {
     let path = vec![(node, Some(column))];
     trace(graph, &mut on_join, path)
@@ -24,7 +24,7 @@ fn trace<F>(
     mut path: Vec<(NodeIndex, Option<usize>)>,
 ) -> Vec<Vec<(NodeIndex, Option<usize>)>>
 where
-    F: FnMut(NodeIndex, &[NodeIndex]) -> Option<NodeIndex>,
+    F: FnMut(NodeIndex, Option<usize>, &[NodeIndex]) -> Option<NodeIndex>,
 {
     // figure out what node/column we're looking up
     let (node, column) = path.last().cloned().unwrap();
@@ -50,7 +50,7 @@ where
     if column.is_none() {
         // except if we're a join and on_join says to only walk through one...
         if n.is_internal() && n.is_join() {
-            if let Some(parent) = on_join(node, &parents[..]) {
+            if let Some(parent) = on_join(node, column, &parents[..]) {
                 path.push((parent, None));
                 return trace(graph, on_join, path);
             }
@@ -130,7 +130,7 @@ where
     // okay, so this is a join. it's up to the on_join function to tell us whether to walk up *all*
     // the parents of the join, or just one of them. let's ask.
     // TODO: provide an early-termination mechanism?
-    match on_join(node, &parents[..]) {
+    match on_join(node, Some(column), &parents[..]) {
         None => {
             // our caller wants information about all our parents.
             // since the column we're chasing only follows a single path through a join (unless it

@@ -4,7 +4,7 @@ use ops::grouped::GroupedOperator;
 use flow::prelude::*;
 
 /// Supported kinds of extremum operators.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Extremum {
     /// The minimum value that occurs in the `over` column in each group.
     MIN,
@@ -275,7 +275,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], vec![0]);
+        assert_eq!(idx[&me], (vec![0], true));
     }
 
     #[test]

@@ -39,12 +39,12 @@ nom_sql = { git = "https://github.com/ms705/nom-sql.git", rev = "7758136babe72f4
 
 # for benchmarks
 # cli
-clap = "2.25.0"
+clap = "2.26.2"
 # distributions
 rand = "0.3.15"
 zipf = "1.0.0"
 # sampling
-hdrsample = "4.0.0"
+hdrsample = "5.0.0"
 # mssql
 futures-state-stream = { version = "0.1", optional = true }
 tiberius = { git = "https://github.com/steffengy/tiberius", optional = true }
@@ -146,6 +146,11 @@ path = "benchmarks/hotsoup/extract_queries.rs"
 required-features = ["binaries"]
 
 [[bin]]
+name = "process_paper_queries"
+path = "benchmarks/hotsoup/process_paper_queries.rs"
+required-features = ["binaries"]
+
+[[bin]]
 name = "piazza"
 path = "benchmarks/piazza/piazza.rs"
 required-features = ["binaries"]
@@ -153,4 +158,9 @@ required-features = ["binaries"]
 [[bin]]
 name = "vote-new-fraction"
 path = "benchmarks/vote/vote-new-fraction.rs"
+required-features = ["binaries"]
+
+[[bin]]
+name = "vote-stress"
+path = "benchmarks/vote/stress.rs"
 required-features = ["binaries"]

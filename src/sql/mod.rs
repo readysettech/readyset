@@ -3,7 +3,7 @@ mod passes;
 mod query_graph;
 mod query_signature;
 mod query_utils;
-mod reuse;
+pub mod reuse;
 
 use flow::Migration;
 use flow::prelude::NodeIndex;
@@ -13,8 +13,8 @@ use nom_sql::parser as sql_parser;
 use nom_sql::{Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
-use self::reuse::ReuseConfig;
-use sql::query_graph::{QueryGraph, to_query_graph};
+use self::reuse::{ReuseConfig, ReuseConfigType};
+use sql::query_graph::{to_query_graph, QueryGraph};
 use security::{Policy};
 
 use slog;
@@ -57,7 +57,7 @@ pub struct SqlIncorporator {
     schema_version: usize,
     view_schemas: HashMap<String, Vec<String>>,
     transactional: bool,
-    enable_reuse: bool,
+    reuse_type: ReuseConfigType,
 }
 
 impl Default for SqlIncorporator {
@@ -72,7 +72,7 @@ impl Default for SqlIncorporator {
             schema_version: 0,
             view_schemas: HashMap::default(),
             transactional: false,
-            enable_reuse: true,
+            reuse_type: ReuseConfigType::Finkelstein,
         }
     }
 }
@@ -95,12 +95,12 @@ impl SqlIncorporator {
 
     /// Disable node reuse for future migrations.
     pub fn disable_reuse(&mut self) {
-        self.enable_reuse = false;
+        self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
-    pub fn enable_reuse(&mut self) {
-        self.enable_reuse = true;
+    pub fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+        self.reuse_type = reuse_type;
     }
 
     /// Starts a new user universe
@@ -214,7 +214,7 @@ impl SqlIncorporator {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 
-        let qg = match to_query_graph(st) {
+        let mut qg = match to_query_graph(st) {
             Ok(qg) => qg,
             Err(e) => panic!(e),
         };
@@ -222,7 +222,7 @@ impl SqlIncorporator {
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
         // if reuse is disabled, we're done
-        if !self.enable_reuse {
+        if self.reuse_type == ReuseConfigType::NoReuse {
             return (qg, QueryGraphReuse::None);
         }
 
@@ -247,68 +247,83 @@ impl SqlIncorporator {
                     );
                     return (qg, QueryGraphReuse::ExactMatch(mir_query.leaf.clone()));
                 } else if existing_qg.signature() == qg.signature() {
-                    // QGs are identical, except for parameters (or their order)
-                    info!(
-                        self.log,
-                        "Query '{}' has an exact match modulo parameters, \
-                         so making a new reader",
-                        query_name
-                    );
+                    use self::query_graph::OutputColumn;
 
-                    // We want to hang the new leaf off the last non-leaf node of the query that has the
-                    // parameter columns we need, so backtrack until we find this place. Typically, this
-                    // unwinds only two steps, above the final projection.
-                    // However, there might be cases in which a parameter column needed is not present
-                    // in the query graph (because a later migration added the column to a base schema
-                    // after the query was added to the graph). In this case, we move on to other reuse
-                    // options.
-                    let params = qg.parameters().into_iter().cloned().collect();
+                    // if any of our columns are grouped expressions, we can't reuse here, since
+                    // the difference in parameters means that there is a difference in the implied
+                    // GROUP BY clause
+                    if qg.columns.iter().all(|c| match *c {
+                        OutputColumn::Literal(_) => true,
+                        OutputColumn::Data(ref dc) => dc.function.is_none(),
+                    }) {
+                        // QGs are identical, except for parameters (or their order)
+                        info!(
+                            self.log,
+                            "Query '{}' has an exact match modulo parameters in {}, \
+                             so making a new reader",
+                            query_name,
+                            mir_query.name,
+                        );
 
-                    match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params) {
-                        Some(mn) => {
-                            use mir::MirNodeType;
-                            let project_columns = match mn.borrow().inner {
-                                MirNodeType::Project { .. } => None,
-                                _ => {
-                                    // N.B.: we can't just add an identity here, since we might have
-                                    // backtracked above a projection in order to get the new
-                                    // parameter column(s). In this case, we need to add a new
-                                    // projection that includes the same columns as the one for the
-                                    // existing query, but also additional parameter columns. The
-                                    // latter get added later; here we simply extract the columns
-                                    // that need reprojecting and pass them along with the reuse
-                                    // instruction.
-                                    let existing_projection = mir_query
-                                        .leaf
-                                        .borrow()
-                                        .ancestors()
-                                        .iter()
-                                        .next()
-                                        .unwrap()
-                                        .clone();
-                                    let project_columns = existing_projection
-                                        .borrow()
-                                        .columns()
-                                        .into_iter()
-                                        .cloned()
-                                        .collect();
-                                    Some(project_columns)
-                                }
-                            };
-                            return (
-                                qg,
-                                QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params),
-                            );
-                        },
-                        None => ()
+                        // We want to hang the new leaf off the last non-leaf node of the query that
+                        // has the parameter columns we need, so backtrack until we find this place.
+                        // Typically, this unwinds only two steps, above the final projection.
+                        // However, there might be cases in which a parameter column needed is not
+                        // present in the query graph (because a later migration added the column to
+                        // a base schema after the query was added to the graph). In this case, we
+                        // move on to other reuse options.
+                        let params = qg.parameters().into_iter().cloned().collect();
+                        match mir_reuse::rewind_until_columns_found(mir_query.leaf.clone(), &params)
+                        {
+                            Some(mn) => {
+                                use mir::MirNodeType;
+                                let project_columns = match mn.borrow().inner {
+                                    MirNodeType::Project { .. } => None,
+                                    _ => {
+                                        // N.B.: we can't just add an identity here, since we might
+                                        // have backtracked above a projection in order to get the
+                                        // new parameter column(s). In this case, we need to add a
+                                        // new projection that includes the same columns as the one
+                                        // for the existing query, but also additional parameter
+                                        // columns. The latter get added later; here we simply
+                                        // extract the columns that need reprojecting and pass them
+                                        // along with the reuse instruction.
+                                        let existing_projection = mir_query
+                                            .leaf
+                                            .borrow()
+                                            .ancestors()
+                                            .iter()
+                                            .next()
+                                            .unwrap()
+                                            .clone();
+                                        let project_columns = existing_projection
+                                            .borrow()
+                                            .columns()
+                                            .into_iter()
+                                            .cloned()
+                                            .collect();
+                                        Some(project_columns)
+                                    }
+                                };
+                                return (
+                                    qg,
+                                    QueryGraphReuse::ReaderOntoExisting(
+                                        mn,
+                                        project_columns,
+                                        params,
+                                    ),
+                                );
+                            }
+                            None => (),
+                        }
                     }
                 }
             }
         }
 
-        let reuse_config = ReuseConfig::default();
+        let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
-        let reuse_candidates = reuse_config.reuse_candidates(&qg, &self.query_graphs);
+        let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs);
 
         if reuse_candidates.len() > 0 {
             info!(
@@ -516,17 +531,9 @@ impl SqlIncorporator {
     /// Runs some standard rewrite passes on the query.
     fn rewrite_query(&mut self,
         q: SqlQuery,
-<<<<<<< HEAD
         policy_enhanced: bool,
         mut mig: &mut Migration
     ) -> SqlQuery {
-=======
-        query_name: String,
-        mig: &mut Migration,
-    ) -> Result<QueryFlowParts, String> {
-        use nom_sql::{JoinRightSide, Table};
-        use self::query_utils::ReferredTables;
->>>>>>> master
         use sql::passes::alias_removal::AliasRemoval;
         use sql::passes::count_star_rewrite::CountStarRewrite;
         use sql::passes::implied_tables::ImpliedTableExpansion;
@@ -535,19 +542,6 @@ impl SqlIncorporator {
         use sql::passes::subqueries::SubQueries;
         use sql::query_utils::ReferredTables;
 
-<<<<<<< HEAD
-        // First, flatten out the query by extracting subqueries, adding them as
-        // views in the graph, then replace any subqueries for references to
-        // existing views.
-        let mut fq = q.clone();
-        for mut cond_base in fq.extract_subqueries() {
-            use sql::passes::subqueries::query_from_condition_base;
-            use sql::passes::subqueries::field_with_table_name;
-            let (sq, column) = query_from_condition_base(&cond_base);
-
-            let qfp = self.add_parsed_query(sq, None, policy_enhanced, mig).expect("failed to add subquery");
-            *cond_base = field_with_table_name(qfp.name.clone(), column);
-=======
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
         // so we will end up incrementing this for every subquery.
@@ -584,7 +578,6 @@ impl SqlIncorporator {
                     }
                 }
             }
->>>>>>> master
         }
 
         // Check that all tables mentioned in the query exist.

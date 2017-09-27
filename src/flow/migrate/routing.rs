@@ -128,7 +128,7 @@ pub fn add(
 
                 // insert the new ingress node
                 let ingress = graph.add_node(i);
-                graph.add_edge(parent, ingress, false);
+                graph.add_edge(parent, ingress, ());
 
                 // we also now need to deal with this ingress node
                 new.insert(ingress);
@@ -224,7 +224,7 @@ pub fn add(
                 egress.add_to(graph[sender].domain());
                 egress.shard_by(graph[sender].sharded_by());
                 let egress = graph.add_node(egress);
-                graph.add_edge(sender, egress, false);
+                graph.add_edge(sender, egress, ());
 
                 // we also now need to deal with this egress node
                 new.insert(egress);
@@ -277,7 +277,7 @@ pub fn connect(
 
                 let shards = domains[&n.domain()].shards();
                 let domain = domains.get_mut(&sender_node.domain()).unwrap();
-                if shards != 1 && sender_node.sharded_by() != Sharding::None {
+                if shards != 1 && !sender_node.sharded_by().is_none() {
                     // we need to be a bit careful here in the particular case where we have a
                     // sharded egress that sends to another domain sharded by the same key.
                     // specifically, in that case we shouldn't have each shard of domain A send to

@@ -249,7 +249,11 @@ impl Node {
         match self.domain {
             Some(domain) => domain,
             None => {
-                unreachable!("asked for unset domain for {:?}", self);
+                unreachable!(
+                    "asked for unset domain for {:?} {}",
+                    self,
+                    self.global_addr().index()
+                );
             }
         }
     }
@@ -370,10 +374,7 @@ impl Node {
     /// its domain.
     pub fn is_output(&self) -> bool {
         match self.inner {
-            NodeType::Egress { .. } |
-            NodeType::Reader(..) |
-            NodeType::Sharder(..) |
-            NodeType::Hook(..) => true,
+            NodeType::Egress { .. } | NodeType::Reader(..) | NodeType::Sharder(..) => true,
             _ => false,
         }
     }

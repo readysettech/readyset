@@ -106,17 +106,14 @@ impl DomainHandle {
                 boot_args.push((rx, in_rx, back_rx, cr_tx));
             };
             add();
-            match sharded_by {
-                Sharding::None => {}
-                _ => {
-                    // NOTE: warning to future self
-                    // the code currently relies on the fact that the domains that are sharded by
-                    // the same key *also* have the same number of shards. if this no longer holds,
-                    // we actually need to do a shuffle, otherwise writes will end up on the wrong
-                    // shard. keep that in mind.
-                    for _ in 1..::SHARDS {
-                        add();
-                    }
+            if !sharded_by.is_none() {
+                // NOTE: warning to future self
+                // the code currently relies on the fact that the domains that are sharded by
+                // the same key *also* have the same number of shards. if this no longer holds,
+                // we actually need to do a shuffle, otherwise writes will end up on the wrong
+                // shard. keep that in mind.
+                for _ in 1..::SHARDS {
+                    add();
                 }
             }
         }
@@ -155,6 +152,7 @@ impl DomainHandle {
         &mut self,
         log: &Logger,
         graph: &mut Graph,
+        config: &domain::Config,
         readers: &flow::Readers,
         nodes: Vec<(NodeIndex, bool)>,
         persistence_params: &persistence::Parameters,
@@ -197,6 +195,7 @@ impl DomainHandle {
                 i,
                 n,
                 nodes,
+                config.clone(),
                 readers,
                 persistence_params.clone(),
                 checktable.clone(),
@@ -231,14 +230,20 @@ impl DomainHandle {
             Packet::AddNode {
                 ref node,
                 ref parents,
-            } => {
-                box Packet::AddNode {
-                    node: node.clone(),
-                    parents: parents.clone(),
-                }
-            }
-            Packet::AddBaseColumn { .. } |
-            Packet::DropBaseColumn { .. } => unreachable!("sharded base node"),
+            } => box Packet::AddNode {
+                node: node.clone(),
+                parents: parents.clone(),
+            },
+            Packet::AddBaseColumn {
+                node,
+                ref field,
+                ref default,
+            } => box Packet::AddBaseColumn {
+                node: node,
+                field: field.clone(),
+                default: default.clone(),
+            },
+            Packet::DropBaseColumn { node, column } => box Packet::DropBaseColumn { node, column },
             Packet::UpdateEgress {
                 ref node,
                 ref new_tx,

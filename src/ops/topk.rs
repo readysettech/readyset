@@ -89,14 +89,14 @@ impl TopK {
     /// relaying to us. thus, since we got this key, our parent must have it.
     fn apply(
         &self,
-        current_topk: &[Box<Vec<DataType>>],
+        current_topk: &[Row<Vec<DataType>>],
         new: Records,
         state: &StateMap,
         group: &[DataType],
     ) -> Records {
 
         let mut delta: Vec<Record> = Vec::new();
-        let mut current: Vec<&Box<Vec<DataType>>> = current_topk.iter().collect();
+        let mut current: Vec<&Row<Vec<DataType>>> = current_topk.iter().collect();
         current.sort_by(|a, b| self.order.cmp(&&***a, &&***b));
         for r in new.iter() {
             if let &Record::Negative(ref a) = r {
@@ -216,14 +216,6 @@ impl Ingredient for TopK {
         vec![self.src.as_global()]
     }
 
-    fn should_materialize(&self) -> bool {
-        true
-    }
-
-    fn will_query(&self, _: bool) -> bool {
-        true
-    }
-
     fn on_connected(&mut self, g: &Graph) {
         let srcn = &g[self.src.as_global()];
         self.cols = srcn.fields().len();
@@ -242,6 +234,7 @@ impl Ingredient for TopK {
         from: LocalNodeIndex,
         rs: Records,
         _: &mut Tracer,
+        replay_key_col: Option<usize>,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ProcessingResult {
@@ -291,6 +284,12 @@ impl Ingredient for TopK {
                     LookupResult::Missing => {
                         misses.push(Miss {
                             node: *us,
+                            columns: Vec::from(group_by),
+                            replay_key: replay_key_col.map(|col| {
+                                // since topk is an identity, we don't need to map this output
+                                // column to an input column.
+                                vec![diffs[0][col].clone()]
+                            }),
                             key: group.clone(),
                         });
                         None
@@ -328,10 +327,10 @@ impl Ingredient for TopK {
         }
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Vec<usize>> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, (Vec<usize>, bool)> {
         vec![
-            (this, self.group_by.clone()),
-            (self.src.as_global(), self.group_by.clone()),
+            (this, (self.group_by.clone(), true)),
+            (self.src.as_global(), (self.group_by.clone(), true)),
         ].into_iter()
             .collect()
     }
@@ -483,8 +482,8 @@ mod tests {
         let me = 2.into();
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 2);
-        assert_eq!(*idx.iter().next().unwrap().1, vec![1]);
-        assert_eq!(*idx.iter().skip(1).next().unwrap().1, vec![1]);
+        assert_eq!(*idx.iter().next().unwrap().1, (vec![1], true));
+        assert_eq!(*idx.iter().skip(1).next().unwrap().1, (vec![1], true));
     }
 
     #[test]

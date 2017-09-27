@@ -1,6 +1,7 @@
 use flow::prelude::*;
 use flow::node::NodeType;
 use flow::payload;
+use std::collections::HashSet;
 
 impl Node {
     pub fn process(
@@ -18,22 +19,14 @@ impl Node {
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
-                let mut misses = Vec::new();
+                let tag = m.tag();
                 m.map_data(|rs| {
-                    misses = materialize(rs, addr, state.get_mut(&addr));
+                    materialize(rs, tag, state.get_mut(&addr));
                 });
-                misses
+                vec![]
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
-                vec![]
-            }
-            NodeType::Hook(ref mut h) => {
-                if let &mut Some(ref mut h) = h {
-                    h.on_input(m.take().unwrap().take_data());
-                } else {
-                    unreachable!();
-                }
                 vec![]
             }
             NodeType::Egress(None) => unreachable!(),
@@ -54,27 +47,33 @@ impl Node {
                     let m = m.as_mut().unwrap();
                     let from = m.link().src;
 
-                    let nshards = match **m {
-                        Packet::ReplayPiece { ref nshards, .. } => *nshards,
-                        _ => 1,
+                    let mut replay = match (&mut **m,) {
+                        (&mut Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Partial {
+                                ref mut for_keys,
+                                ignore,
+                            },
+                            ..
+                        },) => {
+                            use std::mem;
+                            assert!(!ignore);
+                            assert!(keyed_by.is_some());
+                            for key in &*for_keys {
+                                assert_eq!(key.len(), 1);
+                            }
+                            ReplayContext::Partial {
+                                key_col: keyed_by.unwrap(),
+                                keys: mem::replace(for_keys, HashSet::new()),
+                            }
+                        }
+                        (&mut Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Regular { last },
+                            ..
+                        },) => ReplayContext::Full { last: last },
+                        _ => ReplayContext::None,
                     };
 
-                    let replay = if let Packet::ReplayPiece {
-                        context: payload::ReplayPieceContext::Partial {
-                            ref for_key,
-                            ignore,
-                        },
-                        ..
-                    } = **m
-                    {
-                        assert!(!ignore);
-                        assert!(keyed_by.is_some());
-                        assert_eq!(for_key.len(), 1);
-                        Some((keyed_by.unwrap(), for_key[0].clone()))
-                    } else {
-                        None
-                    };
-
+                    let mut set_replay_last = None;
                     tracer = m.tracer().and_then(|t| t.take());
                     m.map_data(|data| {
                         use std::mem;
@@ -82,29 +81,58 @@ impl Node {
                         // we need to own the data
                         let old_data = mem::replace(data, Records::default());
 
-                        match i.on_input_raw(
-                            from,
-                            old_data,
-                            &mut tracer,
-                            replay,
-                            nshards,
-                            nodes,
-                            state,
-                        ) {
+                        match i.on_input_raw(from, old_data, &mut tracer, &replay, nodes, state) {
                             RawProcessingResult::Regular(m) => {
                                 mem::replace(data, m.results);
                                 misses = m.misses;
                             }
-                            RawProcessingResult::ReplayPiece(rs) => {
+                            RawProcessingResult::ReplayPiece(rs, emitted_keys) => {
                                 // we already know that m must be a ReplayPiece since only a
                                 // ReplayPiece can release a ReplayPiece.
                                 mem::replace(data, rs);
+                                if let ReplayContext::Partial { ref mut keys, .. } = replay {
+                                    *keys = emitted_keys;
+                                } else {
+                                    unreachable!();
+                                }
                             }
                             RawProcessingResult::Captured => {
                                 captured = true;
                             }
+                            RawProcessingResult::FullReplay(rs, last) => {
+                                // we already know that m must be a (full) ReplayPiece since only a
+                                // (full) ReplayPiece can release a FullReplay
+                                mem::replace(data, rs);
+                                set_replay_last = Some(last);
+                            }
                         }
                     });
+
+                    if let Some(new_last) = set_replay_last {
+                        if let Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Regular { ref mut last },
+                            ..
+                        } = **m
+                        {
+                            *last = new_last;
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
+                    if let ReplayContext::Partial { keys, .. } = replay {
+                        if let Packet::ReplayPiece {
+                            context: payload::ReplayPieceContext::Partial {
+                                ref mut for_keys, ..
+                            },
+                            ..
+                        } = **m
+                        {
+                            *for_keys = keys;
+                        } else {
+                            unreachable!();
+                        }
+                    }
                 }
 
                 if captured {
@@ -126,8 +154,23 @@ impl Node {
                 // So: only materialize if either (1) the message we're processing is not a replay,
                 // or (2) if the node we're at is not a base.
                 if m.is_regular() || i.get_base().is_none() {
+                    let tag = match **m {
+                        Packet::ReplayPiece {
+                            tag,
+                            context: payload::ReplayPieceContext::Partial { .. },
+                            ..
+                        } => {
+                            // NOTE: non-partial replays shouldn't be materialized only for a
+                            // particular index, and so the tag shouldn't be forwarded to the
+                            // materialization code. this allows us to keep some asserts deeper in
+                            // the code to check that we don't do partial replays to non-partial
+                            // indices, or for unknown tags.
+                            Some(tag)
+                        }
+                        _ => None,
+                    };
                     m.map_data(|rs| {
-                        misses.extend(materialize(rs, addr, state.get_mut(&addr)));
+                        materialize(rs, tag, state.get_mut(&addr));
                     });
                 }
 
@@ -138,46 +181,51 @@ impl Node {
     }
 }
 
-pub fn materialize(rs: &mut Records, node: LocalNodeIndex, state: Option<&mut State>) -> Vec<Miss> {
+pub fn materialize(rs: &mut Records, partial: Option<Tag>, state: Option<&mut State>) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {
         // nope
-        return Vec::new();
+        return;
     }
 
     // yes!
     let state = state.unwrap();
     if state.is_partial() {
-        let mut holes = Vec::new();
         rs.retain(|r| {
-            // we need to check that we're not hitting any holes
-            if let Some(columns) = state.hits_hole(r) {
-                // we would need a replay of this update.
-                holes.push(Miss {
-                    node: node,
-                    key: columns.into_iter().map(|&c| r[c].clone()).collect(),
-                });
-
-                // we don't want to propagate records that miss
-                return false;
-            }
+            // we need to check that we're not erroneously filling any holes
+            // there are two cases here:
+            //
+            //  - if the incoming record is a partial replay (i.e., partial.is_some()), then we
+            //    *know* that we are the target of the replay, and therefore we *know* that the
+            //    materialization must already have marked the given key as "not a hole".
+            //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
+            //    need to be careful. since this materialization is partial, it may be that we
+            //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
+            //    record! if all of our indices have holes for this record, there's no need for us
+            //    to forward it. it would just be wasted work.
+            //
+            //    XXX: we could potentially save come computation here in joins by not forcing
+            //    `right` to backfill the lookup key only to then throw the record away
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
+                Record::Positive(ref r) => state.insert(r.clone(), partial),
                 Record::Negative(ref r) => state.remove(r),
                 Record::DeleteRequest(..) => unreachable!(),
             }
-            true
         });
-        holes
     } else {
         for r in rs.iter() {
             match *r {
-                Record::Positive(ref r) => state.insert(r.clone()),
-                Record::Negative(ref r) => state.remove(r),
+                Record::Positive(ref r) => {
+                    let hit = state.insert(r.clone(), None);
+                    debug_assert!(hit);
+                }
+                Record::Negative(ref r) => {
+                    let hit = state.remove(r);
+                    debug_assert!(hit);
+                }
                 Record::DeleteRequest(..) => unreachable!(),
             }
         }
-        Vec::new()
     }
 
 }

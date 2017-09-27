@@ -1,8 +1,5 @@
 use std::collections::HashMap;
-use distributary::{Blender, DataType, Mutator, Recipe};
-
-type Datas = Vec<Vec<DataType>>;
-type Getter = Box<Fn(&DataType, bool) -> Result<Datas, ()> + Send>;
+use distributary::{Blender, DataType, Datas, Getter, Mutator, Recipe};
 
 pub struct Backend {
     getters: HashMap<String, Getter>,
@@ -40,7 +37,7 @@ impl Backend {
                 .unwrap(),
         );
 
-        match get_fn(&key.into(), true) {
+        match get_fn.lookup(&key.into(), true) {
             Ok(records) => Ok(records),
             Err(_) => Err(format!("GET for {} failed!", kind)),
         }
