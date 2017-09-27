@@ -189,7 +189,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let res = SqlQuery::Select(q).expand_table_aliases();
+        let res = SqlQuery::Select(q).expand_table_aliases(None);
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
