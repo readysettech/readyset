@@ -399,7 +399,7 @@ impl SqlToMirConverter {
                         // remember the schema for this version
                         let base_schemas = self.base_schemas
                             .entry(String::from(name))
-                            .or_insert(Vec::new());
+                            .or_default();
                         base_schemas.push((self.schema_version, columns.clone()));
 
                         return MirNode::adapt_base(existing_node, columns_added, columns_removed);
@@ -432,7 +432,7 @@ impl SqlToMirConverter {
         // remember the schema for this version
         let base_schemas = self.base_schemas
             .entry(String::from(name))
-            .or_insert(Vec::new());
+            .or_default();
         base_schemas.push((self.schema_version, cols.clone()));
 
         // make node
@@ -1071,7 +1071,7 @@ impl SqlToMirConverter {
                     for col in cols {
                         column_to_predicates
                             .entry(col)
-                            .or_insert(Vec::new())
+                            .or_default()
                             .push(pred);
                     }
                 }

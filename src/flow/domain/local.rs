@@ -451,7 +451,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                     match map.entry(key) {
                         Entry::Occupied(mut rs) => rs.get_mut().push(r),
                         Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
                     }
                 }
                 KeyedState::Tri(ref mut map) => {
@@ -463,7 +463,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                     match map.entry(key) {
                         Entry::Occupied(mut rs) => rs.get_mut().push(r),
                         Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
                     }
                 }
                 KeyedState::Quad(ref mut map) => {
@@ -476,7 +476,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                     match map.entry(key) {
                         Entry::Occupied(mut rs) => rs.get_mut().push(r),
                         Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
                     }
                 }
                 KeyedState::Quin(ref mut map) => {
@@ -490,7 +490,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                     match map.entry(key) {
                         Entry::Occupied(mut rs) => rs.get_mut().push(r),
                         Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
                     }
                 }
                 KeyedState::Sex(ref mut map) => {
@@ -505,7 +505,7 @@ impl<T: Hash + Eq + Clone + 'static> State<T> {
                     match map.entry(key) {
                         Entry::Occupied(mut rs) => rs.get_mut().push(r),
                         Entry::Vacant(..) if s.partial.is_some() => return false,
-                        rs @ Entry::Vacant(..) => rs.or_insert_with(Vec::new).push(r),
+                        rs @ Entry::Vacant(..) => rs.or_default().push(r),
                     }
                 }
                 KeyedState::Single(..) => unreachable!(),
