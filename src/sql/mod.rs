@@ -369,17 +369,18 @@ impl SqlIncorporator {
         qg: QueryGraph,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
+        use mir::visualize::GraphViz;
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter
             .named_query_to_mir(query_name, query, &qg);
 
-        trace!(self.log, "Unoptimized MIR: {}", mir);
+        trace!(self.log, "Unoptimized MIR:\n{}", mir.to_graphviz().unwrap());
 
         // run MIR-level optimizations
         mir = mir.optimize();
 
-        trace!(self.log, "Optimized MIR: {}", mir);
+        trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
@@ -411,6 +412,7 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
         use super::mir::reuse::merge_mir_for_queries;
+        use mir::visualize::GraphViz;
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
@@ -419,7 +421,11 @@ impl SqlIncorporator {
         // TODO(malte): should we run the MIR-level optimizations here?
         let new_opt_mir = new_query_mir.optimize();
 
-        trace!(self.log, "Optimized MIR: {}", new_opt_mir);
+        trace!(
+            self.log,
+            "Optimized MIR:\n{}",
+            new_opt_mir.to_graphviz().unwrap()
+        );
 
         // compare to existing query MIR and reuse prefix
         let mut reused_mir = new_opt_mir.clone();
@@ -434,7 +440,11 @@ impl SqlIncorporator {
 
         let mut post_reuse_opt_mir = reused_mir.optimize_post_reuse();
 
-        trace!(self.log, "Post-reuse optimized MIR: {}", post_reuse_opt_mir);
+        trace!(
+            self.log,
+            "Post-reuse optimized MIR:\n{}",
+            post_reuse_opt_mir.to_graphviz().unwrap()
+        );
 
         let qfp = post_reuse_opt_mir.into_flow_parts(&mut mig);
 

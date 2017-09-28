@@ -258,7 +258,7 @@ impl SqlToMirConverter {
         let nodes = self.make_nodes_for_selection(&name, sq, qg);
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
-        for (i, mn) in nodes.into_iter().enumerate() {
+        for mn in nodes.into_iter() {
             let node_id = (String::from(mn.borrow().name()), self.schema_version);
             // only add the node if we don't have it registered at this schema version already. If
             // we don't do this, we end up adding the node again for every re-use of it, with
@@ -266,16 +266,6 @@ impl SqlToMirConverter {
             if !self.nodes.contains_key(&node_id) {
                 self.nodes.insert(node_id, mn.clone());
             }
-
-            trace!(
-                self.log,
-                "{} MIR node {} ({}, v{}): {:?}",
-                name,
-                i,
-                mn.borrow().name(),
-                self.schema_version,
-                mn
-            );
 
             if mn.borrow().ancestors().len() == 0 {
                 // root

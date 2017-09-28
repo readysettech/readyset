@@ -18,6 +18,7 @@ use sql::QueryFlowParts;
 pub mod reuse;
 mod rewrite;
 mod optimize;
+pub mod visualize;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {
@@ -170,30 +171,14 @@ impl Display for MirQuery {
             in_edge_counts.insert(n.borrow().versioned_name(), 0);
         }
 
-        writeln!(f, "digraph {{")?;
-        writeln!(f, "node [shape=record, fontsize=10]")?;
-
         while !node_queue.is_empty() {
             let n = node_queue.pop_front().unwrap();
             assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
 
-            let vn = n.borrow().versioned_name();
-            writeln!(
-                f,
-                "\"{}\" [label=\"{{ {} | {} }}\"]",
-                vn,
-                vn,
-                n.borrow()
-                    .columns()
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", \\n")
-            )?;
+            writeln!(f, "{} MIR node {:?}", self.name, n.borrow())?;
 
             for child in n.borrow().children.iter() {
                 let nd = child.borrow().versioned_name();
-                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
                 let in_edges = if in_edge_counts.contains_key(&nd) {
                     in_edge_counts[&nd]
                 } else {
@@ -207,7 +192,6 @@ impl Display for MirQuery {
                 in_edge_counts.insert(nd, in_edges - 1);
             }
         }
-        write!(f, "}}")?;
 
         Ok(())
     }
@@ -1006,6 +990,12 @@ impl MirNodeType {
     }
 }
 
+impl Display for MirNode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "{}", self.inner.description())
+    }
+}
+
 impl Debug for MirNode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         write!(
@@ -1195,7 +1185,12 @@ impl Debug for MirNodeType {
                     format!("")
                 }
             ),
-            MirNodeType::Reuse { ref node } => write!(f, "Reuse [{:#?}]", node),
+            MirNodeType::Reuse { ref node } => write!(
+                f,
+                "Reuse [{}: {}]",
+                node.borrow().versioned_name(),
+                node.borrow()
+            ),
             MirNodeType::TopK {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
