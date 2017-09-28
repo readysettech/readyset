@@ -24,22 +24,17 @@ fn load_recipe() -> Result<Backend, String> {
     let mut soup = Blender::new();
     soup.log_with(distributary::logger_pls());
 
-    let recipe;
-    {
-        let mut mig = soup.start_migration();
-
+    let recipe = soup.migrate(|mig| {
         // install recipe
-        recipe = match Recipe::from_str(&sql, None) {
+        match Recipe::from_str(&sql, None) {
             Ok(mut recipe) => {
-                recipe.activate(&mut mig, false)?;
+                recipe.activate(mig, false)?;
                 recipe
             }
             Err(e) => return Err(e),
-        };
-
-        // brings up new graph for processing
-        mig.commit();
-    }
+        }
+        // return brings up new graph for processing
+    });
 
     Ok(Backend::new(soup, recipe))
 }
