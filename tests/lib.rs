@@ -285,6 +285,41 @@ fn it_works_deletion() {
 }
 
 #[test]
+fn it_works_with_sql_recipe() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE Table Car (id int, brand varchar(255), PRIMARY KEY(id));
+        CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
+    ";
+
+    let recipe = {
+        let mut mig = g.start_migration();
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(&mut mig, false).unwrap();
+        mig.commit();
+        recipe
+    };
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let count_index = recipe.node_addr_for("CountCars").unwrap();
+    let mut mutator = g.get_mutator(car_index);
+    let getter = g.get_getter(count_index).unwrap();
+    let brands = vec!["Volvo", "Volvo", "Volkswagen"];
+    for (i, &brand) in brands.iter().enumerate() {
+        let id = i as i32;
+        mutator.put(vec![id.into(), brand.into()]).unwrap();
+    }
+
+    // Let writes propagate:
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&"Volvo".into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][0], 2.into());
+}
+
+#[test]
 fn votes() {
     use distributary::{Aggregation, Base, Join, JoinType, Union};
 
