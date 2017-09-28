@@ -2065,7 +2065,17 @@ impl Domain {
         self.total_ptime.start();
         polling_loop.run_polling_loop(|event| match event {
             PollEvent::ResumePolling(timeout) => {
-                *timeout = group_commit_queues.duration_until_flush();
+                *timeout = group_commit_queues.duration_until_flush().or_else(||{
+                    let now = time::Instant::now();
+                    self.buffered_replay_requests
+                        .iter()
+                        .map(|(_, &(first, _))| {
+                            self.replay_batch_timeout
+                                .checked_sub(now.duration_since(first))
+                                .unwrap_or(time::Duration::from_millis(0))
+                        })
+                        .min()
+                });
                 KeepPolling
             }
             PollEvent::Process(packet) => {
