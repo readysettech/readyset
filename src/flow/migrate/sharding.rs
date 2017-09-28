@@ -494,7 +494,7 @@ pub fn shard(
             }
 
             let mut grandp = grandp;
-            let mut real_grandp = grandp;
+            let real_grandp = grandp;
             if let Some(current_grandp) = swaps.get(&(p, grandp)) {
                 // so, this is interesting... the parent of p has *already* been swapped, most
                 // likely by another (hoisted) sharder. it doesn't really matter to us here, but we
