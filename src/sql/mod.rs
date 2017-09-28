@@ -297,6 +297,8 @@ impl SqlIncorporator {
         project_columns: Option<Vec<Column>>,
         mut mig: &mut Migration,
     ) -> QueryFlowParts {
+        trace!(self.log, "Adding a new leaf below: {:?}", final_query_node);
+
         let mut mir = self.mir_converter.add_leaf_below(
             final_query_node,
             query_name,
