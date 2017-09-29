@@ -230,13 +230,7 @@ mod tests {
         g
     }
 
-    fn setup_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
-        let expression = ArithmeticExpression {
-            left: ArithmeticBase::Column(0),
-            right: ArithmeticBase::Column(1),
-            op: op,
-        };
-
+    fn setup_arithmetic(expression: ArithmeticExpression) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
 
@@ -244,10 +238,25 @@ mod tests {
         g.set_op(
             "permute",
             &["x", "y", "z"],
-            Project::new(s.as_global(), &permutation[..], None, Some(vec![expression])),
+            Project::new(
+                s.as_global(),
+                &permutation[..],
+                None,
+                Some(vec![expression]),
+            ),
             false,
         );
         g
+    }
+
+    fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
+        let expression = ArithmeticExpression {
+            left: ArithmeticBase::Column(0),
+            right: ArithmeticBase::Column(1),
+            op: op,
+        };
+
+        setup_arithmetic(expression)
     }
 
     #[test]
@@ -314,7 +323,7 @@ mod tests {
 
     #[test]
     fn it_forwards_addition_arithmetic() {
-        let mut p = setup_arithmetic(ArithmeticOperator::Add);
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Add);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -324,7 +333,7 @@ mod tests {
 
     #[test]
     fn it_forwards_subtraction_arithmetic() {
-        let mut p = setup_arithmetic(ArithmeticOperator::Subtract);
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Subtract);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -334,7 +343,7 @@ mod tests {
 
     #[test]
     fn it_forwards_multiplication_arithmetic() {
-        let mut p = setup_arithmetic(ArithmeticOperator::Multiply);
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Multiply);
         let rec = vec![10.into(), 20.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
@@ -344,11 +353,46 @@ mod tests {
 
     #[test]
     fn it_forwards_division_arithmetic() {
-        let mut p = setup_arithmetic(ArithmeticOperator::Divide);
+        let mut p = setup_column_arithmetic(ArithmeticOperator::Divide);
         let rec = vec![10.into(), 2.into()];
         assert_eq!(
             p.narrow_one_row(rec, false),
             vec![vec![10.into(), 2.into(), 5.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_arithmetic_w_literals() {
+        let number: DataType = 40.into();
+        let expression = ArithmeticExpression {
+            left: ArithmeticBase::Column(0),
+            right: ArithmeticBase::Literal(number),
+            op: ArithmeticOperator::Multiply,
+        };
+
+        let mut p = setup_arithmetic(expression);
+        let rec = vec![10.into(), 0.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![10.into(), 0.into(), 400.into()]].into()
+        );
+    }
+
+    #[test]
+    fn it_forwards_arithmetic_w_only_literals() {
+        let a: DataType = 80.into();
+        let b: DataType = 40.into();
+        let expression = ArithmeticExpression {
+            left: ArithmeticBase::Literal(a),
+            right: ArithmeticBase::Literal(b),
+            op: ArithmeticOperator::Divide,
+        };
+
+        let mut p = setup_arithmetic(expression);
+        let rec = vec![0.into(), 0.into()];
+        assert_eq!(
+            p.narrow_one_row(rec, false),
+            vec![vec![0.into(), 0.into(), 2.into()]].into()
         );
     }
 
