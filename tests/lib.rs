@@ -771,7 +771,7 @@ fn migrate_added_columns() {
         let b = mig.add_ingredient(
             "x",
             &["c", "b"],
-            distributary::Project::new(a, &[2, 0], None),
+            distributary::Project::new(a, &[2, 0], None, None),
         );
         mig.maintain(b, 1);
         mig.commit();
@@ -902,7 +902,7 @@ fn key_on_added() {
         let b = mig.add_ingredient(
             "x",
             &["c", "b"],
-            distributary::Project::new(a, &[2, 1], None),
+            distributary::Project::new(a, &[2, 1], None, None),
         );
         mig.maintain(b, 0);
         mig.commit();
@@ -1046,7 +1046,7 @@ fn full_aggregation_with_bogokey() {
         let bogo = mig.add_ingredient(
             "bogo",
             &["x", "bogo"],
-            distributary::Project::new(base, &[0], Some(vec![0.into()])),
+            distributary::Project::new(base, &[0], Some(vec![0.into()]), None),
         );
         let agg = mig.add_ingredient(
             "agg",

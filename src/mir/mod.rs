@@ -1570,6 +1570,7 @@ fn make_project_node(
             parent_na,
             projected_column_ids.as_slice(),
             Some(literal_values),
+            None,
         ),
     );
     FlowNode::New(n)
