@@ -236,25 +236,33 @@ impl<'a> From<&'a str> for DataType {
     }
 }
 
-impl Add for DataType {
-    type Output = DataType;
-
-    fn add(self, other: DataType) -> DataType {
-        match (self, other) {
-            (DataType::Int(first), DataType::Int(second)) => (first + second).into(),
-            (DataType::BigInt(first), DataType::BigInt(second)) => (first + second).into(),
-            (DataType::Int(first), DataType::BigInt(second)) => ((first as i64) + second).into(),
-            (DataType::BigInt(first), DataType::Int(second)) => (first + (second as i64)).into(),
+// Performs an arithmetic operation on two numeric DataTypes,
+// returning a new DataType as the result.
+macro_rules! arithmetic_operation (
+    ($op:tt, $first:ident, $second:ident) => (
+        match ($first, $second) {
+            (DataType::Int(a), DataType::Int(b)) => (a $op b).into(),
+            (DataType::BigInt(a), DataType::BigInt(b)) => (a $op b).into(),
+            (DataType::Int(a), DataType::BigInt(b)) => ((a as i64) $op b).into(),
+            (DataType::BigInt(a), DataType::Int(b)) => (a $op (b as i64)).into(),
 
             (first @ DataType::Int(..), second @ DataType::Real(..)) |
             (first @ DataType::Real(..), second @ DataType::Int(..)) |
             (first @ DataType::Real(..), second @ DataType::Real(..)) => {
                 let a: f64 = first.into();
                 let b: f64 = second.into();
-                (a + b).into()
+                (a $op b).into()
             }
-            (first, second) => panic!(format!("cannot add a {} and {}", first, second)),
+            (first, second) => panic!(format!("can't {} a {:?} and {:?}", stringify!($op), first, second)),
         }
+    );
+);
+
+impl Add for DataType {
+    type Output = DataType;
+
+    fn add(self, other: DataType) -> DataType {
+        arithmetic_operation!(+, self, other)
     }
 }
 
@@ -262,21 +270,7 @@ impl Sub for DataType {
     type Output = DataType;
 
     fn sub(self, other: DataType) -> DataType {
-        match (self, other) {
-            (DataType::Int(first), DataType::Int(second)) => (first - second).into(),
-            (DataType::BigInt(first), DataType::BigInt(second)) => (first - second).into(),
-            (DataType::Int(first), DataType::BigInt(second)) => ((first as i64) - second).into(),
-            (DataType::BigInt(first), DataType::Int(second)) => (first - (second as i64)).into(),
-
-            (first @ DataType::Int(..), second @ DataType::Real(..)) |
-            (first @ DataType::Real(..), second @ DataType::Int(..)) |
-            (first @ DataType::Real(..), second @ DataType::Real(..)) => {
-                let a: f64 = first.into();
-                let b: f64 = second.into();
-                (a - b).into()
-            }
-            (first, second) => panic!(format!("cannot subtract a {} and {}", first, second)),
-        }
+        arithmetic_operation!(-, self, other)
     }
 }
 
@@ -284,21 +278,7 @@ impl Mul for DataType {
     type Output = DataType;
 
     fn mul(self, other: DataType) -> DataType {
-        match (self, other) {
-            (DataType::Int(first), DataType::Int(second)) => (first * second).into(),
-            (DataType::BigInt(first), DataType::BigInt(second)) => (first * second).into(),
-            (DataType::Int(first), DataType::BigInt(second)) => ((first as i64) * second).into(),
-            (DataType::BigInt(first), DataType::Int(second)) => (first * (second as i64)).into(),
-
-            (first @ DataType::Int(..), second @ DataType::Real(..)) |
-            (first @ DataType::Real(..), second @ DataType::Int(..)) |
-            (first @ DataType::Real(..), second @ DataType::Real(..)) => {
-                let a: f64 = first.into();
-                let b: f64 = second.into();
-                (a * b).into()
-            }
-            (first, second) => panic!(format!("cannot multiply a {} and {}", first, second)),
-        }
+        arithmetic_operation!(*, self, other)
     }
 }
 
@@ -306,21 +286,7 @@ impl Div for DataType {
     type Output = DataType;
 
     fn div(self, other: DataType) -> DataType {
-        match (self, other) {
-            (DataType::Int(first), DataType::Int(second)) => (first / second).into(),
-            (DataType::BigInt(first), DataType::BigInt(second)) => (first / second).into(),
-            (DataType::Int(first), DataType::BigInt(second)) => ((first as i64) / second).into(),
-            (DataType::BigInt(first), DataType::Int(second)) => (first / (second as i64)).into(),
-
-            (first @ DataType::Int(..), second @ DataType::Real(..)) |
-            (first @ DataType::Real(..), second @ DataType::Int(..)) |
-            (first @ DataType::Real(..), second @ DataType::Real(..)) => {
-                let a: f64 = first.into();
-                let b: f64 = second.into();
-                (a / b).into()
-            }
-            (first, second) => panic!(format!("cannot divide a {} and {}", first, second)),
-        }
+        arithmetic_operation!(/, self, other)
     }
 }
 
@@ -591,6 +557,14 @@ mod tests {
         assert_eq!(DataType::BigInt(4) / DataType::BigInt(2), 2.into());
         assert_eq!(DataType::from(4) / DataType::BigInt(2), 2.into());
         assert_eq!(DataType::BigInt(4) / DataType::from(2), 2.into());
+    }
+
+    #[test]
+    #[should_panic(expected = "can't + a TinyText(\"hi\") and Int(5)")]
+    fn add_invalid_types() {
+        let a: DataType = "hi".into();
+        let b: DataType = 5.into();
+        a + b;
     }
 
     #[test]
