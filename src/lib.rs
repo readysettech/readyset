@@ -5,7 +5,7 @@ extern crate nom;
 extern crate serde_derive;
 extern crate serde;
 
-
+pub use self::arithmetic::{ArithmeticBase, ArithmeticExpression, ArithmeticOperator};
 pub use self::common::{FieldExpression, Literal, Operator, SqlType, TableKey};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification, FunctionExpression};
 pub use self::condition::{ConditionBase, ConditionExpression, ConditionTree};
