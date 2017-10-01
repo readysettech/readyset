@@ -9,7 +9,7 @@ use flow::Migration;
 use flow::prelude::NodeIndex;
 use mir::reuse as mir_reuse;
 use nom_sql::parser as sql_parser;
-use nom_sql::{Column, SqlQuery};
+use nom_sql::{ArithmeticBase, Column, SqlQuery};
 use nom_sql::SelectStatement;
 use self::mir::{MirNodeRef, MirQuery, SqlToMirConverter};
 use self::reuse::{ReuseConfig, ReuseConfigType};
@@ -192,8 +192,18 @@ impl SqlIncorporator {
                     // GROUP BY clause
                     if qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
-                        // TODO(ekmartin): is this okay?
-                        OutputColumn::Arithmetic(_) => true,
+                        OutputColumn::Arithmetic(ref ac) => {
+                            let mut is_function = false;
+                            if let ArithmeticBase::Column(ref c) = ac.expression.left {
+                                is_function = is_function || c.function.is_some();
+                            }
+
+                            if let ArithmeticBase::Column(ref c) = ac.expression.right {
+                                is_function = is_function || c.function.is_some();
+                            }
+
+                            !is_function
+                        },
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     }) {
                         // QGs are identical, except for parameters (or their order)
