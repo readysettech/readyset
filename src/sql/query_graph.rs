@@ -1,5 +1,5 @@
-use nom_sql::{Column, ConditionBase, ConditionExpression, ConditionTree, FieldExpression,
-              JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
+use nom_sql::{ArithmeticExpression, Column, ConditionBase, ConditionExpression, ConditionTree,
+              FieldExpression, JoinConstraint, JoinOperator, JoinRightSide, Literal, Operator};
 use nom_sql::SelectStatement;
 use nom_sql::ConditionExpression::*;
 
@@ -19,14 +19,27 @@ pub struct LiteralColumn {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ArithmeticColumn {
+    pub name: String,
+    pub table: Option<String>,
+    pub expression: ArithmeticExpression,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OutputColumn {
     Data(Column),
+    Arithmetic(ArithmeticColumn),
     Literal(LiteralColumn),
 }
 
 impl Ord for OutputColumn {
     fn cmp(&self, other: &OutputColumn) -> Ordering {
         match *self {
+            OutputColumn::Arithmetic(ArithmeticColumn {
+                ref name,
+                ref table,
+                ..
+            }) |
             OutputColumn::Data(Column {
                 ref name,
                 ref table,
@@ -37,6 +50,11 @@ impl Ord for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
+                OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
                 OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
@@ -62,6 +80,11 @@ impl Ord for OutputColumn {
 impl PartialOrd for OutputColumn {
     fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
         match *self {
+            OutputColumn::Arithmetic(ArithmeticColumn {
+                ref name,
+                ref table,
+                ..
+            }) |
             OutputColumn::Data(Column {
                 ref name,
                 ref table,
@@ -72,6 +95,11 @@ impl PartialOrd for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
+                OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: ref other_name,
+                    table: ref other_table,
+                    ..
+                }) |
                 OutputColumn::Data(Column {
                     name: ref other_name,
                     table: ref other_table,
@@ -420,6 +448,7 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     // No need to do anything for literals here, as they aren't associated with a
                     // relation (and thus have no QGN)
                     FieldExpression::Literal(_) => None,
+                    FieldExpression::Arithmetic(_) => None,
                     FieldExpression::Col(ref c) => {
                         match c.table.as_ref() {
                             None => {
@@ -652,6 +681,13 @@ pub fn to_query_graph(st: &SelectStatement) -> Result<QueryGraph, String> {
                     name: String::from("literal"),
                     table: None,
                     value: l.clone(),
+                }));
+            }
+            FieldExpression::Arithmetic(ref a) => {
+                qg.columns.push(OutputColumn::Arithmetic(ArithmeticColumn {
+                    name: String::from("arithmetic"),
+                    table: None,
+                    expression: a.clone(),
                 }));
             }
             FieldExpression::Col(ref c) => {

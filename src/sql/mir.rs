@@ -5,7 +5,7 @@ use mir::{GroupedNodeType, MirNode, MirNodeType};
 pub use mir::{FlowNode, MirNodeRef, MirQuery};
 use ops::join::JoinType;
 
-use nom_sql::{Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
+use nom_sql::{ArithmeticExpression, Column, ColumnSpecification, ConditionBase, ConditionExpression, ConditionTree,
               Literal, Operator, SqlQuery, TableKey};
 use nom_sql::{LimitClause, OrderClause, SelectStatement};
 use sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge, JoinRef};
@@ -166,6 +166,7 @@ impl SqlToMirConverter {
                 MirNodeType::Project {
                     emit: columns.clone(),
                     literals: vec![],
+                    arithmetic: vec![],
                 },
                 vec![parent.clone()],
                 vec![],
@@ -720,6 +721,7 @@ impl SqlToMirConverter {
             name,
             parent,
             vec![fn_col],
+            vec![],
             vec![(String::from("grp"), DataType::from(0 as i32))],
         )
     }
@@ -729,10 +731,13 @@ impl SqlToMirConverter {
         name: &str,
         parent_node: MirNodeRef,
         proj_cols: Vec<&Column>,
+        arithmetic: Vec<(String, ArithmeticExpression)>,
         literals: Vec<(String, DataType)>,
     ) -> MirNodeRef {
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
+        // TODO(ekmartin): group these two together
+        let arithmetic_names: Vec<String> = arithmetic.iter().map(|&(ref n, _)| n.clone()).collect();
         let literal_names: Vec<String> = literals.iter().map(|&(ref n, _)| n.clone()).collect();
         let fields = proj_cols
             .clone()
@@ -747,6 +752,14 @@ impl SqlToMirConverter {
                 None => c.clone(),
             })
             .chain(literal_names.into_iter().map(|n| {
+                Column {
+                    name: n,
+                    alias: None,
+                    table: Some(String::from(name)),
+                    function: None,
+                }
+            }))
+            .chain(arithmetic_names.into_iter().map(|n| {
                 Column {
                     name: n,
                     alias: None,
@@ -778,6 +791,7 @@ impl SqlToMirConverter {
             MirNodeType::Project {
                 emit: emit_cols,
                 literals: literals,
+                arithmetic: arithmetic,
             },
             vec![parent_node.clone()],
             vec![],
@@ -1314,6 +1328,7 @@ impl SqlToMirConverter {
             let mut projected_columns: Vec<&Column> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(ref c) => Some(c),
                     OutputColumn::Literal(_) => None,
                 })
@@ -1323,9 +1338,20 @@ impl SqlToMirConverter {
                     projected_columns.push(pc);
                 }
             }
+            let projected_arithmetic: Vec<(String, ArithmeticExpression)> = qg.columns
+                .iter()
+                .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(ref ac) => {
+                        Some((ac.name.clone(), ac.expression.clone()))
+                    },
+                    OutputColumn::Data(_) => None,
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect();
             let projected_literals: Vec<(String, DataType)> = qg.columns
                 .iter()
                 .filter_map(|oc| match *oc {
+                    OutputColumn::Arithmetic(_) => None,
                     OutputColumn::Data(_) => None,
                     OutputColumn::Literal(ref lc) => {
                         Some((lc.name.clone(), DataType::from(&lc.value)))
@@ -1335,7 +1361,7 @@ impl SqlToMirConverter {
 
             let ident = format!("q_{:x}_n{}", qg.signature().hash, new_node_count);
             let leaf_project_node =
-                self.make_project_node(&ident, final_node, projected_columns, projected_literals);
+                self.make_project_node(&ident, final_node, projected_columns, projected_arithmetic, projected_literals);
             nodes_added.push(leaf_project_node.clone());
 
             // We always materialize leaves of queries (at least currently), so add a

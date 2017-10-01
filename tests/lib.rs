@@ -288,7 +288,7 @@ fn it_works_deletion() {
 fn it_works_with_sql_recipe() {
     let mut g = distributary::Blender::new();
     let sql = "
-        CREATE Table Car (id int, brand varchar(255), PRIMARY KEY(id));
+        CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
 
@@ -318,6 +318,85 @@ fn it_works_with_sql_recipe() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], 2.into());
 }
+
+#[test]
+fn it_works_with_simple_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+        CarPrice: SELECT 2 * price FROM Car WHERE id = ?;
+    ";
+
+    let recipe = {
+        let mut mig = g.start_migration();
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(&mut mig, false).unwrap();
+        mig.commit();
+        recipe
+    };
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let count_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut mutator = g.get_mutator(car_index);
+    let getter = g.get_getter(count_index).unwrap();
+    let id: distributary::DataType = 1.into();
+    let price: distributary::DataType = 123.into();
+    mutator.put(vec![id.clone(), price]).unwrap();
+
+    // Let writes propagate:
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id, true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], 246.into());
+}
+
+#[test]
+fn it_works_with_join_arithmetic() {
+    let mut g = distributary::Blender::new();
+    let sql = "
+        CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
+        CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
+        CREATE TABLE Sales (sales_id int, price_id int, fraction float, PRIMARY KEY(sales_id));
+        CarPrice: SELECT price * fraction FROM Car \
+                  JOIN Price ON Car.price_id = Price.price_id \
+                  JOIN Sales ON Price.price_id = Sales.price_id \
+                  WHERE car_id = ?;
+    ";
+
+    let recipe = {
+        let mut mig = g.start_migration();
+        let mut recipe = distributary::Recipe::from_str(&sql, None).unwrap();
+        recipe.activate(&mut mig, false).unwrap();
+        mig.commit();
+        recipe
+    };
+
+    let car_index = recipe.node_addr_for("Car").unwrap();
+    let price_index = recipe.node_addr_for("Price").unwrap();
+    let sales_index = recipe.node_addr_for("Sales").unwrap();
+    let query_index = recipe.node_addr_for("CarPrice").unwrap();
+    let mut car_mutator = g.get_mutator(car_index);
+    let mut price_mutator = g.get_mutator(price_index);
+    let mut sales_mutator = g.get_mutator(sales_index);
+    let getter = g.get_getter(query_index).unwrap();
+    let id = 1;
+    let price = 123;
+    let fraction = 0.7;
+    car_mutator.put(vec![id.into(), id.into()]).unwrap();
+    price_mutator.put(vec![id.into(), price.into()]).unwrap();
+    sales_mutator.put(vec![id.into(), id.into(), fraction.into()]).unwrap();
+
+    // Let writes propagate:
+    thread::sleep(time::Duration::from_millis(SETTLE_TIME_MS));
+
+    // Retrieve the result of the count query:
+    let result = getter.lookup(&id.into(), true).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][1], (price as f64 * fraction).into());
+}
+
 
 #[test]
 fn votes() {

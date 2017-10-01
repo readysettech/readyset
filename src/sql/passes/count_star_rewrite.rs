@@ -96,6 +96,7 @@ impl CountStarRewrite for SqlQuery {
                         &mut FieldExpression::All => panic!(err),
                         &mut FieldExpression::AllInTable(_) => panic!(err),
                         &mut FieldExpression::Literal(_) => (),
+                        &mut FieldExpression::Arithmetic(_) => (),
                         &mut FieldExpression::Col(ref mut c) => {
                             rewrite_count_star(c, &tables, &avoid_cols)
                         }

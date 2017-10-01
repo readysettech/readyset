@@ -1,4 +1,4 @@
-use nom_sql::{Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
+use nom_sql::{ArithmeticBase, ArithmeticExpression, Column, ColumnConstraint, ColumnSpecification, Operator, OrderType};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Error, Formatter};
@@ -12,7 +12,7 @@ use ops::grouped::aggregate::Aggregation as AggregationKind;
 use ops::grouped::extremum::Extremum as ExtremumKind;
 use ops::join::{Join, JoinType};
 use ops::latest::Latest;
-use ops::project::Project;
+use ops::project::{Project, ProjectExpression, ProjectExpressionBase};
 use sql::QueryFlowParts;
 
 pub mod reuse;
@@ -644,6 +644,7 @@ impl MirNode {
                     MirNodeType::Project {
                         ref emit,
                         ref literals,
+                        ref arithmetic,
                     } => {
                         assert_eq!(self.ancestors.len(), 1);
                         let parent = self.ancestors[0].clone();
@@ -652,6 +653,7 @@ impl MirNode {
                             parent,
                             self.columns.as_slice(),
                             emit,
+                            arithmetic,
                             literals,
                             mig,
                         )
@@ -765,6 +767,7 @@ pub enum MirNodeType {
     /// emit columns
     Project {
         emit: Vec<Column>,
+        arithmetic: Vec<(String, ArithmeticExpression)>,
         literals: Vec<(String, DataType)>,
     },
     /// emit columns
@@ -943,11 +946,13 @@ impl MirNodeType {
             MirNodeType::Project {
                 emit: ref our_emit,
                 literals: ref our_literals,
+                arithmetic: ref our_arithmetic,
             } => match *other {
                 MirNodeType::Project {
                     ref emit,
                     ref literals,
-                } => our_emit == emit && our_literals == literals,
+                    ref arithmetic,
+                } => our_emit == emit && our_literals == literals && our_arithmetic == arithmetic,
                 _ => false,
             },
             MirNodeType::Reuse { node: ref us } => {
@@ -1165,6 +1170,7 @@ impl Debug for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
+                ref arithmetic,
             } => write!(
                 f,
                 "π [{}{}]",
@@ -1184,6 +1190,8 @@ impl Debug for MirNodeType {
                 } else {
                     format!("")
                 }
+
+                // TODO: format arithmetic
             ),
             MirNodeType::Reuse { ref node } => write!(
                 f,
@@ -1546,11 +1554,26 @@ fn make_latest_node(
     FlowNode::New(na)
 }
 
+// Converts a nom_sql::ArithmeticBase into a project::ProjectExpressionBase:
+fn generate_projection_base(parent: &MirNodeRef, base: &ArithmeticBase) -> ProjectExpressionBase {
+    match *base {
+        ArithmeticBase::Column(ref column) => {
+            let column_id = parent.borrow().column_id_for_column(column);
+            ProjectExpressionBase::Column(column_id)
+        }
+        ArithmeticBase::Scalar(ref literal) => {
+            let data: DataType = literal.into();
+            ProjectExpressionBase::Literal(data)
+        }
+    }
+}
+
 fn make_project_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     emit: &Vec<Column>,
+    arithmetic: &Vec<(String, ArithmeticExpression)>,
     literals: &Vec<(String, DataType)>,
     mig: &mut Migration,
 ) -> FlowNode {
@@ -1563,6 +1586,15 @@ fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
+    let projected_arithmetic: Vec<ProjectExpression> = arithmetic
+        .iter()
+        .map(|&(_, ref e)| ProjectExpression::new(
+            e.op.clone(),
+            generate_projection_base(&parent, &e.left),
+            generate_projection_base(&parent, &e.right),
+        ))
+        .collect();
+
     let n = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
@@ -1570,7 +1602,7 @@ fn make_project_node(
             parent_na,
             projected_column_ids.as_slice(),
             Some(literal_values),
-            None,
+            Some(projected_arithmetic),
         ),
     );
     FlowNode::New(n)

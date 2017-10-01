@@ -215,6 +215,7 @@ impl GraphViz for MirNodeType {
             MirNodeType::Project {
                 ref emit,
                 ref literals,
+                ref arithmetic,
             } => {
                 write!(
                     out,
@@ -235,6 +236,8 @@ impl GraphViz for MirNodeType {
                     } else {
                         format!("")
                     }
+
+                    // TODO(ekmartin): handle arithmetic
                 )?;
             }
             MirNodeType::Reuse { ref node } => {

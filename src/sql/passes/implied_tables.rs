@@ -1,4 +1,4 @@
-use nom_sql::{Column, ConditionExpression, ConditionTree, FieldExpression, JoinRightSide,
+use nom_sql::{ArithmeticBase, Column, ConditionExpression, ConditionTree, FieldExpression, JoinRightSide,
               SqlQuery, Table};
 
 use std::collections::HashMap;
@@ -174,6 +174,15 @@ impl ImpliedTableExpansion for SqlQuery {
                         &mut FieldExpression::All => panic!(err),
                         &mut FieldExpression::AllInTable(_) => panic!(err),
                         &mut FieldExpression::Literal(_) => (),
+                        &mut FieldExpression::Arithmetic(ref mut e) => {
+                            if let ArithmeticBase::Column(ref mut c) = e.left {
+                                *c = expand_columns(c.clone(), &tables);
+                            }
+
+                            if let ArithmeticBase::Column(ref mut c) = e.right {
+                                *c = expand_columns(c.clone(), &tables);
+                            }
+                        }
                         &mut FieldExpression::Col(ref mut f) => {
                             *f = expand_columns(f.clone(), &tables);
                         }

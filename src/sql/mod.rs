@@ -192,6 +192,8 @@ impl SqlIncorporator {
                     // GROUP BY clause
                     if qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
+                        // TODO(ekmartin): is this okay?
+                        OutputColumn::Arithmetic(_) => true,
                         OutputColumn::Data(ref dc) => dc.function.is_none(),
                     }) {
                         // QGs are identical, except for parameters (or their order)

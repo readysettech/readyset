@@ -1,28 +1,35 @@
+use nom_sql::ArithmeticOperator;
 use std::collections::HashMap;
 
 use flow::prelude::*;
 
-// TODO: use the ArithmeticOperator from nom-sql
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum ArithmeticOperator {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum ArithmeticBase {
+pub enum ProjectExpressionBase {
     Column(usize),
     Literal(DataType),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArithmeticExpression {
+pub struct ProjectExpression {
     op: ArithmeticOperator,
-    left: ArithmeticBase,
-    right: ArithmeticBase,
+    left: ProjectExpressionBase,
+    right: ProjectExpressionBase,
 }
+
+impl ProjectExpression {
+    pub fn new(
+        op: ArithmeticOperator,
+        left: ProjectExpressionBase,
+        right: ProjectExpressionBase,
+    ) -> ProjectExpression {
+        ProjectExpression {
+            op: op,
+            left: left,
+            right: right,
+        }
+    }
+}
+
 
 /// Permutes or omits columns from its source node, or adds additional literal value columns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +37,7 @@ pub struct Project {
     us: Option<IndexPair>,
     emit: Option<Vec<usize>>,
     additional: Option<Vec<DataType>>,
-    expressions: Option<Vec<ArithmeticExpression>>,
+    expressions: Option<Vec<ProjectExpression>>,
     src: IndexPair,
     cols: usize,
 }
@@ -41,7 +48,7 @@ impl Project {
         src: NodeIndex,
         emit: &[usize],
         additional: Option<Vec<DataType>>,
-        expressions: Option<Vec<ArithmeticExpression>>,
+        expressions: Option<Vec<ProjectExpression>>,
     ) -> Project {
         Project {
             emit: Some(emit.into()),
@@ -64,15 +71,15 @@ impl Project {
         }
     }
 
-    fn eval_expression(&self, expression: &ArithmeticExpression, record: &Record) -> DataType {
+    fn eval_expression(&self, expression: &ProjectExpression, record: &Record) -> DataType {
         let left = match expression.left {
-            ArithmeticBase::Column(i) => &record[i],
-            ArithmeticBase::Literal(ref data) => data,
+            ProjectExpressionBase::Column(i) => &record[i],
+            ProjectExpressionBase::Literal(ref data) => data,
         }.clone();
 
         let right = match expression.right {
-            ArithmeticBase::Column(i) => &record[i],
-            ArithmeticBase::Literal(ref data) => data,
+            ProjectExpressionBase::Column(i) => &record[i],
+            ProjectExpressionBase::Literal(ref data) => data,
         }.clone();
 
         match expression.op {
@@ -230,7 +237,7 @@ mod tests {
         g
     }
 
-    fn setup_arithmetic(expression: ArithmeticExpression) -> ops::test::MockGraph {
+    fn setup_arithmetic(expression: ProjectExpression) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);
 
@@ -250,9 +257,9 @@ mod tests {
     }
 
     fn setup_column_arithmetic(op: ArithmeticOperator) -> ops::test::MockGraph {
-        let expression = ArithmeticExpression {
-            left: ArithmeticBase::Column(0),
-            right: ArithmeticBase::Column(1),
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Column(1),
             op: op,
         };
 
@@ -364,9 +371,9 @@ mod tests {
     #[test]
     fn it_forwards_arithmetic_w_literals() {
         let number: DataType = 40.into();
-        let expression = ArithmeticExpression {
-            left: ArithmeticBase::Column(0),
-            right: ArithmeticBase::Literal(number),
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Column(0),
+            right: ProjectExpressionBase::Literal(number),
             op: ArithmeticOperator::Multiply,
         };
 
@@ -382,9 +389,9 @@ mod tests {
     fn it_forwards_arithmetic_w_only_literals() {
         let a: DataType = 80.into();
         let b: DataType = 40.into();
-        let expression = ArithmeticExpression {
-            left: ArithmeticBase::Literal(a),
-            right: ArithmeticBase::Literal(b),
+        let expression = ProjectExpression {
+            left: ProjectExpressionBase::Literal(a),
+            right: ProjectExpressionBase::Literal(b),
             op: ArithmeticOperator::Divide,
         };
 
